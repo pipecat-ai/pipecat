@@ -20,11 +20,15 @@ from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
 from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
 
+# Normal speech usually results in many samples between ±500 to ±5000, depending on loudness and mic gain.
+# So we are using a threshold that is well below what real speech produces.
+SPEAKING_THRESHOLD = 20
+
 
 def create_default_resampler(**kwargs) -> BaseAudioResampler:
     """Create a default audio resampler instance.
 
-    . deprecated:: 0.0.74
+    .. deprecated:: 0.0.74
         This function is deprecated and will be removed in a future version.
         Use `create_stream_resampler` for real-time processing scenarios or
         `create_file_resampler` for batch processing of complete audio files.
@@ -37,13 +41,15 @@ def create_default_resampler(**kwargs) -> BaseAudioResampler:
     """
     import warnings
 
-    warnings.warn(
-        "`create_default_resampler` is deprecated. "
-        "Use `create_stream_resampler` for real-time processing scenarios or "
-        "`create_file_resampler` for batch processing of complete audio files.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.warn(
+            "`create_default_resampler` is deprecated. "
+            "Use `create_stream_resampler` for real-time processing scenarios or "
+            "`create_file_resampler` for batch processing of complete audio files.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     return SOXRAudioResampler(**kwargs)
 
 
@@ -275,3 +281,33 @@ async def pcm_to_alaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: 
     out_alaw_bytes = audioop.lin2alaw(in_pcm_bytes, 2)
 
     return out_alaw_bytes
+
+
+def is_silence(pcm_bytes: bytes) -> bool:
+    """Determine if an audio sample contains silence by checking amplitude levels.
+
+    This function analyzes raw PCM audio data to detect silence by comparing
+    the maximum absolute amplitude against a predefined threshold. The audio
+    is expected to be clean speech or complete silence without background noise.
+
+    Args:
+        pcm_bytes: Raw PCM audio data as bytes (16-bit signed integers).
+
+    Returns:
+        bool: True if the audio sample is considered silence (below threshold),
+              False otherwise.
+
+    Note:
+        Normal speech typically produces amplitude values between ±500 to ±5000,
+        depending on factors like loudness and microphone gain. The threshold
+        (SPEAKING_THRESHOLD) is set well below typical speech levels to
+        reliably detect silence vs. speech.
+    """
+    # Convert raw audio bytes to a NumPy array of int16 samples
+    audio_data = np.frombuffer(pcm_bytes, dtype=np.int16)
+
+    # Check the maximum absolute amplitude in the frame
+    max_value = np.abs(audio_data).max()
+
+    # If max value is lower than SPEAKING_THRESHOLD, consider it as silence
+    return max_value <= SPEAKING_THRESHOLD

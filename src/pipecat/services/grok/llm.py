@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -107,7 +108,7 @@ class GrokLLMService(OpenAILLMService):
         logger.debug(f"Creating Grok client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: OpenAILLMContext | LLMContext):
         """Process a context through the LLM and accumulate token usage metrics.
 
         This method overrides the parent class implementation to handle Grok's

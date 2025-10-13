@@ -14,9 +14,9 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
     TextFrame,
 )
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
@@ -64,11 +64,11 @@ class LangchainProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMMessagesFrame):
+        if isinstance(frame, OpenAILLMContextFrame):
             # Messages are accumulated on the context as a list of messages.
             # The last one by the human is the one we want to send to the LLM.
             logger.debug(f"Got transcription frame {frame}")
-            text: str = frame.messages[-1]["content"]
+            text: str = frame.context.messages[-1]["content"]
 
             await self._ainvoke(text.strip())
         else:

@@ -36,6 +36,7 @@ class PipelineRunner(BaseObject):
         *,
         name: Optional[str] = None,
         handle_sigint: bool = True,
+        handle_sigterm: bool = False,
         force_gc: bool = False,
         loop: Optional[asyncio.AbstractEventLoop] = None,
     ):
@@ -43,7 +44,8 @@ class PipelineRunner(BaseObject):
 
         Args:
             name: Optional name for the runner instance.
-            handle_sigint: Whether to automatically handle SIGINT/SIGTERM signals.
+            handle_sigint: Whether to automatically handle SIGINT signals.
+            handle_sigterm: Whether to automatically handle SIGTERM signals.
             force_gc: Whether to force garbage collection after task completion.
             loop: Event loop to use. If None, uses the current running loop.
         """
@@ -57,6 +59,9 @@ class PipelineRunner(BaseObject):
         if handle_sigint:
             self._setup_sigint()
 
+        if handle_sigterm:
+            self._setup_sigterm()
+
     async def run(self, task: PipelineTask):
         """Run a pipeline task to completion.
 
@@ -66,7 +71,10 @@ class PipelineRunner(BaseObject):
         logger.debug(f"Runner {self} started running {task}")
         self._tasks[task.name] = task
         params = PipelineTaskParams(loop=self._loop)
-        await task.run(params)
+        try:
+            await task.run(params)
+        except asyncio.CancelledError:
+            await self._cancel()
         del self._tasks[task.name]
 
         # Cleanup base object.
@@ -90,12 +98,20 @@ class PipelineRunner(BaseObject):
     async def cancel(self):
         """Cancel all running tasks immediately."""
         logger.debug(f"Cancelling runner {self}")
+        await self._cancel()
+
+    async def _cancel(self):
+        """Cancel all running tasks immediately."""
         await asyncio.gather(*[t.cancel() for t in self._tasks.values()])
 
     def _setup_sigint(self):
         """Set up signal handlers for graceful shutdown."""
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGINT, lambda *args: self._sig_handler())
+
+    def _setup_sigterm(self):
+        """Set up signal handlers for graceful shutdown."""
+        loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, lambda *args: self._sig_handler())
 
     def _sig_handler(self):

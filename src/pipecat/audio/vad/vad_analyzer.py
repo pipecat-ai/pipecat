@@ -183,36 +183,37 @@ class VADAnalyzer(ABC):
         if len(self._vad_buffer) < num_required_bytes:
             return self._vad_state
 
-        audio_frames = self._vad_buffer[:num_required_bytes]
-        self._vad_buffer = self._vad_buffer[num_required_bytes:]
+        while len(self._vad_buffer) >= num_required_bytes:
+            audio_frames = self._vad_buffer[:num_required_bytes]
+            self._vad_buffer = self._vad_buffer[num_required_bytes:]
 
-        confidence = self.voice_confidence(audio_frames)
+            confidence = self.voice_confidence(audio_frames)
 
-        volume = self._get_smoothed_volume(audio_frames)
-        self._prev_volume = volume
+            volume = self._get_smoothed_volume(audio_frames)
+            self._prev_volume = volume
 
-        speaking = confidence >= self._params.confidence and volume >= self._params.min_volume
+            speaking = confidence >= self._params.confidence and volume >= self._params.min_volume
 
-        if speaking:
-            match self._vad_state:
-                case VADState.QUIET:
-                    self._vad_state = VADState.STARTING
-                    self._vad_starting_count = 1
-                case VADState.STARTING:
-                    self._vad_starting_count += 1
-                case VADState.STOPPING:
-                    self._vad_state = VADState.SPEAKING
-                    self._vad_stopping_count = 0
-        else:
-            match self._vad_state:
-                case VADState.STARTING:
-                    self._vad_state = VADState.QUIET
-                    self._vad_starting_count = 0
-                case VADState.SPEAKING:
-                    self._vad_state = VADState.STOPPING
-                    self._vad_stopping_count = 1
-                case VADState.STOPPING:
-                    self._vad_stopping_count += 1
+            if speaking:
+                match self._vad_state:
+                    case VADState.QUIET:
+                        self._vad_state = VADState.STARTING
+                        self._vad_starting_count = 1
+                    case VADState.STARTING:
+                        self._vad_starting_count += 1
+                    case VADState.STOPPING:
+                        self._vad_state = VADState.SPEAKING
+                        self._vad_stopping_count = 0
+            else:
+                match self._vad_state:
+                    case VADState.STARTING:
+                        self._vad_state = VADState.QUIET
+                        self._vad_starting_count = 0
+                    case VADState.SPEAKING:
+                        self._vad_state = VADState.STOPPING
+                        self._vad_stopping_count = 1
+                    case VADState.STOPPING:
+                        self._vad_stopping_count += 1
 
         if (
             self._vad_state == VADState.STARTING

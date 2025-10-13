@@ -14,6 +14,7 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import (
     alaw_to_pcm,
     create_stream_resampler,
@@ -28,9 +29,8 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
-    KeypadEntry,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -137,7 +137,7 @@ class TelnyxFrameSerializer(FrameSerializer):
             self._hangup_attempted = True
             await self._hang_up_call()
             return None
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear"}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -154,6 +154,10 @@ class TelnyxFrameSerializer(FrameSerializer):
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
+
+            if serialized_data is None or len(serialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
 
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
@@ -261,6 +265,10 @@ class TelnyxFrameSerializer(FrameSerializer):
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.outbound_encoding}")
+
+            if deserialized_data is None or len(deserialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
 
             audio_frame = InputAudioRawFrame(
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate

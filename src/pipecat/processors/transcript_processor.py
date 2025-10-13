@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    StartInterruptionFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
@@ -86,7 +86,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
     transcript messages. Utterances are completed when:
 
     - The bot stops speaking (BotStoppedSpeakingFrame)
-    - The bot is interrupted (StartInterruptionFrame)
+    - The bot is interrupted (InterruptionFrame)
     - The pipeline ends (EndFrame)
     """
 
@@ -140,11 +140,13 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
                 Result: "Hello there how are you"
         """
         if self._current_text_parts and self._aggregation_start_time:
+            # Check specifically for space characters, previously isspace() was used
+            # but that includes all whitespace characters (e.g. \n), not just spaces.
             has_leading_spaces = any(
-                part and part[0].isspace() for part in self._current_text_parts[1:]
+                part and part[0] == " " for part in self._current_text_parts[1:]
             )
             has_trailing_spaces = any(
-                part and part[-1].isspace() for part in self._current_text_parts[:-1]
+                part and part[-1] == " " for part in self._current_text_parts[:-1]
             )
 
             # If there are embedded spaces in the fragments, use direct concatenation
@@ -183,7 +185,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
 
         - TTSTextFrame: Aggregates text for current utterance
         - BotStoppedSpeakingFrame: Completes current utterance
-        - StartInterruptionFrame: Completes current utterance due to interruption
+        - InterruptionFrame: Completes current utterance due to interruption
         - EndFrame: Completes current utterance at pipeline end
         - CancelFrame: Completes current utterance due to cancellation
 
@@ -193,7 +195,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (StartInterruptionFrame, CancelFrame)):
+        if isinstance(frame, (InterruptionFrame, CancelFrame)):
             # Push frame first otherwise our emitted transcription update frame
             # might get cleaned up.
             await self.push_frame(frame, direction)

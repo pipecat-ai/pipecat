@@ -44,6 +44,7 @@ from .models import (
 
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use AssemblyAI, you need to `pip install "pipecat-ai[assemblyai]"`.')
@@ -190,9 +191,9 @@ class AssemblyAISTTService(STTService):
                 "Authorization": self._api_key,
                 "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version})",
             }
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 ws_url,
-                extra_headers=headers,
+                additional_headers=headers,
             )
             self._connected = True
             self._receive_task = self.create_task(self._receive_task_handler())
@@ -218,10 +219,7 @@ class AssemblyAISTTService(STTService):
                 await self._websocket.send(json.dumps({"type": "Terminate"}))
 
                 try:
-                    await asyncio.wait_for(
-                        self._termination_event.wait(),
-                        timeout=5.0,
-                    )
+                    await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     logger.warning("Timed out waiting for termination message from server")
 
@@ -246,11 +244,9 @@ class AssemblyAISTTService(STTService):
         try:
             while self._connected:
                 try:
-                    message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
+                    message = await self._websocket.recv()
                     data = json.loads(message)
                     await self._handle_message(data)
-                except asyncio.TimeoutError:
-                    self.reset_watchdog()
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:

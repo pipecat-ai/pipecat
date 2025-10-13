@@ -15,7 +15,6 @@ import json
 import urllib.parse
 from typing import AsyncGenerator, Optional
 
-import websockets
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -33,6 +32,15 @@ from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+
+try:
+    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 class CartesiaLiveOptions:
@@ -216,7 +224,7 @@ class CartesiaSTTService(STTService):
             None - transcription results are handled via WebSocket responses.
         """
         # If the connection is closed, due to timeout, we need to reconnect when the user starts speaking again
-        if not self._connection or self._connection.closed:
+        if not self._connection or self._connection.state is State.CLOSED:
             await self._connect()
 
         await self._connection.send(audio)
@@ -229,7 +237,7 @@ class CartesiaSTTService(STTService):
         headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 
         try:
-            self._connection = await websockets.connect(ws_url, extra_headers=headers)
+            self._connection = await websocket_connect(ws_url, additional_headers=headers)
             # Setup the receiver task to handle the incoming messages from the Cartesia server
             if self._receiver_task is None or self._receiver_task.done():
                 self._receiver_task = asyncio.create_task(self._receive_messages())
@@ -240,7 +248,7 @@ class CartesiaSTTService(STTService):
     async def _receive_messages(self):
         try:
             while True:
-                if not self._connection or self._connection.closed:
+                if not self._connection or self._connection.state is State.CLOSED:
                     break
 
                 message = await self._connection.recv()
@@ -320,7 +328,7 @@ class CartesiaSTTService(STTService):
                 logger.exception(f"Unexpected exception while cancelling task: {e}")
             self._receiver_task = None
 
-        if self._connection and self._connection.open:
+        if self._connection and self._connection.state is State.OPEN:
             logger.debug("Disconnecting from Cartesia")
 
             await self._connection.close()
@@ -344,5 +352,5 @@ class CartesiaSTTService(STTService):
             await self.start_metrics()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # Send finalize command to flush the transcription session
-            if self._connection and self._connection.open:
+            if self._connection and self._connection.state is State.OPEN:
                 await self._connection.send("finalize")

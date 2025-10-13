@@ -44,7 +44,7 @@ class DirectFunction(Protocol):
 
     "Direct" functions' metadata is automatically extracted from their function signature and
     docstrings, allowing them to be used without accompanying function configurations (as
-    `FunctionSchema`s or in provider-specific formats).
+    FunctionSchemas or in provider-specific formats).
     """
 
     async def __call__(self, params: "FunctionCallParams", **kwargs: Any) -> None:

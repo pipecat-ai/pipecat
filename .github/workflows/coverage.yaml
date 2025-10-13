@@ -18,35 +18,28 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
       - name: Set up Python
-        id: setup_python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-      - name: Cache virtual environment
-        uses: actions/cache@v3
-        with:
-          # We are hashing dev-requirements.txt and test-requirements.txt which
-          # contain all dependencies needed to run the tests.
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('test-requirements.txt') }}
-          path: .venv
+        run: uv python install 3.12
+
       - name: Install system packages
-        id: install_system_packages
         run: |
           sudo apt-get install -y portaudio19-dev
-      - name: Setup virtual environment
+
+      - name: Install dependencies
         run: |
-          python -m venv .venv
-      - name: Install basic Python dependencies
-        run: |
-          source .venv/bin/activate
-          python -m pip install --upgrade pip
-          pip install -r dev-requirements.txt -r test-requirements.txt
+          uv sync --group dev --extra anthropic --extra aws --extra google --extra langchain
+
       - name: Run tests with coverage
         run: |
-          source .venv/bin/activate
-          coverage run
-          coverage xml
+          uv run coverage run
+          uv run coverage xml
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

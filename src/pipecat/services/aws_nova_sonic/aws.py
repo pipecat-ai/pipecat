@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -62,7 +63,6 @@ from pipecat.services.aws_nova_sonic.context import (
 )
 from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
-from pipecat.utils.asyncio.watchdog_coroutine import watchdog_coroutine
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -247,12 +247,13 @@ class AWSNovaSonicLLMService(LLMService):
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
-        self._assistant_response_trigger_audio: Optional[bytes] = (
-            None  # Not cleared on _disconnect()
-        )
         self._disconnecting = False
         self._connected_time: Optional[float] = None
         self._wants_connection = False
+
+        file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
+        with wave.open(file_path.open("rb"), "rb") as wav_file:
+            self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
 
     #
     # standard AIService frame handling
@@ -323,6 +324,10 @@ class AWSNovaSonicLLMService(LLMService):
 
         if isinstance(frame, OpenAILLMContextFrame):
             await self._handle_context(frame.context)
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError(
+                "Universal LLMContext is not yet supported for AWS Nova Sonic."
+            )
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
@@ -474,7 +479,6 @@ class AWSNovaSonicLLMService(LLMService):
         # If we need to, send assistant response trigger (depends on self._connected_time)
         if self._triggering_assistant_response:
             await self._send_assistant_response_trigger()
-            self._triggering_assistant_response = False
 
     async def _disconnect(self):
         try:
@@ -796,7 +800,7 @@ class AWSNovaSonicLLMService(LLMService):
         try:
             while self._stream and not self._disconnecting:
                 output = await self._stream.await_output()
-                result = await watchdog_coroutine(output[1].receive(), manager=self.task_manager)
+                result = await output[1].receive()
 
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
@@ -1096,63 +1100,60 @@ class AWSNovaSonicLLMService(LLMService):
 
         self._triggering_assistant_response = True
 
-        # Read audio bytes, if we don't already have them cached
-        if not self._assistant_response_trigger_audio:
-            file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
-            with wave.open(file_path.open("rb"), "rb") as wav_file:
-                self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
-
         # Send the trigger audio, if we're fully connected and set up
-        if self._connected_time is not None:
+        if self._connected_time:
             await self._send_assistant_response_trigger()
-            self._triggering_assistant_response = False
 
     async def _send_assistant_response_trigger(self):
-        if (
-            not self._assistant_response_trigger_audio or self._connected_time is None
-        ):  # should never happen
+        if not self._connected_time:
+            # should never happen
             return
 
-        logger.debug("Sending assistant response trigger...")
+        try:
+            logger.debug("Sending assistant response trigger...")
 
-        chunk_duration = 0.02  # what we might get from InputAudioRawFrame
-        chunk_size = int(
-            chunk_duration
-            * self._params.input_sample_rate
-            * self._params.input_channel_count
-            * (self._params.input_sample_size / 8)
-        )  # e.g. 0.02 seconds of 16-bit (2-byte) PCM mono audio at 16kHz is 640 bytes
+            chunk_duration = 0.02  # what we might get from InputAudioRawFrame
+            chunk_size = int(
+                chunk_duration
+                * self._params.input_sample_rate
+                * self._params.input_channel_count
+                * (self._params.input_sample_size / 8)
+            )  # e.g. 0.02 seconds of 16-bit (2-byte) PCM mono audio at 16kHz is 640 bytes
 
-        # Lead with a bit of blank audio, if needed.
-        # It seems like the LLM can't quite "hear" the first little bit of audio sent on a
-        # connection.
-        current_time = time.time()
-        max_blank_audio_duration = 0.5
-        blank_audio_duration = (
-            max_blank_audio_duration - (current_time - self._connected_time)
-            if self._connected_time is not None
-            and (current_time - self._connected_time) < max_blank_audio_duration
-            else None
-        )
-        if blank_audio_duration:
-            logger.debug(
-                f"Leading assistant response trigger with {blank_audio_duration}s of blank audio"
+            # Lead with a bit of blank audio, if needed.
+            # It seems like the LLM can't quite "hear" the first little bit of audio sent on a
+            # connection.
+            current_time = time.time()
+            max_blank_audio_duration = 0.5
+            blank_audio_duration = (
+                max_blank_audio_duration - (current_time - self._connected_time)
+                if self._connected_time is not None
+                and (current_time - self._connected_time) < max_blank_audio_duration
+                else None
             )
-            blank_audio_chunk = b"\x00" * chunk_size
-            num_chunks = int(blank_audio_duration / chunk_duration)
-            for _ in range(num_chunks):
-                await self._send_user_audio_event(blank_audio_chunk)
-                await asyncio.sleep(chunk_duration)
+            if blank_audio_duration:
+                logger.debug(
+                    f"Leading assistant response trigger with {blank_audio_duration}s of blank audio"
+                )
+                blank_audio_chunk = b"\x00" * chunk_size
+                num_chunks = int(blank_audio_duration / chunk_duration)
+                for _ in range(num_chunks):
+                    await self._send_user_audio_event(blank_audio_chunk)
+                    await asyncio.sleep(chunk_duration)
 
-        # Send trigger audio
-        # NOTE: this audio *will* be transcribed and eventually make it into the context. That's OK:
-        # if we ever need to seed this service again with context it would make sense to include it
-        # since the instruction (i.e. the "wait for the trigger" instruction) will be part of the
-        # context as well.
-        audio_chunks = [
-            self._assistant_response_trigger_audio[i : i + chunk_size]
-            for i in range(0, len(self._assistant_response_trigger_audio), chunk_size)
-        ]
-        for chunk in audio_chunks:
-            await self._send_user_audio_event(chunk)
-            await asyncio.sleep(chunk_duration)
+            # Send trigger audio
+            # NOTE: this audio *will* be transcribed and eventually make it into the context. That's OK:
+            # if we ever need to seed this service again with context it would make sense to include it
+            # since the instruction (i.e. the "wait for the trigger" instruction) will be part of the
+            # context as well.
+            audio_chunks = [
+                self._assistant_response_trigger_audio[i : i + chunk_size]
+                for i in range(0, len(self._assistant_response_trigger_audio), chunk_size)
+            ]
+            for chunk in audio_chunks:
+                await self._send_user_audio_event(chunk)
+                await asyncio.sleep(chunk_duration)
+        finally:
+            # We need to clean up in case sending the trigger was cancelled, e.g. in the case of a user interruption.
+            # (An asyncio.CancelledError would be raised in that case.)
+            self._triggering_assistant_response = False

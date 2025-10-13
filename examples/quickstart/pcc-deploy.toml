@@ -1,0 +1,6 @@
+agent_name = "quickstart"
+image = "your_username/quickstart:0.1"
+secret_set = "quickstart-secrets"
+
+[scaling]
+	min_agents = 1

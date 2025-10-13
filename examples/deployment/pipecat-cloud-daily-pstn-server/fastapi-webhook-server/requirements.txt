@@ -1,6 +1,0 @@
-fastapi
-uvicorn
-python-dotenv
-requests
-pydantic
-loguru

@@ -11,12 +11,11 @@ an OpenAI-compatible interface. It handles Perplexity's unique token usage
 reporting patterns while maintaining compatibility with the Pipecat framework.
 """
 
-from typing import List
+from openai import NOT_GIVEN
 
-from openai import NOT_GIVEN, AsyncStream
-from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
-
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -53,22 +52,23 @@ class PerplexityLLMService(OpenAILLMService):
         self._has_reported_prompt_tokens = False
         self._is_processing = False
 
-    async def get_chat_completions(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> AsyncStream[ChatCompletionChunk]:
-        """Get chat completions from Perplexity API using OpenAI-compatible parameters.
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
+        """Build parameters for Perplexity chat completion request.
+
+        Perplexity uses a subset of OpenAI parameters and doesn't support tools.
 
         Args:
-            context: The context containing conversation history and settings.
-            messages: The messages to send to the API.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
 
         Returns:
-            A stream of chat completion chunks from the Perplexity API.
+            Dictionary of parameters for the chat completion request.
         """
         params = {
             "model": self.model_name,
             "stream": True,
-            "messages": messages,
+            "messages": params_from_context["messages"],
         }
 
         # Add OpenAI-compatible parameters if they're set
@@ -83,10 +83,9 @@ class PerplexityLLMService(OpenAILLMService):
         if self._settings["max_tokens"] is not NOT_GIVEN:
             params["max_tokens"] = self._settings["max_tokens"]
 
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
+        return params
 
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: OpenAILLMContext | LLMContext):
         """Process a context through the LLM and accumulate token usage metrics.
 
         This method overrides the parent class implementation to handle

@@ -14,13 +14,12 @@ for downstream processing by LLM context aggregators.
 import asyncio
 from typing import Optional
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InputDTMFFrame,
-    KeypadEntry,
     StartFrame,
     TranscriptionFrame,
 )
@@ -64,7 +63,11 @@ class DTMFAggregator(FrameProcessor):
 
         self._digit_event = asyncio.Event()
         self._aggregation_task: Optional[asyncio.Task] = None
-        self._interruption_task: Optional[asyncio.Task] = None
+
+    async def cleanup(self) -> None:
+        """Clean up resources."""
+        await super().cleanup()
+        await self._stop_aggregation_task()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         """Process incoming frames and handle DTMF aggregation.
@@ -82,7 +85,6 @@ class DTMFAggregator(FrameProcessor):
             if self._aggregation:
                 await self._flush_aggregation()
             await self._stop_aggregation_task()
-            await self._stop_interruption_task()
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputDTMFFrame):
             # Push the DTMF frame downstream first
@@ -100,9 +102,9 @@ class DTMFAggregator(FrameProcessor):
         digit_value = frame.button.value
         self._aggregation += digit_value
 
-        # For first digit, schedule interruption in separate task
+        # For first digit, schedule interruption.
         if is_first_digit:
-            self._interruption_task = self.create_task(self._send_interruption_task())
+            await self.push_interruption_task_frame_and_wait()
 
         # Check for immediate flush conditions
         if frame.button == self._termination_digit:
@@ -110,16 +112,6 @@ class DTMFAggregator(FrameProcessor):
         else:
             # Signal digit received for timeout handling
             self._digit_event.set()
-
-    async def _send_interruption_task(self):
-        """Send interruption frame safely in a separate task."""
-        await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
-
-    async def _stop_interruption_task(self) -> None:
-        """Stops the interruption task."""
-        if self._interruption_task:
-            await self.cancel_task(self._interruption_task)
-            self._interruption_task = None
 
     def _create_aggregation_task(self) -> None:
         """Creates the aggregation task if it hasn't been created yet."""
@@ -139,7 +131,6 @@ class DTMFAggregator(FrameProcessor):
                 await asyncio.wait_for(self._digit_event.wait(), timeout=self._idle_timeout)
                 self._digit_event.clear()
             except asyncio.TimeoutError:
-                self.reset_watchdog()
                 if self._aggregation:
                     await self._flush_aggregation()
 
@@ -157,8 +148,3 @@ class DTMFAggregator(FrameProcessor):
         await self.push_frame(transcription_frame)
 
         self._aggregation = ""
-
-    async def cleanup(self) -> None:
-        """Clean up resources."""
-        await super().cleanup()
-        await self._stop_aggregation_task()

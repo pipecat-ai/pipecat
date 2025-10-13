@@ -22,7 +22,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-# This assumes a running TTS service running: https://github.com/rhasspy/piper/blob/master/src/python_run/README_http.md
+# This assumes a running TTS service running: https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_HTTP.md
 class PiperTTSService(TTSService):
     """Piper TTS service implementation.
 
@@ -79,12 +79,14 @@ class PiperTTSService(TTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
         headers = {
-            "Content-Type": "text/plain",
+            "Content-Type": "application/json",
         }
         try:
             await self.start_ttfb_metrics()
 
-            async with self._session.post(self._base_url, data=text, headers=headers) as response:
+            async with self._session.post(
+                self._base_url, json={"text": text}, headers=headers
+            ) as response:
                 if response.status != 200:
                     error = await response.text()
                     logger.error(

@@ -1,5 +1,0 @@
-pipecat-ai[daily,openai,silero]
-fastapi
-uvicorn
-python-dotenv
-loguru

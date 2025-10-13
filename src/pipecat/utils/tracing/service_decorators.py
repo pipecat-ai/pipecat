@@ -134,7 +134,8 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             Yields:
                 The active span for the TTS operation.
             """
-            if not is_tracing_available():
+            # Check if tracing is enabled for this service instance
+            if not getattr(self, "_tracing_enabled", False):
                 yield None
                 return
 
@@ -178,7 +179,8 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             @functools.wraps(f)
             async def gen_wrapper(self, text, *args, **kwargs):
                 try:
-                    if not is_tracing_available():
+                    # Check if tracing is enabled for this service instance
+                    if not getattr(self, "_tracing_enabled", False):
                         async for item in f(self, text, *args, **kwargs):
                             yield item
                         return
@@ -198,7 +200,8 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             @functools.wraps(f)
             async def wrapper(self, text, *args, **kwargs):
                 try:
-                    if not is_tracing_available():
+                    # Check if tracing is enabled for this service instance
+                    if not getattr(self, "_tracing_enabled", False):
                         return await f(self, text, *args, **kwargs)
 
                     async with tracing_context(self, text):
@@ -239,7 +242,8 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
         @functools.wraps(f)
         async def wrapper(self, transcript, is_final, language=None):
             try:
-                if not is_tracing_available():
+                # Check if tracing is enabled for this service instance
+                if not getattr(self, "_tracing_enabled", False):
                     return await f(self, transcript, is_final, language)
 
                 service_class_name = self.__class__.__name__
@@ -320,7 +324,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
         @functools.wraps(f)
         async def wrapper(self, context, *args, **kwargs):
             try:
-                if not is_tracing_available():
+                # Check if tracing is enabled for this service instance
+                if not getattr(self, "_tracing_enabled", False):
                     return await f(self, context, *args, **kwargs)
 
                 service_class_name = self.__class__.__name__
@@ -522,7 +527,8 @@ def traced_gemini_live(operation: str) -> Callable:
         @functools.wraps(func)
         async def wrapper(self, *args, **kwargs):
             try:
-                if not is_tracing_available():
+                # Check if tracing is enabled for this service instance
+                if not getattr(self, "_tracing_enabled", False):
                     return await func(self, *args, **kwargs)
 
                 service_class_name = self.__class__.__name__
@@ -826,7 +832,8 @@ def traced_openai_realtime(operation: str) -> Callable:
         @functools.wraps(func)
         async def wrapper(self, *args, **kwargs):
             try:
-                if not is_tracing_available():
+                # Check if tracing is enabled for this service instance
+                if not getattr(self, "_tracing_enabled", False):
                     return await func(self, *args, **kwargs)
 
                 service_class_name = self.__class__.__name__

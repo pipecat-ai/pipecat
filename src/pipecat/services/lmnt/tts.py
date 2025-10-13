@@ -16,8 +16,8 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -29,7 +29,8 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for LMNT configuration needed
 try:
-    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use LMNT, you need to `pip install pipecat-ai[lmnt]`.")
@@ -95,7 +96,7 @@ class LmntTTSService(InterruptibleTTSService):
         voice_id: str,
         sample_rate: Optional[int] = None,
         language: Language = Language.EN,
-        model: str = "aurora",
+        model: str = "blizzard",
         **kwargs,
     ):
         """Initialize the LMNT TTS service.
@@ -105,7 +106,7 @@ class LmntTTSService(InterruptibleTTSService):
             voice_id: ID of the voice to use for synthesis.
             sample_rate: Audio sample rate. If None, uses default.
             language: Language for synthesis. Defaults to English.
-            model: TTS model to use. Defaults to "aurora".
+            model: TTS model to use. Defaults to "blizzard".
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
         super().__init__(
@@ -179,7 +180,7 @@ class LmntTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
 
     async def _connect(self):
@@ -200,7 +201,7 @@ class LmntTTSService(InterruptibleTTSService):
     async def _connect_websocket(self):
         """Connect to LMNT websocket."""
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             logger.debug("Connecting to LMNT")
@@ -216,7 +217,7 @@ class LmntTTSService(InterruptibleTTSService):
             }
 
             # Connect to LMNT's websocket directly
-            self._websocket = await websockets.connect("wss://api.lmnt.com/v1/ai/speech/stream")
+            self._websocket = await websocket_connect("wss://api.lmnt.com/v1/ai/speech/stream")
 
             # Send initialization message
             await self._websocket.send(json.dumps(init_msg))
@@ -251,7 +252,7 @@ class LmntTTSService(InterruptibleTTSService):
 
     async def flush_audio(self):
         """Flush any pending audio synthesis."""
-        if not self._websocket or self._websocket.closed:
+        if not self._websocket or self._websocket.state is State.CLOSED:
             return
         await self._get_websocket().send(json.dumps({"flush": True}))
 
@@ -292,7 +293,7 @@ class LmntTTSService(InterruptibleTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             try:

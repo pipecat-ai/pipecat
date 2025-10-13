@@ -32,6 +32,9 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    InputTextRawFrame,
+    InterruptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -39,7 +42,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
-    StartInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -66,7 +68,6 @@ from pipecat.services.openai.llm import (
     OpenAIUserContextAggregator,
 )
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
@@ -75,7 +76,7 @@ from . import events
 from .file_api import GeminiFileAPI
 
 try:
-    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -271,6 +272,7 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                         parts.append({"text": part.get("text")})
                     elif part.get("type") == "file_data":
                         file_data = part.get("file_data", {})
+
                         parts.append(
                             {
                                 "fileData": {
@@ -572,6 +574,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Initialize the File API client
         self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
 
+        # Grounding metadata tracking
+        self._search_result_buffer = ""
+        self._accumulated_grounding_metadata = None
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
 
@@ -733,13 +739,20 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError(
+                "Universal LLMContext is not yet supported for Gemini Multimodal Live."
+            )
+        elif isinstance(frame, InputTextRawFrame):
+            await self._send_user_text(frame.text)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputImageRawFrame):
             await self._send_user_video(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
@@ -786,7 +799,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         try:
             logger.info(f"Connecting to wss://{self._base_url}")
             uri = f"wss://{self._base_url}?key={self._api_key}"
-            self._websocket = await websockets.connect(uri=uri)
+            self._websocket = await websocket_connect(uri=uri)
             self._receive_task = self.create_task(self._receive_task_handler())
 
             # Create the basic configuration
@@ -920,7 +933,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _receive_task_handler(self):
         """Handle incoming messages from the WebSocket connection."""
-        async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
+        async for message in self._websocket:
             evt = events.parse_server_event(message)
             # logger.debug(f"Received event: {message[:500]}")
             # logger.debug(f"Received event: {evt}")
@@ -936,6 +949,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_input_transcription(evt)
             elif evt.serverContent and evt.serverContent.outputTranscription:
                 await self._handle_evt_output_transcription(evt)
+            elif evt.serverContent and evt.serverContent.groundingMetadata:
+                await self._handle_evt_grounding_metadata(evt)
             elif evt.toolCall:
                 await self._handle_evt_tool_call(evt)
             elif False:  # !!! todo: error events?
@@ -963,6 +978,23 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._user_audio_buffer.extend(audio)
             length = int((frame.sample_rate * frame.num_channels * 2) * 0.5)
             self._user_audio_buffer = self._user_audio_buffer[-length:]
+
+    async def _send_user_text(self, text: str):
+        """Send user text via Gemini Live API's realtime input stream.
+
+        This method sends text through the realtimeInput stream (via TextInputMessage)
+        rather than the clientContent stream. This ensures text input is synchronized
+        with audio and video inputs, preventing temporal misalignment that can occur
+        when different modalities are processed through separate API pathways.
+
+        For realtimeInput, turn completion is automatically inferred by the API based
+        on user activity, so no explicit turnComplete signal is needed.
+
+        Args:
+            text: The text to send as user input.
+        """
+        evt = events.TextInputMessage.from_text(text)
+        await self.send_client_event(evt)
 
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""
@@ -1027,6 +1059,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                         parts.append({"text": part.get("text")})
                     elif part.get("type") == "file_data":
                         file_data = part.get("file_data", {})
+
                         parts.append(
                             {
                                 "fileData": {
@@ -1107,7 +1140,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
 
             self._bot_text_buffer += text
+            self._search_result_buffer += text  # Also accumulate for grounding
             await self.push_frame(LLMTextFrame(text=text))
+
+        # Check for grounding metadata in server content
+        if evt.serverContent and evt.serverContent.groundingMetadata:
+            self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
 
         inline_data = part.inlineData
         if not inline_data:
@@ -1175,6 +1213,16 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         self._bot_text_buffer = ""
         self._llm_output_buffer = ""
+
+        # Process grounding metadata if we have accumulated any
+        if self._accumulated_grounding_metadata:
+            await self._process_grounding_metadata(
+                self._accumulated_grounding_metadata, self._search_result_buffer
+            )
+
+        # Reset grounding tracking for next response
+        self._search_result_buffer = ""
+        self._accumulated_grounding_metadata = None
 
         # Only push the TTSStoppedFrame if the bot is outputting audio
         # when text is found, modalities is set to TEXT and no audio
@@ -1252,11 +1300,73 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not text:
             return
 
+        # Accumulate text for grounding as well
+        self._search_result_buffer += text
+
+        # Check for grounding metadata in server content
+        if evt.serverContent and evt.serverContent.groundingMetadata:
+            self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
         # Collect text for tracing
         self._llm_output_buffer += text
 
         await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
+
+    async def _handle_evt_grounding_metadata(self, evt):
+        """Handle dedicated grounding metadata events."""
+        if evt.serverContent and evt.serverContent.groundingMetadata:
+            grounding_metadata = evt.serverContent.groundingMetadata
+            # Process the grounding metadata immediately
+            await self._process_grounding_metadata(grounding_metadata, self._search_result_buffer)
+
+    async def _process_grounding_metadata(
+        self, grounding_metadata: events.GroundingMetadata, search_result: str = ""
+    ):
+        """Process grounding metadata and emit LLMSearchResponseFrame."""
+        if not grounding_metadata:
+            return
+
+        # Extract rendered content for search suggestions
+        rendered_content = None
+        if (
+            grounding_metadata.searchEntryPoint
+            and grounding_metadata.searchEntryPoint.renderedContent
+        ):
+            rendered_content = grounding_metadata.searchEntryPoint.renderedContent
+
+        # Convert grounding chunks and supports to LLMSearchOrigin format
+        origins = []
+
+        if grounding_metadata.groundingChunks and grounding_metadata.groundingSupports:
+            # Create a mapping of chunk indices to origins
+            chunk_to_origin = {}
+
+            for index, chunk in enumerate(grounding_metadata.groundingChunks):
+                if chunk.web:
+                    origin = LLMSearchOrigin(
+                        site_uri=chunk.web.uri, site_title=chunk.web.title, results=[]
+                    )
+                    chunk_to_origin[index] = origin
+                    origins.append(origin)
+
+            # Add grounding support results to the appropriate origins
+            for support in grounding_metadata.groundingSupports:
+                if support.segment and support.groundingChunkIndices:
+                    text = support.segment.text or ""
+                    confidence_scores = support.confidenceScores or []
+
+                    # Add this result to all origins referenced by this support
+                    for chunk_index in support.groundingChunkIndices:
+                        if chunk_index in chunk_to_origin:
+                            result = LLMSearchResult(text=text, confidence=confidence_scores)
+                            chunk_to_origin[chunk_index].results.append(result)
+
+        # Create and push the search response frame
+        search_frame = LLMSearchResponseFrame(
+            search_result=search_result, origins=origins, rendered_content=rendered_content
+        )
+
+        await self.push_frame(search_frame)
 
     async def _handle_evt_usage_metadata(self, evt):
         """Handle the usage metadata event."""

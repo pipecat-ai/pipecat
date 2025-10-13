@@ -15,7 +15,7 @@ import copy
 import io
 import json
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from openai._types import NOT_GIVEN, NotGiven
 from openai.types.chat import (
@@ -111,8 +111,6 @@ class OpenAILLMContext:
         context = OpenAILLMContext()
 
         for message in messages:
-            if "name" not in message:
-                message["name"] = message["role"]
             context.add_message(message)
         return context
 
@@ -185,13 +183,13 @@ class OpenAILLMContext:
         """
         return json.dumps(self._messages, cls=CustomEncoder, ensure_ascii=False, indent=2)
 
-    def get_messages_for_logging(self) -> str:
+    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
         """Get sanitized messages suitable for logging.
 
         Removes or truncates sensitive data like image content for safe logging.
 
         Returns:
-            JSON string with sanitized message content for logging.
+            List of messages in a format ready for logging.
         """
         msgs = []
         for message in self.messages:
@@ -205,7 +203,7 @@ class OpenAILLMContext:
             if "mime_type" in msg and msg["mime_type"].startswith("image/"):
                 msg["data"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs, ensure_ascii=False)
+        return msgs
 
     def from_standard_message(self, message):
         """Convert from OpenAI message format to OpenAI message format (passthrough).

@@ -25,13 +25,14 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
-    StopInterruptionFrame,
     STTMuteFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -133,7 +134,8 @@ class STTMuteFilter(FrameProcessor):
         if should_mute != self.is_muted:
             logger.debug(f"STTMuteFilter {'muting' if should_mute else 'unmuting'}")
             self._is_muted = should_mute
-            await self.push_frame(STTMuteFrame(mute=should_mute))
+            await self.push_frame(STTMuteFrame(mute=should_mute), FrameDirection.UPSTREAM)
+            await self.push_frame(STTMuteFrame(mute=should_mute), FrameDirection.DOWNSTREAM)
 
     async def _should_mute(self) -> bool:
         """Determine if STT should be muted based on current state and strategies."""
@@ -202,8 +204,9 @@ class STTMuteFilter(FrameProcessor):
         if isinstance(
             frame,
             (
-                StartInterruptionFrame,
-                StopInterruptionFrame,
+                InterruptionFrame,
+                VADUserStartedSpeakingFrame,
+                VADUserStoppedSpeakingFrame,
                 UserStartedSpeakingFrame,
                 UserStoppedSpeakingFrame,
                 InputAudioRawFrame,

@@ -1,6 +1,0 @@
-fastapi
-uvicorn
-python-dotenv
-pipecat-ai[daily,webrtc,silero,cartesia,deepgram,openai,tracing]
-pipecat-ai-small-webrtc-prebuilt
-opentelemetry-exporter-otlp-proto-http

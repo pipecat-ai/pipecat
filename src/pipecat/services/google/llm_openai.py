@@ -17,7 +17,6 @@ from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
 from pipecat.services.llm_service import FunctionCallFromLLM
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -40,6 +39,10 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
     Note: This service includes a workaround for a Google API bug where function
     call indices may be incorrectly set to None, resulting in empty function names.
 
+    .. deprecated:: 0.0.82
+        GoogleLLMOpenAIBetaService is deprecated and will be removed in a future version.
+        Use GoogleLLMService instead for better integration with Google's native API.
+
     Reference:
         https://ai.google.dev/gemini-api/docs/openai
     """
@@ -60,6 +63,17 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             model: Google model name to use (e.g., "gemini-2.0-flash").
             **kwargs: Additional arguments passed to the parent OpenAILLMService.
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "GoogleLLMOpenAIBetaService is deprecated and will be removed in a future version. "
+                "Use GoogleLLMService instead for better integration with Google's native API.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     async def _process_context(self, context: OpenAILLMContext):
@@ -73,11 +87,11 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
-            context
-        )
+        chunk_stream: AsyncStream[
+            ChatCompletionChunk
+        ] = await self._stream_chat_completions_specific_context(context)
 
-        async for chunk in WatchdogAsyncIterator(chunk_stream, manager=self.task_manager):
+        async for chunk in chunk_stream:
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

@@ -2,70 +2,63 @@
 
 This directory contains examples showing how to build voice and multimodal agents with Pipecat. Each example demonstrates specific features, progressing from basic to advanced concepts.
 
-## Learning Paths
+## Setup
 
-Depending on what you're trying to build, these learning paths will guide you through relevant examples:
+1. Follow the [README](../../README.md#%EF%B8%8F-contributing-to-the-framework) steps to get your local environment configured.
 
-- **New to Pipecat**: Start with examples [01](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/01-say-one-thing.py), [02](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/02-llm-say-one-thing.py), [07](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/07-interruptible.py)
-- **Building conversational bots**: [07](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/07-interruptible.py), [10](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/10-wake-phrase.py), [38](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/38-smart-turn-fal.py)
-- **Common add-on capabilities**: [17](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/17-detect-user-idle.py), [24](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/24-stt-mute-filter.py), [28](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/28-transcription-processor.py), [34](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/34-audio-recording.py)
-- **Adding visual capabilities**: [03](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/03-still-frame.py), [12](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/12a-describe-video-gemini-flash.py), [26](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/26c-gemini-multimodal-live-video.py)
-- **Advanced agent capabilities**: [14](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/14-function-calling.py), [20](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/20a-persistent-context-openai.py), [37](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/37-mem0.py)
+   > **Run from root directory**: Make sure you are running the steps from the root directory.
 
-## Quick Start
+   > **Using local audio?**: The `LocalAudioTransport` requires a system dependency for `portaudio`. Install the dependency to use the transport.
 
-1. Set up a virtual environment:
+2. Copy the [`env.example`](../../env.example) file and add API keys for services you plan to use:
 
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   cp env.example .env
+   # Edit .env with your API keys
    ```
 
-2. Install dependencies:
+3. Navigate to the examples directory if you aren't already there:
 
    ```bash
-   pip install -r requirements.txt
+   cd examples/foundational
    ```
-
-3. Create a `.env` file with your API keys.
 
 4. Run any example:
 
    ```bash
-   python 01-say-one-thing.py
+   uv run python 01-say-one-thing.py
    ```
 
-5. Open the web interface at http://localhost:7860 and click "Connect"
+5. Open the web interface at http://localhost:7860/client/ and click "Connect"
 
 ## Running examples with other transports
 
-It is possible to run most of the examples with other transports such as Twilio or Daily.
+Most examples support running with other transports, like Twilio or Daily.
 
 ### Daily
 
 You need to create a Daily account at https://dashboard.daily.co/u/signup. Once signed up, you can create your own room from the dashboard and set the environment variables `DAILY_SAMPLE_ROOM_URL` and `DAILY_API_KEY`. Alternatively, you can let the example create a room for you (still needs `DAILY_API_KEY` environment variable). Then, start any example with `-t daily`:
 
 ```bash
-python 07-interruptible.py -t daily
+uv run 07-interruptible.py -t daily
 ```
 
 ### Twilio
 
-It is also possible to run the example through a Twilio phone number. You will
-need to setup a few things:
+It is also possible to run the example through a Twilio phone number. You will need to setup a few things:
 
 1. Install and run [ngrok](https://ngrok.com/download).
 
-  ```bash
-  ngrok http 7860
-  ```
+```bash
+ngrok http 7860
+```
 
 2. Configure your Twilio phone number. One way is to setup a TwiML app and set the request URL to the ngrok URL from step (1). Then, set your phone number to use the new TwiML app.
 
 Then, run the example with:
 
 ```bash
-python 07-interruptible.py -t twilio -x NGROK_HOST_NAME (no protocol)
+uv run 07-interruptible.py -t twilio -x NGROK_HOST_NAME
 ```
 
 ## Examples by Feature
@@ -133,21 +126,18 @@ python 07-interruptible.py -t twilio -x NGROK_HOST_NAME (no protocol)
 
 - **[16-gpu-container-local-bot.py](./16-gpu-container-local-bot.py)**: GPU-accelerated local bot (Performance measurement)
 
-### Utilities
-
 ## Advanced Usage
 
 ### Customizing Network Settings
 
 ```bash
-python <example-name> --host 0.0.0.0 --port 8080
+uv run python <example-name> --host 0.0.0.0 --port 8080
 ```
 
 ### Troubleshooting
 
 - **No audio/video**: Check browser permissions for microphone and camera
 - **Connection errors**: Verify API keys in `.env` file
-- **Missing dependencies**: Run `pip install -r requirements.txt`
 - **Port conflicts**: Use `--port` to change the port
 
-For more examples, visit our [GitHub repository](https://github.com/pipecat-ai/pipecat/tree/main/examples).
+For more examples, visit our the [`pipecat-examples repository](https://github.com/pipecat-ai/pipecat-examples).

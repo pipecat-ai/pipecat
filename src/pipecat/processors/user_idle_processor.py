@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
 
 
 class UserIdleProcessor(FrameProcessor):
@@ -78,7 +77,7 @@ class UserIdleProcessor(FrameProcessor):
         self._interrupted = False
         self._conversation_started = False
         self._idle_task = None
-        self._idle_event = None
+        self._idle_event = asyncio.Event()
 
     def _wrap_callback(
         self,
@@ -137,9 +136,6 @@ class UserIdleProcessor(FrameProcessor):
             direction: Direction of the frame flow.
         """
         await super().process_frame(frame, direction)
-
-        if isinstance(frame, StartFrame):
-            self._idle_event = WatchdogEvent(self.task_manager)
 
         # Check for end frames before processing
         if isinstance(frame, (EndFrame, CancelFrame)):
