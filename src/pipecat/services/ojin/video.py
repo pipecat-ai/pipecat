@@ -102,7 +102,6 @@ class OjinPersonaInteraction:
 
     state: InteractionState = InteractionState.INACTIVE
     expected_frames: float = 0
-    num_played_frames: int = 0
 
     def __post_init__(self):
         self.pending_audio = bytearray()
@@ -197,6 +196,7 @@ class AnimationKeyframe:
 
     frame_idx: int
     image: bytes
+    is_final_frame: bool
 
 
 class OjinPersonaService(FrameProcessor):
@@ -225,7 +225,7 @@ class OjinPersonaService(FrameProcessor):
             self._client = client
 
         assert self._settings.persona_config_id is not None
-
+        self.num_speech_frames_played: int = 0
         self._processed_queued_audio_task: Optional[asyncio.Task] = None
         self._run_loop_task: Optional[asyncio.Task] = None
 
@@ -325,15 +325,20 @@ class OjinPersonaService(FrameProcessor):
             animation_frame = AnimationKeyframe(
                 frame_idx=frame_idx,
                 image=message.video_frame_bytes,
+                is_final_frame=message.is_final_response,
             )
             if self.persona_state == PersonaState.INITIALIZING:
                 # IDLE frame
                 self.idle_frames.append(animation_frame)
             else:
-                logger.debug(f"Received frame {frame_idx}")
+                if not self.can_recieve_video_frames():
+                    logger.warning("Received video frame with no active speech interaction")
+                    return
+
+                logger.debug(f"Received video frame {frame_idx}")
                 self.pending_speech_frames.append(animation_frame)
 
-            if message.is_final_response:
+            if animation_frame.is_final_frame:
                 self._interaction = None
                 if self._pending_interaction is not None:
                     await self._start_speech_interaction(self._pending_interaction)
@@ -370,6 +375,13 @@ class OjinPersonaService(FrameProcessor):
             if is_fatal:
                 await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
                 await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+
+    def can_recieve_video_frames(self):
+        return (
+            self._interaction is not None
+            and self._interaction.state != InteractionState.INACTIVE 
+            and self._interaction.state != InteractionState.STARTING
+        )
 
     async def _receive_ojin_messages(self):
         """Continuously receive and process messages from the proxy.
@@ -452,7 +464,8 @@ class OjinPersonaService(FrameProcessor):
             self.pending_speech_frames.clear()
             self.num_speech_frames_played = 0
 
-            self._interaction.set_state(InteractionState.INACTIVE)
+            self._interaction.close()
+            self._interaction = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames from the pipeline.
@@ -528,7 +541,7 @@ class OjinPersonaService(FrameProcessor):
             self._pending_interaction.set_state(InteractionState.INACTIVE)
             interaction_to_use = self._pending_interaction
         else:
-            if self._interaction is None:
+            if self._interaction is None or self._interaction.state == InteractionState.INACTIVE:
                 await self._start_speech_interaction()
 
             assert self._interaction is not None
@@ -569,7 +582,7 @@ class OjinPersonaService(FrameProcessor):
 
         """
         self._interaction = new_interaction or OjinPersonaInteraction()
-        self._interaction.set_state(InteractionState.STARTING)
+        self._interaction.set_state(InteractionState.ACTIVE)
 
         assert self._client is not None
         logger.info(
@@ -686,12 +699,15 @@ class OjinPersonaService(FrameProcessor):
                 logger.debug(
                     f"played frame {self.pending_speech_frames[0].frame_idx} ==? {self.current_frame_index}"
                 )
-                if self._interaction is not None:
-                    self._interaction.num_played_frames += 1
+                self.num_speech_frames_played += 1
                 animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
+                if animation_frame.is_final_frame:
+                    # Restart number of frames for next interaction (which might already be generating frames)
+                    self.num_speech_frames_played = 0
+
                 self.played_frame_idx = animation_frame.frame_idx
             else:
-                if self._interaction is not None and self._interaction.num_played_frames > 0:
+                if self._interaction is not None and self.num_speech_frames_played > 0:
                     logger.debug(f"frame missed: {self.current_frame_index}")
                     self.current_frame_index -= 1
 
@@ -706,6 +722,7 @@ class OjinPersonaService(FrameProcessor):
                     continue
 
                 self.played_frame_idx += 1
+                self.num_speech_frames_played = 0
                 animation_frame = self._get_idle_frame_for_index(self.played_frame_idx)
                 logger.debug(f"played idle frame: {self.played_frame_idx}")
 
