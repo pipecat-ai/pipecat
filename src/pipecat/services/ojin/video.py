@@ -1,5 +1,6 @@
 import asyncio
 import math
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -218,6 +219,7 @@ class OjinPersonaService(FrameProcessor):
                 ws_url=settings.ws_url,
                 api_key=settings.api_key,
                 config_id=settings.persona_config_id,
+                mode=os.getenv("OJIN_MODE", ""),
             )
         else:
             self._client = client
@@ -327,7 +329,7 @@ class OjinPersonaService(FrameProcessor):
             if self.persona_state == PersonaState.INITIALIZING:
                 # IDLE frame
                 self.idle_frames.append(animation_frame)
-            else:                
+            else:
                 logger.debug(f"Received frame {frame_idx}")
                 self.pending_speech_frames.append(animation_frame)
 
