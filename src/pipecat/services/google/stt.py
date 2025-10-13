@@ -855,6 +855,38 @@ class GoogleSTTService(STTService):
 
                     if result.is_final:
                         self._last_transcript_was_final = True
+
+                        # Get performance metrics
+                        ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+                        processing_time = (
+                            self._metrics.processing_time if hasattr(self, "_metrics") else None
+                        )
+
+                        # Get confidence if available (Google provides word-level confidence)
+                        confidence = None
+                        if result.alternatives[0].confidence:
+                            confidence = result.alternatives[0].confidence
+
+                        # Calculate audio duration from result end time if available
+                        audio_duration = None
+                        if hasattr(result, "result_end_offset") and result.result_end_offset:
+                            audio_duration = result.result_end_offset.total_seconds()
+
+                        # Calculate STT usage metrics
+                        if audio_duration:
+                            await self.start_stt_usage_metrics(
+                                audio_duration=audio_duration,
+                                transcript=transcript,
+                                processing_time=processing_time,
+                                ttft=ttft,
+                                confidence=confidence,
+                                sample_rate=self.sample_rate,
+                                channels=1,
+                                encoding="LINEAR16",
+                                cost_per_minute=self._cost_per_minute,
+                                ground_truth=self._ground_truth,
+                            )
+
                         await self.push_frame(
                             TranscriptionFrame(
                                 transcript,

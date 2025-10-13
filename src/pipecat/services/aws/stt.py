@@ -497,6 +497,34 @@ class AWSTranscribeSTTService(STTService):
                             if transcript:
                                 await self.stop_ttfb_metrics()
                                 if is_final:
+                                    # Calculate audio duration from start and end time if available
+                                    audio_duration = None
+                                    if "StartTime" in result and "EndTime" in result:
+                                        audio_duration = result["EndTime"] - result["StartTime"]
+
+                                    # Get performance metrics
+                                    ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+                                    processing_time = (
+                                        self._metrics.processing_time
+                                        if hasattr(self, "_metrics")
+                                        else None
+                                    )
+
+                                    # AWS doesn't provide confidence in streaming results
+                                    # Calculate STT usage metrics
+                                    if audio_duration:
+                                        await self.start_stt_usage_metrics(
+                                            audio_duration=audio_duration,
+                                            transcript=transcript,
+                                            processing_time=processing_time,
+                                            ttft=ttft,
+                                            sample_rate=self._settings["sample_rate"],
+                                            channels=self._settings["number_of_channels"],
+                                            encoding=self._settings["media_encoding"].upper(),
+                                            cost_per_minute=self._cost_per_minute,
+                                            ground_truth=self._ground_truth,
+                                        )
+
                                     await self.push_frame(
                                         TranscriptionFrame(
                                             transcript,

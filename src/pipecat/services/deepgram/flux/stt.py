@@ -554,6 +554,28 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
         logger.debug("User stopped speaking")
 
+        # Get audio duration from data if available
+        audio_duration = data.get("duration")
+
+        # Get performance metrics
+        ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+        processing_time = self._metrics.processing_time if hasattr(self, "_metrics") else None
+
+        # Deepgram Flux doesn't provide confidence in EndOfTurn events
+        # Calculate STT usage metrics
+        if audio_duration:
+            await self.start_stt_usage_metrics(
+                audio_duration=audio_duration,
+                transcript=transcript,
+                processing_time=processing_time,
+                ttft=ttft,
+                sample_rate=self.sample_rate,
+                channels=1,
+                encoding="LINEAR16",
+                cost_per_minute=self._cost_per_minute,
+                ground_truth=self._ground_truth,
+            )
+
         await self.push_frame(
             TranscriptionFrame(
                 transcript,

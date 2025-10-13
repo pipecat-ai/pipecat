@@ -296,6 +296,30 @@ class CartesiaSTTService(STTService):
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
+                # Get performance metrics
+                ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+                processing_time = (
+                    self._metrics.processing_time if hasattr(self, "_metrics") else None
+                )
+
+                # Cartesia may provide audio duration in the response
+                audio_duration = data.get("audio_duration")
+
+                # Cartesia doesn't provide confidence scores
+                # Calculate STT usage metrics if we have duration
+                if audio_duration:
+                    await self.start_stt_usage_metrics(
+                        audio_duration=audio_duration,
+                        transcript=transcript,
+                        processing_time=processing_time,
+                        ttft=ttft,
+                        sample_rate=self.sample_rate,
+                        channels=1,
+                        encoding=self._settings.encoding.upper(),
+                        cost_per_minute=self._cost_per_minute,
+                        ground_truth=self._ground_truth,
+                    )
+
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,

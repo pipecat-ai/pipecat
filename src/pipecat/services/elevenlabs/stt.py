@@ -323,6 +323,34 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 # Use the language_code returned by the API
                 detected_language = result.get("language_code", "eng")
 
+                # Calculate audio duration (audio is WAV format, calculate from bytes)
+                # WAV header is 44 bytes, then raw PCM data
+                # For 16-bit PCM: duration = (bytes - 44) / (sample_rate * 2)
+                audio_duration = None
+                if len(audio) > 44:
+                    audio_duration = (len(audio) - 44) / (self.sample_rate * 2)
+
+                # Get performance metrics
+                ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+                processing_time = (
+                    self._metrics.processing_time if hasattr(self, "_metrics") else None
+                )
+
+                # ElevenLabs doesn't provide confidence scores
+                # Calculate STT usage metrics
+                if audio_duration:
+                    await self.start_stt_usage_metrics(
+                        audio_duration=audio_duration,
+                        transcript=text,
+                        processing_time=processing_time,
+                        ttft=ttft,
+                        sample_rate=self.sample_rate,
+                        channels=1,
+                        encoding="LINEAR16",
+                        cost_per_minute=self._cost_per_minute,
+                        ground_truth=self._ground_truth,
+                    )
+
                 await self._handle_transcription(text, True, detected_language)
                 logger.debug(f"Transcription: [{text}]")
 

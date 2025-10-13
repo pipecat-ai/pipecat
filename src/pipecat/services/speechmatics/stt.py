@@ -759,6 +759,45 @@ class SpeechmaticsSTTService(STTService):
 
         # If final, then re-parse into TranscriptionFrame
         if finalized:
+            # Calculate audio duration from speech fragments
+            audio_duration = None
+            if self._speech_fragments and len(self._speech_fragments) > 0:
+                # Get first and last fragment timing
+                first_fragment = self._speech_fragments[0]
+                last_fragment = self._speech_fragments[-1]
+                audio_duration = last_fragment.end_time - first_fragment.start_time
+
+            # Get performance metrics
+            ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+            processing_time = self._metrics.processing_time if hasattr(self, "_metrics") else None
+
+            # Calculate average confidence from fragments
+            confidence = None
+            if self._speech_fragments and all(
+                hasattr(f, "confidence") and f.confidence for f in self._speech_fragments
+            ):
+                confidence = sum(f.confidence for f in self._speech_fragments) / len(
+                    self._speech_fragments
+                )
+
+            # Get transcript text for metrics
+            transcript_text = " ".join(frame.text for frame in speech_frames if frame.text)
+
+            # Calculate STT usage metrics
+            if audio_duration and transcript_text:
+                await self.start_stt_usage_metrics(
+                    audio_duration=audio_duration,
+                    transcript=transcript_text,
+                    processing_time=processing_time,
+                    ttft=ttft,
+                    confidence=confidence,
+                    sample_rate=self.sample_rate,
+                    channels=1,
+                    encoding="LINEAR16",
+                    cost_per_minute=self._cost_per_minute,
+                    ground_truth=self._ground_truth,
+                )
+
             # Reset the speech fragments
             self._speech_fragments.clear()
 

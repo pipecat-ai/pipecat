@@ -42,6 +42,7 @@ class STTService(AIService):
         audio_passthrough=True,
         # STT input sample rate
         sample_rate: Optional[int] = None,
+        cost_per_minute: Optional[float] = None,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -51,6 +52,9 @@ class STTService(AIService):
                 Defaults to True.
             sample_rate: The sample rate for audio input. If None, will be determined
                 from the start frame.
+            cost_per_minute: Cost per minute of audio for usage metrics. If None, cost metrics
+                will not be calculated. Refer to your STT provider's pricing docs for the
+                specific cost of your model.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -61,6 +65,8 @@ class STTService(AIService):
         self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
+        self._ground_truth: Optional[str] = None
+        self._cost_per_minute = cost_per_minute
 
     @property
     def is_muted(self) -> bool:
@@ -95,6 +101,16 @@ class STTService(AIService):
             language: The language to use for speech recognition.
         """
         pass
+
+    def set_ground_truth(self, ground_truth: Optional[str]):
+        """Set ground truth text for testing/evaluation purposes.
+
+        This allows WER and other accuracy metrics to be calculated automatically.
+
+        Args:
+            ground_truth: The expected correct transcription for accuracy comparison.
+        """
+        self._ground_truth = ground_truth
 
     @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:

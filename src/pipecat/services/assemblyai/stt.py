@@ -304,6 +304,35 @@ class AssemblyAISTTService(STTService):
         if message.end_of_turn and (
             not self._connection_params.formatted_finals or message.turn_is_formatted
         ):
+            # Calculate audio duration from word timings
+            audio_duration = None
+            confidence = None
+            if message.words and len(message.words) > 0:
+                # Audio duration is from first word start to last word end (in milliseconds)
+                audio_duration = (message.words[-1].end - message.words[0].start) / 1000.0
+                # Calculate average confidence from all words
+                if all(word.confidence for word in message.words):
+                    confidence = sum(word.confidence for word in message.words) / len(message.words)
+
+            # Get performance metrics
+            ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+            processing_time = self._metrics.processing_time if hasattr(self, "_metrics") else None
+
+            # Calculate STT usage metrics
+            if audio_duration:
+                await self.start_stt_usage_metrics(
+                    audio_duration=audio_duration,
+                    transcript=message.transcript,
+                    processing_time=processing_time,
+                    ttft=ttft,
+                    confidence=confidence,
+                    sample_rate=self.sample_rate,
+                    channels=1,
+                    encoding=self._connection_params.encoding.upper(),
+                    cost_per_minute=self._cost_per_minute,
+                    ground_truth=self._ground_truth,
+                )
+
             await self.push_frame(
                 TranscriptionFrame(
                     message.transcript,

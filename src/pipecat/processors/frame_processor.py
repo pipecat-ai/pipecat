@@ -434,6 +434,49 @@ class FrameProcessor(BaseObject):
             if frame:
                 await self.push_frame(frame)
 
+    async def start_stt_usage_metrics(
+        self,
+        audio_duration: float,
+        transcript: Optional[str] = None,
+        processing_time: Optional[float] = None,
+        confidence: Optional[float] = None,
+        sample_rate: Optional[int] = None,
+        channels: Optional[int] = None,
+        encoding: Optional[str] = None,
+        cost_per_minute: Optional[float] = None,
+        ttft: Optional[float] = None,
+        ground_truth: Optional[str] = None,
+    ):
+        """Start enhanced STT usage metrics collection with automatic calculations.
+
+        Args:
+            audio_duration: Duration of audio processed in seconds (required).
+            transcript: The transcribed text (used to calculate word/character counts).
+            processing_time: Time taken to process the audio in seconds.
+            confidence: Average confidence score from 0.0 to 1.0.
+            sample_rate: Audio sample rate in Hz (e.g., 16000).
+            channels: Number of audio channels (1 for mono, 2 for stereo).
+            encoding: Audio encoding format (e.g., "LINEAR16", "OPUS").
+            cost_per_minute: Cost per minute of audio (for cost estimation).
+            ttft: Time to first transcript in seconds.
+            ground_truth: Reference transcript for WER calculation (optional, for testing).
+        """
+        if self.can_generate_metrics() and self.usage_metrics_enabled:
+            frame = await self._metrics.start_stt_usage_metrics(
+                audio_duration=audio_duration,
+                transcript=transcript,
+                processing_time=processing_time,
+                confidence=confidence,
+                sample_rate=sample_rate,
+                channels=channels,
+                encoding=encoding,
+                cost_per_minute=cost_per_minute,
+                ttft=ttft,
+                ground_truth=ground_truth,
+            )
+            if frame:
+                await self.push_frame(frame)
+
     async def stop_all_metrics(self):
         """Stop all active metrics collection."""
         await self.stop_ttfb_metrics()
