@@ -93,17 +93,18 @@ class ImageFormatConverter(FrameProcessor):
 
 
 async def main():
+    time_scale = 2.0
     input = MockTTSProcessor(
         {
             "audio_sequence": [
-                ("./mock/assets/long_audio_16k.wav", 14),
-                # ("./mock/assets/long_audio_16k.wav", 23),
+                ("./mock/assets/long_audio_16k.wav", 18 * time_scale),
+                ("./mock/assets/long_audio_16k.wav", 23 * time_scale),
             ],
             "event_sequence": [
-                ("user_started_speaking", 12),
-                ("user_stopped_speaking", 13),
-                # ("user_started_speaking", 21),
-                # ("user_stopped_speaking", 22),
+                ("user_started_speaking", 16 * time_scale),
+                ("user_stopped_speaking", 17 * time_scale),
+                ("user_started_speaking", 21 * time_scale),
+                ("user_stopped_speaking", 22 * time_scale),
             ],
             "chunk_size": 600000,
             "chunk_delay": 0.2,
