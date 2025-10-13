@@ -172,11 +172,11 @@ class OjinPersonaSettings:
         default=True
     )  # whether to push bot stopped speaking frames to the output
     frame_count_threshold_for_end_interaction: int = field(
-        default=35
+        default=25
     )  # If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
 
     extra_frames_lat: int = field(
-        default=15,
+        default=10,
     )  # round trip latency between server and client, make sure to specify extra room for error
 
 
@@ -489,6 +489,7 @@ class OjinPersonaService(FrameProcessor):
 
         elif isinstance(frame, TTSStoppedFrame):
             logger.debug("TTSStoppedFrame")
+            await self._end_interaction()
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, TTSAudioRawFrame):
