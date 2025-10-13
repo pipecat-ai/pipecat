@@ -101,6 +101,7 @@ class OjinPersonaInteraction:
     interaction_id: str = ""
 
     state: InteractionState = InteractionState.INACTIVE
+    received_frames: int = 0
     expected_frames: float = 0
 
     def __post_init__(self):
@@ -172,8 +173,8 @@ class OjinPersonaSettings:
         default=True
     )  # whether to push bot stopped speaking frames to the output
     frame_count_threshold_for_end_interaction: int = field(
-        default=25
-    )  # If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
+        default=-1
+    )  # If -1 then it will not end the interaction based on frame count only when receiving TTSStoppedFrame. If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
 
     extra_frames_lat: int = field(
         default=10,
@@ -336,6 +337,7 @@ class OjinPersonaService(FrameProcessor):
                     return
 
                 logger.debug(f"Received video frame {frame_idx}")
+                self._interaction.received_frames += 1
                 self.pending_speech_frames.append(animation_frame)
 
             if animation_frame.is_final_frame:
@@ -634,19 +636,22 @@ class OjinPersonaService(FrameProcessor):
                 await asyncio.sleep(0.001)
                 continue
 
-            if (
-                len(self._interaction.pending_audio) == 0
-                and self.num_speech_frames_played > 0
-                and (
-                    self.num_speech_frames_played
-                    + self._settings.frame_count_threshold_for_end_interaction
-                    > self._interaction.expected_frames
-                )
-            ):
-                logger.debug(
-                    f"Ending interaction because loop doesn't have enough frames queued: expected: {self._interaction.expected_frames}, played: {self.num_speech_frames_played}"
-                )
-                await self._end_interaction()
+            # Mechanism to end interaction if we have audio starvation, considering how many video frames are left to play
+            if self._settings.frame_count_threshold_for_end_interaction != -1:
+                if (
+                    len(self._interaction.pending_audio) == 0
+                    and self._interaction.received_frames
+                    >= self._settings.frame_count_threshold_for_end_interaction
+                    and (
+                        self.num_speech_frames_played
+                        + self._settings.frame_count_threshold_for_end_interaction
+                        > self._interaction.expected_frames
+                    )
+                ):
+                    logger.debug(
+                        f"Ending interaction because loop doesn't have enough frames queued: expected: {self._interaction.expected_frames}, played: {self.num_speech_frames_played}"
+                    )
+                    await self._end_interaction()
 
             # while there is more audio coming we wait for it if we don't have any to process atm
             if len(self._interaction.pending_audio) == 0:
