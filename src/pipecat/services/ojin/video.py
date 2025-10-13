@@ -634,10 +634,14 @@ class OjinPersonaService(FrameProcessor):
                 await asyncio.sleep(0.001)
                 continue
 
-            if len(self._interaction.pending_audio) == 0 and (
-                self.num_speech_frames_played
-                + self._settings.frame_count_threshold_for_end_interaction
-                > self._interaction.expected_frames
+            if (
+                len(self._interaction.pending_audio) == 0
+                and self.num_speech_frames_played > 0
+                and (
+                    self.num_speech_frames_played
+                    + self._settings.frame_count_threshold_for_end_interaction
+                    > self._interaction.expected_frames
+                )
             ):
                 logger.debug(
                     f"Ending interaction because loop doesn't have enough frames queued: expected: {self._interaction.expected_frames}, played: {self.num_speech_frames_played}"
