@@ -510,6 +510,7 @@ class OjinPersonaService(FrameProcessor):
             with self.pending_speech_frames.mutex:
                 self.pending_speech_frames.queue.clear()
             self.num_speech_frames_played = 0
+            self.last_queued_frame_index = self.current_frame_index
 
             self._interaction.close()
             self._interaction = None
