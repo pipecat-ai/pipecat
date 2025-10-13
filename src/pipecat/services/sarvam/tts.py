@@ -20,9 +20,9 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -121,6 +121,9 @@ class SarvamHttpTTSService(TTSService):
             default=0.6,
             ge=0.01,
             le=1.0,
+            description="Controls the randomness of the output for bulbul v3 beta. "
+            "Lower values make the output more focused and deterministic, while "
+            "higher values make it more random. Range: 0.01 to 1.0. Default: 0.6.",
         )
 
     def __init__(
@@ -155,31 +158,31 @@ class SarvamHttpTTSService(TTSService):
         self._base_url = base_url
         self._session = aiohttp_session
 
-        if model == "bulbul:v3-beta" or model == "bulbul:v3":
-            # For bulbul v3 beta, exclude pace and loudness parameters
-            self._settings = {
-                "language": (
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-IN"
-                ),
-                "enable_preprocessing": params.enable_preprocessing,
-                "temperature": getattr(params, "temperature", 0.6),
-                "model": model,  # Include model in settings for v3 beta
-            }
+        # Build base settings common to all models
+        self._settings = {
+            "language": (
+                self.language_to_service_language(params.language) if params.language else "en-IN"
+            ),
+            "enable_preprocessing": params.enable_preprocessing,
+        }
+
+        # Add model-specific parameters
+        if model in ("bulbul:v3-beta", "bulbul:v3"):
+            self._settings.update(
+                {
+                    "temperature": getattr(params, "temperature", 0.6),
+                    "model": model,
+                }
+            )
         else:
-            # For bulbul v2, include all parameters including pace and loudness
-            self._settings = {
-                "language": (
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-IN"
-                ),
-                "pitch": params.pitch,
-                "pace": params.pace,
-                "loudness": params.loudness,
-                "enable_preprocessing": params.enable_preprocessing,
-            }
+            self._settings.update(
+                {
+                    "pitch": params.pitch,
+                    "pace": params.pace,
+                    "loudness": params.loudness,
+                    "model": model,
+                }
+            )
 
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -310,7 +313,7 @@ class SarvamTTSService(InterruptibleTTSService):
         )
 
         # For bulbul v3 beta with any speaker and temperature:
-        # Note: pace and loudness are not supported for bulbul v3 beta
+        # Note: pace and loudness are not supported for bulbul v3 and bulbul v3 beta
         tts_v3 = SarvamTTSService(
             api_key="your-api-key",
             voice_id="speaker_name",
@@ -386,8 +389,10 @@ class SarvamTTSService(InterruptibleTTSService):
             voice_id: Voice identifier for synthesis (default "anushka").
             url: WebSocket URL for connecting to the TTS backend (default production URL).
             aiohttp_session: Optional shared aiohttp session. To maintain backward compatibility.
+
                 .. deprecated:: 0.0.81
                     aiohttp_session is no longer used. This parameter will be removed in a future version.
+
             aggregate_sentences: Whether to merge multiple sentences into one audio chunk (default True).
             sample_rate: Desired sample rate for the output audio in Hz (overrides default if set).
             params: Optional input parameters to override global configuration.
@@ -423,44 +428,37 @@ class SarvamTTSService(InterruptibleTTSService):
         self._api_key = api_key
         self.set_model_name(model)
         self.set_voice(voice_id)
-        # Configuration parameters
-        if model == "bulbul:v3-beta" or model == "bulbul:v3":
-            # For bulbul v3 beta, exclude pace and loudness parameters
-            self._settings = {
-                "target_language_code": (
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-IN"
-                ),
-                "speaker": voice_id,
-                "speech_sample_rate": 0,
-                "enable_preprocessing": params.enable_preprocessing,
-                "min_buffer_size": params.min_buffer_size,
-                "max_chunk_length": params.max_chunk_length,
-                "output_audio_codec": params.output_audio_codec,
-                "output_audio_bitrate": params.output_audio_bitrate,
-                "temperature": getattr(params, "temperature", 0.6),
-                "model": model,  # Include model in settings for v3 beta
-            }
+        # Build base settings common to all models
+        self._settings = {
+            "target_language_code": (
+                self.language_to_service_language(params.language) if params.language else "en-IN"
+            ),
+            "speaker": voice_id,
+            "speech_sample_rate": 0,
+            "enable_preprocessing": params.enable_preprocessing,
+            "min_buffer_size": params.min_buffer_size,
+            "max_chunk_length": params.max_chunk_length,
+            "output_audio_codec": params.output_audio_codec,
+            "output_audio_bitrate": params.output_audio_bitrate,
+        }
+
+        # Add model-specific parameters
+        if model in ("bulbul:v3-beta", "bulbul:v3"):
+            self._settings.update(
+                {
+                    "temperature": getattr(params, "temperature", 0.6),
+                    "model": model,
+                }
+            )
         else:
-            # For bulbul v2, include all parameters including pace and loudness
-            self._settings = {
-                "target_language_code": (
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-IN"
-                ),
-                "pitch": params.pitch,
-                "pace": params.pace,
-                "speaker": voice_id,
-                "loudness": params.loudness,
-                "speech_sample_rate": 0,
-                "enable_preprocessing": params.enable_preprocessing,
-                "min_buffer_size": params.min_buffer_size,
-                "max_chunk_length": params.max_chunk_length,
-                "output_audio_codec": params.output_audio_codec,
-                "output_audio_bitrate": params.output_audio_bitrate,
-            }
+            self._settings.update(
+                {
+                    "pitch": params.pitch,
+                    "pace": params.pace,
+                    "loudness": params.loudness,
+                    "model": model,
+                }
+            )
         self._started = False
 
         self._receive_task = None
@@ -529,7 +527,7 @@ class SarvamTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
