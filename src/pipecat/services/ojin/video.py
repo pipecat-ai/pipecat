@@ -389,7 +389,7 @@ class OjinPersonaService(FrameProcessor):
 
                 if self.persona_state == PersonaState.INITIALIZING:
                     #self._run_loop_task = self.create_task(self._run_loop())
-                    threading.Thread(target=self.audio_worker).start()
+                    threading.Thread(target=self.update_loop_worker).start()
                     self.persona_state = PersonaState.ACTIVE
                     await self.push_frame(
                         OjinPersonaInitializedFrame(), direction=FrameDirection.DOWNSTREAM
@@ -731,7 +731,7 @@ class OjinPersonaService(FrameProcessor):
             self.pending_audio_to_play = self.pending_audio_to_play[audio_bytes_length_for_one_frame:]
         return frame, audio
 
-    def audio_worker(self):
+    def update_loop_worker(self):
         frame_target_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(frame_target_duration * OJIN_PERSONA_SAMPLE_RATE)
         silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
