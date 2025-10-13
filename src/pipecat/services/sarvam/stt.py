@@ -7,11 +7,9 @@ can handle multiple audio formats for Indian language speech recognition.
 
 import asyncio
 import base64
-from enum import StrEnum
-from typing import Literal, Optional
+from typing import Optional
 
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -33,51 +31,6 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Sarvam, you need to `pip install pipecat-ai[sarvam]`.")
     raise Exception(f"Missing module: {e}")
-
-
-class TranscriptionMetrics(BaseModel):
-    """Metrics for transcription performance."""
-
-    audio_duration: float
-    processing_latency: float
-
-
-class TranscriptionData(BaseModel):
-    """Data structure for transcription results."""
-
-    request_id: str
-    transcript: str
-    language_code: Optional[str]
-    metrics: Optional[TranscriptionMetrics] = None
-    is_final: Optional[bool] = None
-
-
-class TranscriptionResponse(BaseModel):
-    """Response structure for transcription data."""
-
-    type: Literal["data"]
-    data: TranscriptionData
-
-
-class VADSignal(StrEnum):
-    """Voice Activity Detection signal types."""
-
-    START = "START_SPEECH"
-    END = "END_SPEECH"
-
-
-class EventData(BaseModel):
-    """Data structure for VAD events."""
-
-    signal_type: VADSignal
-    occured_at: float
-
-
-class EventResponse(BaseModel):
-    """Response structure for VAD events."""
-
-    type: Literal["events"]
-    data: EventData
 
 
 def language_to_sarvam_language(language: Language) -> str:
@@ -249,7 +202,6 @@ class SarvamSTTService(STTService):
             # Choose the appropriate service based on model
             if "saarika" in self._model.lower():
                 # STT service - requires language_code
-                logger.debug(f"Using STT service with language: {self._language_string}")
                 self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
                     language_code=self._language_string,
                     model=self._model,
@@ -260,7 +212,6 @@ class SarvamSTTService(STTService):
                 )
             else:
                 # STT-translate service - auto-detects language
-                logger.debug("Using STT-translate service")
                 self._websocket_context = (
                     self._sarvam_client.speech_to_text_translate_streaming.connect(
                         model=self._model,
@@ -273,27 +224,6 @@ class SarvamSTTService(STTService):
 
             # Enter the async context manager
             self._socket_client = await self._websocket_context.__aenter__()
-
-            # Set up event handlers
-            def on_open(data):
-                logger.debug("WebSocket connection opened")
-
-            def on_message(message):
-                # Handle message in a separate task to avoid blocking
-                asyncio.create_task(self._handle_response(message))
-
-            def on_error(error):
-                logger.error(f"WebSocket error: {error}")
-                asyncio.create_task(self.push_error(ErrorFrame(f"WebSocket error: {error}")))
-
-            def on_close(data):
-                logger.debug("WebSocket connection closed")
-
-            # Register event handlers
-            self._socket_client.on(EventType.OPEN, on_open)
-            self._socket_client.on(EventType.MESSAGE, on_message)
-            self._socket_client.on(EventType.ERROR, on_error)
-            self._socket_client.on(EventType.CLOSE, on_close)
 
             # Start listening for messages
             self._listening_task = asyncio.create_task(self._socket_client.start_listening())
@@ -345,7 +275,7 @@ class SarvamSTTService(STTService):
                 timestamp = message.data.occured_at
                 logger.debug(f"VAD Signal: {signal}, Occurred at: {timestamp}")
 
-                if signal == VADSignal.START:
+                if signal == "START_SPEECH":
                     await self.start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
@@ -377,10 +307,10 @@ class SarvamSTTService(STTService):
         except Exception as e:
             logger.error(f"Error handling Sarvam response: {e}")
             await self.push_error(ErrorFrame(f"Failed to handle response: {e}"))
+            await self.stop_all_metrics()
 
     def _map_language_code_to_enum(self, language_code: str) -> Language:
         """Map Sarvam language code to pipecat Language enum."""
-        logger.debug(f"Audio language detected as: {language_code}")
         mapping = {
             "bn-IN": Language.BN_IN,
             "gu-IN": Language.GU_IN,
