@@ -22,7 +22,7 @@ from pipecat.serializers.vonage import VonageFrameSerializer
 from pipecat.services.openai_realtime_beta.context import OpenAIRealtimeLLMContext
 from pipecat.services.openai_realtime_beta.openai import OpenAIRealtimeBetaLLMService
 from pipecat.transports.network.websocket_server import WebsocketServerParams
-from pipecat.transports.services.vonage_audio_connector import VonageAudioConnectorTransport
+from pipecat.transports.vonage.audio_connector import VonageAudioConnectorTransport
 
 WS_HOST = "0.0.0.0"
 WS_PORT = 8005

@@ -63,12 +63,12 @@ vonage_video_mock.models.SessionSettings = MagicMock
 vonage_video_mock.models.SessionAudioSettings = MagicMock
 
 # Mock the module in sys.modules so imports work
-sys.modules["vonage_video"] = vonage_video_mock
-sys.modules["vonage_video.models"] = vonage_video_mock.models
+sys.modules["vonage_video_connector"] = vonage_video_mock
+sys.modules["vonage_video_connector.models"] = vonage_video_mock.models
 
 
 # Now we can import the transport classes since the vonage_video module is mocked
-from pipecat.transports.services.vonage_video_webrtc import (
+from pipecat.transports.vonage.video_webrtc import (
     AudioProps,
     VonageClient,
     VonageClientListener,
@@ -280,7 +280,7 @@ class TestVonageVideoWebrtcTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_args.number_of_channels, 2)
         self.assertEqual(call_args.sample_rate, 48000)
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_vonage_input_transport_initialization(self, mock_resampler):
         """Test VonageVideoWebrtcInputTransport initialization."""
         mock_resampler.return_value = Mock()
@@ -294,7 +294,7 @@ class TestVonageVideoWebrtcTransport(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(transport._initialized)
         mock_resampler.assert_called_once()
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_vonage_input_transport_start(self, mock_resampler):
         """Test VonageVideoWebrtcInputTransport start method."""
         mock_resampler.return_value = Mock()
@@ -315,7 +315,7 @@ class TestVonageVideoWebrtcTransport(unittest.IsolatedAsyncioTestCase):
         client.connect.assert_called_once()
         transport.set_transport_ready.assert_called_once_with(start_frame)
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_vonage_input_transport_stop(self, mock_resampler):
         """Test VonageVideoWebrtcInputTransport stop method."""
         mock_resampler.return_value = Mock()
@@ -335,7 +335,7 @@ class TestVonageVideoWebrtcTransport(unittest.IsolatedAsyncioTestCase):
         client.disconnect.assert_called_once_with(1)
         self.assertIsNone(transport._listener_id)
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_vonage_input_transport_cancel(self, mock_resampler):
         """Test VonageVideoWebrtcInputTransport cancel method."""
         mock_resampler.return_value = Mock()
@@ -355,7 +355,7 @@ class TestVonageVideoWebrtcTransport(unittest.IsolatedAsyncioTestCase):
         client.disconnect.assert_called_once_with(1)
         self.assertIsNone(transport._listener_id)
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_vonage_output_transport_initialization(self, mock_resampler):
         """Test VonageVideoWebrtcOutputTransport initialization."""
         mock_resampler.return_value = Mock()
@@ -369,7 +369,7 @@ class TestVonageVideoWebrtcTransport(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(transport._initialized)
         mock_resampler.assert_called_once()
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_vonage_output_transport_start(self, mock_resampler):
         """Test VonageVideoWebrtcOutputTransport start method."""
         mock_resampler.return_value = Mock()
@@ -390,7 +390,7 @@ class TestVonageVideoWebrtcTransport(unittest.IsolatedAsyncioTestCase):
         client.connect.assert_called_once()
         transport.set_transport_ready.assert_called_once_with(start_frame)
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_vonage_output_transport_write_audio_frame(self, mock_resampler):
         """Test VonageVideoWebrtcOutputTransport write_audio_frame method."""
         mock_resampler_instance = Mock()
@@ -461,8 +461,8 @@ class TestVonageVideoWebrtcTransport(unittest.IsolatedAsyncioTestCase):
         self.assertIs(transport.input(), input_transport)
         self.assertIs(transport.output(), output_transport)
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.asyncio.run_coroutine_threadsafe")
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.asyncio.run_coroutine_threadsafe")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_vonage_input_audio_callback(self, mock_resampler, mock_run_coroutine):
         """Test audio input callback processing."""
         resampled_audio = b"\x00\x01\x02\x03"
@@ -680,7 +680,7 @@ class TestAudioNormalization(unittest.IsolatedAsyncioTestCase):
         result = self.process_audio_channels(audio, current, target)
         np.testing.assert_array_equal(result, audio)
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_process_audio_same_sample_rate(self, mock_resampler):
         """Test process_audio when sample rates are the same."""
         mock_resampler_instance = Mock()
@@ -699,7 +699,7 @@ class TestAudioNormalization(unittest.IsolatedAsyncioTestCase):
         # Resampler should not be called
         mock_resampler_instance.resample.assert_not_called()
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_process_audio_different_sample_rate_mono(self, mock_resampler):
         """Test process_audio with different sample rates (mono)."""
         mock_resampler_instance = Mock()
@@ -721,7 +721,7 @@ class TestAudioNormalization(unittest.IsolatedAsyncioTestCase):
         # Resampler should be called with correct parameters
         mock_resampler_instance.resample.assert_called_once_with(audio.tobytes(), 48000, 16000)
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_process_audio_different_sample_rate_stereo_to_mono(self, mock_resampler):
         """Test process_audio with different sample rates and channel conversion."""
         mock_resampler_instance = Mock()
@@ -748,7 +748,7 @@ class TestAudioNormalization(unittest.IsolatedAsyncioTestCase):
             expected_mono.tobytes(), 48000, 16000
         )
 
-    @patch("pipecat.transports.services.vonage_video_webrtc.create_default_resampler")
+    @patch("pipecat.transports.vonage.video_webrtc.create_stream_resampler")
     async def test_process_audio_different_sample_rate_mono_to_stereo(self, mock_resampler):
         """Test process_audio with different sample rates converting mono to stereo."""
         mock_resampler_instance = Mock()

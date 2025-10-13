@@ -17,7 +17,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.serializers.vonage import VonageFrameSerializer
 from pipecat.services.openai import OpenAILLMService, OpenAISTTService, OpenAITTSService
 from pipecat.transports.network.websocket_server import WebsocketServerParams
-from pipecat.transports.services.vonage_audio_connector import VonageAudioConnectorTransport
+from pipecat.transports.vonage.audio_connector import VonageAudioConnectorTransport
 
 # ---- Constants ---------------------------------------------------------------
 

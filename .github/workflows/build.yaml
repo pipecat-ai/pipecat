@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - '*_rc'
   pull_request:
     branches:
       - "**"
@@ -34,7 +35,18 @@ jobs:
         run: uv sync --group dev
       
       - name: Build project
-        run: uv build
+        run: |
+          release=$(cat RELEASE)
+          hash=$(git rev-parse --short HEAD)
+          sed -i 's/^dynamic = \["version"\]/version = "'"${release}+${hash}"'"/' pyproject.toml
+          uv build
       
       - name: Install project in editable mode
         run: uv pip install --editable .
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipecat_ai_dist_files
+          path: dist/*
+          retention-days: 30%

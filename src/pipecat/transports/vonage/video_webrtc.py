@@ -10,7 +10,7 @@ import numpy as np
 from loguru import logger
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
-from pipecat.audio.utils import create_default_resampler
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -25,8 +25,8 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 try:
-    import vonage_video
-    from vonage_video.models import (
+    import vonage_video_connector as vonage_video
+    from vonage_video_connector.models import (
         AudioData,
         LoggingSettings,
         Publisher,
@@ -47,7 +47,13 @@ except ModuleNotFoundError as e:
 
 
 class VonageVideoWebrtcTransportParams(TransportParams):
-    """Parameters for the Vonage transport."""
+    """Parameters for the Vonage WebRTC transport.
+
+    Parameters:
+        publisher_name: Name of the publisher stream.
+        publisher_enable_opus_dtx: Whether to enable OPUS DTX for publisher audio.
+        session_enable_migration: Whether to enable session migration.
+    """
 
     publisher_name: str = ""
     publisher_enable_opus_dtx: bool = False
@@ -55,7 +61,7 @@ class VonageVideoWebrtcTransportParams(TransportParams):
 
 
 class VonageException(Exception):
-    """Exception raised for errors in the Vonage transport."""
+    """Exception raised when a Vonage transport operation fails or encounters an error."""
 
     pass
 
@@ -67,7 +73,18 @@ async def async_noop(*args, **kwargs):
 
 @dataclass
 class VonageClientListener:
-    """Listener for Vonage client events."""
+    """Listener for Vonage client events.
+
+    Parameters:
+        on_connected: Async callback when session is connected.
+        on_disconnected: Async callback when session is disconnected.
+        on_error: Async callback for session errors.
+        on_audio_in: Callback for incoming audio data.
+        on_stream_received: Async callback when a stream is received.
+        on_stream_dropped: Async callback when a stream is dropped.
+        on_subscriber_connected: Async callback when a subscriber connects.
+        on_subscriber_disconnected: Async callback when a subscriber disconnects.
+    """
 
     on_connected: Callable[[Session], Awaitable[None]] = async_noop
     on_disconnected: Callable[[Session], Awaitable[None]] = async_noop
@@ -81,7 +98,15 @@ class VonageClientListener:
 
 @dataclass
 class VonageClientParams:
-    """Parameters for the Vonage client."""
+    """Parameters for the Vonage client.
+
+    Parameters:
+        audio_in_sample_rate: Sample rate for incoming audio.
+        audio_in_channels: Number of channels for incoming audio.
+        audio_out_sample_rate: Sample rate for outgoing audio.
+        audio_out_channels: Number of channels for outgoing audio.
+        enable_migration: Whether to enable session migration.
+    """
 
     audio_in_sample_rate: int = 48000
     audio_in_channels: int = 2
@@ -91,7 +116,18 @@ class VonageClientParams:
 
 
 class VonageClient:
-    """Client for managing a Vonage session."""
+    """Client for managing a Vonage Video session.
+
+    Handles connection, publishing, subscribing, and event callbacks for a Vonage Video session.
+
+    Supported features:
+
+    - Connects to a Vonage Video session using provided credentials
+    - Publishes audio streams with configurable settings
+    - Subscribes to remote streams and handles audio data
+    - Manages event listeners for session and stream events
+    - Supports session migration and advanced audio options
+    """
 
     def __init__(
         self,
@@ -101,7 +137,15 @@ class VonageClient:
         params: VonageClientParams,
         publisher_settings: Optional[PublisherSettings] = None,
     ):
-        """Initialize the Vonage client with session string and parameters."""
+        """Initialize the Vonage client.
+
+        Args:
+            application_id: The Vonage Video application ID.
+            session_id: The session ID to connect to.
+            token: The authentication token for the session.
+            params: Parameters for audio and migration settings.
+            publisher_settings: Optional publisher settings for audio stream.
+        """
         self._client = vonage_video.VonageVideoClient()
         self._application_id: str = application_id
         self._session_id: str = session_id
@@ -118,21 +162,43 @@ class VonageClient:
         self._session = Session(id=session_id)
 
     def get_params(self) -> VonageClientParams:
-        """Return the parameters of the Vonage client."""
+        """Get the parameters of the Vonage client.
+
+        Returns:
+            The VonageClientParams instance for this client.
+        """
         return self._params
 
     def add_listener(self, listener: VonageClientListener) -> int:
-        """Add a listener to the Vonage client."""
+        """Add a listener to the Vonage client.
+
+        Args:
+            listener: The VonageClientListener to add.
+
+        Returns:
+            The unique ID assigned to the listener.
+        """
         listener_id = next(self._listener_id_gen)
         self._listeners[listener_id] = listener
         return listener_id
 
     def remove_listener(self, listener_id: int):
-        """Remove a listener from the Vonage client."""
+        """Remove a listener from the Vonage client.
+
+        Args:
+            listener_id: The ID of the listener to remove.
+        """
         self._listeners.pop(listener_id, None)
 
     async def connect(self, listener: VonageClientListener) -> int:
-        """Connect to the Vonage session."""
+        """Connect to the Vonage session.
+
+        Args:
+            listener: Listener for session events.
+
+        Returns:
+            The unique ID assigned to the listener.
+        """
         logger.info(f"Connecting with session string {self._session_id}")
 
         listener_id: int = self.add_listener(listener)
@@ -189,7 +255,11 @@ class VonageClient:
         return listener_id
 
     async def disconnect(self, listener_id: int):
-        """Disconnect from the Vonage session."""
+        """Disconnect from the Vonage session.
+
+        Args:
+            listener_id: The ID of the listener to disconnect.
+        """
         self._connection_counter -= 1
         if not self._connected or self._connection_counter != 0:
             logger.info(f"Already disconnected from {self._session_id}")
@@ -211,7 +281,11 @@ class VonageClient:
         logger.info(f"Disconnected from {self._session_id}")
 
     async def write_audio(self, raw_audio_frame: bytes):
-        """Write audio data to the Vonage session."""
+        """Write audio data to the Vonage session.
+
+        Args:
+            raw_audio_frame: Raw PCM audio data to inject into the session.
+        """
         frame_count = len(raw_audio_frame) // (self._params.audio_out_channels * 2)
         self._client.inject_audio(
             AudioData(
@@ -338,21 +412,32 @@ class VonageClient:
 
 
 class VonageVideoWebrtcInputTransport(BaseInputTransport):
-    """Input transport for Vonage, handling audio input from the Vonage session."""
+    """Input transport for Vonage, handling audio input from the Vonage session.
+
+    Receives audio from a Vonage Video session and pushes it as input frames.
+    """
 
     _params: VonageVideoWebrtcTransportParams
 
     def __init__(self, client: VonageClient, params: VonageVideoWebrtcTransportParams):
-        """Initialize the Vonage input transport with the client and parameters."""
-        super().__init__(params)
+        """Initialize the Vonage input transport.
 
+        Args:
+            client: The VonageClient instance to use.
+            params: Transport parameters for input configuration.
+        """
+        super().__init__(params)
         self._initialized: bool = False
         self._client: VonageClient = client
         self._listener_id: Optional[int] = None
-        self._resampler = create_default_resampler()
+        self._resampler = create_stream_resampler()
 
     async def start(self, frame: StartFrame):
-        """Start the Vonage input transport."""
+        """Start the Vonage input transport.
+
+        Args:
+            frame: The StartFrame to initiate the transport.
+        """
         await super().start(frame)
 
         if self._initialized:
@@ -403,14 +488,22 @@ class VonageVideoWebrtcInputTransport(BaseInputTransport):
             asyncio.run_coroutine_threadsafe(push_frame(), self.get_event_loop())
 
     async def stop(self, frame: EndFrame):
-        """Stop the Vonage input transport."""
+        """Stop the Vonage input transport.
+
+        Args:
+            frame: The EndFrame to stop the transport.
+        """
         await super().stop(frame)
         if self._listener_id is not None and self._params.audio_in_enabled:
             listener_id, self._listener_id = self._listener_id, None
             await self._client.disconnect(listener_id)
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the Vonage input transport."""
+        """Cancel the Vonage input transport.
+
+        Args:
+            frame: The CancelFrame to cancel the transport.
+        """
         await super().cancel(frame)
         if self._listener_id is not None and self._params.audio_in_enabled:
             listener_id, self._listener_id = self._listener_id, None
@@ -418,20 +511,32 @@ class VonageVideoWebrtcInputTransport(BaseInputTransport):
 
 
 class VonageVideoWebrtcOutputTransport(BaseOutputTransport):
-    """Output transport for Vonage, handling audio output to the Vonage session."""
+    """Output transport for Vonage, handling audio output to the Vonage session.
+
+    Sends audio frames to a Vonage Video session as output.
+    """
 
     _params: VonageVideoWebrtcTransportParams
 
     def __init__(self, client: VonageClient, params: VonageVideoWebrtcTransportParams):
-        """Initialize the Vonage output transport with the client and parameters."""
+        """Initialize the Vonage output transport.
+
+        Args:
+            client: The VonageClient instance to use.
+            params: Transport parameters for output configuration.
+        """
         super().__init__(params)
         self._initialized: bool = False
-        self._resampler = create_default_resampler()
+        self._resampler = create_stream_resampler()
         self._client = client
         self._listener_id: Optional[int] = None
 
     async def start(self, frame: StartFrame):
-        """Start the Vonage output transport."""
+        """Start the Vonage output transport.
+
+        Args:
+            frame: The StartFrame to initiate the transport.
+        """
         await super().start(frame)
 
         if self._initialized:
@@ -445,7 +550,11 @@ class VonageVideoWebrtcOutputTransport(BaseOutputTransport):
         await self.set_transport_ready(frame)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
-        """Write an audio frame to the Vonage session."""
+        """Write an audio frame to the Vonage session.
+
+        Args:
+            frame: The OutputAudioRawFrame to send.
+        """
         if self._listener_id is not None and self._params.audio_out_enabled:
             check_audio_data(frame.audio, frame.num_frames, frame.num_channels)
 
@@ -470,14 +579,22 @@ class VonageVideoWebrtcOutputTransport(BaseOutputTransport):
             await self._client.write_audio(processed_audio.tobytes())
 
     async def stop(self, frame: EndFrame):
-        """Stop the Vonage output transport."""
+        """Stop the Vonage output transport.
+
+        Args:
+            frame: The EndFrame to stop the transport.
+        """
         await super().stop(frame)
         if self._listener_id is not None and self._params.audio_out_enabled:
             listener_id, self._listener_id = self._listener_id, None
             await self._client.disconnect(listener_id)
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the Vonage output transport."""
+        """Cancel the Vonage output transport.
+
+        Args:
+            frame: The CancelFrame to cancel the transport.
+        """
         await super().cancel(frame)
         if self._listener_id is not None and self._params.audio_out_enabled:
             listener_id, self._listener_id = self._listener_id, None
@@ -485,7 +602,18 @@ class VonageVideoWebrtcOutputTransport(BaseOutputTransport):
 
 
 class VonageVideoWebrtcTransport(BaseTransport):
-    """Vonage transport implementation for Pipecat."""
+    """Vonage WebRTC transport implementation for Pipecat.
+
+    Provides input and output audio transport for Vonage Video sessions, supporting event handling
+    for session and participant lifecycle.
+
+    Supported features:
+
+    - Audio input and output transport for Vonage Video sessions
+    - Event handler registration for session and participant events
+    - Publisher and subscriber management
+    - Configurable audio and migration parameters
+    """
 
     _params: VonageVideoWebrtcTransportParams
 
@@ -496,7 +624,14 @@ class VonageVideoWebrtcTransport(BaseTransport):
         token: str,
         params: VonageVideoWebrtcTransportParams,
     ):
-        """Initialize the Vonage transport with session string and parameters."""
+        """Initialize the Vonage WebRTC transport.
+
+        Args:
+            application_id: The Vonage Video application ID.
+            session_id: The session ID to connect to.
+            token: The authentication token for the session.
+            params: Transport parameters for input/output configuration.
+        """
         super().__init__()
         params.audio_out_sample_rate = params.audio_out_sample_rate or 48000
         self._params = params
@@ -550,27 +685,58 @@ class VonageVideoWebrtcTransport(BaseTransport):
         self._one_stream_received: bool = False
 
     def input(self) -> FrameProcessor:
-        """Return the input transport for Vonage."""
+        """Get the input transport for Vonage.
+
+        Returns:
+            The VonageVideoWebrtcInputTransport instance.
+        """
         if not self._input:
             self._input = VonageVideoWebrtcInputTransport(self._client, self._params)
         return self._input
 
     def output(self) -> FrameProcessor:
-        """Return the output transport for Vonage."""
+        """Get the output transport for Vonage.
+
+        Returns:
+            The VonageVideoWebrtcOutputTransport instance.
+        """
         if not self._output:
             self._output = VonageVideoWebrtcOutputTransport(self._client, self._params)
         return self._output
 
     async def _on_connected(self, session: Session):
+        """Handle session connected event.
+
+        Args:
+            session: The connected Session object.
+        """
         await self._call_event_handler("on_joined", {"sessionId": session.id})
 
     async def _on_disconnected(self, _session_id: Session):
+        """Handle session disconnected event.
+
+        Args:
+            _session_id: The disconnected Session object.
+        """
         await self._call_event_handler("on_left")
 
     async def _on_error(self, _session: Session, description: str, _code: int):
+        """Handle session error event.
+
+        Args:
+            _session: The Session object.
+            description: Error description.
+            _code: Error code.
+        """
         await self._call_event_handler("on_error", description)
 
     async def _on_stream_received(self, session: Session, stream: Stream):
+        """Handle stream received event.
+
+        Args:
+            session: The Session object.
+            stream: The received Stream object.
+        """
         if not self._one_stream_received:
             self._one_stream_received = True
             await self._call_event_handler(
@@ -582,16 +748,32 @@ class VonageVideoWebrtcTransport(BaseTransport):
         )
 
     async def _on_stream_dropped(self, session: Session, stream: Stream):
+        """Handle stream dropped event.
+
+        Args:
+            session: The Session object.
+            stream: The dropped Stream object.
+        """
         await self._call_event_handler(
             "on_participant_left", {"sessionId": session.id, "streamId": stream.id}
         )
 
     async def _on_subscriber_connected(self, subscriber: Subscriber):
+        """Handle subscriber connected event.
+
+        Args:
+            subscriber: The connected Subscriber object.
+        """
         await self._call_event_handler(
             "on_client_connected", {"subscriberId": subscriber.stream.id}
         )
 
     async def _on_subscriber_disconnected(self, subscriber: Subscriber):
+        """Handle subscriber disconnected event.
+
+        Args:
+            subscriber: The disconnected Subscriber object.
+        """
         await self._call_event_handler(
             "on_client_disconnected", {"subscriberId": subscriber.stream.id}
         )
@@ -613,7 +795,12 @@ def check_audio_data(buffer: bytes | memoryview, number_of_frames: int, number_o
 
 @dataclass
 class AudioProps:
-    """Audio properties for normalization."""
+    """Audio properties for normalization.
+
+    Parameters:
+        sample_rate: The sample rate of the audio.
+        is_stereo: Whether the audio is stereo (True) or mono (False).
+    """
 
     sample_rate: int
     is_stereo: bool
