@@ -585,7 +585,7 @@ class OjinPersonaService(FrameProcessor):
             }
         )
         logger.debug(f"Started interaction with id: {interaction_id}")
-        self._interaction.num_received_frames = 0
+        self._interaction.num_played_frames = 0
         self._interaction.interaction_id = interaction_id
 
     async def _end_interaction(self):
@@ -686,7 +686,8 @@ class OjinPersonaService(FrameProcessor):
                 logger.debug(
                     f"played frame {self.pending_speech_frames[0].frame_idx} ==? {self.current_frame_index}"
                 )
-                self._interaction.num_played_frames += 1
+                if self._interaction is not None:
+                    self._interaction.num_played_frames += 1
                 animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
                 self.played_frame_idx = animation_frame.frame_idx
             else:
