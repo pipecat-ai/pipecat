@@ -2,6 +2,8 @@ import asyncio
 import math
 import os
 import time
+import threading
+import queue
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -64,6 +66,35 @@ async def async_accurate_sleep(duration_s: float):
     observed = time.perf_counter() - start
     to_sleep -= observed
 
+    start = time.perf_counter()
+    while to_sleep > time.perf_counter() - start:
+        continue
+
+
+# NOTE(mouad): source: https://blat-blatnik.github.io/computerBear/making-accurate-sleep-function/
+def accurate_sleep(duration_s: float):
+    millisecond = 0.001
+    to_sleep = duration_s
+    estimate = 5 * millisecond
+    mean = 5 * millisecond
+    count = 1
+    m2 = 0.0
+    
+    while to_sleep > estimate:
+        start = time.perf_counter()
+        time.sleep(1 * millisecond)
+        observed = time.perf_counter() - start
+        to_sleep -= observed
+
+        count += 1
+        
+        delta = observed - mean
+        mean += delta / count
+        m2 += delta * (observed - mean)
+        stddev = math.sqrt(m2 / (count - 1))
+        estimate = mean + stddev
+        
+    # NOTE(mouad): spin-lock
     start = time.perf_counter()
     while to_sleep > time.perf_counter() - start:
         continue
@@ -177,7 +208,7 @@ class OjinPersonaSettings:
     )  # If -1 then it will not end the interaction based on frame count only when receiving TTSStoppedFrame. If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
 
     extra_frames_lat: int = field(
-        default=10,
+        default=15,
     )  # round trip latency between server and client, make sure to specify extra room for error
 
 
@@ -199,6 +230,10 @@ class AnimationKeyframe:
     image: bytes
     is_final_frame: bool
 
+@dataclass
+class Audio_Input:
+    frame: OutputAudioRawFrame
+    duration: float
 
 class OjinPersonaService(FrameProcessor):
     """Ojin Persona integration for Pipecat.
@@ -241,15 +276,19 @@ class OjinPersonaService(FrameProcessor):
 
         self.persona_state = PersonaState.INVALID
         self.idle_frames: list[AnimationKeyframe] = []  # Keyframes of the idle animation
-        self.pending_speech_frames: deque[AnimationKeyframe] = deque()
+        self.pending_speech_frames: queue.Queue[AnimationKeyframe] = queue.Queue()
 
-        self.num_speech_frames_played: int = 0
         self.is_mirrored_loop: bool = True
         self.fps = 25
         self.current_frame_index = -1
+        self.last_queued_frame_index = -1
 
+        self.pedning_audio_mutex: threading.Lock = threading.Lock()
         self.pending_audio_to_play = bytearray()
         self.extra_frames_lat = settings.extra_frames_lat
+        
+        self.audio_queue: queue.Queue[Audio_Input] = queue.Queue()
+        self.event_loop = asyncio.get_event_loop()
 
     async def connect_with_retry(self) -> bool:
         """Attempt to connect with configurable retry mechanism."""
@@ -335,10 +374,12 @@ class OjinPersonaService(FrameProcessor):
                 if not self.can_recieve_video_frames():
                     logger.warning("Received video frame with no active speech interaction")
                     return
+                assert self._interaction is not None
 
                 logger.debug(f"Received video frame {frame_idx}")
                 self._interaction.received_frames += 1
-                self.pending_speech_frames.append(animation_frame)
+                self.pending_speech_frames.put(animation_frame)
+                self.last_queued_frame_index = animation_frame.frame_idx
 
             if animation_frame.is_final_frame:
                 self._interaction = None
@@ -347,7 +388,8 @@ class OjinPersonaService(FrameProcessor):
                     self._pending_interaction = None
 
                 if self.persona_state == PersonaState.INITIALIZING:
-                    self._run_loop_task = self.create_task(self._run_loop())
+                    #self._run_loop_task = self.create_task(self._run_loop())
+                    threading.Thread(target=self.audio_worker).start()
                     self.persona_state = PersonaState.ACTIVE
                     await self.push_frame(
                         OjinPersonaInitializedFrame(), direction=FrameDirection.DOWNSTREAM
@@ -462,8 +504,11 @@ class OjinPersonaService(FrameProcessor):
                 )
             )
             # TODO(mouad): interpolate towards silence instead of hard stop?
-            self.pending_audio_to_play.clear()
-            self.pending_speech_frames.clear()
+            with self.pedning_audio_mutex:
+                self.pending_audio_to_play.clear()
+
+            with self.pending_speech_frames.mutex:
+                self.pending_speech_frames.queue.clear()
             self.num_speech_frames_played = 0
 
             self._interaction.close()
@@ -588,12 +633,15 @@ class OjinPersonaService(FrameProcessor):
         self._interaction.set_state(InteractionState.ACTIVE)
 
         assert self._client is not None
+        start_generation_frame_index = self.last_queued_frame_index if self.last_queued_frame_index > self.current_frame_index else self.current_frame_index
+
+        start_generation_frame_index += self.extra_frames_lat
         logger.info(
-            f"Starting interaction at frame index: {self.current_frame_index + self.extra_frames_lat}"
+            f"Starting interaction at frame index: {start_generation_frame_index}"
         )
         interaction_id = await self._client.start_interaction(
             params={
-                "client_frame_index": self.current_frame_index + self.extra_frames_lat,
+                "client_frame_index": start_generation_frame_index,
                 "filter_amount": SPEECH_FILTER_AMOUNT,
                 "mouth_opening_scale": SPEECH_MOUTH_OPENING_SCALE,
                 "source_keyframes_index": active_keyframes_slot,
@@ -601,7 +649,6 @@ class OjinPersonaService(FrameProcessor):
             }
         )
         logger.debug(f"Started interaction with id: {interaction_id}")
-        self._interaction.num_played_frames = 0
         self._interaction.interaction_id = interaction_id
 
     async def _end_interaction(self):
@@ -666,7 +713,8 @@ class OjinPersonaService(FrameProcessor):
                     audio_int16_bytes=audio_bytes, interaction_id=self._interaction.interaction_id
                 )
             )
-            self.pending_audio_to_play.extend(audio_bytes)
+            with self.pedning_audio_mutex:
+                self.pending_audio_to_play.extend(audio_bytes)
 
     def _get_idle_frame_for_index(self, index: int) -> AnimationKeyframe:
         mirror_frame_idx = mirror_index(
@@ -677,11 +725,57 @@ class OjinPersonaService(FrameProcessor):
     def get_next_pending_frame_and_audio(self) -> tuple[AnimationKeyframe, bytes]:
         frame_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
-        frame = self.pending_speech_frames.popleft()
-        audio = self.pending_audio_to_play[:audio_bytes_length_for_one_frame]
-        self.pending_audio_to_play = self.pending_audio_to_play[audio_bytes_length_for_one_frame:]
+        frame = self.pending_speech_frames.get()
+        with self.pedning_audio_mutex:
+            audio = self.pending_audio_to_play[:audio_bytes_length_for_one_frame]
+            self.pending_audio_to_play = self.pending_audio_to_play[audio_bytes_length_for_one_frame:]
         return frame, audio
 
+    def audio_worker(self):
+        frame_target_duration = 1 / self.fps
+        audio_bytes_length_for_one_frame = 2 * int(frame_target_duration * OJIN_PERSONA_SAMPLE_RATE)
+        silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
+
+        start_time = time.perf_counter()
+        while True:
+            loop_start_time = time.perf_counter()
+            audio_to_play = silence_audio_for_one_frame
+            
+            if not self.pending_speech_frames.empty() and self.pending_speech_frames.queue[0].frame_idx <= self.current_frame_index:
+                animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
+                if animation_frame.frame_idx < self.current_frame_index:
+                    logger.debug(f"frame missed: {animation_frame.frame_idx}")
+                logger.debug(
+                    f"played frame {animation_frame.frame_idx} ==? {self.current_frame_index}"
+                )
+                self.num_speech_frames_played += 1
+                if animation_frame.is_final_frame:
+                    # Restart number of frames for next interaction (which might already be generating frames)
+                    self.num_speech_frames_played = 0
+
+                self.current_frame_index = animation_frame.frame_idx
+            else:
+                self.num_speech_frames_played = 0
+                animation_frame = self._get_idle_frame_for_index(self.current_frame_index)
+                logger.debug(f"played idle frame: {self.current_frame_index}")
+
+            audio_frame = OutputAudioRawFrame(
+                audio=audio_to_play,
+                sample_rate=OJIN_PERSONA_SAMPLE_RATE,
+                num_channels=1,
+            )
+            image_frame = OutputImageRawFrame(
+                image=animation_frame.image, size=self._settings.image_size, format="RGB"
+            )
+            asyncio.run_coroutine_threadsafe(self.push_frame(image_frame), self.event_loop)
+            asyncio.run_coroutine_threadsafe(self.push_frame(audio_frame), self.event_loop)
+
+            elapsed = time.perf_counter() - start_time
+            frame_remaining_time = frame_target_duration - elapsed
+            accurate_sleep(max(0, frame_remaining_time - 0.00004)) # ~20us error
+            start_time = time.perf_counter()
+            self.current_frame_index += 1
+        
     async def _run_loop(self):
         while self.persona_state == PersonaState.INITIALIZING:
             await asyncio.sleep(0.1)
@@ -710,14 +804,18 @@ class OjinPersonaService(FrameProcessor):
 
             audio_to_play = silence_audio_for_one_frame
             self.current_frame_index = next_frame_idx
+            animation_frame = self._get_idle_frame_for_index(self.played_frame_idx)
             if (
                 len(self.pending_speech_frames) != 0
                 and self.pending_speech_frames[0].frame_idx <= self.current_frame_index
             ):
+                if self.pending_speech_frames[0].frame_idx < self.current_frame_index:
+                    logger.debug(f"frame missed: {self.pending_speech_frames[0].frame_idx}")
+                    
                 logger.debug(
                     f"played frame {self.pending_speech_frames[0].frame_idx} ==? {self.current_frame_index}"
                 )
-                animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
+                # animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
                 self.num_speech_frames_played += 1
                 if animation_frame.is_final_frame:
                     # Restart number of frames for next interaction (which might already be generating frames)
@@ -726,6 +824,7 @@ class OjinPersonaService(FrameProcessor):
                 self.played_frame_idx = animation_frame.frame_idx
             else:
                 if self._interaction is not None and self.num_speech_frames_played > 0:
+                    assert len(self.pending_speech_frames) == 0
                     logger.debug(f"frame missed: {self.current_frame_index}")
                     self.current_frame_index -= 1
 
@@ -735,8 +834,8 @@ class OjinPersonaService(FrameProcessor):
                         sample_rate=OJIN_PERSONA_SAMPLE_RATE,
                         num_channels=1,
                     )
-                    await self.push_frame(audio_frame)
-                    await asyncio.sleep(0.005)
+                    # await self.push_frame(audio_frame)
+                    self.audio_queue.put(Audio_Input(audio_frame, 0.005))
                     continue
 
                 self.played_frame_idx += 1
@@ -752,8 +851,8 @@ class OjinPersonaService(FrameProcessor):
                 sample_rate=OJIN_PERSONA_SAMPLE_RATE,
                 num_channels=1,
             )
-            await self.push_frame(image_frame)
-            await self.push_frame(audio_frame)
+            #await self.push_frame(image_frame)
+            #self.audio_queue.put(Audio_Input(audio_frame, 1 / self.fps))
 
 
 def mirror_index(index: int, size: int, period: int = 2):
