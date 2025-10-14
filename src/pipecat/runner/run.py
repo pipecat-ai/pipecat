@@ -217,7 +217,7 @@ def _setup_webrtc_routes(
         """Redirect root requests to client interface."""
         return RedirectResponse(url="/client/")
 
-    @app.get("/files/{filename}")
+    @app.get("/files/{filename:path}")
     async def download_file(filename: str):
         """Handle file downloads."""
         if not folder:
