@@ -577,6 +577,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 logger.error(f"Error closing context on interruption: {e}")
             self._context_id = None
             self._started = False
+            self._partial_word = ""
+            self._partial_word_start_time = 0.0
 
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from ElevenLabs."""
@@ -616,11 +618,13 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             if msg.get("alignment"):
                 alignment = msg["alignment"]
-                word_times, self._partial_word, self._partial_word_start_time = calculate_word_times(
-                    alignment,
-                    self._cumulative_time,
-                    self._partial_word,
-                    self._partial_word_start_time,
+                word_times, self._partial_word, self._partial_word_start_time = (
+                    calculate_word_times(
+                        alignment,
+                        self._cumulative_time,
+                        self._partial_word,
+                        self._partial_word_start_time,
+                    )
                 )
 
                 if word_times:
