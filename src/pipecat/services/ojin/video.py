@@ -779,6 +779,10 @@ class OjinPersonaService(FrameProcessor):
                 animation_frame = self._get_idle_frame_for_index(self.current_frame_index)
                 logger.debug(f"played idle frame: {self.current_frame_index}")
 
+            if len(audio_to_play) < audio_bytes_length_for_one_frame:
+                # NOTE(mouad): extend with silence
+                audio_to_play += b"\x00" * (audio_bytes_length_for_one_frame - len(audio_to_play))
+
             audio_frame = OutputAudioRawFrame(
                 audio=audio_to_play,
                 sample_rate=OJIN_PERSONA_SAMPLE_RATE,
@@ -792,7 +796,7 @@ class OjinPersonaService(FrameProcessor):
 
             elapsed = time.perf_counter() - start_time
             frame_remaining_time = frame_target_duration - elapsed
-            accurate_sleep(max(0, frame_remaining_time - 0.00004)) # ~20us error
+            accurate_sleep(max(0, frame_remaining_time - 0.00002)) # ~20us error
             start_time = time.perf_counter()
             self.current_frame_index += 1
         
