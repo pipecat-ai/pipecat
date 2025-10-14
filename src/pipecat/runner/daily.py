@@ -82,6 +82,7 @@ async def configure(
     sip_enable_video: Optional[bool] = False,
     sip_num_endpoints: Optional[int] = 1,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
+    daily_room_properties: Optional[DailyRoomProperties] = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
 
@@ -99,6 +100,8 @@ async def configure(
         sip_num_endpoints: Number of allowed SIP endpoints.
         sip_codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
+        daily_room_properties: Custom room properties to use instead of default configuration.
+            If provided, overrides all other property settings.
 
     Returns:
         DailyRoomConfig: Object with room_url, token, and optional sip_endpoint.
@@ -173,7 +176,10 @@ async def configure(
         room_properties.start_video_off = not sip_enable_video  # Voice-only by default
 
     # Create room parameters
-    room_params = DailyRoomParams(name=room_name, properties=room_properties)
+    if daily_room_properties:
+        room_params = DailyRoomParams(name=room_name, properties=daily_room_properties)
+    else:
+        room_params = DailyRoomParams(name=room_name, properties=room_properties)
 
     try:
         room_response = await daily_rest_helper.create_room(room_params)
