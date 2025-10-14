@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
     TTSStoppedFrame,
     UserStoppedSpeakingFrame,
 )
@@ -26,9 +27,7 @@ class MockTTSProcessor(FrameProcessor):
         self.audio_sequence = config.get(
             "audio_sequence", []
         )  # List of (file_path, start_time) tuples
-        self.event_sequence = config.get(
-            "event_sequence", []
-        )  # List of (event, start_time) tuples
+        self.event_sequence = config.get("event_sequence", [])  # List of (event, start_time) tuples
         self.chunk_size = config.get("chunk_size", 1024)
         self.chunk_delay = config.get("chunk_delay", 0.05)
         self.input_sample_rate = 16000
@@ -105,16 +104,12 @@ class MockTTSProcessor(FrameProcessor):
                 logger.debug(f"Triggering event {event} at {elapsed:.2f}s")
 
                 if event == "user_started_speaking":
-                    await self.push_frame(
-                        StartInterruptionFrame(), FrameDirection.DOWNSTREAM
-                    )
+                    await self.push_frame(StartInterruptionFrame(), FrameDirection.DOWNSTREAM)
                     if self._current_wave_file:
                         self._current_wave_file.close()
                         self._current_wave_file = None
                 elif event == "user_stopped_speaking":
-                    await self.push_frame(
-                        UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM
-                    )
+                    await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
                 else:
                     logger.warning(f"Unknown event type: {type(event)}")
 
@@ -130,9 +125,7 @@ class MockTTSProcessor(FrameProcessor):
             curr_time = time.monotonic()
             # Respect the chunk delay
             if curr_time - self._last_chunk_time < self.chunk_delay:
-                await asyncio.sleep(
-                    self.chunk_delay - (curr_time - self._last_chunk_time)
-                )
+                await asyncio.sleep(self.chunk_delay - (curr_time - self._last_chunk_time))
                 continue
             self._last_chunk_time = time.monotonic()
             elapsed = self._last_chunk_time - self._start_time
@@ -159,13 +152,11 @@ class MockTTSProcessor(FrameProcessor):
                         )
                     logger.debug(f"Successfully opened audio file: {abs_path}")
                     logger.debug(f"  Channels: {self._current_wave_file.getnchannels()}")
-                    logger.debug(
-                        f"  Sample width: {self._current_wave_file.getsampwidth()}"
-                    )
-                    logger.debug(
-                        f"  Frame rate: {self._current_wave_file.getframerate()}"
-                    )
+                    logger.debug(f"  Sample width: {self._current_wave_file.getsampwidth()}")
+                    logger.debug(f"  Frame rate: {self._current_wave_file.getframerate()}")
                     logger.debug(f"  Frames: {self._current_wave_file.getnframes()}")
+
+                    await self.push_frame(TTSStartedFrame(), FrameDirection.DOWNSTREAM)
                 except Exception as e:
                     logger.error(f"Error opening audio file {abs_path}: {str(e)}")
                     self._current_wave_file = None
@@ -173,14 +164,6 @@ class MockTTSProcessor(FrameProcessor):
 
             if self._current_wave_file:
                 raw_data = self._current_wave_file.readframes(self.chunk_size)
-                if len(raw_data) == 0:
-                    logger.debug(
-                        f"End of file reached for audio file at sequence idx {self._current_sequence_idx - 1}"
-                    )
-                    self._current_wave_file.close()
-                    self._current_wave_file = None
-                    await self.push_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
-                    continue
 
                 frame_obj = TTSAudioRawFrame(
                     audio=raw_data,
@@ -191,6 +174,31 @@ class MockTTSProcessor(FrameProcessor):
                 # logger.info("Pushing audio frame")
                 # Use await since we're already in an async context
                 await self.push_frame(frame_obj)
+
+                eod_raw_data = self._current_wave_file.readframes(self.chunk_size)
+                if len(eod_raw_data) == 0:
+                    logger.debug(
+                        f"End of file reached for audio file at sequence idx {self._current_sequence_idx - 1}"
+                    )
+                    self._current_wave_file.close()
+                    self._current_wave_file = None
+                    await asyncio.sleep(1.5)
+                    await self.push_frame(TTSStoppedFrame(), FrameDirection.DOWNSTREAM)
+
+                    # Simulate audio coming after TTSStoppedFrame
+                    await asyncio.sleep(1.0)
+
+                    # Push silence for 1 second after TTSStoppedFrame to cover race conditions from pipecat TTS Service
+                    silence = b"\x00" * 16000
+                    frame_obj = TTSAudioRawFrame(
+                        audio=silence,
+                        sample_rate=16000,
+                        num_channels=1,
+                    )
+
+                    await self.push_frame(frame_obj)
+
+                    continue
                 await asyncio.sleep(self.chunk_delay)
             else:
                 if self._current_sequence_idx >= len(self.audio_sequence):
