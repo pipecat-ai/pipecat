@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The runner `--folder` argument now supports downloading files from
+  subdirectories.
+
 ### Fixed
 
 - Fixed an issue where `RimeHttpTTSService` and `PiperTTSService` could generate
