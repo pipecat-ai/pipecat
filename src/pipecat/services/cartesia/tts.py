@@ -348,6 +348,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             self._websocket = await websocket_connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
             )
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -365,6 +366,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         finally:
             self._context_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
