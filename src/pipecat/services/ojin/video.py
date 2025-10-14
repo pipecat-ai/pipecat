@@ -263,7 +263,6 @@ class OjinPersonaService(FrameProcessor):
         assert self._settings.persona_config_id is not None
         self.num_speech_frames_played: int = 0
         self._processed_queued_audio_task: Optional[asyncio.Task] = None
-        self._run_loop_task: Optional[asyncio.Task] = None
 
         self._resampler = create_default_resampler()
         self._server_fps_tracker = FPSTracker("OjinPersonaService")
@@ -289,6 +288,7 @@ class OjinPersonaService(FrameProcessor):
         
         self.audio_queue: queue.Queue[Audio_Input] = queue.Queue()
         self.event_loop = asyncio.get_event_loop()
+        self.should_stop_updated_loop = threading.Event()
 
     async def connect_with_retry(self) -> bool:
         """Attempt to connect with configurable retry mechanism."""
@@ -388,7 +388,6 @@ class OjinPersonaService(FrameProcessor):
                     self._pending_interaction = None
 
                 if self.persona_state == PersonaState.INITIALIZING:
-                    #self._run_loop_task = self.create_task(self._run_loop())
                     threading.Thread(target=self.update_loop_worker).start()
                     self.persona_state = PersonaState.ACTIVE
                     await self.push_frame(
@@ -475,9 +474,7 @@ class OjinPersonaService(FrameProcessor):
         # Clear all buffers
         await self._interrupt()
 
-        if self._run_loop_task:
-            await self.cancel_task(self._run_loop_task)
-
+        self.should_stop_updated_loop.set()
         logger.debug(f"OjinPersonaService {self._settings.persona_config_id} stopped")
 
     async def _interrupt(self):
@@ -738,7 +735,7 @@ class OjinPersonaService(FrameProcessor):
         silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
 
         start_time = time.perf_counter()
-        while True:
+        while not self.should_stop_updated_loop.is_set():
             loop_start_time = time.perf_counter()
             audio_to_play = silence_audio_for_one_frame
             
@@ -777,85 +774,6 @@ class OjinPersonaService(FrameProcessor):
             start_time = time.perf_counter()
             self.current_frame_index += 1
         
-    async def _run_loop(self):
-        while self.persona_state == PersonaState.INITIALIZING:
-            await asyncio.sleep(0.1)
-
-        silence_duration = 1 / self.fps
-        audio_bytes_length_for_one_frame = 2 * int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
-        silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
-
-        start_ts = time.perf_counter()
-        self.played_frame_idx = -1
-        while True:
-            elapsed_time = time.perf_counter() - start_ts
-            next_frame_idx = int(elapsed_time * self.fps)
-            if next_frame_idx <= self.current_frame_index:
-                next_frame_time = (self.current_frame_index + 1) * 0.04
-                waiting_time = next_frame_time - elapsed_time - 0.005
-                await asyncio.sleep(max(0, waiting_time))
-
-                # spin lock
-                elapsed_time = time.perf_counter() - start_ts
-                next_frame_idx = self.current_frame_index + 1
-                calculated_frame_idx = int(elapsed_time * self.fps)
-                while calculated_frame_idx < next_frame_idx:
-                    elapsed_time = time.perf_counter() - start_ts
-                    calculated_frame_idx = int(elapsed_time * self.fps)
-
-            audio_to_play = silence_audio_for_one_frame
-            self.current_frame_index = next_frame_idx
-            animation_frame = self._get_idle_frame_for_index(self.played_frame_idx)
-            if (
-                len(self.pending_speech_frames) != 0
-                and self.pending_speech_frames[0].frame_idx <= self.current_frame_index
-            ):
-                if self.pending_speech_frames[0].frame_idx < self.current_frame_index:
-                    logger.debug(f"frame missed: {self.pending_speech_frames[0].frame_idx}")
-                    
-                logger.debug(
-                    f"played frame {self.pending_speech_frames[0].frame_idx} ==? {self.current_frame_index}"
-                )
-                # animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
-                self.num_speech_frames_played += 1
-                if animation_frame.is_final_frame:
-                    # Restart number of frames for next interaction (which might already be generating frames)
-                    self.num_speech_frames_played = 0
-
-                self.played_frame_idx = animation_frame.frame_idx
-            else:
-                if self._interaction is not None and self.num_speech_frames_played > 0:
-                    assert len(self.pending_speech_frames) == 0
-                    logger.debug(f"frame missed: {self.current_frame_index}")
-                    self.current_frame_index -= 1
-
-                    silence_5ms = b"\x00\x00" * int(0.005 * OJIN_PERSONA_SAMPLE_RATE)
-                    audio_frame = OutputAudioRawFrame(
-                        audio=silence_5ms,
-                        sample_rate=OJIN_PERSONA_SAMPLE_RATE,
-                        num_channels=1,
-                    )
-                    # await self.push_frame(audio_frame)
-                    self.audio_queue.put(Audio_Input(audio_frame, 0.005))
-                    continue
-
-                self.played_frame_idx += 1
-                self.num_speech_frames_played = 0
-                animation_frame = self._get_idle_frame_for_index(self.played_frame_idx)
-                logger.debug(f"played idle frame: {self.played_frame_idx}")
-
-            image_frame = OutputImageRawFrame(
-                image=animation_frame.image, size=self._settings.image_size, format="RGB"
-            )
-            audio_frame = OutputAudioRawFrame(
-                audio=audio_to_play,
-                sample_rate=OJIN_PERSONA_SAMPLE_RATE,
-                num_channels=1,
-            )
-            #await self.push_frame(image_frame)
-            #self.audio_queue.put(Audio_Input(audio_frame, 1 / self.fps))
-
-
 def mirror_index(index: int, size: int, period: int = 2):
     """Calculate a mirrored index for creating a ping-pong animation effect.
 
