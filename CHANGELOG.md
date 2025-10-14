@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `daily_room_properties` parameter to `configure()` function in 
+  `pipecat.runner.daily`, allowing custom `DailyRoomProperties` to be passed 
+  for more flexible room configuration.
+
 ### Fixed
 
 - Fixed an issue where `RimeHttpTTSService` and `PiperTTSService` could generate
