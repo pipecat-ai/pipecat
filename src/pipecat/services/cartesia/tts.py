@@ -344,7 +344,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
-            logger.debug("Connecting to Cartesia")
+            logger.debug("Connecting to Cartesia TTS")
             self._websocket = await websocket_connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
             )
