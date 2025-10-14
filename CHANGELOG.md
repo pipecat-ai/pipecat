@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The runner `--folder` argument now supports downloading files from
   subdirectories.
 
+### Changed
+
+- `CartesiaSTTService` now inherits from `WebsocketSTTService`.
+
 ### Fixed
 
 - Fixed an issue where `RimeHttpTTSService` and `PiperTTSService` could generate
