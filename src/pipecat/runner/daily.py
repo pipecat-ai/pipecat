@@ -42,6 +42,7 @@ from typing import Dict, List, Optional
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
+from typing_extensions import Literal
 
 from pipecat.transports.daily.utils import (
     DailyRESTHelper,
@@ -82,6 +83,7 @@ async def configure(
     sip_enable_video: Optional[bool] = False,
     sip_num_endpoints: Optional[int] = 1,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
+    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None,
     daily_room_properties: Optional[DailyRoomProperties] = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
@@ -100,6 +102,7 @@ async def configure(
         sip_num_endpoints: Number of allowed SIP endpoints.
         sip_codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
+        enable_recording: Recording mode for the room. One of "cloud", "local", or "raw-tracks".
         daily_room_properties: Custom room properties to use instead of default configuration.
             If provided, overrides all other property settings.
 
@@ -158,8 +161,7 @@ async def configure(
 
     # Create room properties
     room_properties = DailyRoomProperties(
-        exp=expiration_time,
-        eject_at_room_exp=True,
+        exp=expiration_time, eject_at_room_exp=True, enable_recording=enable_recording
     )
 
     # Add SIP configuration if enabled
