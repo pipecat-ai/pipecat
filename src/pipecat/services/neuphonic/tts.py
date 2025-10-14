@@ -293,6 +293,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
             headers = {"x-api-key": self._api_key}
 
             self._websocket = await websocket_connect(url, additional_headers=headers)
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -311,6 +313,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         finally:
             self._started = False
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def _receive_messages(self):
         """Receive and process messages from Neuphonic WebSocket."""
