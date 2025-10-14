@@ -218,7 +218,8 @@ class AudioBufferProcessor(FrameProcessor):
             resampled = await self._resample_input_audio(frame)
             self._user_audio_buffer.extend(resampled)
             # Save time of frame so we can compute silence.
-            self._last_user_frame_at = time.time()
+            frame_time = frame.num_frames / frame.sample_rate
+            self._last_user_frame_at = time.time() + frame_time
         elif self._recording and isinstance(frame, OutputAudioRawFrame):
             # Add silence if we need to.
             silence = self._compute_silence(self._last_bot_frame_at)
@@ -227,7 +228,8 @@ class AudioBufferProcessor(FrameProcessor):
             resampled = await self._resample_output_audio(frame)
             self._bot_audio_buffer.extend(resampled)
             # Save time of frame so we can compute silence.
-            self._last_bot_frame_at = time.time()
+            frame_time = frame.num_frames / frame.sample_rate
+            self._last_bot_frame_at = time.time() + frame_time
 
         if self._buffer_size > 0 and (
             len(self._user_audio_buffer) >= self._buffer_size
