@@ -46,6 +46,7 @@ Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
 aic = [ "aic-sdk~=1.0.1" ]
+anannas = []
 anthropic = [ "anthropic~=0.49.0" ]
 assemblyai = [ "pipecat-ai[websockets-base]" ]
 asyncai = [ "pipecat-ai[websockets-base]" ]
