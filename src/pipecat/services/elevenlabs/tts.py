@@ -827,6 +827,10 @@ class ElevenLabsHttpTTSService(WordTTSService):
         # Store previous text for context within a turn
         self._previous_text = ""
 
+        # Track partial words that span across alignment chunks
+        self._partial_word = ""
+        self._partial_word_start_time = 0.0
+
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language to ElevenLabs language code.
 
@@ -854,6 +858,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self._cumulative_time = 0
         self._started = False
         self._previous_text = ""
+        self._partial_word = ""
+        self._partial_word_start_time = 0.0
         logger.debug(f"{self}: Reset internal state")
 
     async def start(self, frame: StartFrame):
@@ -888,11 +894,13 @@ class ElevenLabsHttpTTSService(WordTTSService):
     def calculate_word_times(self, alignment_info: Mapping[str, Any]) -> List[Tuple[str, float]]:
         """Calculate word timing from character alignment data.
 
+        This method handles partial words that may span across multiple alignment chunks.
+
         Args:
             alignment_info: Character timing data from ElevenLabs.
 
         Returns:
-            List of (word, timestamp) pairs.
+            List of (word, timestamp) pairs for complete words in this chunk.
 
         Example input data::
 
@@ -918,30 +926,28 @@ class ElevenLabsHttpTTSService(WordTTSService):
         # Build the words and find their start times
         words = []
         word_start_times = []
-        current_word = ""
-        first_char_idx = -1
+        # Start with any partial word from previous chunk
+        current_word = self._partial_word
+        word_start_time = self._partial_word_start_time if self._partial_word else None
 
         for i, char in enumerate(chars):
             if char == " ":
                 if current_word:  # Only add non-empty words
                     words.append(current_word)
-                    # Use time of the first character of the word, offset by cumulative time
-                    word_start_times.append(
-                        self._cumulative_time + char_start_times[first_char_idx]
-                    )
+                    word_start_times.append(word_start_time)
                     current_word = ""
-                    first_char_idx = -1
+                    word_start_time = None
             else:
-                if not current_word:  # This is the first character of a new word
-                    first_char_idx = i
+                if word_start_time is None:  # First character of a new word
+                    # Use time of the first character of the word, offset by cumulative time
+                    word_start_time = self._cumulative_time + char_start_times[i]
                 current_word += char
 
-        # Don't forget the last word if there's no trailing space
-        if current_word and first_char_idx >= 0:
-            words.append(current_word)
-            word_start_times.append(self._cumulative_time + char_start_times[first_char_idx])
+        # Store any incomplete word at the end of this chunk
+        self._partial_word = current_word if current_word else ""
+        self._partial_word_start_time = word_start_time if word_start_time is not None else 0.0
 
-        # Create word-time pairs
+        # Create word-time pairs for complete words only
         word_times = list(zip(words, word_start_times))
 
         return word_times
