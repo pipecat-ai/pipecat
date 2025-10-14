@@ -8,6 +8,7 @@ import sys
 
 from pipecat.services import DeprecatedModuleProxy
 
+from .config import *
 from .llm import *
 from .nova_sonic import *
 from .stt import *
