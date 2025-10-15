@@ -528,6 +528,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 url, max_size=16 * 1024 * 1024, additional_headers={"xi-api-key": self._api_key}
             )
 
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -550,6 +551,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             self._started = False
             self._context_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:

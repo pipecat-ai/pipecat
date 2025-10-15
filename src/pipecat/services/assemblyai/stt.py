@@ -197,6 +197,8 @@ class AssemblyAISTTService(STTService):
             )
             self._connected = True
             self._receive_task = self.create_task(self._receive_task_handler())
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"Failed to connect to AssemblyAI: {e}")
             self._connected = False
@@ -238,6 +240,7 @@ class AssemblyAISTTService(STTService):
             self._websocket = None
             self._connected = False
             self._receive_task = None
+            await self._call_event_handler("on_disconnected")
 
     async def _receive_task_handler(self):
         """Handle incoming WebSocket messages."""

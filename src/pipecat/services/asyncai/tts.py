@@ -235,6 +235,8 @@ class AsyncAITTSService(InterruptibleTTSService):
             }
 
             await self._get_websocket().send(json.dumps(init_msg))
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -252,6 +254,7 @@ class AsyncAITTSService(InterruptibleTTSService):
         finally:
             self._websocket = None
             self._started = False
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
