@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where audio filters' `stop()` would not be called when using
   `CancelFrame`.
 
+- Fixed an issue in `ElevenLabsHttpTTSService`, where
+  `apply_text_normalization` was incorrectly set as a query parameter. It's now
+  being added as a request parameter.
+
 - Fixed an issue where `RimeHttpTTSService` and `PiperTTSService` could generate
   incorrectly 16-bit aligned audio frames, potentially leading to internal
   errors or static audio.
