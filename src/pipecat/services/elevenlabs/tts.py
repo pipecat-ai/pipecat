@@ -1070,6 +1070,14 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         logger.error(f"Error processing response: {e}", exc_info=True)
                         continue
 
+                # After processing all chunks, emit any remaining partial word
+                # since this is the end of the utterance
+                if self._partial_word:
+                    final_word_time = [(self._partial_word, self._partial_word_start_time)]
+                    await self.add_word_timestamps(final_word_time)
+                    self._partial_word = ""
+                    self._partial_word_start_time = 0.0
+
                 # After processing all chunks, add the total utterance duration
                 # to the cumulative time to ensure next utterance starts after this one
                 if utterance_duration > 0:

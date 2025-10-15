@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `ElevenLabsTTSService` and `ElevenLabsHttpTTSService` where
+  the Flash models would split words, resulting in a space being inserted
+  between words.
+
 - Fixed an issue where audio filters' `stop()` would not be called when using
   `CancelFrame`.
 
