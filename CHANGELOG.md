@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   incorrectly 16-bit aligned audio frames, potentially leading to internal
   errors or static audio.
 
+### Other
+
+- Added foundational example `47-sentry-metrics.py`, demonstrating how to use the
+  `SentryMetrics` processor.
+
 ## [0.0.90] - 2025-10-10
 
 ### Added
