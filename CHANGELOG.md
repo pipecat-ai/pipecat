@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where audio filters' `stop()` would not be called when using
+  `CancelFrame`.
+
 - Fixed an issue where `RimeHttpTTSService` and `PiperTTSService` could generate
   incorrectly 16-bit aligned audio frames, potentially leading to internal
   errors or static audio.
