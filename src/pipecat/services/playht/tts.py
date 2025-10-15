@@ -269,6 +269,8 @@ class PlayHTTTSService(InterruptibleTTSService):
                 raise ValueError("WebSocket URL is not a string")
 
             self._websocket = await websocket_connect(self._websocket_url)
+
+            await self._call_event_handler("on_connected")
         except ValueError as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -291,6 +293,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         finally:
             self._request_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def _get_websocket_url(self):
         """Retrieve WebSocket URL from PlayHT API."""

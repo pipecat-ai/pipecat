@@ -273,6 +273,7 @@ class CartesiaSTTService(WebsocketSTTService):
             headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self}: unable to connect to Cartesia: {e}")
 
@@ -285,6 +286,7 @@ class CartesiaSTTService(WebsocketSTTService):
             logger.error(f"{self} error closing websocket: {e}")
         finally:
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
