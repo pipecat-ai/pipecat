@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an `aggregate_sentences` arg in `ElevenLabsHttpTTSService`, where the
   default value is True.
 
+- Added a `room_properties` arg to the Daily runner's `configure()` method,
+  allowing `DailyRoomProperties` to be provided.
+
 - The runner `--folder` argument now supports downloading files from
   subdirectories.
 

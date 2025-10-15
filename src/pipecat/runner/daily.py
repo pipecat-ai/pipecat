@@ -82,6 +82,7 @@ async def configure(
     sip_enable_video: Optional[bool] = False,
     sip_num_endpoints: Optional[int] = 1,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
+    room_properties: Optional[DailyRoomProperties] = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
 
@@ -99,6 +100,10 @@ async def configure(
         sip_num_endpoints: Number of allowed SIP endpoints.
         sip_codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
+        room_properties: Optional DailyRoomProperties to use instead of building from
+            individual parameters. When provided, this overrides room_exp_duration and
+            SIP-related parameters. If not provided, properties are built from the
+            individual parameters as before.
 
     Returns:
         DailyRoomConfig: Object with room_url, token, and optional sip_endpoint.
@@ -115,6 +120,13 @@ async def configure(
         # SIP-enabled room
         sip_config = await configure(session, sip_caller_phone="+15551234567")
         print(f"SIP endpoint: {sip_config.sip_endpoint}")
+
+        # Custom room properties with recording enabled
+        custom_props = DailyRoomProperties(
+            enable_recording="cloud",
+            max_participants=2,
+        )
+        config = await configure(session, room_properties=custom_props)
     """
     # Check for required API key
     api_key = os.getenv("DAILY_API_KEY")
@@ -124,8 +136,31 @@ async def configure(
             "Get your API key from https://dashboard.daily.co/developers"
         )
 
+    # Warn if both room_properties and individual parameters are provided
+    if room_properties is not None:
+        individual_params_provided = any(
+            [
+                room_exp_duration != 2.0,
+                token_exp_duration != 2.0,
+                sip_caller_phone is not None,
+                sip_enable_video is not False,
+                sip_num_endpoints != 1,
+                sip_codecs is not None,
+            ]
+        )
+        if individual_params_provided:
+            logger.warning(
+                "Both room_properties and individual parameters (room_exp_duration, token_exp_duration, "
+                "sip_*) were provided. The room_properties will be used and individual parameters "
+                "will be ignored."
+            )
+
     # Determine if SIP mode is enabled
     sip_enabled = sip_caller_phone is not None
+
+    # If room_properties is provided, check if it has SIP configuration
+    if room_properties and room_properties.sip:
+        sip_enabled = True
 
     daily_rest_helper = DailyRESTHelper(
         daily_api_key=api_key,
@@ -150,27 +185,29 @@ async def configure(
     room_name = f"{room_prefix}-{uuid.uuid4().hex[:8]}"
     logger.info(f"Creating new Daily room: {room_name}")
 
-    # Calculate expiration time
-    expiration_time = time.time() + (room_exp_duration * 60 * 60)
+    # Use provided room_properties or build from parameters
+    if room_properties is None:
+        # Calculate expiration time
+        expiration_time = time.time() + (room_exp_duration * 60 * 60)
 
-    # Create room properties
-    room_properties = DailyRoomProperties(
-        exp=expiration_time,
-        eject_at_room_exp=True,
-    )
-
-    # Add SIP configuration if enabled
-    if sip_enabled:
-        sip_params = DailyRoomSipParams(
-            display_name=sip_caller_phone,
-            video=sip_enable_video,
-            sip_mode="dial-in",
-            num_endpoints=sip_num_endpoints,
-            codecs=sip_codecs,
+        # Create room properties
+        room_properties = DailyRoomProperties(
+            exp=expiration_time,
+            eject_at_room_exp=True,
         )
-        room_properties.sip = sip_params
-        room_properties.enable_dialout = True  # Enable outbound calls if needed
-        room_properties.start_video_off = not sip_enable_video  # Voice-only by default
+
+        # Add SIP configuration if enabled
+        if sip_enabled:
+            sip_params = DailyRoomSipParams(
+                display_name=sip_caller_phone,
+                video=sip_enable_video,
+                sip_mode="dial-in",
+                num_endpoints=sip_num_endpoints,
+                codecs=sip_codecs,
+            )
+            room_properties.sip = sip_params
+            room_properties.enable_dialout = True  # Enable outbound calls if needed
+            room_properties.start_video_off = not sip_enable_video  # Voice-only by default
 
     # Create room parameters
     room_params = DailyRoomParams(name=room_name, properties=room_properties)
