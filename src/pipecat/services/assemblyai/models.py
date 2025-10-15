@@ -108,6 +108,7 @@ class AssemblyAIConnectionParams(BaseModel):
         end_of_turn_confidence_threshold: Confidence threshold for end-of-turn detection.
         min_end_of_turn_silence_when_confident: Minimum silence duration when confident about end-of-turn.
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
+        keyterms_prompt: List of key terms to guide transcription. Will be JSON serialized before sending.
     """
 
     sample_rate: int = 16000
@@ -117,3 +118,4 @@ class AssemblyAIConnectionParams(BaseModel):
     end_of_turn_confidence_threshold: Optional[float] = None
     min_end_of_turn_silence_when_confident: Optional[int] = None
     max_turn_silence: Optional[int] = None
+    keyterms_prompt: Optional[List[str]] = None
