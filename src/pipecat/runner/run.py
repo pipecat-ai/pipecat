@@ -289,7 +289,6 @@ def _add_lifespan_to_app(app: FastAPI, new_lifespan):
 
 def _setup_whatsapp_routes(app: FastAPI):
     """Set up WebRTC-specific routes."""
-
     WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
     WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
     WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
@@ -300,10 +299,17 @@ def _setup_whatsapp_routes(app: FastAPI):
             WHATSAPP_TOKEN,
             WHATSAPP_PHONE_NUMBER_ID,
             WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
+            WHATSAPP_APP_SECRET,
         ]
     ):
         logger.trace(
-            "Missing required environment variables for WhatsApp transport. Keeping it disabled."
+            """Missing required environment variables for WhatsApp transport:
+    WHATSAPP_TOKEN
+    WHATSAPP_PHONE_NUMBER_ID
+    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN
+    WHATSAPP_APP_SECRET
+Keeping it disabled.
+            """
         )
         return
 
