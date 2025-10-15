@@ -315,7 +315,7 @@ def _setup_whatsapp_routes(app: FastAPI):
             WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
         ]
     ):
-        logger.debug(
+        logger.trace(
             "Missing required environment variables for WhatsApp transport. Keeping it disabled."
         )
         return
