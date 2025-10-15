@@ -985,6 +985,9 @@ class ElevenLabsHttpTTSService(WordTTSService):
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
 
+        if self._settings["apply_text_normalization"] is not None:
+            payload["apply_text_normalization"] = self._settings["apply_text_normalization"]
+
         language = self._settings["language"]
         if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
             payload["language_code"] = language
@@ -1005,8 +1008,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
         }
         if self._settings["optimize_streaming_latency"] is not None:
             params["optimize_streaming_latency"] = self._settings["optimize_streaming_latency"]
-        if self._settings["apply_text_normalization"] is not None:
-            params["apply_text_normalization"] = self._settings["apply_text_normalization"]
 
         try:
             await self.start_ttfb_metrics()
