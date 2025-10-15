@@ -289,19 +289,6 @@ def _add_lifespan_to_app(app: FastAPI, new_lifespan):
 
 def _setup_whatsapp_routes(app: FastAPI):
     """Set up WebRTC-specific routes."""
-    try:
-        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
-
-        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-        from pipecat.transports.smallwebrtc.request_handler import (
-            SmallWebRTCRequest,
-            SmallWebRTCRequestHandler,
-        )
-        from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
-        from pipecat.transports.whatsapp.client import WhatsAppClient
-    except ImportError as e:
-        logger.error(f"WebRTC transport dependencies not installed: {e}")
-        return
 
     WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
     WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
@@ -318,6 +305,14 @@ def _setup_whatsapp_routes(app: FastAPI):
         logger.trace(
             "Missing required environment variables for WhatsApp transport. Keeping it disabled."
         )
+        return
+
+    # only import WhatsApp dependencies if appropriate env vars are present
+    try:
+        from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
+        from pipecat.transports.whatsapp.client import WhatsAppClient
+    except ImportError as e:
+        logger.error(f"WhatsApp transport dependencies not installed: {e}")
         return
 
     # Global WhatsApp client instance
