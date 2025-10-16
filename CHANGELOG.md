@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for updating `OpenAITTSService` settings (`instructions` and
+  `speed`) at runtime via `TTSUpdateSettingsFrame`.
+
 - Added `--whatsapp` flag to runner to better surface WhatsApp transport logs.
 
 - Added `on_connected` and `on_disconnected` events to TTS and STT
@@ -27,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `CartesiaSTTService` now inherits from `WebsocketSTTService`.
 
-# Package upgrades:
+- Package upgrades:
   - `openai` upgraded to support up to 2.x.x.
   - `openpipe` upgraded to support up to 5.x.x.
 
