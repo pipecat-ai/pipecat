@@ -31,6 +31,11 @@ class AWSNovaSonicLLMAdapter(BaseLLMAdapter[AWSNovaSonicLLMInvocationParams]):
     specific function-calling format, enabling tool use with Nova Sonic models.
     """
 
+    @property
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for AWS Nova Sonic."""
+        raise NotImplementedError("Universal LLMContext is not yet supported for AWS Nova Sonic.")
+
     def get_llm_invocation_params(self, context: LLMContext) -> AWSNovaSonicLLMInvocationParams:
         """Get AWS Nova Sonic-specific LLM invocation parameters from a universal LLM context.
 

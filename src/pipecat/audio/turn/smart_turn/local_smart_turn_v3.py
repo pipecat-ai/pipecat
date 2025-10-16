@@ -77,7 +77,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
         logger.debug("Loaded Local Smart Turn v3")
 
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         """Predict end-of-turn using local ONNX model."""
 
         def truncate_audio_to_last_n_seconds(audio_array, n_seconds=8, sample_rate=16000):
@@ -98,15 +98,15 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         inputs = self._feature_extractor(
             audio_array,
             sampling_rate=16000,
-            return_tensors="pt",
+            return_tensors="np",
             padding="max_length",
             max_length=8 * 16000,
             truncation=True,
             do_normalize=True,
         )
 
-        # Convert to numpy and ensure correct shape for ONNX
-        input_features = inputs.input_features.squeeze(0).numpy().astype(np.float32)
+        # Extract features and ensure correct shape for ONNX
+        input_features = inputs.input_features.squeeze(0).astype(np.float32)
         input_features = np.expand_dims(input_features, axis=0)  # Add batch dimension
 
         # Run ONNX inference

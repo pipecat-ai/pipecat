@@ -42,6 +42,11 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
     to the specific format required by Anthropic's Claude models for function calling.
     """
 
+    @property
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for Anthropic."""
+        return "anthropic"
+
     def get_llm_invocation_params(
         self, context: LLMContext, enable_prompt_caching: bool
     ) -> AnthropicLLMInvocationParams:
@@ -54,7 +59,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         Returns:
             Dictionary of parameters for invoking Anthropic's LLM API.
         """
-        messages = self._from_universal_context_messages(self._get_messages(context))
+        messages = self._from_universal_context_messages(self.get_messages(context))
         return {
             "system": messages.system,
             "messages": (
@@ -78,7 +83,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             List of messages in a format ready for logging about Anthropic.
         """
         # Get messages in Anthropic's format
-        messages = self._from_universal_context_messages(self._get_messages(context)).messages
+        messages = self._from_universal_context_messages(self.get_messages(context)).messages
 
         # Sanitize messages for logging
         messages_for_logging = []
@@ -91,9 +96,6 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                             item["source"]["data"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
-
-    def _get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
-        return context.get_messages("anthropic")
 
     @dataclass
     class ConvertedMessages:

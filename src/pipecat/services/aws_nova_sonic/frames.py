@@ -6,20 +6,16 @@
 
 """Custom frames for AWS Nova Sonic LLM service."""
 
-from dataclasses import dataclass
+import warnings
 
-from pipecat.frames.frames import DataFrame, FunctionCallResultFrame
+from pipecat.services.aws.nova_sonic.frames import *
 
-
-@dataclass
-class AWSNovaSonicFunctionCallResultFrame(DataFrame):
-    """Frame containing function call result for AWS Nova Sonic processing.
-
-    This frame wraps a standard function call result frame to enable
-    AWS Nova Sonic-specific handling and context updates.
-
-    Parameters:
-        result_frame: The underlying function call result frame.
-    """
-
-    result_frame: FunctionCallResultFrame
+with warnings.catch_warnings():
+    warnings.simplefilter("always")
+    warnings.warn(
+        "Types in pipecat.services.aws_nova_sonic.frames are deprecated. "
+        "Please use the equivalent types from "
+        "pipecat.services.aws.nova_sonic.frames instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )

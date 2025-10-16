@@ -6,26 +6,56 @@
 
 
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
+from google.genai.types import HttpOptions
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+from pipecat.services.google.gemini_live.llm_vertex import GeminiLiveVertexLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
+
+
+async def fetch_weather_from_api(params: FunctionCallParams):
+    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+    await params.result_callback(
+        {
+            "conditions": "nice",
+            "temperature": temperature,
+            "format": params.arguments["format"],
+            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+        }
+    )
+
+
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
+system_instruction = """
+You are a helpful assistant who can answer questions and use tools.
+
+You have three tools available to you:
+1. get_current_weather: Use this tool to get the current weather in a specific location.
+2. get_restaurant_recommendation: Use this tool to get a restaurant recommendation in a specific location.
+"""
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -65,43 +95,61 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    llm = GeminiMultimodalLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
-        # system_instruction="Talk like a pirate."
-        # inference_on_context_initialization=False,
+    weather_function = FunctionSchema(
+        name="get_current_weather",
+        description="Get the current weather",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "format": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location.",
+            },
+        },
+        required=["location", "format"],
     )
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
+    # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
+    # you cannot use the "google_search" tool alongside other tools.
+    # See https://github.com/googleapis/python-genai/issues/941.
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
+
+    llm = GeminiLiveVertexLLMService(
+        credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
+        project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
+        location=os.getenv("GOOGLE_CLOUD_LOCATION"),
+        system_instruction=system_instruction,
+        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        tools=tools,
+    )
+
+    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     context = OpenAILLMContext(
-        [
-            {
-                "role": "user",
-                "content": "Say hello. Then ask if I want to hear a joke.",
-            },
-            #     {"role": "assistant", "content": "Hello! Why don't scientists trust atoms?"},
-            #     {
-            #         "role": "user",
-            #         "content": [
-            #             {
-            #                 "type": "text",
-            #                 "text": "Oh, I know this one: because they make up everything.",
-            #             }
-            #         ],
-            #     },
-        ],
+        [{"role": "user", "content": "Say hello."}],
     )
     context_aggregator = llm.create_context_aggregator(context)
-
-    transcript = TranscriptProcessor()
 
     pipeline = Pipeline(
         [
             transport.input(),
             context_aggregator.user(),
-            transcript.user(),
             llm,
             transport.output(),
-            transcript.assistant(),
             context_aggregator.assistant(),
         ]
     )
@@ -125,15 +173,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
-
-    # Register event handler for transcript updates
-    @transcript.event_handler("on_transcript_update")
-    async def on_transcript_update(processor, frame):
-        for msg in frame.messages:
-            if isinstance(msg, TranscriptionMessage):
-                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
-                line = f"{timestamp}{msg.role}: {msg.content}"
-                logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

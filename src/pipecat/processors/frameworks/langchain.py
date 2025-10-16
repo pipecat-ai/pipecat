@@ -12,6 +12,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     TextFrame,
@@ -64,11 +65,16 @@ class LangchainProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, OpenAILLMContextFrame):
+        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
             # Messages are accumulated on the context as a list of messages.
             # The last one by the human is the one we want to send to the LLM.
             logger.debug(f"Got transcription frame {frame}")
-            text: str = frame.context.messages[-1]["content"]
+            messages = (
+                frame.context.messages
+                if isinstance(frame, OpenAILLMContextFrame)
+                else frame.context.get_messages()
+            )
+            text: str = messages[-1]["content"]
 
             await self._ainvoke(text.strip())
         else:

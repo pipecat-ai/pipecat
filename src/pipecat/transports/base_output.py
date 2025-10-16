@@ -29,20 +29,19 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    InputTransportMessageUrgentFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     OutputTransportReadyFrame,
     SpeechOutputAudioRawFrame,
     SpriteFrame,
     StartFrame,
     SystemFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -178,7 +177,9 @@ class BaseOutputTransport(FrameProcessor):
         # Sending a frame indicating that the output transport is ready and able to receive frames.
         await self.push_frame(OutputTransportReadyFrame(), FrameDirection.UPSTREAM)
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message.
 
         Args:
@@ -202,21 +203,27 @@ class BaseOutputTransport(FrameProcessor):
         """
         pass
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the transport.
 
         Args:
             frame: The output video frame to write.
-        """
-        pass
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        Returns:
+            True if the video frame was written successfully, False otherwise.
+        """
+        return False
+
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the transport.
 
         Args:
             frame: The output audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
-        pass
+        return False
 
     async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Write a DTMF tone using the transport's preferred method.
@@ -301,9 +308,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
-        elif isinstance(frame, TransportMessageUrgentFrame) and not isinstance(
-            frame, InputTransportMessageUrgentFrame
-        ):
+        elif isinstance(frame, OutputTransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, OutputDTMFUrgentFrame):
             await self.write_dtmf(frame)
@@ -640,7 +645,7 @@ class BaseOutputTransport(FrameProcessor):
                 await self._set_video_image(frame)
             elif isinstance(frame, SpriteFrame):
                 await self._set_video_images(frame.images)
-            elif isinstance(frame, TransportMessageFrame):
+            elif isinstance(frame, OutputTransportMessageFrame):
                 await self._transport.send_message(frame)
             elif isinstance(frame, OutputDTMFFrame):
                 await self._transport.write_dtmf(frame)
@@ -659,6 +664,7 @@ class BaseOutputTransport(FrameProcessor):
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
                         yield frame
+                        self._audio_queue.task_done()
                     except asyncio.TimeoutError:
                         # Notify the bot stopped speaking upstream if necessary.
                         await self._bot_stopped_speaking()
@@ -673,6 +679,7 @@ class BaseOutputTransport(FrameProcessor):
                             frame.audio = await self._mixer.mix(frame.audio)
                             last_frame_time = time.time()
                         yield frame
+                        self._audio_queue.task_done()
                     except asyncio.QueueEmpty:
                         # Notify the bot stopped speaking upstream if necessary.
                         diff_time = time.time() - last_frame_time
@@ -738,12 +745,22 @@ class BaseOutputTransport(FrameProcessor):
                 # Handle frame.
                 await self._handle_frame(frame)
 
-                # Also, push frame downstream in case anyone else needs it.
-                await self._transport.push_frame(frame)
+                # If we are not able to write to the transport we shouldn't
+                # pushb downstream.
+                push_downstream = True
 
-                # Send audio.
-                if isinstance(frame, OutputAudioRawFrame):
-                    await self._transport.write_audio_frame(frame)
+                # Try to send audio to the transport.
+                try:
+                    if isinstance(frame, OutputAudioRawFrame):
+                        push_downstream = await self._transport.write_audio_frame(frame)
+                except Exception as e:
+                    logger.error(f"{self} Error writing {frame} to transport: {e}")
+                    push_downstream = False
+
+                # If we were able to send to the transport, push the frame
+                # downstream in case anyone else needs it.
+                if push_downstream:
+                    await self._transport.push_frame(frame)
 
         #
         # Video handling

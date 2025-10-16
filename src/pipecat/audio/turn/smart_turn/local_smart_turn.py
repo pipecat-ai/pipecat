@@ -64,7 +64,7 @@ class LocalSmartTurnAnalyzer(BaseSmartTurn):
         self._turn_model.eval()
         logger.debug("Loaded Local Smart Turn")
 
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         """Predict end-of-turn using local PyTorch model."""
         inputs = self._turn_processor(
             audio_array,

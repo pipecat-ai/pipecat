@@ -24,14 +24,15 @@ from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai_realtime import (
+from pipecat.services.openai.realtime.events import (
+    AudioConfiguration,
+    AudioInput,
     InputAudioNoiseReduction,
     InputAudioTranscription,
-    OpenAIRealtimeLLMService,
     SemanticTurnDetection,
     SessionProperties,
 )
-from pipecat.services.openai_realtime.events import AudioConfiguration, AudioInput
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams

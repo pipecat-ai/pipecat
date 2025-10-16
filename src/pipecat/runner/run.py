@@ -67,11 +67,15 @@ To run locally:
 
 import argparse
 import asyncio
+import mimetypes
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Dict
+from pathlib import Path
+from typing import Optional
 
+import aiohttp
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from pipecat.runner.types import (
@@ -83,7 +87,7 @@ from pipecat.runner.types import (
 try:
     import uvicorn
     from dotenv import load_dotenv
-    from fastapi import BackgroundTasks, FastAPI, Request, WebSocket
+    from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import HTMLResponse, RedirectResponse
 except ImportError as e:
@@ -96,6 +100,12 @@ except ImportError as e:
 
 load_dotenv(override=True)
 os.environ["ENV"] = "local"
+
+TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
+
+RUNNER_DOWNLOADS_FOLDER: Optional[str] = None
+RUNNER_HOST: str = "localhost"
+RUNNER_PORT: int = 7860
 
 
 def _get_bot_module():
@@ -151,7 +161,12 @@ async def _run_telephony_bot(websocket: WebSocket):
 
 
 def _create_server_app(
-    transport_type: str, host: str = "localhost", proxy: str = None, esp32_mode: bool = False
+    *,
+    transport_type: str,
+    host: str = "localhost",
+    proxy: str,
+    esp32_mode: bool = False,
+    folder: Optional[str] = None,
 ):
     """Create FastAPI app with transport-specific routes."""
     app = FastAPI()
@@ -166,29 +181,33 @@ def _create_server_app(
 
     # Set up transport-specific routes
     if transport_type == "webrtc":
-        _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host)
+        _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host, folder=folder)
+        _setup_whatsapp_routes(app)
     elif transport_type == "daily":
         _setup_daily_routes(app)
-    elif transport_type in ["twilio", "telnyx", "plivo", "exotel"]:
-        _setup_telephony_routes(app, transport_type, proxy)
+    elif transport_type in TELEPHONY_TRANSPORTS:
+        _setup_telephony_routes(app, transport_type=transport_type, proxy=proxy)
     else:
         logger.warning(f"Unknown transport type: {transport_type}")
 
     return app
 
 
-def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "localhost"):
+def _setup_webrtc_routes(
+    app: FastAPI, *, esp32_mode: bool = False, host: str = "localhost", folder: Optional[str] = None
+):
     """Set up WebRTC-specific routes."""
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.request_handler import (
+            SmallWebRTCRequest,
+            SmallWebRTCRequestHandler,
+        )
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
-
-    # Store connections by pc_id
-    pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
     # Mount the frontend
     app.mount("/client", SmallWebRTCPrebuiltUI)
@@ -198,53 +217,222 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
         """Redirect root requests to client interface."""
         return RedirectResponse(url="/client/")
 
+    @app.get("/files/{filename}")
+    async def download_file(filename: str):
+        """Handle file downloads."""
+        if not folder:
+            logger.warning(f"Attempting to dowload {filename}, but downloads folder not setup.")
+            return
+
+        file_path = Path(folder) / filename
+        if not os.path.exists(file_path):
+            raise HTTPException(404)
+
+        media_type, _ = mimetypes.guess_type(file_path)
+
+        return FileResponse(path=file_path, media_type=media_type, filename=filename)
+
+    # Initialize the SmallWebRTC request handler
+    small_webrtc_handler: SmallWebRTCRequestHandler = SmallWebRTCRequestHandler(
+        esp32_mode=esp32_mode, host=host
+    )
+
     @app.post("/api/offer")
-    async def offer(request: dict, background_tasks: BackgroundTasks):
-        """Handle WebRTC offer requests and manage peer connections."""
-        pc_id = request.get("pc_id")
+    async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
+        """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
 
-        if pc_id and pc_id in pcs_map:
-            pipecat_connection = pcs_map[pc_id]
-            logger.info(f"Reusing existing connection for pc_id: {pc_id}")
-            await pipecat_connection.renegotiate(
-                sdp=request["sdp"],
-                type=request["type"],
-                restart_pc=request.get("restart_pc", False),
-            )
-        else:
-            pipecat_connection = SmallWebRTCConnection()
-            await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
-
-            @pipecat_connection.event_handler("closed")
-            async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
-                """Handle WebRTC connection closure and cleanup."""
-                logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
-                pcs_map.pop(webrtc_connection.pc_id, None)
-
+        # Prepare runner arguments with the callback to run your bot
+        async def webrtc_connection_callback(connection):
             bot_module = _get_bot_module()
-            runner_args = SmallWebRTCRunnerArguments(webrtc_connection=pipecat_connection)
+            runner_args = SmallWebRTCRunnerArguments(webrtc_connection=connection)
             background_tasks.add_task(bot_module.bot, runner_args)
 
-        answer = pipecat_connection.get_answer()
-
-        # Apply ESP32 SDP munging if enabled
-        if esp32_mode and host != "localhost":
-            from pipecat.runner.utils import smallwebrtc_sdp_munging
-
-            answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], host)
-
-        pcs_map[answer["pc_id"]] = pipecat_connection
+        # Delegate handling to SmallWebRTCRequestHandler
+        answer = await small_webrtc_handler.handle_web_request(
+            request=request,
+            webrtc_connection_callback=webrtc_connection_callback,
+        )
         return answer
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def smallwebrtc_lifespan(app: FastAPI):
         """Manage FastAPI application lifecycle and cleanup connections."""
         yield
-        coros = [pc.disconnect() for pc in pcs_map.values()]
-        await asyncio.gather(*coros)
-        pcs_map.clear()
+        await small_webrtc_handler.close()
 
-    app.router.lifespan_context = lifespan
+    # Add the SmallWebRTC lifespan to the app
+    _add_lifespan_to_app(app, smallwebrtc_lifespan)
+
+
+def _add_lifespan_to_app(app: FastAPI, new_lifespan):
+    """Add a new lifespan context manager to the app, combining with existing if present.
+
+    Args:
+        app: The FastAPI application instance
+        new_lifespan: The new lifespan context manager to add
+    """
+    if hasattr(app.router, "lifespan_context") and app.router.lifespan_context is not None:
+        # If there's already a lifespan context, combine them
+        existing_lifespan = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def combined_lifespan(app: FastAPI):
+            async with existing_lifespan(app):
+                async with new_lifespan(app):
+                    yield
+
+        app.router.lifespan_context = combined_lifespan
+    else:
+        # No existing lifespan, use the new one
+        app.router.lifespan_context = new_lifespan
+
+
+def _setup_whatsapp_routes(app: FastAPI):
+    """Set up WebRTC-specific routes."""
+    try:
+        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
+
+        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.request_handler import (
+            SmallWebRTCRequest,
+            SmallWebRTCRequestHandler,
+        )
+        from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
+        from pipecat.transports.whatsapp.client import WhatsAppClient
+    except ImportError as e:
+        logger.error(f"WebRTC transport dependencies not installed: {e}")
+        return
+
+    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
+    WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
+
+    if not all(
+        [
+            WHATSAPP_TOKEN,
+            WHATSAPP_PHONE_NUMBER_ID,
+            WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
+        ]
+    ):
+        logger.debug(
+            "Missing required environment variables for WhatsApp transport. Keeping it disabled."
+        )
+        return
+
+    # Global WhatsApp client instance
+    whatsapp_client: Optional[WhatsAppClient] = None
+
+    @app.get(
+        "/whatsapp",
+        summary="Verify WhatsApp webhook",
+        description="Handles WhatsApp webhook verification requests from Meta",
+    )
+    async def verify_webhook(request: Request):
+        """Verify WhatsApp webhook endpoint.
+
+        This endpoint is called by Meta's WhatsApp Business API to verify
+        the webhook URL during setup. It validates the verification token
+        and returns the challenge parameter if successful.
+        """
+        if whatsapp_client is None:
+            logger.error("WhatsApp client is not initialized")
+            raise HTTPException(status_code=503, detail="Service unavailable")
+
+        params = dict(request.query_params)
+        logger.debug(f"Webhook verification request received with params: {list(params.keys())}")
+
+        try:
+            result = await whatsapp_client.handle_verify_webhook_request(
+                params=params, expected_verification_token=WHATSAPP_WEBHOOK_VERIFICATION_TOKEN
+            )
+            logger.info("Webhook verification successful")
+            return result
+        except ValueError as e:
+            logger.warning(f"Webhook verification failed: {e}")
+            raise HTTPException(status_code=403, detail="Verification failed")
+
+    @app.post(
+        "/whatsapp",
+        summary="Handle WhatsApp webhook events",
+        description="Processes incoming WhatsApp messages and call events",
+    )
+    async def whatsapp_webhook(
+        body: WhatsAppWebhookRequest,
+        background_tasks: BackgroundTasks,
+        request: Request,
+        x_hub_signature_256: str = Header(None),
+    ):
+        """Handle incoming WhatsApp webhook events.
+
+        For call events, establishes WebRTC connections and spawns bot instances
+        in the background to handle real-time communication.
+        """
+        if whatsapp_client is None:
+            logger.error("WhatsApp client is not initialized")
+            raise HTTPException(status_code=503, detail="Service unavailable")
+
+        # Validate webhook object type
+        if body.object != "whatsapp_business_account":
+            logger.warning(f"Invalid webhook object type: {body.object}")
+            raise HTTPException(status_code=400, detail="Invalid object type")
+
+        logger.debug(f"Processing WhatsApp webhook: {body.model_dump()}")
+
+        async def connection_callback(connection: SmallWebRTCConnection):
+            """Handle new WebRTC connections from WhatsApp calls.
+
+            Called when a WebRTC connection is established for a WhatsApp call.
+            Spawns a bot instance to handle the conversation.
+
+            Args:
+                connection: The established WebRTC connection
+            """
+            bot_module = _get_bot_module()
+            runner_args = SmallWebRTCRunnerArguments(webrtc_connection=connection)
+            background_tasks.add_task(bot_module.bot, runner_args)
+
+        try:
+            # Process the webhook request
+            raw_body = await request.body()
+            result = await whatsapp_client.handle_webhook_request(
+                body, connection_callback, sha256_signature=x_hub_signature_256, raw_body=raw_body
+            )
+            logger.debug(f"Webhook processed successfully: {result}")
+            return {"status": "success", "message": "Webhook processed successfully"}
+        except ValueError as ve:
+            logger.warning(f"Invalid webhook request format: {ve}")
+            raise HTTPException(status_code=400, detail=f"Invalid request: {str(ve)}")
+        except Exception as e:
+            logger.error(f"Internal error processing webhook: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error processing webhook")
+
+    @asynccontextmanager
+    async def whatsapp_lifespan(app: FastAPI):
+        """Manage WhatsApp client lifecycle and cleanup connections."""
+        nonlocal whatsapp_client
+
+        # Initialize WhatsApp client with persistent HTTP session
+        async with aiohttp.ClientSession() as session:
+            whatsapp_client = WhatsAppClient(
+                whatsapp_token=WHATSAPP_TOKEN,
+                whatsapp_secret=WHATSAPP_APP_SECRET,
+                phone_number_id=WHATSAPP_PHONE_NUMBER_ID,
+                session=session,
+            )
+            logger.info("WhatsApp client initialized successfully")
+
+            try:
+                yield  # Run the application
+            finally:
+                # Cleanup all active calls on shutdown
+                logger.info("Cleaning up WhatsApp client resources...")
+                if whatsapp_client:
+                    await whatsapp_client.terminate_all_calls()
+                logger.info("WhatsApp cleanup completed")
+
+    # Add the WhatsApp lifespan to the app
+    _add_lifespan_to_app(app, whatsapp_lifespan)
 
 
 def _setup_daily_routes(app: FastAPI):
@@ -332,7 +520,7 @@ def _setup_daily_routes(app: FastAPI):
         return await _handle_rtvi_request(request)
 
 
-def _setup_telephony_routes(app: FastAPI, transport_type: str, proxy: str):
+def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
     """Set up telephony-specific routes."""
     # XML response templates (Exotel doesn't use XML webhooks)
     XML_TEMPLATES = {
@@ -435,6 +623,21 @@ def _validate_and_clean_proxy(proxy: str) -> str:
     return proxy
 
 
+def runner_downloads_folder() -> Optional[str]:
+    """Returns the folder where files are stored for later download."""
+    return RUNNER_DOWNLOADS_FOLDER
+
+
+def runner_host() -> str:
+    """Returns the host name of this runner."""
+    return RUNNER_HOST
+
+
+def runner_port() -> int:
+    """Returns the port of this runner."""
+    return RUNNER_PORT
+
+
 def main():
     """Start the Pipecat development runner.
 
@@ -455,14 +658,16 @@ def main():
 
     The bot file must contain a `bot(runner_args)` function as the entry point.
     """
+    global RUNNER_DOWNLOADS_FOLDER, RUNNER_HOST, RUNNER_PORT
+
     parser = argparse.ArgumentParser(description="Pipecat Development Runner")
-    parser.add_argument("--host", type=str, default="localhost", help="Host address")
-    parser.add_argument("--port", type=int, default=7860, help="Port number")
+    parser.add_argument("--host", type=str, default=RUNNER_HOST, help="Host address")
+    parser.add_argument("--port", type=int, default=RUNNER_PORT, help="Port number")
     parser.add_argument(
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "webrtc", "twilio", "telnyx", "plivo", "exotel"],
+        choices=["daily", "webrtc", *TELEPHONY_TRANSPORTS],
         default="webrtc",
         help="Transport type",
     )
@@ -480,6 +685,7 @@ def main():
         default=False,
         help="Connect directly to Daily room (automatically sets transport to daily)",
     )
+    parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
     parser.add_argument(
         "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
     )
@@ -500,6 +706,10 @@ def main():
     # Validate ESP32 requirements
     if args.esp32 and args.host == "localhost":
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
+        return
+
+    if args.transport in TELEPHONY_TRANSPORTS and not args.proxy:
+        logger.error(f"For telephony transports, you need to specify `--proxy PROXY`.")
         return
 
     # Log level
@@ -532,8 +742,18 @@ def main():
         print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
         print()
 
+    RUNNER_DOWNLOADS_FOLDER = args.folder
+    RUNNER_HOST = args.host
+    RUNNER_PORT = args.port
+
     # Create the app with transport-specific setup
-    app = _create_server_app(args.transport, args.host, args.proxy, args.esp32)
+    app = _create_server_app(
+        transport_type=args.transport,
+        host=args.host,
+        proxy=args.proxy,
+        esp32_mode=args.esp32,
+        folder=args.folder,
+    )
 
     # Run the server
     uvicorn.run(app, host=args.host, port=args.port)

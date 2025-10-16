@@ -393,7 +393,9 @@ class HeyGenClient:
             participant_id: Identifier of the participant to capture audio from
             callback: Async function to handle received audio frames
         """
-        logger.debug(f"capture_participant_audio: {participant_id}")
+        logger.debug(
+            f"capture_participant_audio: {participant_id}, sample_rate: {self._in_sample_rate}"
+        )
         self._audio_frame_callback = callback
         if self._audio_task is not None:
             logger.warning(
@@ -407,7 +409,9 @@ class HeyGenClient:
             for track_pub in participant.track_publications.values():
                 if track_pub.kind == rtc.TrackKind.KIND_AUDIO and track_pub.track is not None:
                     logger.debug(f"Starting audio capture for existing track: {track_pub.sid}")
-                    audio_stream = rtc.AudioStream(track_pub.track)
+                    audio_stream = rtc.AudioStream(
+                        track=track_pub.track, sample_rate=self._in_sample_rate
+                    )
                     self._audio_task = self._task_manager.create_task(
                         self._process_audio_frames(audio_stream), name="HeyGenClient_Receive_Audio"
                     )
@@ -536,7 +540,7 @@ class HeyGenClient:
                     and self._audio_task is None
                 ):
                     logger.debug(f"Creating audio stream processor for track: {publication.sid}")
-                    audio_stream = rtc.AudioStream(track)
+                    audio_stream = rtc.AudioStream(track=track, sample_rate=self._in_sample_rate)
                     self._audio_task = self._task_manager.create_task(
                         self._process_audio_frames(audio_stream), name="HeyGenClient_Receive_Audio"
                     )
@@ -559,7 +563,7 @@ class HeyGenClient:
                 )
 
             await self._livekit_room.connect(
-                self._heyGen_session.url, self._heyGen_session.access_token
+                self._heyGen_session.url, self._heyGen_session.livekit_agent_token
             )
             logger.debug(f"Successfully connected to LiveKit room: {self._livekit_room.name}")
             logger.debug(f"Local participant SID: {self._livekit_room.local_participant.sid}")

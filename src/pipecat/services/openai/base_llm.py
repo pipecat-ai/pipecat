@@ -66,6 +66,7 @@ class BaseOpenAILLMService(LLMService):
             top_p: Top-p (nucleus) sampling parameter (0.0 to 1.0).
             max_tokens: Maximum tokens in response (deprecated, use max_completion_tokens).
             max_completion_tokens: Maximum completion tokens to generate.
+            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             extra: Additional model-specific parameters.
         """
 
@@ -83,6 +84,7 @@ class BaseOpenAILLMService(LLMService):
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         max_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
         max_completion_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
+        service_tier: Optional[str] = Field(default_factory=lambda: NOT_GIVEN)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -125,6 +127,7 @@ class BaseOpenAILLMService(LLMService):
             "top_p": params.top_p,
             "max_tokens": params.max_tokens,
             "max_completion_tokens": params.max_completion_tokens,
+            "service_tier": params.service_tier,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self._retry_timeout_secs = retry_timeout_secs
@@ -236,6 +239,7 @@ class BaseOpenAILLMService(LLMService):
             "top_p": self._settings["top_p"],
             "max_tokens": self._settings["max_tokens"],
             "max_completion_tokens": self._settings["max_completion_tokens"],
+            "service_tier": self._settings["service_tier"],
         }
 
         # Messages, tools, tool_choice
@@ -281,8 +285,10 @@ class BaseOpenAILLMService(LLMService):
         # base64 encode any images
         for message in messages:
             if message.get("mime_type") == "image/jpeg":
-                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
-                text = message["content"]
+                # Avoid .getvalue() which makes a full copy of BytesIO
+                raw_bytes = message["data"].read()
+                encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
+                text = message.get("content", "")
                 message["content"] = [
                     {"type": "text", "text": text},
                     {
@@ -290,6 +296,7 @@ class BaseOpenAILLMService(LLMService):
                         "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
                     },
                 ]
+                # Explicit cleanup
                 del message["data"]
                 del message["mime_type"]
 
@@ -334,10 +341,16 @@ class BaseOpenAILLMService(LLMService):
 
         async for chunk in chunk_stream:
             if chunk.usage:
+                cached_tokens = (
+                    chunk.usage.prompt_tokens_details.cached_tokens
+                    if chunk.usage.prompt_tokens_details
+                    else None
+                )
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
                     completion_tokens=chunk.usage.completion_tokens,
                     total_tokens=chunk.usage.total_tokens,
+                    cache_read_input_tokens=cached_tokens,
                 )
                 await self.start_llm_usage_metrics(tokens)
 
