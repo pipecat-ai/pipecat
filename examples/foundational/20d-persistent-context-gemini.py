@@ -90,7 +90,6 @@ async def save_conversation(params: FunctionCallParams):
     )
     try:
         with open(filename, "w") as file:
-            # todo: extract 'system' into the first message in the list
             messages = params.context.get_messages()
             # remove the last message (the instruction to save the context)
             messages.pop()
