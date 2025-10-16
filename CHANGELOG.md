@@ -9,7 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added some new configuration options to `GeminiMultimodalLiveLLMService`:
+- Added `on_connected` and `on_disconnected` events to TTS and STT
+  websocket-based services.
+
+- Added an `aggregate_sentences` arg in `ElevenLabsHttpTTSService`, where the
+  default value is True.
+
+- Added a `room_properties` arg to the Daily runner's `configure()` method,
+  allowing `DailyRoomProperties` to be provided.
+
+- The runner `--folder` argument now supports downloading files from
+  subdirectories.
+
+### Changed
+
+- `CartesiaSTTService` now inherits from `WebsocketSTTService`.
+
+- Package upgrades:
+  - `openai` upgraded to support up to 2.x.x.
+  - `openpipe` upgraded to support up to 5.x.x.
+
+### Fixed
+
+- Fixed an issue in `ElevenLabsTTSService` and `ElevenLabsHttpTTSService` where
+  the Flash models would split words, resulting in a space being inserted
+  between words.
+
+- Fixed an issue where audio filters' `stop()` would not be called when using
+  `CancelFrame`.
+
+- Fixed an issue in `ElevenLabsHttpTTSService`, where
+  `apply_text_normalization` was incorrectly set as a query parameter. It's now
+  being added as a request parameter.
+
+- Fixed an issue where `RimeHttpTTSService` and `PiperTTSService` could generate
+  incorrectly 16-bit aligned audio frames, potentially leading to internal
+  errors or static audio.
+
+### Other
+
+- Added foundational example `47-sentry-metrics.py`, demonstrating how to use the
+  `SentryMetrics` processor.
+
+- Added foundational example `14x-function-calling-openpipe.py`.
+
+## [0.0.90] - 2025-10-10
+
+### Added
+
+- Added audio filter `KrispVivaFilter` using the Krisp VIVA SDK.
+
+- Added `--folder` argument to the runner, allowing files saved in that folder
+  to be downloaded from `http://HOST:PORT/file/FILE`.
+
+- Added `GeminiLiveVertexLLMService`, for accessing Gemini Live via Google
+  Vertex AI.
+
+- Added some new configuration options to `GeminiLiveLLMService`:
 
   - `thinking`
   - `enable_affective_dialog`
@@ -34,16 +90,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `GeminiMultimodalLiveLLMService` to use the `google-genai` library
-  rather than use WebSockets directly.
+- Updated `GeminiLiveLLMService` to use the `google-genai` library rather than
+  use WebSockets directly.
+
+### Deprecated
+
+- `LivekitFrameSerializer` is now deprecated. Use `LiveKitTransport` instead.
+
+- `pipecat.service.openai_realtime` is now deprecated, use
+  `pipecat.services.openai.realtime` instead or
+  `pipecat.services.azure.realtime` for Azure Realtime.
+
+- `pipecat.service.aws_nova_sonic` is now deprecated, use
+  `pipecat.services.aws.nova_sonic` instead.
+
+- `GeminiMultimodalLiveLLMService` is now deprecated, use
+  `GeminiLiveLLMService`.
 
 ### Fixed
 
-- `GeminiMultimodalLiveLLMService` will now end gracefully (i.e. after the bot
-  has finished) upon receiving an `EndFrame`.
+- Fixed a `GoogleVertexLLMService` issue that would generate an error if no
+  token information was returned.
 
-- `GeminiMultimodalLiveLLMService` will try to seamlessly reconnect when it
-  loses its connection.
+- `GeminiLiveLLMService` will now end gracefully (i.e. after the bot has
+  finished) upon receiving an `EndFrame`.
+
+- `GeminiLiveLLMService` will try to seamlessly reconnect when it loses its
+  connection.
 
 ## [0.0.89] - 2025-10-07
 
@@ -1462,7 +1535,7 @@ quality and critical bugs impacting `ParallelPipelines` functionality.**
 - Added `session_token` parameter to `AWSNovaSonicLLMService`.
 
 - Added Gemini Multimodal Live File API for uploading, fetching, listing, and
-  deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
+  deleting files. See `26f-gemini-live-files-api.py` for example usage.
 
 ### Changed
 
@@ -3468,7 +3541,7 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 - Added the new modalities option and helper function to set Gemini output
   modalities.
 
-- Added `examples/foundational/26d-gemini-multimodal-live-text.py` which is
+- Added `examples/foundational/26d-gemini-live-text.py` which is
   using Gemini as TEXT modality and using another TTS provider for TTS process.
 
 ### Changed
@@ -3655,9 +3728,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 - Added new foundational examples for `GeminiMultimodalLiveLLMService`:
 
   - `26-gemini-multimodal-live.py`
-  - `26a-gemini-multimodal-live-transcription.py`
-  - `26b-gemini-multimodal-live-video.py`
-  - `26c-gemini-multimodal-live-video.py`
+  - `26a-gemini-live-transcription.py`
+  - `26b-gemini-live-video.py`
+  - `26c-gemini-live-video.py`
 
 - Added `SimliVideoService`. This is an integration for Simli AI avatars.
   (see https://www.simli.com)

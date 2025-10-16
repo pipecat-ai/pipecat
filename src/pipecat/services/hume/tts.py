@@ -42,7 +42,7 @@ class HumeTTSService(TTSService):
     """Hume Octave Text-to-Speech service.
 
     Streams PCM audio via Hume's HTTP output streaming (JSON chunks) endpoint
-    using the Python SDK and emits `TTSAudioRawFrame`s suitable for Pipecat transports.
+    using the Python SDK and emits ``TTSAudioRawFrame`` frames suitable for Pipecat transports.
 
     Supported features:
 
@@ -78,7 +78,7 @@ class HumeTTSService(TTSService):
 
         Args:
             api_key: Hume API key. If omitted, reads the ``HUME_API_KEY`` environment variable.
-            voice_id: ID of the voice to use (ID-only; names are not supported here).
+            voice_id: ID of the voice to use. Only voice IDs are supported; voice names are not.
             params: Optional synthesis controls (acting instructions, speed, trailing silence).
             sample_rate: Output sample rate for emitted PCM frames. Defaults to 48_000 (Hume).
             **kwargs: Additional arguments passed to the parent class.

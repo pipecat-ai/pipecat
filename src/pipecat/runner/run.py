@@ -67,12 +67,15 @@ To run locally:
 
 import argparse
 import asyncio
+import mimetypes
 import os
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 import aiohttp
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from pipecat.runner.types import (
@@ -97,6 +100,12 @@ except ImportError as e:
 
 load_dotenv(override=True)
 os.environ["ENV"] = "local"
+
+TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
+
+RUNNER_DOWNLOADS_FOLDER: Optional[str] = None
+RUNNER_HOST: str = "localhost"
+RUNNER_PORT: int = 7860
 
 
 def _get_bot_module():
@@ -152,7 +161,12 @@ async def _run_telephony_bot(websocket: WebSocket):
 
 
 def _create_server_app(
-    transport_type: str, host: str = "localhost", proxy: str = None, esp32_mode: bool = False
+    *,
+    transport_type: str,
+    host: str = "localhost",
+    proxy: str,
+    esp32_mode: bool = False,
+    folder: Optional[str] = None,
 ):
     """Create FastAPI app with transport-specific routes."""
     app = FastAPI()
@@ -167,19 +181,21 @@ def _create_server_app(
 
     # Set up transport-specific routes
     if transport_type == "webrtc":
-        _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host)
+        _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host, folder=folder)
         _setup_whatsapp_routes(app)
     elif transport_type == "daily":
         _setup_daily_routes(app)
-    elif transport_type in ["twilio", "telnyx", "plivo", "exotel"]:
-        _setup_telephony_routes(app, transport_type, proxy)
+    elif transport_type in TELEPHONY_TRANSPORTS:
+        _setup_telephony_routes(app, transport_type=transport_type, proxy=proxy)
     else:
         logger.warning(f"Unknown transport type: {transport_type}")
 
     return app
 
 
-def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "localhost"):
+def _setup_webrtc_routes(
+    app: FastAPI, *, esp32_mode: bool = False, host: str = "localhost", folder: Optional[str] = None
+):
     """Set up WebRTC-specific routes."""
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
@@ -200,6 +216,21 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
     async def root_redirect():
         """Redirect root requests to client interface."""
         return RedirectResponse(url="/client/")
+
+    @app.get("/files/{filename:path}")
+    async def download_file(filename: str):
+        """Handle file downloads."""
+        if not folder:
+            logger.warning(f"Attempting to dowload {filename}, but downloads folder not setup.")
+            return
+
+        file_path = Path(folder) / filename
+        if not os.path.exists(file_path):
+            raise HTTPException(404)
+
+        media_type, _ = mimetypes.guess_type(file_path)
+
+        return FileResponse(path=file_path, media_type=media_type, filename=filename)
 
     # Initialize the SmallWebRTC request handler
     small_webrtc_handler: SmallWebRTCRequestHandler = SmallWebRTCRequestHandler(
@@ -284,7 +315,7 @@ def _setup_whatsapp_routes(app: FastAPI):
             WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
         ]
     ):
-        logger.debug(
+        logger.trace(
             "Missing required environment variables for WhatsApp transport. Keeping it disabled."
         )
         return
@@ -489,7 +520,7 @@ def _setup_daily_routes(app: FastAPI):
         return await _handle_rtvi_request(request)
 
 
-def _setup_telephony_routes(app: FastAPI, transport_type: str, proxy: str):
+def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
     """Set up telephony-specific routes."""
     # XML response templates (Exotel doesn't use XML webhooks)
     XML_TEMPLATES = {
@@ -592,6 +623,21 @@ def _validate_and_clean_proxy(proxy: str) -> str:
     return proxy
 
 
+def runner_downloads_folder() -> Optional[str]:
+    """Returns the folder where files are stored for later download."""
+    return RUNNER_DOWNLOADS_FOLDER
+
+
+def runner_host() -> str:
+    """Returns the host name of this runner."""
+    return RUNNER_HOST
+
+
+def runner_port() -> int:
+    """Returns the port of this runner."""
+    return RUNNER_PORT
+
+
 def main():
     """Start the Pipecat development runner.
 
@@ -612,14 +658,16 @@ def main():
 
     The bot file must contain a `bot(runner_args)` function as the entry point.
     """
+    global RUNNER_DOWNLOADS_FOLDER, RUNNER_HOST, RUNNER_PORT
+
     parser = argparse.ArgumentParser(description="Pipecat Development Runner")
-    parser.add_argument("--host", type=str, default="localhost", help="Host address")
-    parser.add_argument("--port", type=int, default=7860, help="Port number")
+    parser.add_argument("--host", type=str, default=RUNNER_HOST, help="Host address")
+    parser.add_argument("--port", type=int, default=RUNNER_PORT, help="Port number")
     parser.add_argument(
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "webrtc", "twilio", "telnyx", "plivo", "exotel"],
+        choices=["daily", "webrtc", *TELEPHONY_TRANSPORTS],
         default="webrtc",
         help="Transport type",
     )
@@ -637,6 +685,7 @@ def main():
         default=False,
         help="Connect directly to Daily room (automatically sets transport to daily)",
     )
+    parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
     parser.add_argument(
         "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
     )
@@ -657,6 +706,10 @@ def main():
     # Validate ESP32 requirements
     if args.esp32 and args.host == "localhost":
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
+        return
+
+    if args.transport in TELEPHONY_TRANSPORTS and not args.proxy:
+        logger.error(f"For telephony transports, you need to specify `--proxy PROXY`.")
         return
 
     # Log level
@@ -689,8 +742,18 @@ def main():
         print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
         print()
 
+    RUNNER_DOWNLOADS_FOLDER = args.folder
+    RUNNER_HOST = args.host
+    RUNNER_PORT = args.port
+
     # Create the app with transport-specific setup
-    app = _create_server_app(args.transport, args.host, args.proxy, args.esp32)
+    app = _create_server_app(
+        transport_type=args.transport,
+        host=args.host,
+        proxy=args.proxy,
+        esp32_mode=args.esp32,
+        folder=args.folder,
+    )
 
     # Run the server
     uvicorn.run(app, host=args.host, port=args.port)

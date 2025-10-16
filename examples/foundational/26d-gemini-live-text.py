@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -19,7 +19,12 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.google.gemini_live.llm import (
+    GeminiLiveLLMService,
+    GeminiModalities,
+    InputParams,
+)
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -27,21 +32,14 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 load_dotenv(override=True)
 
 
-# Function handlers for the LLM
-search_tool = {"google_search": {}}
-tools = [search_tool]
+SYSTEM_INSTRUCTION = f"""
+"You are Gemini Chatbot, a friendly, helpful robot.
 
-system_instruction = """
-You are an expert at providing the most recent news from any place. Your responses will be converted to audio, so avoid using special characters or overly complex formatting.
+Your goal is to demonstrate your capabilities in a succinct way.
 
-Always use the google search API to retrieve the latest news. You must also use it to check which day is today.
+Your output will be converted to audio so don't include special characters in your answers.
 
-You can:
-- Use the Google search API to check the current date.
-- Provide the most recent and relevant news from any place by using the google search API.
-- Answer any questions the user may have, ensuring your responses are accurate and concise.
-
-Start each interaction by asking the user about which place they would like to know the information.
+Respond to what the user said in a creative and helpful way. Keep your responses brief. One or two sentences at most.
 """
 
 
@@ -82,31 +80,46 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    # Initialize the Gemini Multimodal Live model
-    llm = GeminiMultimodalLiveLLMService(
+    # KNOWN ISSUE: If using GeminiLiveVertexLLMService, you cannot specify a
+    # modality other than AUDIO (at least not if using the service's default
+    # model, which is a native audio model:
+    # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api/tools#native-audio).
+    llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
-        system_instruction=system_instruction,
-        tools=tools,
+        system_instruction=SYSTEM_INSTRUCTION,
+        tools=[{"google_search": {}}, {"code_execution": {}}],
+        params=InputParams(modalities=GeminiModalities.TEXT),
     )
 
-    context = OpenAILLMContext(
-        [
-            {
-                "role": "user",
-                "content": "Start by greeting the user warmly, introducing yourself, and mentioning the current day. Be friendly and engaging to set a positive tone for the interaction.",
-            }
-        ],
+    # Optionally, you can set the response modalities via a function
+    # llm.set_model_modalities(
+    #     GeminiMultimodalModalities.TEXT
+    # )
+
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"), voice_id="71a7ad14-091c-4e8e-a314-022ece01c121"
     )
+
+    messages = [
+        {
+            "role": "user",
+            "content": 'Start by saying "Hello, I\'m Gemini".',
+        },
+    ]
+
+    # Set up conversation context and management
+    # The context_aggregator will automatically collect conversation context
+    context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
-            context_aggregator.user(),  # User responses
-            llm,  # LLM
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            transport.input(),
+            context_aggregator.user(),
+            llm,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
         ]
     )
 
