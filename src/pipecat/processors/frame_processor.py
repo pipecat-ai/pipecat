@@ -877,14 +877,14 @@ class FrameProcessor(BaseObject):
 
         """
         while True:
+            (frame, direction, callback) = await self.__input_queue.get()
+
             if self.__should_block_system_frames and self.__input_event:
                 logger.trace(f"{self}: system frame processing paused")
                 await self.__input_event.wait()
                 self.__input_event.clear()
                 self.__should_block_system_frames = False
                 logger.trace(f"{self}: system frame processing resumed")
-
-            (frame, direction, callback) = await self.__input_queue.get()
 
             if isinstance(frame, SystemFrame):
                 await self.__process_frame(frame, direction, callback)
@@ -900,14 +900,14 @@ class FrameProcessor(BaseObject):
     async def __process_frame_task_handler(self):
         """Handle non-system frames from the process queue."""
         while True:
+            (frame, direction, callback) = await self.__process_queue.get()
+
             if self.__should_block_frames and self.__process_event:
                 logger.trace(f"{self}: frame processing paused")
                 await self.__process_event.wait()
                 self.__process_event.clear()
                 self.__should_block_frames = False
                 logger.trace(f"{self}: frame processing resumed")
-
-            (frame, direction, callback) = await self.__process_queue.get()
 
             await self.__process_frame(frame, direction, callback)
 

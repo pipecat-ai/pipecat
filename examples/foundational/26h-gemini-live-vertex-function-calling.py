@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 
 from dotenv import load_dotenv
+from google.genai.types import HttpOptions
 from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -22,7 +23,8 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+from pipecat.services.google.gemini_live.llm_vertex import GeminiLiveVertexLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -53,7 +55,6 @@ You are a helpful assistant who can answer questions and use tools.
 You have three tools available to you:
 1. get_current_weather: Use this tool to get the current weather in a specific location.
 2. get_restaurant_recommendation: Use this tool to get a restaurant recommendation in a specific location.
-3. google_search: Use this tool to search the web for information.
 """
 
 
@@ -121,15 +122,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
         required=["location"],
     )
-    search_tool = {"google_search": {}}
-    tools = ToolsSchema(
-        standard_tools=[weather_function, restaurant_function],
-        custom_tools={AdapterType.GEMINI: [search_tool]},
-    )
+    # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
+    # you cannot use the "google_search" tool alongside other tools.
+    # See https://github.com/googleapis/python-genai/issues/941.
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
-    llm = GeminiMultimodalLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+    llm = GeminiLiveVertexLLMService(
+        credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
+        project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
+        location=os.getenv("GOOGLE_CLOUD_LOCATION"),
         system_instruction=system_instruction,
+        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         tools=tools,
     )
 

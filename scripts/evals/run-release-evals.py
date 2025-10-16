@@ -136,6 +136,7 @@ TESTS_14 = [
     ("14r-function-calling-aws.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14v-function-calling-openai.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14w-function-calling-mistral.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
+    ("14x-function-calling-openpipe.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     # Currently not working.
     # ("14c-function-calling-together.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     # ("14l-function-calling-deepseek.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
@@ -147,7 +148,10 @@ TESTS_15 = [
 ]
 
 TESTS_19 = [
+    ("19-openai-realtime.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("19-openai-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
+    # OpenAI Realtime not released on Azure yet
+    # ("19a-azure-realtime.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("19a-azure-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("19b-openai-realtime-text.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("19b-openai-realtime-beta-text.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
@@ -160,18 +164,18 @@ TESTS_21 = [
 TESTS_26 = [
     ("26-gemini-multimodal-live.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     (
-        "26a-gemini-multimodal-live-transcription.py",
+        "26a-gemini-live-transcription.py",
         PROMPT_SIMPLE_MATH,
         EVAL_SIMPLE_MATH,
         BOT_SPEAKS_FIRST,
     ),
     (
-        "26b-gemini-multimodal-live-function-calling.py",
+        "26b-gemini-live-function-calling.py",
         PROMPT_WEATHER,
         EVAL_WEATHER,
         BOT_SPEAKS_FIRST,
     ),
-    ("26c-gemini-multimodal-live-video.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("26c-gemini-live-video.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     (
         "26e-gemini-multimodal-google-search.py",
         PROMPT_ONLINE_SEARCH,
@@ -179,7 +183,13 @@ TESTS_26 = [
         BOT_SPEAKS_FIRST,
     ),
     # Currently not working.
-    # ("26d-gemini-multimodal-live-text.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    # ("26d-gemini-live-text.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    (
+        "26h-gemini-live-vertex-function-calling.py",
+        PROMPT_WEATHER,
+        EVAL_WEATHER,
+        BOT_SPEAKS_FIRST,
+    ),
 ]
 
 TESTS_27 = [
