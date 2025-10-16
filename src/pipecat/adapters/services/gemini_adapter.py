@@ -54,6 +54,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     - Extracting and sanitizing messages from the LLM context for logging with Gemini.
     """
 
+    @property
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for Google."""
+        return "google"
+
     def get_llm_invocation_params(self, context: LLMContext) -> GeminiLLMInvocationParams:
         """Get Gemini-specific LLM invocation parameters from a universal LLM context.
 
@@ -63,7 +68,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         Returns:
             Dictionary of parameters for Gemini's API.
         """
-        messages = self._from_universal_context_messages(self._get_messages(context))
+        messages = self._from_universal_context_messages(self.get_messages(context))
         return {
             "system_instruction": messages.system_instruction,
             "messages": messages.messages,
@@ -82,9 +87,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             Includes both converted standard tools and any custom Gemini-specific tools.
         """
         functions_schema = tools_schema.standard_tools
-        formatted_standard_tools = [
-            {"function_declarations": [func.to_default_dict() for func in functions_schema]}
-        ]
+        formatted_standard_tools = (
+            [{"function_declarations": [func.to_default_dict() for func in functions_schema]}]
+            if functions_schema
+            else []
+        )
         custom_gemini_tools = []
         if tools_schema.custom_tools:
             custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
@@ -103,7 +110,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             List of messages in a format ready for logging about Gemini.
         """
         # Get messages in Gemini's format
-        messages = self._from_universal_context_messages(self._get_messages(context)).messages
+        messages = self._from_universal_context_messages(self.get_messages(context)).messages
 
         # Sanitize messages for logging
         messages_for_logging = []
@@ -118,9 +125,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 logger.debug(f"Error: {e}")
             messages_for_logging.append(obj)
         return messages_for_logging
-
-    def _get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
-        return context.get_messages("google")
 
     @dataclass
     class ConvertedMessages:

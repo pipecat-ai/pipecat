@@ -4,20 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Gated OpenAI LLM context aggregator for controlled message flow."""
+"""Gated LLM context aggregator for controlled message flow."""
 
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, LLMContextFrame, StartFrame
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.sync.base_notifier import BaseNotifier
 
 
-class GatedOpenAILLMContextAggregator(FrameProcessor):
-    """Aggregator that gates OpenAI LLM context frames until notified.
+class GatedLLMContextAggregator(FrameProcessor):
+    """Aggregator that gates LLM context frames until notified.
 
-    This aggregator captures OpenAI LLM context frames and holds them until
-    a notifier signals that they can be released. This is useful for controlling
-    the flow of context frames based on external conditions or timing.
+    This aggregator captures LLM context frames and holds them until a notifier
+    signals that they can be released. This is useful for controlling the flow
+    of context frames based on external conditions or timing.
     """
 
     def __init__(self, *, notifier: BaseNotifier, start_open: bool = False, **kwargs):
@@ -35,7 +35,7 @@ class GatedOpenAILLMContextAggregator(FrameProcessor):
         self._gate_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process incoming frames, gating OpenAI LLM context frames.
+        """Process incoming frames, gating LLM context frames.
 
         Args:
             frame: The frame to process.
@@ -49,7 +49,7 @@ class GatedOpenAILLMContextAggregator(FrameProcessor):
         if isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
             await self.push_frame(frame)
-        elif isinstance(frame, OpenAILLMContextFrame):
+        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
             if self._start_open:
                 self._start_open = False
                 await self.push_frame(frame, direction)

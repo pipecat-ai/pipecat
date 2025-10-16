@@ -11,6 +11,7 @@ import unittest
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
@@ -196,10 +197,10 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             nonlocal start_received
             start_received = True
 
-        @task.event_handler("on_pipeline_ended")
-        async def on_pipeline_ended(task, frame: EndFrame):
+        @task.event_handler("on_pipeline_finished")
+        async def on_pipeline_finished(task, frame: Frame):
             nonlocal end_received
-            end_received = True
+            end_received = isinstance(frame, EndFrame)
 
         await task.queue_frame(EndFrame())
         await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
@@ -214,10 +215,10 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline)
 
-        @task.event_handler("on_pipeline_stopped")
-        async def on_pipeline_ended(task, frame: StopFrame):
+        @task.event_handler("on_pipeline_finished")
+        async def on_pipeline_finished(task, frame: Frame):
             nonlocal stop_received
-            stop_received = True
+            stop_received = isinstance(frame, StopFrame)
 
         await task.queue_frame(StopFrame())
         await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
@@ -441,12 +442,43 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         async def on_pipeline_started(task: PipelineTask, frame: StartFrame):
             await task.cancel()
 
-        @task.event_handler("on_pipeline_cancelled")
-        async def on_pipeline_cancelled(task: PipelineTask, frame: CancelFrame):
+        @task.event_handler("on_pipeline_finished")
+        async def on_pipeline_finished(task: PipelineTask, frame: Frame):
             nonlocal cancelled
-            cancelled = True
+            cancelled = isinstance(frame, CancelFrame)
 
         try:
             await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         except asyncio.CancelledError:
             assert cancelled
+
+    async def test_task_error(self):
+        class ErrorProcessor(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, TextFrame):
+                    await self.push_error(ErrorFrame("Boo!"))
+
+                await self.push_frame(frame, direction)
+
+        error_received = False
+
+        pipeline = Pipeline([ErrorProcessor()])
+        task = PipelineTask(pipeline)
+
+        @task.event_handler("on_pipeline_error")
+        async def on_pipeline_error(task: PipelineTask, frame: ErrorFrame):
+            nonlocal error_received
+            error_received = True
+            await task.cancel()
+
+        await task.queue_frame(TextFrame(text="Hello from Pipecat!"))
+
+        try:
+            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        except asyncio.CancelledError:
+            assert error_received

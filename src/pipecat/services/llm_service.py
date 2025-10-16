@@ -44,7 +44,7 @@ from pipecat.frames.frames import (
     StartFrame,
     UserImageRequestFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -194,6 +194,17 @@ class LLMService(AIService):
             The adapter instance used for LLM communication.
         """
         return self._adapter
+
+    def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
+        """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.
+
+        Args:
+            message: The message content.
+
+        Returns:
+            A LLMSpecificMessage instance.
+        """
+        return self.get_llm_adapter().create_llm_specific_message(message)
 
     async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.

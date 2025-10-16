@@ -532,9 +532,7 @@ class AWSTranscribeSTTService(STTService):
                     logger.debug(f"{self} Other message type received: {headers}")
                     logger.debug(f"{self} Payload: {payload}")
             except websockets.exceptions.ConnectionClosed as e:
-                logger.error(
-                    f"{self} WebSocket connection closed in receive loop with code {e.code}: {e.reason}"
-                )
+                logger.error(f"{self} WebSocket connection closed in receive loop: {e}")
                 break
             except Exception as e:
                 logger.error(f"{self} Unexpected error in receive loop: {e}")

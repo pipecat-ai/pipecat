@@ -5,25 +5,25 @@ on:
     inputs:
       gitref:
         type: string
-        description: "what git tag to build (e.g. v0.0.74)"
+        description: 'what git tag to build (e.g. v0.0.74)'
         required: true
 
 jobs:
   build:
-    name: "Build and upload wheels"
+    name: 'Build and upload wheels'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.gitref }}
-      
+
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
-          version: "latest"
+          version: 'latest'
       - name: Set up Python
-        run: uv python install 3.10
+        run: uv python install 3.12
       - name: Install development dependencies
         run: uv sync --group dev
       - name: Build project
@@ -35,9 +35,9 @@ jobs:
           path: ./dist
 
   publish-to-pypi:
-    name: "Publish to PyPI"
+    name: 'Publish to PyPI'
     runs-on: ubuntu-latest
-    needs: [ build ]
+    needs: [build]
     environment:
       name: pypi
       url: https://pypi.org/p/pipecat-ai
@@ -56,12 +56,12 @@ jobs:
           print-hash: true
 
   publish-to-test-pypi:
-    name: "Publish to Test PyPI"
+    name: 'Publish to Test PyPI'
     runs-on: ubuntu-latest
-    needs: [ build ]
+    needs: [build]
     environment:
       name: testpypi
-      url: https://pypi.org/p/pipecat-ai
+      url: https://test.pypi.org/p/pipecat-ai
     permissions:
       id-token: write
     steps:
@@ -70,7 +70,7 @@ jobs:
         with:
           name: wheels
           path: ./dist
-      - name: Publish to PyPI
+      - name: Publish to Test PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           verbose: true

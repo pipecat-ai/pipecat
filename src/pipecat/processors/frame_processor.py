@@ -141,6 +141,12 @@ class FrameProcessor(BaseObject):
     task. System frames are also processed in a separate task which guarantees
     frame priority.
 
+    Event handlers available:
+
+    - on_before_process_frame: Called before a frame is processed
+    - on_after_process_frame: Called after a frame is processed
+    - on_before_push_frame: Called before a frame is pushed
+    - on_after_push_frame: Called after a frame is pushed
     """
 
     def __init__(
@@ -220,8 +226,19 @@ class FrameProcessor(BaseObject):
         self.__process_event: Optional[asyncio.Event] = None
         self.__process_frame_task: Optional[asyncio.Task] = None
 
+        # To interrupt a pipeline, we push an `InterruptionTaskFrame` upstream.
+        # Then we wait for the corresponding `InterruptionFrame` to travel from
+        # the start of the pipeline back to the processor that sent the
+        # `InterruptionTaskFrame`. This wait is handled using the following
+        # event.
         self._wait_for_interruption = False
         self._wait_interruption_event = asyncio.Event()
+
+        # Frame processor events.
+        self._register_event_handler("on_before_process_frame", sync=True)
+        self._register_event_handler("on_after_process_frame", sync=True)
+        self._register_event_handler("on_before_push_frame", sync=True)
+        self._register_event_handler("on_after_push_frame", sync=True)
 
     @property
     def id(self) -> int:
@@ -438,8 +455,12 @@ class FrameProcessor(BaseObject):
             name = f"{self}::{coroutine.cr_code.co_name}"
         return self.task_manager.create_task(coroutine, name)
 
-    async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
+    async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = 1.0):
         """Cancel a task managed by this processor.
+
+        A default timeout if 1 second is used in order to avoid potential
+        freezes caused by certain libraries that swallow
+        `asyncio.CancelledError`.
 
         Args:
             task: The task to cancel.
@@ -563,11 +584,15 @@ class FrameProcessor(BaseObject):
         """Pause processing of queued frames."""
         logger.trace(f"{self}: pausing frame processing")
         self.__should_block_frames = True
+        if self.__process_event:
+            self.__process_event.clear()
 
     async def pause_processing_system_frames(self):
         """Pause processing of queued system frames."""
         logger.trace(f"{self}: pausing system frame processing")
         self.__should_block_system_frames = True
+        if self.__input_event:
+            self.__input_event.clear()
 
     async def resume_processing_frames(self):
         """Resume processing of queued frames."""
@@ -630,9 +655,15 @@ class FrameProcessor(BaseObject):
         if not self._check_started(frame):
             return
 
+        await self._call_event_handler("on_before_push_frame", frame)
+
         await self.__internal_push_frame(frame, direction)
 
-        if isinstance(frame, InterruptionFrame):
+        await self._call_event_handler("on_after_push_frame", frame)
+
+        # If we are waiting for an interruption and we get an interruption, then
+        # we can unblock `push_interruption_task_frame_and_wait()`.
+        if self._wait_for_interruption and isinstance(frame, InterruptionFrame):
             self._wait_interruption_event.set()
 
     async def push_interruption_task_frame_and_wait(self):
@@ -825,11 +856,15 @@ class FrameProcessor(BaseObject):
         self, frame: Frame, direction: FrameDirection, callback: Optional[FrameCallback]
     ):
         try:
+            await self._call_event_handler("on_before_process_frame", frame)
+
             # Process the frame.
             await self.process_frame(frame, direction)
             # If this frame has an associated callback, call it now.
             if callback:
                 await callback(self, frame, direction)
+
+            await self._call_event_handler("on_after_process_frame", frame)
         except Exception as e:
             logger.exception(f"{self}: error processing frame: {e}")
             await self.push_error(ErrorFrame(str(e)))
@@ -842,14 +877,14 @@ class FrameProcessor(BaseObject):
 
         """
         while True:
+            (frame, direction, callback) = await self.__input_queue.get()
+
             if self.__should_block_system_frames and self.__input_event:
                 logger.trace(f"{self}: system frame processing paused")
                 await self.__input_event.wait()
                 self.__input_event.clear()
                 self.__should_block_system_frames = False
                 logger.trace(f"{self}: system frame processing resumed")
-
-            (frame, direction, callback) = await self.__input_queue.get()
 
             if isinstance(frame, SystemFrame):
                 await self.__process_frame(frame, direction, callback)
@@ -865,14 +900,14 @@ class FrameProcessor(BaseObject):
     async def __process_frame_task_handler(self):
         """Handle non-system frames from the process queue."""
         while True:
+            (frame, direction, callback) = await self.__process_queue.get()
+
             if self.__should_block_frames and self.__process_event:
                 logger.trace(f"{self}: frame processing paused")
                 await self.__process_event.wait()
                 self.__process_event.clear()
                 self.__should_block_frames = False
                 logger.trace(f"{self}: frame processing resumed")
-
-            (frame, direction, callback) = await self.__process_queue.get()
 
             await self.__process_frame(frame, direction, callback)
 

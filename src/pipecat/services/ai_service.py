@@ -97,9 +97,7 @@ class AIService(FrameProcessor):
         pass
 
     async def _update_settings(self, settings: Mapping[str, Any]):
-        from pipecat.services.openai_realtime_beta.events import (
-            SessionProperties,
-        )
+        from pipecat.services.openai.realtime.events import SessionProperties
 
         for key, value in settings.items():
             logger.debug("Update request for:", key, value)
@@ -111,9 +109,7 @@ class AIService(FrameProcessor):
                 logger.debug("Attempting to update", key, value)
 
                 try:
-                    from pipecat.services.openai_realtime_beta.events import (
-                        TurnDetection,
-                    )
+                    from pipecat.services.openai.realtime.events import TurnDetection
 
                     if isinstance(self._session_properties, SessionProperties):
                         current_properties = self._session_properties

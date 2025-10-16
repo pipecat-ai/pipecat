@@ -11,15 +11,17 @@ machine learning models to determine when a user has finished speaking, going
 beyond simple silence-based detection.
 """
 
+import asyncio
 import time
 from abc import abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, BaseTurnParams, EndOfTurnState
 from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
 
 # Default timing parameters
@@ -29,7 +31,7 @@ MAX_DURATION_SECONDS = 8  # Max allowed segment duration
 USE_ONLY_LAST_VAD_SEGMENT = True
 
 
-class SmartTurnParams(BaseModel):
+class SmartTurnParams(BaseTurnParams):
     """Configuration parameters for smart turn analysis.
 
     Parameters:
@@ -77,6 +79,9 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._speech_triggered = False
         self._silence_ms = 0
         self._speech_start_time = 0
+        # Thread executor that will run the model. We only need one thread per
+        # analyzer because one analyzer just handles one audio stream.
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
     @property
     def speech_triggered(self) -> bool:
@@ -151,7 +156,10 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             Tuple containing the end-of-turn state and optional metrics data
             from the ML model analysis.
         """
-        state, result = await self._process_speech_segment(self._audio_buffer)
+        loop = asyncio.get_running_loop()
+        state, result = await loop.run_in_executor(
+            self._executor, self._process_speech_segment, self._audio_buffer
+        )
         if state == EndOfTurnState.COMPLETE or USE_ONLY_LAST_VAD_SEGMENT:
             self._clear(state)
         logger.debug(f"End of Turn result: {state}")
@@ -169,9 +177,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._speech_start_time = 0
         self._silence_ms = 0
 
-    async def _process_speech_segment(
-        self, audio_buffer
-    ) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    def _process_speech_segment(self, audio_buffer) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
         """Process accumulated audio segment using ML model."""
         state = EndOfTurnState.INCOMPLETE
 
@@ -203,7 +209,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         if len(segment_audio) > 0:
             start_time = time.perf_counter()
             try:
-                result = await self._predict_endpoint(segment_audio)
+                result = self._predict_endpoint(segment_audio)
                 state = (
                     EndOfTurnState.COMPLETE
                     if result["prediction"] == 1
@@ -249,6 +255,6 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         return state, result_data
 
     @abstractmethod
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         """Predict end-of-turn using ML model from audio data."""
         pass

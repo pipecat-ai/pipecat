@@ -25,10 +25,30 @@ except ModuleNotFoundError as e:
 class LivekitFrameSerializer(FrameSerializer):
     """Serializer for converting between Pipecat frames and LiveKit audio frames.
 
+    .. deprecated:: 0.0.90
+
+        This class is deprecated and will be removed in a future version.
+        Please use LiveKitTransport instead, which handles audio streaming
+        and frame conversion natively.
+
     This serializer handles the conversion of Pipecat's OutputAudioRawFrame objects
     to LiveKit AudioFrame objects for transmission, and the reverse conversion
     for received audio data.
     """
+
+    def __init__(self):
+        """Initialize the LiveKit frame serializer."""
+        super().__init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LivekitFrameSerializer is deprecated and will be removed in a future version. "
+                "Please use LiveKitTransport instead, which handles audio streaming natively.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     @property
     def type(self) -> FrameSerializerType:
