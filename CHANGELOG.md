@@ -25,11 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `CartesiaSTTService` now inherits from `WebsocketSTTService`.
 
-- Package upgrades:
+# Package upgrades:
   - `openai` upgraded to support up to 2.x.x.
   - `openpipe` upgraded to support up to 5.x.x.
 
 ### Fixed
+
+- Fixed multiple pipeline task cancellation issues. `asyncio.CancelledError` is
+  now handled properly in `PipelineTask` making it possible to cancel an asyncio
+  task that it's executing a `PipelineRunner` cleanly. Also,
+  `PipelineTask.cancel()` does not block anymore waiting for the `CancelFrame`
+  to reach the end of the pipeline (going back to the behavior in < 0.0.83).
 
 - Fixed an issue in `ElevenLabsTTSService` and `ElevenLabsHttpTTSService` where
   the Flash models would split words, resulting in a space being inserted
