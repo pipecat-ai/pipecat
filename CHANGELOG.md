@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `--whatsapp` flag to runner to better surface WhatsApp transport logs.
+
 - Added `on_connected` and `on_disconnected` events to TTS and STT
   websocket-based services.
 
