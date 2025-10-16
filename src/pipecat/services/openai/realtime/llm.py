@@ -14,7 +14,9 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
+from pipecat.adapters.services.open_ai_realtime_adapter import (
+    OpenAIRealtimeLLMAdapter,
+)
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -41,6 +43,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -59,7 +62,6 @@ from pipecat.utils.tracing.service_decorators import traced_openai_realtime, tra
 from . import events
 from .context import (
     OpenAIRealtimeAssistantContextAggregator,
-    OpenAIRealtimeLLMContext,
     OpenAIRealtimeUserContextAggregator,
 )
 from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
@@ -138,7 +140,17 @@ class OpenAIRealtimeLLMService(LLMService):
         self._send_transcription_frames = send_transcription_frames
         self._websocket = None
         self._receive_task = None
-        self._context = None
+        # "Last received context" is only needed while we still support
+        # OpenAILLMContextFrame. The "last received context" is the context received
+        # in the most recent OpenAILLMContextFrame or LLMContextFrame, *before*
+        # it's converted to an LLMContext if needed. Storing the "last received
+        # context" lets us determine whether the context has changed. (We can't
+        # compare contexts after conversion because conversion creates a new
+        # object.)
+        self._context: LLMContext = None
+        self._last_received_context: OpenAILLMContext | LLMContext = None
+
+        self._llm_needs_conversation_setup = True
 
         self._disconnecting = False
         self._api_session_ready = False
@@ -347,22 +359,22 @@ class OpenAIRealtimeLLMService(LLMService):
 
         if isinstance(frame, TranscriptionFrame):
             pass
-        elif isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAIRealtimeLLMContext = OpenAIRealtimeLLMContext.upgrade_to_realtime(
+        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+            context = (
                 frame.context
+                if isinstance(frame, LLMContextFrame)
+                else LLMContext.from_openai_context(frame.context)
             )
             if not self._context:
+                self._last_received_context = frame.context
                 self._context = context
-            elif frame.context is not self._context:
+            elif frame.context is not self._last_received_context:
                 # If the context has changed, reset the conversation
+                self._last_received_context = frame.context
                 self._context = context
                 await self.reset_conversation()
             # Run the LLM at next opportunity
             await self._create_response()
-        elif isinstance(frame, LLMContextFrame):
-            raise NotImplementedError(
-                "Universal LLMContext is not yet supported for OpenAI Realtime."
-            )
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -377,6 +389,7 @@ class OpenAIRealtimeLLMService(LLMService):
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
         elif isinstance(frame, RealtimeMessagesUpdateFrame):
+            # TODO: we don't need RealtimeMessagesUpdateFrame, I think...?
             self._context = frame.context
         elif isinstance(frame, LLMUpdateSettingsFrame):
             self._session_properties = events.SessionProperties(**frame.settings)
@@ -459,13 +472,20 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _update_settings(self):
         settings = self._session_properties
-        # tools given in the context override the tools in the session properties
-        if self._context and self._context.tools:
-            settings.tools = self._context.tools
-        # instructions in the context come from an initial "system" message in the
-        # messages list, and override instructions in the session properties
-        if self._context and self._context._session_instructions:
-            settings.instructions = self._context._session_instructions
+
+        if self._context:
+            adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
+            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+
+            # tools given in the context override the tools in the session properties
+            if llm_invocation_params["tools"]:
+                settings.tools = llm_invocation_params["tools"]
+
+            # instructions in the context come from an initial "system" message in the
+            # messages list, and override instructions in the session properties
+            if llm_invocation_params["system_instruction"]:
+                settings.instructions = llm_invocation_params["system_instruction"]
+
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 
     #
@@ -760,9 +780,7 @@ class OpenAIRealtimeLLMService(LLMService):
         """
         logger.debug("Resetting conversation")
         await self._disconnect()
-        if self._context:
-            self._context.llm_needs_settings_update = True
-            self._context.llm_needs_initial_messages = True
+        self._llm_needs_conversation_setup = True
         await self._connect()
 
     @traced_openai_realtime(operation="llm_request")
@@ -771,19 +789,25 @@ class OpenAIRealtimeLLMService(LLMService):
             self._run_llm_when_api_session_ready = True
             return
 
-        if self._context.llm_needs_initial_messages:
-            messages = self._context.get_messages_for_initializing_history()
+        adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
+
+        # Configure the LLM for this session if needed
+        if self._llm_needs_conversation_setup:
+            # Send initial messages
+            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+            messages = llm_invocation_params["messages"]
             for item in messages:
                 evt = events.ConversationItemCreateEvent(item=item)
                 self._messages_added_manually[evt.item.id] = True
                 await self.send_client_event(evt)
-            self._context.llm_needs_initial_messages = False
 
-        if self._context.llm_needs_settings_update:
+            # Send new settings if needed
             await self._update_settings()
-            self._context.llm_needs_settings_update = False
 
-        logger.debug(f"Creating response: {self._context.get_messages_for_logging()}")
+            # We're done configuring the LLM for this session
+            self._llm_needs_conversation_setup = False
+
+        logger.debug(f"Creating response: {adapter.get_messages_for_logging(self._context)}")
 
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()
