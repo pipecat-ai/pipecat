@@ -213,7 +213,7 @@ class AWSNovaSonicLLMService(LLMService):
             tools: Available tools/functions for the model to use.
             send_transcription_frames: Whether to emit transcription frames.
 
-                .. deprecated:: 0.0.87
+                .. deprecated:: 0.0.91
                     This parameter is deprecated and will be removed in a future version.
                     Transcription frames are always sent.
 
