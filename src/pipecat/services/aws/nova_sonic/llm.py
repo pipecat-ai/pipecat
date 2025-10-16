@@ -268,7 +268,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._assistant_text_buffer = ""
         self._completed_tool_calls = set()
 
-        file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
+        file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
             self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
 
