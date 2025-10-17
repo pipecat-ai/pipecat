@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
+
+- Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the multilingual model.
+
 - The runner `--folder` argument now supports downloading files from
   subdirectories.
 
