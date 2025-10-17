@@ -620,7 +620,7 @@ class SpeechmaticsSTTService(STTService):
             transcription_config.additional_vocab = [
                 {
                     "content": e.content,
-                    "sounds_like": e.sounds_like,
+                    **({"sounds_like": e.sounds_like} if e.sounds_like else {}),
                 }
                 for e in self._params.additional_vocab
             ]
