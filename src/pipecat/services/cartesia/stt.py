@@ -244,6 +244,7 @@ class CartesiaSTTService(STTService):
             logger.debug(f"Connected to Cartesia")
         except Exception as e:
             logger.error(f"{self}: unable to connect to Cartesia: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
 
     async def _receive_messages(self):
         try:
@@ -270,7 +271,9 @@ class CartesiaSTTService(STTService):
                 await self._on_transcript(data)
 
             elif data["type"] == "error":
-                logger.error(f"Cartesia error: {data.get('message', 'Unknown error')}")
+                error_msg = data.get("message", "Unknown error")
+                logger.error(f"Cartesia error: {error_msg}")
+                await self.push_error(ErrorFrame(error=error_msg, fatal=False))
 
     @traced_stt
     async def _handle_transcription(

@@ -116,4 +116,4 @@ class DeepgramTTSService(TTSService):
 
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
-            yield ErrorFrame(f"Error getting audio: {str(e)}")
+            await self.push_error(ErrorFrame(error=f"Error getting audio: {str(e)}", fatal=False))

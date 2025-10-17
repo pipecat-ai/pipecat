@@ -208,6 +208,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self.push_error(ErrorFrame(error=e, fatal=False))
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -225,6 +226,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
 
     async def _send_close_stream(self) -> None:
         """Sends a CloseStream control message to the Deepgram Flux WebSocket API.

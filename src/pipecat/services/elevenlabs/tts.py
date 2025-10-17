@@ -524,6 +524,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self.push_error(ErrorFrame(error=e, fatal=False))
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -539,6 +540,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
         finally:
             self._started = False
             self._context_id = None
@@ -708,11 +710,13 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
+                await self.push_error(ErrorFrame(error=e, fatal=False))
                 self._started = False
                 return
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
 
 
 class ElevenLabsHttpTTSService(WordTTSService):

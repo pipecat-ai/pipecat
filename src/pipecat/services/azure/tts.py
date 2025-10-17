@@ -362,6 +362,7 @@ class AzureTTSService(AzureBaseTTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
 
 
 class AzureHttpTTSService(AzureBaseTTSService):
