@@ -528,6 +528,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 url, max_size=16 * 1024 * 1024, additional_headers={"xi-api-key": self._api_key}
             )
 
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -550,6 +551,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             self._started = False
             self._context_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
@@ -774,6 +776,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        aggregate_sentences: Optional[bool] = True,
         **kwargs,
     ):
         """Initialize the ElevenLabs HTTP TTS service.
@@ -786,10 +789,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
+            aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
         """
         super().__init__(
-            aggregate_sentences=True,
+            aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
             sample_rate=sample_rate,
@@ -983,6 +987,9 @@ class ElevenLabsHttpTTSService(WordTTSService):
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
 
+        if self._settings["apply_text_normalization"] is not None:
+            payload["apply_text_normalization"] = self._settings["apply_text_normalization"]
+
         language = self._settings["language"]
         if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
             payload["language_code"] = language
@@ -1003,8 +1010,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
         }
         if self._settings["optimize_streaming_latency"] is not None:
             params["optimize_streaming_latency"] = self._settings["optimize_streaming_latency"]
-        if self._settings["apply_text_normalization"] is not None:
-            params["apply_text_normalization"] = self._settings["apply_text_normalization"]
 
         try:
             await self.start_ttfb_metrics()
@@ -1064,6 +1069,14 @@ class ElevenLabsHttpTTSService(WordTTSService):
                     except Exception as e:
                         logger.error(f"Error processing response: {e}", exc_info=True)
                         continue
+
+                # After processing all chunks, emit any remaining partial word
+                # since this is the end of the utterance
+                if self._partial_word:
+                    final_word_time = [(self._partial_word, self._partial_word_start_time)]
+                    await self.add_word_timestamps(final_word_time)
+                    self._partial_word = ""
+                    self._partial_word_start_time = 0.0
 
                 # After processing all chunks, add the total utterance duration
                 # to the cumulative time to ensure next utterance starts after this one

@@ -269,6 +269,9 @@ class PipelineTask(BasePipelineTask):
         # StopFrame) has been received at the end of the pipeline.
         self._pipeline_end_event = asyncio.Event()
 
+        # This event is set when the pipeline truly finishes.
+        self._pipeline_finished_event = asyncio.Event()
+
         # This is the final pipeline. It is composed of a source processor,
         # followed by the user pipeline, and ending with a sink processor. The
         # source allows us to receive and react to upstream frames, and the sink
@@ -401,11 +404,7 @@ class PipelineTask(BasePipelineTask):
         await self.queue_frame(EndFrame())
 
     async def cancel(self):
-        """Immediately stop the running pipeline.
-
-        Cancels all running tasks and stops frame processing without
-        waiting for completion.
-        """
+        """Request the running pipeline to cancel."""
         if not self._finished:
             await self._cancel()
 
@@ -417,51 +416,38 @@ class PipelineTask(BasePipelineTask):
         """
         if self.has_finished():
             return
-        cleanup_pipeline = True
+
+        # Setup processors.
+        await self._setup(params)
+
+        # Create all main tasks and wait for the main push task. This is the
+        # task that pushes frames to the very beginning of our pipeline (i.e. to
+        # our controlled source processor).
+        await self._create_tasks()
+
         try:
-            # Setup processors.
-            await self._setup(params)
-
-            # Create all main tasks and wait of the main push task. This is the
-            # task that pushes frames to the very beginning of our pipeline (our
-            # controlled source processor).
-            push_task = await self._create_tasks()
-            await push_task
-
-            # We have already cleaned up the pipeline inside the task.
-            cleanup_pipeline = False
-
-            # Pipeline has finished nicely.
-            self._finished = True
+            # Wait for pipeline to finish.
+            await self._wait_for_pipeline_finished()
         except asyncio.CancelledError:
-            # Raise exception back to the pipeline runner so it can cancel this
-            # task properly.
+            logger.debug(f"Pipeline task {self} got cancelled from outside...")
+            # We have been cancelled from outside, let's just cancel everything.
+            await self._cancel()
+            # Wait again for pipeline to finish. This time we have really
+            # cancelled, so it should really finish.
+            await self._wait_for_pipeline_finished()
+            # Re-raise in case there's more cleanup to do.
             raise
         finally:
             # We can reach this point for different reasons:
             #
-            # 1. The task has finished properly (e.g. `EndFrame`).
-            # 2. By calling `PipelineTask.cancel()`.
-            # 3. By asyncio task cancellation.
-            #
-            # Case (1) will execute the code below without issues because
-            # `self._finished` is true.
-            #
-            # Case (2) will execute the code below without issues because
-            # `self._cancelled` is true.
-            #
-            # Case (3) will raise the exception above (because we are cancelling
-            # the asyncio task). This will be then captured by the
-            # `PipelineRunner` which will call `PipelineTask.cancel()` and
-            # therefore becoming case (2).
-            if self._finished or self._cancelled:
-                logger.debug(f"Pipeline task {self} is finishing cleanup...")
-                await self._cancel_tasks()
-                await self._cleanup(cleanup_pipeline)
-                if self._check_dangling_tasks:
-                    self._print_dangling_tasks()
-                self._finished = True
-                logger.debug(f"Pipeline task {self} has finished")
+            # 1. The pipeline task has finished (try case).
+            # 2. By an asyncio task cancellation (except case).
+            logger.debug(f"Pipeline task {self} is finishing...")
+            await self._cancel_tasks()
+            if self._check_dangling_tasks:
+                self._print_dangling_tasks()
+            self._finished = True
+            logger.debug(f"Pipeline task {self} has finished")
 
     async def queue_frame(self, frame: Frame):
         """Queue a single frame to be pushed down the pipeline.
@@ -489,19 +475,7 @@ class PipelineTask(BasePipelineTask):
         if not self._cancelled:
             logger.debug(f"Cancelling pipeline task {self}")
             self._cancelled = True
-            cancel_frame = CancelFrame()
-            # Make sure everything is cleaned up downstream. This is sent
-            # out-of-band from the main streaming task which is what we want since
-            # we want to cancel right away.
-            await self._pipeline.queue_frame(cancel_frame)
-            # Wait for CancelFrame to make it through the pipeline.
-            await self._wait_for_pipeline_end(cancel_frame)
-            # Only cancel the push task, we don't want to be able to process any
-            # other frame after cancel. Everything else will be cancelled in
-            # run().
-            if self._process_push_task:
-                await self._task_manager.cancel_task(self._process_push_task)
-                self._process_push_task = None
+            await self.queue_frame(CancelFrame())
 
     async def _create_tasks(self):
         """Create and start all pipeline processing tasks."""
@@ -602,6 +576,17 @@ class PipelineTask(BasePipelineTask):
             logger.debug(f"{self}: {frame} reached the end of the pipeline, pipeline is closing.")
 
         self._pipeline_end_event.clear()
+
+        # We are really done.
+        self._pipeline_finished_event.set()
+
+    async def _wait_for_pipeline_finished(self):
+        await self._pipeline_finished_event.wait()
+        self._pipeline_finished_event.clear()
+        # Make sure we wait for the main task to complete.
+        if self._process_push_task:
+            await self._process_push_task
+            self._process_push_task = None
 
     async def _setup(self, params: PipelineTaskParams):
         """Set up the pipeline task and all processors."""
