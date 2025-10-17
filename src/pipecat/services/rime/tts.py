@@ -260,6 +260,7 @@ class RimeTTSService(AudioContextWordTTSService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self.push_error(ErrorFrame(error=e, fatal=False))
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -271,6 +272,7 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
         finally:
             self._context_id = None
             self._websocket = None
@@ -410,12 +412,14 @@ class RimeTTSService(AudioContextWordTTSService):
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
+                await self.push_error(ErrorFrame(error=e, fatal=False))
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
 
 
 class RimeHttpTTSService(TTSService):
@@ -565,7 +569,7 @@ class RimeHttpTTSService(TTSService):
 
         except Exception as e:
             logger.exception(f"Error generating TTS: {e}")
-            yield ErrorFrame(error=f"Rime TTS error: {str(e)}")
+            await self.push_error(ErrorFrame(error=f"Rime TTS error: {str(e)}", fatal=False))
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

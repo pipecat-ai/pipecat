@@ -207,6 +207,7 @@ class AssemblyAISTTService(STTService):
         except Exception as e:
             logger.error(f"Failed to connect to AssemblyAI: {e}")
             self._connected = False
+            await self.push_error(ErrorFrame(error=e, fatal=False))
             raise
 
     async def _disconnect(self):
@@ -240,6 +241,7 @@ class AssemblyAISTTService(STTService):
 
         except Exception as e:
             logger.error(f"Error during disconnect: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
 
         finally:
             self._websocket = None

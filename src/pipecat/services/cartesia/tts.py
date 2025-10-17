@@ -352,6 +352,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self.push_error(ErrorFrame(error=e, fatal=False))
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -461,12 +462,14 @@ class CartesiaTTSService(AudioContextWordTTSService):
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
+                await self.push_error(ErrorFrame(error=e, fatal=False))
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=e, fatal=False))
 
 
 class CartesiaHttpTTSService(TTSService):
