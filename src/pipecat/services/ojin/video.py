@@ -1,9 +1,9 @@
 import asyncio
 import math
 import os
-import time
-import threading
 import queue
+import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -80,7 +80,7 @@ def accurate_sleep(duration_s: float):
     mean = 5 * millisecond
     count = 1
     m2 = 0.0
-    
+
     while to_sleep > estimate:
         start = time.perf_counter()
         time.sleep(1 * millisecond)
@@ -88,13 +88,13 @@ def accurate_sleep(duration_s: float):
         to_sleep -= observed
 
         count += 1
-        
+
         delta = observed - mean
         mean += delta / count
         m2 += delta * (observed - mean)
         stddev = math.sqrt(m2 / (count - 1))
         estimate = mean + stddev
-        
+
     # NOTE(mouad): spin-lock
     start = time.perf_counter()
     while to_sleep > time.perf_counter() - start:
@@ -231,10 +231,12 @@ class AnimationKeyframe:
     image: bytes
     is_final_frame: bool
 
+
 @dataclass
 class Audio_Input:
     frame: OutputAudioRawFrame
     duration: float
+
 
 class OjinPersonaService(FrameProcessor):
     """Ojin Persona integration for Pipecat.
@@ -286,7 +288,7 @@ class OjinPersonaService(FrameProcessor):
         self.pedning_audio_mutex: threading.Lock = threading.Lock()
         self.pending_audio_to_play = bytearray()
         self.extra_frames_lat = settings.extra_frames_lat
-        
+
         self.audio_queue: queue.Queue[Audio_Input] = queue.Queue()
         self.event_loop = asyncio.get_event_loop()
         self.should_stop_updated_loop = threading.Event()
@@ -638,11 +640,13 @@ class OjinPersonaService(FrameProcessor):
             self._interaction = new_interaction or OjinPersonaInteraction()
             self._interaction.set_state(InteractionState.ACTIVE)
             assert self._client is not None
-            start_generation_frame_index = self.last_queued_frame_index if self.last_queued_frame_index > self.last_played_frame_index else self.current_frame_index
-            start_generation_frame_index += self.extra_frames_lat
-            logger.info(
-                f"Starting interaction at frame index: {start_generation_frame_index}"
+            start_generation_frame_index = (
+                self.last_queued_frame_index
+                if self.last_queued_frame_index > self.last_played_frame_index
+                else self.current_frame_index
             )
+            start_generation_frame_index += self.extra_frames_lat
+            logger.info(f"Starting interaction at frame index: {start_generation_frame_index}")
             interaction_id = await self._client.start_interaction(
                 params={
                     "client_frame_index": start_generation_frame_index,
@@ -743,12 +747,22 @@ class OjinPersonaService(FrameProcessor):
         return self.idle_frames[mirror_frame_idx]
 
     def get_next_pending_frame_and_audio(self) -> tuple[AnimationKeyframe, bytes]:
+        frame = self.pending_speech_frames.get()
+
+        if frame.is_final_frame:
+            with self.pedning_audio_mutex:
+                audio = self.pending_audio_to_play.copy()
+                self.pending_audio_to_play.clear()
+            return frame, audio
+
         frame_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
-        frame = self.pending_speech_frames.get()
+
         with self.pedning_audio_mutex:
             audio = self.pending_audio_to_play[:audio_bytes_length_for_one_frame]
-            self.pending_audio_to_play = self.pending_audio_to_play[audio_bytes_length_for_one_frame:]
+            self.pending_audio_to_play = self.pending_audio_to_play[
+                audio_bytes_length_for_one_frame:
+            ]
         return frame, audio
 
     def update_loop_worker(self):
@@ -766,8 +780,11 @@ class OjinPersonaService(FrameProcessor):
                 accurate_sleep(max(0, waiting_time))
 
             audio_to_play = silence_audio_for_one_frame
-            self.current_frame_index = int((time.perf_counter() - start_time)* self.fps)
-            if not self.pending_speech_frames.empty() and self.pending_speech_frames.queue[0].frame_idx <= self.current_frame_index:
+            self.current_frame_index = int((time.perf_counter() - start_time) * self.fps)
+            if (
+                not self.pending_speech_frames.empty()
+                and self.pending_speech_frames.queue[0].frame_idx <= self.current_frame_index
+            ):
                 animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
                 if animation_frame.frame_idx < self.current_frame_index:
                     logger.debug(f"frame missed: {animation_frame.frame_idx}")
@@ -801,7 +818,7 @@ class OjinPersonaService(FrameProcessor):
             asyncio.run_coroutine_threadsafe(self.push_frame(image_frame), self.event_loop)
             asyncio.run_coroutine_threadsafe(self.push_frame(audio_frame), self.event_loop)
 
-        
+
 def mirror_index(index: int, size: int, period: int = 2):
     """Calculate a mirrored index for creating a ping-pong animation effect.
 
