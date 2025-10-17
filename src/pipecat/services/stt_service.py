@@ -35,6 +35,25 @@ class STTService(AIService):
     Provides common functionality for STT services including audio passthrough,
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
+
+    Event handlers:
+        on_connected: Called when connected to the STT service.
+        on_connected: Called when disconnected from the STT service.
+        on_connection_error: Called when a connection to the STT service error occurs.
+
+    Example::
+
+        @stt.event_handler("on_connected")
+        async def on_connected(stt: STTService):
+            logger.debug(f"STT connected")
+
+        @stt.event_handler("on_disconnected")
+        async def on_disconnected(stt: STTService):
+            logger.debug(f"STT disconnected")
+
+        @stt.event_handler("on_connection_error")
+        async def on_connection_error(stt: STTService, error: str):
+            logger.error(f"STT connection error: {error}")
     """
 
     def __init__(
@@ -61,6 +80,10 @@ class STTService(AIService):
         self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
+
+        self._register_event_handler("on_connected")
+        self._register_event_handler("on_disconnected")
+        self._register_event_handler("on_connection_error")
 
     @property
     def is_muted(self) -> bool:
@@ -292,15 +315,6 @@ class WebsocketSTTService(STTService, WebsocketService):
 
     Combines STT functionality with websocket connectivity, providing automatic
     error handling and reconnection capabilities.
-
-    Event handlers:
-        on_connection_error: Called when a websocket connection error occurs.
-
-    Example::
-
-        @stt.event_handler("on_connection_error")
-        async def on_connection_error(stt: STTService, error: str):
-            logger.error(f"STT connection error: {error}")
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -312,7 +326,6 @@ class WebsocketSTTService(STTService, WebsocketService):
         """
         STTService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        self._register_event_handler("on_connection_error")
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)

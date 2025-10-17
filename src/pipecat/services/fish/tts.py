@@ -225,6 +225,8 @@ class FishAudioTTSService(InterruptibleTTSService):
             start_message = {"event": "start", "request": {"text": "", **self._settings}}
             await self._websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"Fish Audio initialization error: {e}")
             self._websocket = None
@@ -245,6 +247,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             self._request_id = None
             self._started = False
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def flush_audio(self):
         """Flush any buffered audio by sending a flush event to Fish Audio."""
