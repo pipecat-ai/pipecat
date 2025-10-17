@@ -410,6 +410,13 @@ class BaseOutputTransport(FrameProcessor):
 
             # Indicates if the bot is currently speaking.
             self._bot_speaking = False
+            # Last time a BotSpeakingFrame was pushed.
+            self._bot_speaking_frame_time = 0
+            # How often a BotSpeakingFrame should be pushed (value should be
+            # lower than the audio chunks).
+            self._bot_speaking_frame_period = 0.2
+            # Last time the bot actually spoke.
+            self._bot_speech_last_time = 0
 
             self._audio_task: Optional[asyncio.Task] = None
             self._video_task: Optional[asyncio.Task] = None
@@ -601,39 +608,71 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _bot_started_speaking(self):
             """Handle bot started speaking event."""
-            if not self._bot_speaking:
-                logger.debug(
-                    f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
-                )
+            if self._bot_speaking:
+                return
 
-                downstream_frame = BotStartedSpeakingFrame()
-                downstream_frame.transport_destination = self._destination
-                upstream_frame = BotStartedSpeakingFrame()
-                upstream_frame.transport_destination = self._destination
-                await self._transport.push_frame(downstream_frame)
-                await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
+            logger.debug(
+                f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
+            )
 
-                self._bot_speaking = True
+            downstream_frame = BotStartedSpeakingFrame()
+            downstream_frame.transport_destination = self._destination
+            upstream_frame = BotStartedSpeakingFrame()
+            upstream_frame.transport_destination = self._destination
+            await self._transport.push_frame(downstream_frame)
+            await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
+
+            self._bot_speaking = True
 
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
-            if self._bot_speaking:
-                logger.debug(
-                    f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
-                )
+            if not self._bot_speaking:
+                return
 
-                downstream_frame = BotStoppedSpeakingFrame()
-                downstream_frame.transport_destination = self._destination
-                upstream_frame = BotStoppedSpeakingFrame()
-                upstream_frame.transport_destination = self._destination
-                await self._transport.push_frame(downstream_frame)
-                await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
+            logger.debug(
+                f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
+            )
 
-                self._bot_speaking = False
+            downstream_frame = BotStoppedSpeakingFrame()
+            downstream_frame.transport_destination = self._destination
+            upstream_frame = BotStoppedSpeakingFrame()
+            upstream_frame.transport_destination = self._destination
+            await self._transport.push_frame(downstream_frame)
+            await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
-                # Clean audio buffer (there could be tiny left overs if not multiple
-                # to our output chunk size).
-                self._audio_buffer = bytearray()
+            self._bot_speaking = False
+
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
+
+        async def _bot_currently_speaking(self):
+            """Handle bot speaking event."""
+            await self._bot_started_speaking()
+
+            diff_time = time.time() - self._bot_speaking_frame_time
+            if diff_time >= self._bot_speaking_frame_period:
+                await self._transport.push_frame(BotSpeakingFrame())
+                await self._transport.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                self._bot_speaking_frame_time = time.time()
+
+            self._bot_speech_last_time = time.time()
+
+        async def _maybe_bot_currently_speaking(self, frame: SpeechOutputAudioRawFrame):
+            if not is_silence(frame.audio):
+                await self._bot_currently_speaking()
+            else:
+                silence_duration = time.time() - self._bot_speech_last_time
+                if silence_duration > BOT_VAD_STOP_SECS:
+                    await self._bot_stopped_speaking()
+
+        async def _handle_bot_speech(self, frame: Frame):
+            # TTS case.
+            if isinstance(frame, TTSAudioRawFrame):
+                await self._bot_currently_speaking()
+            # Speech stream case.
+            elif isinstance(frame, SpeechOutputAudioRawFrame):
+                await self._maybe_bot_currently_speaking(frame)
 
         async def _handle_frame(self, frame: Frame):
             """Handle various frame types with appropriate processing.
@@ -641,7 +680,9 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The frame to handle.
             """
-            if isinstance(frame, OutputImageRawFrame):
+            if isinstance(frame, OutputAudioRawFrame):
+                await self._handle_bot_speech(frame)
+            elif isinstance(frame, OutputImageRawFrame):
                 await self._set_video_image(frame)
             elif isinstance(frame, SpriteFrame):
                 await self._set_video_images(frame.images)
@@ -705,39 +746,7 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
-            # Push a BotSpeakingFrame every 200ms, we don't really need to push it
-            # at every audio chunk. If the audio chunk is bigger than 200ms, push at
-            # every audio chunk.
-            TOTAL_CHUNK_MS = self._params.audio_out_10ms_chunks * 10
-            BOT_SPEAKING_CHUNK_PERIOD = max(int(200 / TOTAL_CHUNK_MS), 1)
-            bot_speaking_counter = 0
-            speech_last_speaking_time = 0
-
             async for frame in self._next_frame():
-                # Notify the bot started speaking upstream if necessary and that
-                # it's actually speaking.
-                is_speaking = False
-                if isinstance(frame, TTSAudioRawFrame):
-                    is_speaking = True
-                elif isinstance(frame, SpeechOutputAudioRawFrame):
-                    if not is_silence(frame.audio):
-                        is_speaking = True
-                        speech_last_speaking_time = time.time()
-                    else:
-                        silence_duration = time.time() - speech_last_speaking_time
-                        if silence_duration > BOT_VAD_STOP_SECS:
-                            await self._bot_stopped_speaking()
-
-                if is_speaking:
-                    await self._bot_started_speaking()
-                    if bot_speaking_counter % BOT_SPEAKING_CHUNK_PERIOD == 0:
-                        await self._transport.push_frame(BotSpeakingFrame())
-                        await self._transport.push_frame(
-                            BotSpeakingFrame(), FrameDirection.UPSTREAM
-                        )
-                        bot_speaking_counter = 0
-                    bot_speaking_counter += 1
-
                 # No need to push EndFrame, it's pushed from process_frame().
                 if isinstance(frame, EndFrame):
                     break
