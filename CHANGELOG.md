@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `RivaSTTService` where a runtime error occurred due to a
+  mismatch in the _handle_transcription method's signature.
+
 - Fixed multiple pipeline task cancellation issues. `asyncio.CancelledError` is
   now handled properly in `PipelineTask` making it possible to cancel an asyncio
   task that it's executing a `PipelineRunner` cleanly. Also,
