@@ -183,7 +183,7 @@ class AssemblyAISTTService(STTService):
                     params[k] = str(v).lower()
                 else:
                     params[k] = v
-        
+
         if params:
             query_string = urlencode(params)
             return f"{self._api_endpoint_base_url}?{query_string}"
