@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for updating `OpenAITTSService` settings (`instructions` and
+  `speed`) at runtime via `TTSUpdateSettingsFrame`.
+
+- Added `--whatsapp` flag to runner to better surface WhatsApp transport logs.
+
 - Added `on_connected` and `on_disconnected` events to TTS and STT
   websocket-based services.
 
@@ -30,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `openpipe` upgraded to support up to 5.x.x.
 
 ### Fixed
+
+- Fixed multiple pipeline task cancellation issues. `asyncio.CancelledError` is
+  now handled properly in `PipelineTask` making it possible to cancel an asyncio
+  task that it's executing a `PipelineRunner` cleanly. Also,
+  `PipelineTask.cancel()` does not block anymore waiting for the `CancelFrame`
+  to reach the end of the pipeline (going back to the behavior in < 0.0.83).
 
 - Fixed an issue in `ElevenLabsTTSService` and `ElevenLabsHttpTTSService` where
   the Flash models would split words, resulting in a space being inserted

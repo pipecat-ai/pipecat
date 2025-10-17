@@ -70,11 +70,15 @@ class PipelineRunner(BaseObject):
         """
         logger.debug(f"Runner {self} started running {task}")
         self._tasks[task.name] = task
-        params = PipelineTaskParams(loop=self._loop)
+
+        # PipelineTask handles asyncio.CancelledError to shutdown the pipeline
+        # properly and re-raises it in case there's more cleanup to do.
         try:
+            params = PipelineTaskParams(loop=self._loop)
             await task.run(params)
         except asyncio.CancelledError:
-            await self._cancel()
+            pass
+
         del self._tasks[task.name]
 
         # Cleanup base object.

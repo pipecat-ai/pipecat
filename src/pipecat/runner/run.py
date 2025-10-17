@@ -166,6 +166,7 @@ def _create_server_app(
     host: str = "localhost",
     proxy: str,
     esp32_mode: bool = False,
+    whatsapp_enabled: bool = False,
     folder: Optional[str] = None,
 ):
     """Create FastAPI app with transport-specific routes."""
@@ -182,7 +183,8 @@ def _create_server_app(
     # Set up transport-specific routes
     if transport_type == "webrtc":
         _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host, folder=folder)
-        _setup_whatsapp_routes(app)
+        if whatsapp_enabled:
+            _setup_whatsapp_routes(app)
     elif transport_type == "daily":
         _setup_daily_routes(app)
     elif transport_type in TELEPHONY_TRANSPORTS:
@@ -289,6 +291,29 @@ def _add_lifespan_to_app(app: FastAPI, new_lifespan):
 
 def _setup_whatsapp_routes(app: FastAPI):
     """Set up WebRTC-specific routes."""
+    WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
+    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
+
+    if not all(
+        [
+            WHATSAPP_APP_SECRET,
+            WHATSAPP_PHONE_NUMBER_ID,
+            WHATSAPP_TOKEN,
+            WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
+        ]
+    ):
+        logger.error(
+            """Missing required environment variables for WhatsApp transport:
+    WHATSAPP_APP_SECRET
+    WHATSAPP_PHONE_NUMBER_ID
+    WHATSAPP_TOKEN
+    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN
+            """
+        )
+        return
+
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
@@ -300,24 +325,7 @@ def _setup_whatsapp_routes(app: FastAPI):
         from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
         from pipecat.transports.whatsapp.client import WhatsAppClient
     except ImportError as e:
-        logger.error(f"WebRTC transport dependencies not installed: {e}")
-        return
-
-    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
-    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
-    WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
-
-    if not all(
-        [
-            WHATSAPP_TOKEN,
-            WHATSAPP_PHONE_NUMBER_ID,
-            WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
-        ]
-    ):
-        logger.trace(
-            "Missing required environment variables for WhatsApp transport. Keeping it disabled."
-        )
+        logger.error(f"WhatsApp transport dependencies not installed: {e}")
         return
 
     # Global WhatsApp client instance
@@ -689,6 +697,12 @@ def main():
     parser.add_argument(
         "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
     )
+    parser.add_argument(
+        "--whatsapp",
+        action="store_true",
+        default=False,
+        help="Ensure requried WhatsApp environment variables are present",
+    )
 
     args = parser.parse_args()
 
@@ -731,10 +745,11 @@ def main():
         print()
         if args.esp32:
             print(f"🚀 Bot ready! (ESP32 mode)")
-            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
+        elif args.whatsapp:
+            print(f"🚀 Bot ready! (WhatsApp)")
         else:
             print(f"🚀 Bot ready!")
-            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
+        print(f"   → Open http://{args.host}:{args.port}/client in your browser")
         print()
     elif args.transport == "daily":
         print()
@@ -752,6 +767,7 @@ def main():
         host=args.host,
         proxy=args.proxy,
         esp32_mode=args.esp32,
+        whatsapp_enabled=args.whatsapp,
         folder=args.folder,
     )
 
