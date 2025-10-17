@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for trickle ICE to the `SmallWebRTCTransport`.
+
 - Added support for updating `OpenAITTSService` settings (`instructions` and
   `speed`) at runtime via `TTSUpdateSettingsFrame`.
 

@@ -204,6 +204,7 @@ def _setup_webrtc_routes(
 
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
         from pipecat.transports.smallwebrtc.request_handler import (
+            SmallWebRTCPatchRequest,
             SmallWebRTCRequest,
             SmallWebRTCRequestHandler,
         )
@@ -255,6 +256,13 @@ def _setup_webrtc_routes(
             webrtc_connection_callback=webrtc_connection_callback,
         )
         return answer
+
+    @app.patch("/api/offer")
+    async def ice_candidate(request: SmallWebRTCPatchRequest):
+        """Handle WebRTC new ice candidate requests."""
+        logger.debug(f"Received patch request: {request}")
+        await small_webrtc_handler.handle_patch_request(request)
+        return {"status": "success"}
 
     @asynccontextmanager
     async def smallwebrtc_lifespan(app: FastAPI):
