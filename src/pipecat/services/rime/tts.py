@@ -255,6 +255,8 @@ class RimeTTSService(AudioContextWordTTSService):
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await websocket_connect(url, additional_headers=headers)
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -272,6 +274,7 @@ class RimeTTSService(AudioContextWordTTSService):
         finally:
             self._context_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         """Get active websocket connection or raise exception."""
