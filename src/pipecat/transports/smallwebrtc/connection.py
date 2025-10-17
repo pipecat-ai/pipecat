@@ -689,3 +689,8 @@ class SmallWebRTCConnection(BaseObject):
                 )()
                 if track:
                     track.set_enabled(signalling_message.enabled)
+
+    async def add_ice_candidate(self, candidate):
+        """Handle incoming ICE candidates."""
+        logger.debug(f"Adding remote candidate: {candidate}")
+        await self.pc.addIceCandidate(candidate)
