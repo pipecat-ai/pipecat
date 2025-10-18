@@ -583,7 +583,9 @@ class RivaSegmentedSTTService(SegmentedSTTService):
             self._config.language_code = self._language
 
     @traced_stt
-    async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
         """Handle a transcription result with tracing."""
         pass
 
