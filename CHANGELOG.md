@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added support for `bulbul:v3` model in `SarvamTTSService` and `SarvamHttpTTSService`.
 
+- Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
+
+- Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the multilingual model.
+- 
+- Added support for trickle ICE to the `SmallWebRTCTransport`.
+
 - Added support for updating `OpenAITTSService` settings (`instructions` and
   `speed`) at runtime via `TTSUpdateSettingsFrame`.
 
@@ -33,10 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CartesiaSTTService` now inherits from `WebsocketSTTService`.
 
 - Package upgrades:
+
   - `openai` upgraded to support up to 2.x.x.
   - `openpipe` upgraded to support up to 5.x.x.
 
+- `SpeechmaticsSTTService` updated dependencies for `speechmatics-rt>=0.5.0`.
+
 ### Fixed
+
+- Fixed an issue in `RivaSegmentedSTTService` where a runtime error occurred due
+  to a mismatch in the _handle_transcription method's signature.
 
 - Fixed multiple pipeline task cancellation issues. `asyncio.CancelledError` is
   now handled properly in `PipelineTask` making it possible to cancel an asyncio
@@ -58,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where `RimeHttpTTSService` and `PiperTTSService` could generate
   incorrectly 16-bit aligned audio frames, potentially leading to internal
   errors or static audio.
+
+- Fixed an issue in `SpeechmaticsSTTService` where `AdditionalVocabEntry` items
+  needed to have `sounds_like` for the session to start.
 
 ### Other
 
