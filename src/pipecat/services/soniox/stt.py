@@ -309,6 +309,38 @@ class SonioxSTTService(STTService):
         async def send_endpoint_transcript():
             if self._final_transcription_buffer:
                 text = "".join(map(lambda token: token["text"], self._final_transcription_buffer))
+
+                # Calculate audio duration from final token timings if available
+                audio_duration = None
+                if self._final_transcription_buffer and len(self._final_transcription_buffer) > 0:
+                    first_token = self._final_transcription_buffer[0]
+                    last_token = self._final_transcription_buffer[-1]
+                    if "start_ms" in first_token and "duration_ms" in last_token:
+                        start_ms = first_token["start_ms"]
+                        end_ms = last_token["start_ms"] + last_token["duration_ms"]
+                        audio_duration = (end_ms - start_ms) / 1000.0
+
+                # Get performance metrics
+                ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+                processing_time = (
+                    self._metrics.processing_time if hasattr(self, "_metrics") else None
+                )
+
+                # Soniox doesn't provide confidence in the basic token format
+                # Calculate STT usage metrics
+                if audio_duration:
+                    await self.start_stt_usage_metrics(
+                        audio_duration=audio_duration,
+                        transcript=text,
+                        processing_time=processing_time,
+                        ttft=ttft,
+                        sample_rate=self.sample_rate,
+                        channels=1,
+                        encoding="LINEAR16",
+                        cost_per_minute=self._cost_per_minute,
+                        ground_truth=self._ground_truth,
+                    )
+
                 await self.push_frame(
                     TranscriptionFrame(
                         text=text,

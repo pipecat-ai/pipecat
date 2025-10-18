@@ -65,6 +65,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
     ProcessingMetricsData,
+    STTUsageMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -1196,6 +1197,10 @@ class RTVIObserver(BaseObserver):
                 if "characters" not in metrics:
                     metrics["characters"] = []
                 metrics["characters"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, STTUsageMetricsData):
+                if "stt" not in metrics:
+                    metrics["stt"] = []
+                metrics["stt"].append(d.model_dump(exclude_none=True))
 
         message = RTVIMetricsMessage(data=metrics)
         await self.send_rtvi_message(message)
