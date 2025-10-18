@@ -293,15 +293,15 @@ class BaseOutputTransport(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        #
-        # System frames (like InterruptionFrame) are pushed immediately. Other
-        # frames require order so they are put in the sink queue.
-        #
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
             # processed by every processor before any other frame is processed.
             await self.push_frame(frame, direction)
             await self.start(frame)
+        elif isinstance(frame, EndFrame):
+            await self.stop(frame)
+            # Keep pushing EndFrame down so all the pipeline stops nicely.
+            await self.push_frame(frame, direction)
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
@@ -314,21 +314,6 @@ class BaseOutputTransport(FrameProcessor):
             await self.write_dtmf(frame)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
-        # Control frames.
-        elif isinstance(frame, EndFrame):
-            await self.stop(frame)
-            # Keep pushing EndFrame down so all the pipeline stops nicely.
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, MixerControlFrame):
-            await self._handle_frame(frame)
-        # Other frames.
-        elif isinstance(frame, OutputAudioRawFrame):
-            await self._handle_frame(frame)
-        elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
-            await self._handle_frame(frame)
-        # TODO(aleix): Images and audio should support presentation timestamps.
-        elif frame.pts:
-            await self._handle_frame(frame)
         elif direction == FrameDirection.UPSTREAM:
             await self.push_frame(frame, direction)
         else:
