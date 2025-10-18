@@ -17,23 +17,19 @@ import hmac
 import json
 import struct
 import urllib.parse
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+from pipecat.services.aws.config import AWSInputParams
 
 
 def get_presigned_url(
     *,
     region: str,
     credentials: Dict[str, Optional[str]],
-    language_code: str,
-    media_encoding: str = "pcm",
-    sample_rate: int = 16000,
-    number_of_channels: int = 1,
-    enable_partial_results_stabilization: bool = True,
-    partial_results_stability: str = "high",
-    vocabulary_name: Optional[str] = None,
-    vocabulary_filter_name: Optional[str] = None,
-    show_speaker_label: bool = False,
-    enable_channel_identification: bool = False,
+    params: AWSInputParams,
+    language_code: Optional[str] = None,
+    language_options: Optional[List[str]] = None,
+    preferred_language: Optional[str] = None,
 ) -> str:
     """Create a presigned URL for AWS Transcribe streaming.
 
@@ -41,22 +37,19 @@ def get_presigned_url(
         region: AWS region for the service.
         credentials: Dictionary containing AWS credentials. Must include
             'access_key' and 'secret_key', with optional 'session_token'.
+        params: AWSInputParams object containing transcription configuration.
         language_code: Language code for transcription (e.g., "en-US").
-        media_encoding: Audio encoding format. Defaults to "pcm".
-        sample_rate: Audio sample rate in Hz. Defaults to 16000.
-        number_of_channels: Number of audio channels. Defaults to 1.
-        enable_partial_results_stabilization: Whether to enable partial result stabilization.
-        partial_results_stability: Stability level for partial results.
-        vocabulary_name: Custom vocabulary name to use.
-        vocabulary_filter_name: Vocabulary filter name to apply.
-        show_speaker_label: Whether to include speaker labels.
-        enable_channel_identification: Whether to enable channel identification.
+            Cannot be used with identify_multiple_languages. Usually derived from params.
+        language_options: List of language codes for multi-language identification.
+            Usually derived from params.
+        preferred_language: Preferred language from language_options.
+            Usually derived from params.
 
     Returns:
         Presigned WebSocket URL for AWS Transcribe streaming.
 
     Raises:
-        ValueError: If required AWS credentials are missing.
+        ValueError: If required AWS credentials are missing or invalid parameter combinations.
     """
     access_key = credentials.get("access_key")
     secret_key = credentials.get("secret_key")
@@ -65,23 +58,38 @@ def get_presigned_url(
     if not access_key or not secret_key:
         raise ValueError("AWS credentials are required")
 
+    # Validate language parameters
+    if params.identify_multiple_languages or params.identify_language:
+        if not language_options or len(language_options) < 2:
+            raise ValueError(
+                "language_options must contain at least 2 language codes when identify_multiple_languages or identify_language is used"
+            )
+        if language_code:
+            raise ValueError(
+                "Cannot use both language_code and identify_multiple_languages or identify_language"
+            )
+        if preferred_language and preferred_language not in language_options:
+            raise ValueError("preferred_language must be one of the language_options")
+    else:
+        if not language_code:
+            raise ValueError(
+                "language_code is required when identify_multiple_languages and identify_language are not used"
+            )
+
     # Initialize the URL generator
     url_generator = AWSTranscribePresignedURL(
-        access_key=access_key, secret_key=secret_key, session_token=session_token, region=region
+        access_key=access_key,
+        secret_key=secret_key,
+        session_token=session_token,
+        region=region,
     )
 
     # Get the presigned URL
     return url_generator.get_request_url(
-        sample_rate=sample_rate,
+        params=params,
         language_code=language_code,
-        media_encoding=media_encoding,
-        vocabulary_name=vocabulary_name,
-        vocabulary_filter_name=vocabulary_filter_name,
-        show_speaker_label=show_speaker_label,
-        enable_channel_identification=enable_channel_identification,
-        number_of_channels=number_of_channels,
-        enable_partial_results_stabilization=enable_partial_results_stabilization,
-        partial_results_stability=partial_results_stability,
+        language_options=language_options,
+        preferred_language=preferred_language,
     )
 
 
@@ -93,7 +101,11 @@ class AWSTranscribePresignedURL:
     """
 
     def __init__(
-        self, access_key: str, secret_key: str, session_token: str, region: str = "us-east-1"
+        self,
+        access_key: str,
+        secret_key: str,
+        session_token: str,
+        region: str = "us-east-1",
     ):
         """Initialize the presigned URL generator.
 
@@ -127,30 +139,18 @@ class AWSTranscribePresignedURL:
 
     def get_request_url(
         self,
-        sample_rate: int,
-        language_code: str = "",
-        media_encoding: str = "pcm",
-        vocabulary_name: str = "",
-        vocabulary_filter_name: str = "",
-        show_speaker_label: bool = False,
-        enable_channel_identification: bool = False,
-        number_of_channels: int = 1,
-        enable_partial_results_stabilization: bool = False,
-        partial_results_stability: str = "",
+        params: AWSInputParams,
+        language_code: Optional[str] = None,
+        language_options: Optional[List[str]] = None,
+        preferred_language: Optional[str] = None,
     ) -> str:
         """Generate a presigned WebSocket URL for AWS Transcribe.
 
         Args:
-            sample_rate: Audio sample rate in Hz.
-            language_code: Language code for transcription.
-            media_encoding: Audio encoding format.
-            vocabulary_name: Custom vocabulary name.
-            vocabulary_filter_name: Vocabulary filter name.
-            show_speaker_label: Whether to include speaker labels.
-            enable_channel_identification: Whether to enable channel identification.
-            number_of_channels: Number of audio channels.
-            enable_partial_results_stabilization: Whether to enable partial result stabilization.
-            partial_results_stability: Stability level for partial results.
+            params: AWSInputParams object containing transcription configuration.
+            language_code: Language code for transcription (derived from params).
+            language_options: List of language codes for multi-language identification (derived from params).
+            preferred_language: Preferred language from language_options (derived from params).
 
         Returns:
             Presigned WebSocket URL with authentication parameters.
@@ -177,26 +177,36 @@ class AWSTranscribePresignedURL:
             )
         self.canonical_querystring += "&X-Amz-SignedHeaders=" + self.signed_headers
 
-        if enable_channel_identification:
+        if params.enable_channel_identification:
             self.canonical_querystring += "&enable-channel-identification=true"
-        if enable_partial_results_stabilization:
+        if params.enable_partial_results_stabilization:
             self.canonical_querystring += "&enable-partial-results-stabilization=true"
+        if params.identify_language:
+            self.canonical_querystring += "&identify-language=true"
+        if params.identify_multiple_languages:
+            self.canonical_querystring += "&identify-multiple-languages=true"
         if language_code:
-            self.canonical_querystring += "&language-code=" + language_code
-        if media_encoding:
-            self.canonical_querystring += "&media-encoding=" + media_encoding
-        if number_of_channels > 1:
-            self.canonical_querystring += "&number-of-channels=" + str(number_of_channels)
-        if partial_results_stability:
-            self.canonical_querystring += "&partial-results-stability=" + partial_results_stability
-        if sample_rate:
-            self.canonical_querystring += "&sample-rate=" + str(sample_rate)
-        if show_speaker_label:
+            self.canonical_querystring += "&language-code=" + params.language_code
+        if language_options:
+            self.canonical_querystring += "&language-options=" + ",".join(language_options)
+        if params.media_encoding:
+            self.canonical_querystring += "&media-encoding=" + params.media_encoding
+        if params.number_of_channels > 1:
+            self.canonical_querystring += "&number-of-channels=" + str(params.number_of_channels)
+        if params.partial_results_stability:
+            self.canonical_querystring += (
+                "&partial-results-stability=" + params.partial_results_stability
+            )
+        if preferred_language:
+            self.canonical_querystring += "&preferred-language=" + preferred_language
+        if params.sample_rate:
+            self.canonical_querystring += "&sample-rate=" + str(params.sample_rate)
+        if params.show_speaker_label:
             self.canonical_querystring += "&show-speaker-label=true"
-        if vocabulary_filter_name:
-            self.canonical_querystring += "&vocabulary-filter-name=" + vocabulary_filter_name
-        if vocabulary_name:
-            self.canonical_querystring += "&vocabulary-name=" + vocabulary_name
+        if params.vocabulary_filter_name:
+            self.canonical_querystring += "&vocabulary-filter-name=" + params.vocabulary_filter_name
+        if params.vocabulary_name:
+            self.canonical_querystring += "&vocabulary-name=" + params.vocabulary_name
 
         # Create payload hash
         self.payload_hash = hashlib.sha256("".encode("utf-8")).hexdigest()
@@ -213,7 +223,9 @@ class AWSTranscribePresignedURL:
 
         # Calculate signature
         k_date = hmac.new(
-            f"AWS4{self.secret_key}".encode("utf-8"), self.datestamp.encode("utf-8"), hashlib.sha256
+            f"AWS4{self.secret_key}".encode("utf-8"),
+            self.datestamp.encode("utf-8"),
+            hashlib.sha256,
         ).digest()
         k_region = hmac.new(k_date, self.region.encode("utf-8"), hashlib.sha256).digest()
         k_service = hmac.new(k_region, self.service.encode("utf-8"), hashlib.sha256).digest()
