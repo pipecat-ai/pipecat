@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for `bulbul:v3` model in `SarvamTTSService` and `SarvamHttpTTSService`.
+
 - Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
 
 - Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the multilingual model.
