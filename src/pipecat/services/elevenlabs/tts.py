@@ -50,7 +50,20 @@ except ModuleNotFoundError as e:
     logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
     raise Exception(f"Missing module: {e}")
 
-ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
+ElevenLabsOutputFormat = Literal[
+    "pcm_8000",
+    "pcm_16000",
+    "pcm_22050",
+    "pcm_24000",
+    "pcm_44100",
+    "ulaw_8000",
+    "alaw_8000",
+    "opus_48000_32",
+    "opus_48000_64",
+    "opus_48000_96",
+    "opus_48000_128",
+    "opus_48000_192",
+]
 
 # Models that support language codes
 # The following models are excluded as they don't support language codes:
@@ -270,6 +283,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         model: str = "eleven_turbo_v2_5",
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
+        output_format: Optional[ElevenLabsOutputFormat] = "",
         params: Optional[InputParams] = None,
         aggregate_sentences: Optional[bool] = True,
         **kwargs,
@@ -282,6 +296,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
+            output_format: Output format. If provided, takes precedence over automatically determined from sample_rate.
             params: Additional input parameters for voice customization.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
@@ -329,7 +344,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
-        self._output_format = ""  # initialized in start()
+        self._output_format = output_format  # initialized in start()
         self._voice_settings = self._set_voice_settings()
 
         # Indicates if we have sent TTSStartedFrame. It will reset to False when
@@ -430,7 +445,11 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._output_format = output_format_from_sample_rate(self.sample_rate)
+        self._output_format = (
+            self._output_format
+            if self._output_format
+            else output_format_from_sample_rate(self.sample_rate)
+        )
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -775,6 +794,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         model: str = "eleven_turbo_v2_5",
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
+        output_format: Optional[ElevenLabsOutputFormat] = "",
         params: Optional[InputParams] = None,
         aggregate_sentences: Optional[bool] = True,
         **kwargs,
@@ -788,6 +808,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
+            output_format: Output format. If provided, takes precedence over automatically determined from sample_rate.
             params: Additional input parameters for voice customization.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
@@ -821,7 +842,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
-        self._output_format = ""  # initialized in start()
+        self._output_format = output_format  # initialized in start()
         self._voice_settings = self._set_voice_settings()
 
         # Track cumulative time to properly sequence word timestamps across utterances
@@ -873,7 +894,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._output_format = output_format_from_sample_rate(self.sample_rate)
+        self._output_format = (
+            self._output_format
+            if self._output_format
+            else output_format_from_sample_rate(self.sample_rate)
+        )
         self._reset_state()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
