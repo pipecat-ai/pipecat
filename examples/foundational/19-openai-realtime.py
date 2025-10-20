@@ -176,8 +176,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         [
             transport.input(),  # Transport user input
             context_aggregator.user(),
+            transcript.user(),  # LLM pushes TranscriptionFrames upstream
             llm,  # LLM
-            transcript.user(),  # Placed after the LLM, as LLM pushes TranscriptionFrames downstream
             transport.output(),  # Transport bot output
             transcript.assistant(),  # After the transcript output, to time with the audio output
             context_aggregator.assistant(),

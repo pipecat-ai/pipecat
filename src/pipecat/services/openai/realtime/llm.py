@@ -607,11 +607,11 @@ class OpenAIRealtimeLLMService(LLMService):
         # For now, no additional logic needed beyond the event handler call
 
     async def _handle_evt_input_audio_transcription_delta(self, evt):
-        if self._send_transcription_frames:
-            await self.push_frame(
-                # no way to get a language code?
-                InterimTranscriptionFrame(evt.delta, "", time_now_iso8601(), result=evt)
-            )
+        await self.push_frame(
+            # no way to get a language code?
+            InterimTranscriptionFrame(evt.delta, "", time_now_iso8601(), result=evt),
+            direction=FrameDirection.UPSTREAM,
+        )
 
     @traced_stt
     async def _handle_user_transcription(
@@ -628,12 +628,12 @@ class OpenAIRealtimeLLMService(LLMService):
         """
         await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
 
-        if self._send_transcription_frames:
-            await self.push_frame(
-                # no way to get a language code?
-                TranscriptionFrame(evt.transcript, "", time_now_iso8601(), result=evt)
-            )
-            await self._handle_user_transcription(evt.transcript, True, Language.EN)
+        await self.push_frame(
+            # no way to get a language code?
+            TranscriptionFrame(evt.transcript, "", time_now_iso8601(), result=evt),
+            FrameDirection.UPSTREAM,
+        )
+        await self._handle_user_transcription(evt.transcript, True, Language.EN)
         pair = self._user_and_response_message_tuple
         if pair:
             user, assistant = pair
