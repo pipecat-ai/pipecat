@@ -70,12 +70,14 @@ import asyncio
 import mimetypes
 import os
 import sys
+import uuid
 from contextlib import asynccontextmanager
+from http import HTTPMethod
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
 import aiohttp
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from loguru import logger
 
 from pipecat.runner.types import (
@@ -166,6 +168,7 @@ def _create_server_app(
     host: str = "localhost",
     proxy: str,
     esp32_mode: bool = False,
+    whatsapp_enabled: bool = False,
     folder: Optional[str] = None,
 ):
     """Create FastAPI app with transport-specific routes."""
@@ -182,7 +185,8 @@ def _create_server_app(
     # Set up transport-specific routes
     if transport_type == "webrtc":
         _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host, folder=folder)
-        _setup_whatsapp_routes(app)
+        if whatsapp_enabled:
+            _setup_whatsapp_routes(app)
     elif transport_type == "daily":
         _setup_daily_routes(app)
     elif transport_type in TELEPHONY_TRANSPORTS:
@@ -200,14 +204,26 @@ def _setup_webrtc_routes(
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
         from pipecat.transports.smallwebrtc.request_handler import (
+            IceCandidate,
+            SmallWebRTCPatchRequest,
             SmallWebRTCRequest,
             SmallWebRTCRequestHandler,
         )
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
+
+    class IceConfig(TypedDict):
+        iceServers: List[IceServer]
+
+    class StartBotResult(TypedDict, total=False):
+        sessionId: str
+        iceConfig: Optional[IceConfig]
+
+    # In-memory store of active sessions: session_id -> session info
+    active_sessions: Dict[str, Dict[str, Any]] = {}
 
     # Mount the frontend
     app.mount("/client", SmallWebRTCPrebuiltUI)
@@ -254,6 +270,74 @@ def _setup_webrtc_routes(
         )
         return answer
 
+    @app.patch("/api/offer")
+    async def ice_candidate(request: SmallWebRTCPatchRequest):
+        """Handle WebRTC new ice candidate requests."""
+        logger.debug(f"Received patch request: {request}")
+        await small_webrtc_handler.handle_patch_request(request)
+        return {"status": "success"}
+
+    @app.post("/start")
+    async def rtvi_start(request: Request):
+        """Mimic Pipecat Cloud's /start endpoint."""
+        # Parse the request body
+        try:
+            request_data = await request.json()
+            logger.debug(f"Received request: {request_data}")
+        except Exception as e:
+            logger.error(f"Failed to parse request body: {e}")
+            request_data = {}
+
+        # Store session info immediately in memory, replicate the behavior expected on Pipecat Cloud
+        session_id = str(uuid.uuid4())
+        active_sessions[session_id] = request_data
+
+        result: StartBotResult = {"sessionId": session_id}
+        if request_data.get("enableDefaultIceServers"):
+            result["iceConfig"] = IceConfig(
+                iceServers=[IceServer(urls="stun:stun.l.google.com:19302")]
+            )
+
+        return result
+
+    @app.api_route(
+        "/sessions/{session_id}/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    )
+    async def proxy_request(
+        session_id: str, path: str, request: Request, background_tasks: BackgroundTasks
+    ):
+        """Mimic Pipecat Cloud's proxy."""
+        active_session = active_sessions.get(session_id)
+        if not active_session:
+            return Response(content="Invalid or not-yet-ready session_id", status_code=404)
+
+        if path.endswith("api/offer"):
+            # Parse the request body and convert to SmallWebRTCRequest
+            try:
+                request_data = await request.json()
+                if request.method == HTTPMethod.POST.value:
+                    webrtc_request = SmallWebRTCRequest(
+                        sdp=request_data["sdp"],
+                        type=request_data["type"],
+                        pc_id=request_data.get("pc_id"),
+                        restart_pc=request_data.get("restart_pc"),
+                        request_data=request_data,
+                    )
+                    return await offer(webrtc_request, background_tasks)
+                elif request.method == HTTPMethod.PATCH.value:
+                    patch_request = SmallWebRTCPatchRequest(
+                        pc_id=request_data["pc_id"],
+                        candidates=[IceCandidate(**c) for c in request_data.get("candidates", [])],
+                    )
+                    return await ice_candidate(patch_request)
+            except Exception as e:
+                logger.error(f"Failed to parse WebRTC request: {e}")
+                return Response(content="Invalid WebRTC request", status_code=400)
+
+        logger.info(f"Received request for path: {path}")
+        return Response(status_code=200)
+
     @asynccontextmanager
     async def smallwebrtc_lifespan(app: FastAPI):
         """Manage FastAPI application lifecycle and cleanup connections."""
@@ -289,6 +373,29 @@ def _add_lifespan_to_app(app: FastAPI, new_lifespan):
 
 def _setup_whatsapp_routes(app: FastAPI):
     """Set up WebRTC-specific routes."""
+    WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
+    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
+
+    if not all(
+        [
+            WHATSAPP_APP_SECRET,
+            WHATSAPP_PHONE_NUMBER_ID,
+            WHATSAPP_TOKEN,
+            WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
+        ]
+    ):
+        logger.error(
+            """Missing required environment variables for WhatsApp transport:
+    WHATSAPP_APP_SECRET
+    WHATSAPP_PHONE_NUMBER_ID
+    WHATSAPP_TOKEN
+    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN
+            """
+        )
+        return
+
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
@@ -300,24 +407,7 @@ def _setup_whatsapp_routes(app: FastAPI):
         from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
         from pipecat.transports.whatsapp.client import WhatsAppClient
     except ImportError as e:
-        logger.error(f"WebRTC transport dependencies not installed: {e}")
-        return
-
-    WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-    WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
-    WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
-    WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
-
-    if not all(
-        [
-            WHATSAPP_TOKEN,
-            WHATSAPP_PHONE_NUMBER_ID,
-            WHATSAPP_WEBHOOK_VERIFICATION_TOKEN,
-        ]
-    ):
-        logger.trace(
-            "Missing required environment variables for WhatsApp transport. Keeping it disabled."
-        )
+        logger.error(f"WhatsApp transport dependencies not installed: {e}")
         return
 
     # Global WhatsApp client instance
@@ -487,8 +577,6 @@ def _setup_daily_routes(app: FastAPI):
         else:
             logger.debug("No body data provided in request")
 
-        import aiohttp
-
         from pipecat.runner.daily import configure
 
         async with aiohttp.ClientSession() as session:
@@ -576,8 +664,6 @@ def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
 async def _run_daily_direct():
     """Run Daily bot with direct connection (no FastAPI server)."""
     try:
-        import aiohttp
-
         from pipecat.runner.daily import configure
     except ImportError as e:
         logger.error("Daily transport dependencies not installed.")
@@ -689,6 +775,12 @@ def main():
     parser.add_argument(
         "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
     )
+    parser.add_argument(
+        "--whatsapp",
+        action="store_true",
+        default=False,
+        help="Ensure requried WhatsApp environment variables are present",
+    )
 
     args = parser.parse_args()
 
@@ -731,10 +823,11 @@ def main():
         print()
         if args.esp32:
             print(f"🚀 Bot ready! (ESP32 mode)")
-            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
+        elif args.whatsapp:
+            print(f"🚀 Bot ready! (WhatsApp)")
         else:
             print(f"🚀 Bot ready!")
-            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
+        print(f"   → Open http://{args.host}:{args.port}/client in your browser")
         print()
     elif args.transport == "daily":
         print()
@@ -752,6 +845,7 @@ def main():
         host=args.host,
         proxy=args.proxy,
         esp32_mode=args.esp32,
+        whatsapp_enabled=args.whatsapp,
         folder=args.folder,
     )
 

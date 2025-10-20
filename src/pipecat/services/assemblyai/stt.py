@@ -174,11 +174,16 @@ class AssemblyAISTTService(STTService):
 
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
-        params = {
-            k: str(v).lower() if isinstance(v, bool) else v
-            for k, v in self._connection_params.model_dump().items()
-            if v is not None
-        }
+        params = {}
+        for k, v in self._connection_params.model_dump().items():
+            if v is not None:
+                if k == "keyterms_prompt":
+                    params[k] = json.dumps(v)
+                elif isinstance(v, bool):
+                    params[k] = str(v).lower()
+                else:
+                    params[k] = v
+
         if params:
             query_string = urlencode(params)
             return f"{self._api_endpoint_base_url}?{query_string}"
