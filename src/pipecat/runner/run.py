@@ -261,9 +261,8 @@ def _setup_webrtc_routes(
         async def webrtc_connection_callback(connection):
             bot_module = _get_bot_module()
             runner_args = SmallWebRTCRunnerArguments(
-                webrtc_connection=connection,
-                body=request.request_data
-                )
+                webrtc_connection=connection, body=request.request_data
+            )
             background_tasks.add_task(bot_module.bot, runner_args)
 
         # Delegate handling to SmallWebRTCRequestHandler

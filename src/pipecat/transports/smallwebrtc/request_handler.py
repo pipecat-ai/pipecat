@@ -46,6 +46,7 @@ class SmallWebRTCRequest:
             data["request_data"] = data.pop("requestData")
         return cls(**data)
 
+
 @dataclass
 class IceCandidate:
     """The remote ice candidate object received from the peer connection.

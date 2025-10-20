@@ -85,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Runner: `body` property moved to `RunnerArguments` base class as all transports
+  should support arbitrary body data as part of a request.
+
 - `CartesiaSTTService` now inherits from `WebsocketSTTService`.
 
 - Package upgrades:
@@ -105,6 +108,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to changes to support `LLMContext`. See "Changed" section for details.
 
 ### Fixed
+
+- Fixed an issue where the `SmallWebRTCRequest` dataclass in runner would scrub
+  arbitrary request data from client due to camelCase typing. This fixes data
+  passthrough for JS clients where `APIRequest` is used.
 
 - Fixed an issue in `RivaSegmentedSTTService` where a runtime error occurred due
   to a mismatch in the _handle_transcription method's signature.
