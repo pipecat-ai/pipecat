@@ -687,12 +687,15 @@ class OpenAIRealtimeLLMService(LLMService):
             logger.debug(f"Handling standalone response: {evt.response.id}")
 
     async def _handle_evt_text_delta(self, evt):
+        # We receive text deltas (as opposed to audio transcript deltas) when
+        # the output modality is "text"
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
 
     async def _handle_evt_audio_transcript_delta(self, evt):
+        # We receive audio transcript deltas (as opposed to text deltas) when
+        # the output modality is "audio" (the default)
         if evt.delta:
-            await self.push_frame(LLMTextFrame(evt.delta))
             await self.push_frame(TTSTextFrame(evt.delta))
 
     async def _handle_evt_function_call_arguments_done(self, evt):
