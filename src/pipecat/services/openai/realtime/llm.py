@@ -110,7 +110,7 @@ class OpenAIRealtimeLLMService(LLMService):
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
-        send_transcription_frames: bool = True,
+        send_transcription_frames: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize the OpenAI Realtime LLM service.
@@ -123,9 +123,26 @@ class OpenAIRealtimeLLMService(LLMService):
             session_properties: Configuration properties for the realtime session.
                 If None, uses default SessionProperties.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
-            send_transcription_frames: Whether to emit transcription frames. Defaults to True.
+            send_transcription_frames: Whether to emit transcription frames.
+
+                .. deprecated:: 0.0.92
+                    This parameter is deprecated and will be removed in a future version.
+                    Transcription frames are always sent.
+
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        if send_transcription_frames is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`send_transcription_frames` is deprecated and will be removed in a future version. "
+                    "Transcription frames are always sent.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
 
@@ -137,7 +154,6 @@ class OpenAIRealtimeLLMService(LLMService):
             session_properties or events.SessionProperties()
         )
         self._audio_input_paused = start_audio_paused
-        self._send_transcription_frames = send_transcription_frames
         self._websocket = None
         self._receive_task = None
         # "Last received context" is only needed while we still support
