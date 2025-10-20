@@ -38,6 +38,7 @@ dependencies = [
     # Pinning numba to resolve package dependencies
     "numba==0.61.2",
     "wait_for2>=0.4.1; python_version<'3.12'",
+    "pipecat-ai-cli"
 ]
 
 [project.urls]

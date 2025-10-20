@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the [Pipecat CLI](https://github.com/pipecat-ai/pipecat-cli) to the
+  required dependencies, enabling you to scaffold a new project directly from
+  `pipecat-ai`. Get started with:
+
+  ```bash
+  uv run pipecat init
+  ```
+
 - Expanded support for universal `LLMContext` to `AWSNovaSonicLLMService`.
   As a reminder, the context-setup pattern when using `LLMContext` is:
 
@@ -107,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed an issue in `RivaSegmentedSTTService` where a runtime error occurred due
-  to a mismatch in the _handle_transcription method's signature.
+  to a mismatch in the \_handle_transcription method's signature.
 
 - Fixed multiple pipeline task cancellation issues. `asyncio.CancelledError` is
   now handled properly in `PipelineTask` making it possible to cancel an asyncio
