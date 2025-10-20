@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```python
   ## BEFORE:
 
+  # Context aggregator type
+  context_aggregator: AWSNovaSonicContextAggregatorPair
+
   # Context frame type
   frame: OpenAILLMContextFrame
 
@@ -39,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   messages = context.messages
 
   ## AFTER:
+
+  # Context aggregator type
+  context_aggregator: LLMContextAggregatorPair
+
   # Context frame type
   frame: LLMContextFrame
 
@@ -84,6 +91,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `openpipe` upgraded to support up to 5.x.x.
 
 - `SpeechmaticsSTTService` updated dependencies for `speechmatics-rt>=0.5.0`.
+
+### Deprecated
+
+- The `send_transcription_frames` argument to `AWSNovaSonicLLMService` is
+  deprecated. Transcription frames are now always sent. They go upstream, to be
+  handled by the user context aggregator. See "Changed" section for details.
+
+- Types in `pipecat.services.aws.nova_sonic.context` have been deprecated due
+  to changes to support `LLMContext`. See "Changed" section for details.
 
 ### Fixed
 
