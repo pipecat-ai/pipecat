@@ -106,6 +106,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where the `RTVIProcessor` was sending duplicate
+  `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` messages.
+
 - Fixed an issue in `RivaSegmentedSTTService` where a runtime error occurred due
   to a mismatch in the _handle_transcription method's signature.
 
