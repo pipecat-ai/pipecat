@@ -119,16 +119,7 @@ async def create_daily_room(
     except RetryError as e:
         # All retries exhausted
         last_exception = e.last_attempt.exception()
-        if isinstance(last_exception, HTTPStatusError):
-            if last_exception.response.status_code == 429:
-                logger.error(f"Rate limit exceeded after {max_retries} retries")
-            else:
-                logger.error(
-                    f"HTTP {last_exception.response.status_code} error creating room: "
-                    f"{last_exception.response.text}"
-                )
-        else:
-            logger.exception(f"Failed to create room after {max_retries} retries: {last_exception}")
+        logger.exception(f"Failed to create room after {max_retries} retries: {last_exception}")
         return None
 
     except Exception as e:
