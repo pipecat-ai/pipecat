@@ -66,6 +66,9 @@ async def get_recording_s3_url_with_retry(
                 # Recording is finished, return the URLs
                 return recording_url, recording_signed_url
 
+        # This line should never be reached due to reraise=True, but satisfies type checker
+        return None, None
+
     except RetryError as e:
         # All retries exhausted
         last_exception = e.last_attempt.exception()
@@ -78,9 +81,6 @@ async def get_recording_s3_url_with_retry(
     except Exception as e:
         logger.exception(f"Unexpected error retrieving recording for room {room_id}: {e}")
         return None, None
-
-    # This should never be reached, but added for type safety
-    return None, None
 
 
 async def get_recording_s3_url(
@@ -100,47 +100,39 @@ async def get_recording_s3_url(
     Raises:
         HTTPStatusError: When HTTP errors occur (including rate limits)
     """
-    async with AsyncClient() as client:
+    headers = {
+        "Authorization": f"Bearer {os.getenv('DAILY_API_KEY')}",
+        "Content-Type": "application/json",
+    }
+
+    async with AsyncClient(timeout=180) as client:
         # List recordings for the room
         list_response = await client.get(
             url=f"https://api.daily.co/v1/recordings?room_name={room_id}",
-            headers={
-                "Authorization": f"Bearer {os.getenv('DAILY_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            timeout=180,
+            headers=headers,
         )
-
         list_response.raise_for_status()
+        list_data = list_response.json()
 
-    list_data = list_response.json()
+        # Check if recording exists and is finished
+        if not list_data.get("data") or len(list_data["data"]) == 0:
+            return (None, None, None)
 
-    recording_id = None
-    status = None
-
-    if list_data.get("data") and len(list_data["data"]) > 0:
         recording_id = list_data["data"][0].get("id")
         status = list_data["data"][0].get("status")
 
-    if not recording_id or status != "finished":
-        return (None, None, status)
+        if not recording_id or status != "finished":
+            return (None, None, status)
 
-    # Get the recording access link
-    async with AsyncClient() as client:
+        # Get the recording access link
         link_response = await client.get(
             url=f"https://api.daily.co/v1/recordings/{recording_id}/access-link",
-            headers={
-                "Authorization": f"Bearer {os.getenv('DAILY_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            timeout=180,
+            headers=headers,
         )
-
         link_response.raise_for_status()
+        link_data = link_response.json()
 
-    link_data = link_response.json()
     recording_url = link_data.get("download_link")
-
     if not recording_url:
         logger.warning(f"No download link found for recording {recording_id}")
         return (None, None, status)
@@ -217,7 +209,7 @@ async def main():
         if isinstance(result, Exception):
             failed_count += 1
             logger.error(f"❌ [{i}/{len(room_names)}] Failed for {room_name}: {result}")
-        elif isinstance(result, tuple):
+        elif isinstance(result, tuple) and len(result) == 2:
             recording_url, recording_signed_url = result
             if recording_url:
                 success_count += 1
@@ -228,7 +220,7 @@ async def main():
                 logger.debug(f"ℹ️  [{i}/{len(room_names)}] No recording for {room_name}")
         else:
             failed_count += 1
-            logger.error(f"❌ [{i}/{len(room_names)}] Unexpected result for {room_name}")
+            logger.error(f"❌ [{i}/{len(room_names)}] Unexpected result type for {room_name}")
 
     # Summary
     logger.info("\n" + "=" * 60)
