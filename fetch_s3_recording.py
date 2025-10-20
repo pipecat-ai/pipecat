@@ -5,6 +5,7 @@ This module provides functions to retrieve recording download links from Daily's
 with robust error handling, rate limiting, and exponential backoff retry logic.
 """
 
+import asyncio
 import os
 from typing import Optional, Tuple
 
@@ -195,33 +196,39 @@ async def main():
 
     logger.info(f"Found {len(room_names)} rooms to check for recordings")
 
-    # Step 2: Room names are already in an array (room_names)
+    # Call get_recording_s3_url_with_retry on each room concurrently
+    logger.info(f"Attempting to fetch recordings for {len(room_names)} rooms concurrently...")
 
-    # Step 3: Call get_recording_s3_url_with_retry on each room
-    logger.info(f"Attempting to fetch recordings for {len(room_names)} rooms...")
+    # Create tasks for all rooms
+    tasks = [
+        get_recording_s3_url_with_retry(room_id=room_name, max_retries=3)
+        for room_name in room_names
+    ]
 
+    # Execute all tasks concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Process results
     success_count = 0
     not_found_count = 0
     failed_count = 0
 
-    for i, room_name in enumerate(room_names, 1):
-        logger.info(f"\n[{i}/{len(room_names)}] Checking room: {room_name}")
-
-        recording_url, recording_signed_url = await get_recording_s3_url_with_retry(
-            room_id=room_name,
-            max_retries=3,  # Lower retries for testing
-        )
-
-        if recording_url:
-            success_count += 1
-            logger.info(f"✅ Found recording for {room_name}")
-            logger.info(f"   URL: {recording_url[:80]}...")
-        elif recording_url is None and recording_signed_url is None:
-            not_found_count += 1
-            logger.info(f"ℹ️  No recording found for {room_name}")
+    for i, (room_name, result) in enumerate(zip(room_names, results), 1):
+        if isinstance(result, Exception):
+            failed_count += 1
+            logger.error(f"❌ [{i}/{len(room_names)}] Failed for {room_name}: {result}")
+        elif isinstance(result, tuple):
+            recording_url, recording_signed_url = result
+            if recording_url:
+                success_count += 1
+                logger.info(f"✅ [{i}/{len(room_names)}] Found recording for {room_name}")
+                logger.debug(f"   URL: {recording_url[:80]}...")
+            else:
+                not_found_count += 1
+                logger.debug(f"ℹ️  [{i}/{len(room_names)}] No recording for {room_name}")
         else:
             failed_count += 1
-            logger.error(f"❌ Failed to fetch recording for {room_name}")
+            logger.error(f"❌ [{i}/{len(room_names)}] Unexpected result for {room_name}")
 
     # Summary
     logger.info("\n" + "=" * 60)
@@ -236,6 +243,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    import asyncio
-
     asyncio.run(main())
