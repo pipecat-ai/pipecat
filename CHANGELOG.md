@@ -56,11 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   messages = context.get_messages()
   ```
 
-- Added support for `bulbul:v3` model in `SarvamTTSService` and `SarvamHttpTTSService`.
+- Added support for `bulbul:v3` model in `SarvamTTSService` and
+  `SarvamHttpTTSService`.
 
 - Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
 
-- Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the multilingual model.
+- Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the
+  multilingual model.
 
 - Added support for trickle ICE to the `SmallWebRTCTransport`.
 
@@ -97,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `send_transcription_frames` argument to `AWSNovaSonicLLMService` is
   deprecated. Transcription frames are now always sent. They go upstream, to be
-  handled by the user context aggregator. See "Changed" section for details.
+  handled by the user context aggregator. See "Added" section for details.
 
 - Types in `pipecat.services.aws.nova_sonic.context` have been deprecated due
   to changes to support `LLMContext`. See "Changed" section for details.
