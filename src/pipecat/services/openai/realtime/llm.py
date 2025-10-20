@@ -156,15 +156,7 @@ class OpenAIRealtimeLLMService(LLMService):
         self._audio_input_paused = start_audio_paused
         self._websocket = None
         self._receive_task = None
-        # "Last received context" is only needed while we still support
-        # OpenAILLMContextFrame. The "last received context" is the context received
-        # in the most recent OpenAILLMContextFrame or LLMContextFrame, *before*
-        # it's converted to an LLMContext if needed. Storing the "last received
-        # context" lets us determine whether the context has changed. (We can't
-        # compare contexts after conversion because conversion creates a new
-        # object.)
         self._context: LLMContext = None
-        self._last_received_context: OpenAILLMContext | LLMContext = None
 
         self._llm_needs_conversation_setup = True
 
@@ -176,7 +168,6 @@ class OpenAIRealtimeLLMService(LLMService):
         self._current_audio_response = None
 
         self._messages_added_manually = {}
-        self._user_and_response_message_tuple = None
         self._pending_function_calls = {}  # Track function calls by call_id
 
         self._register_event_handler("on_conversation_item_created")
@@ -382,15 +373,15 @@ class OpenAIRealtimeLLMService(LLMService):
                 else LLMContext.from_openai_context(frame.context)
             )
             if not self._context:
-                self._last_received_context = frame.context
+                # We got our initial context
+                # Run the LLM at next opportunity
                 self._context = context
-            elif frame.context is not self._last_received_context:
-                # If the context has changed, reset the conversation
-                self._last_received_context = frame.context
-                self._context = context
-                await self.reset_conversation()
-            # Run the LLM at next opportunity
-            await self._create_response()
+                await self._create_response()
+            else:
+                # We got an updated context
+                # Send results for any newly-completed function calls
+                # TODO: to implement
+                pass
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -607,12 +598,7 @@ class OpenAIRealtimeLLMService(LLMService):
             del self._messages_added_manually[evt.item.id]
             return
 
-        if evt.item.role == "user":
-            # We need to wait for completion of both user message and response message. Then we'll
-            # add both to the context. User message is complete when we have a "transcript" field
-            # that is not None. Response message is complete when we get a "response.done" event.
-            self._user_and_response_message_tuple = (evt.item, {"done": False, "output": []})
-        elif evt.item.role == "assistant":
+        if evt.item.role == "assistant":
             self._current_assistant_response = evt.item
             await self.push_frame(LLMFullResponseStartFrame())
 
@@ -650,16 +636,6 @@ class OpenAIRealtimeLLMService(LLMService):
             FrameDirection.UPSTREAM,
         )
         await self._handle_user_transcription(evt.transcript, True, Language.EN)
-        pair = self._user_and_response_message_tuple
-        if pair:
-            user, assistant = pair
-            user.content[0].transcript = evt.transcript
-            if assistant["done"]:
-                self._user_and_response_message_tuple = None
-                self._context.add_user_content_item_as_message(user)
-        else:
-            # User message without preceding conversation.item.created. Bug?
-            logger.warning(f"Transcript for unknown user message: {evt}")
 
     async def _handle_conversation_item_retrieved(self, evt: events.ConversationItemRetrieved):
         futures = self._retrieve_conversation_item_futures.pop(evt.item.id, None)
@@ -689,18 +665,6 @@ class OpenAIRealtimeLLMService(LLMService):
         # response content
         for item in evt.response.output:
             await self._call_event_handler("on_conversation_item_updated", item.id, item)
-        pair = self._user_and_response_message_tuple
-        if pair:
-            user, assistant = pair
-            assistant["done"] = True
-            assistant["output"] = evt.response.output
-            if user.content[0].transcript is not None:
-                self._user_and_response_message_tuple = None
-                self._context.add_user_content_item_as_message(user)
-        else:
-            # Response message without preceding user message (standalone response)
-            # Function calls in this response were already processed immediately when arguments were complete
-            logger.debug(f"Handling standalone response: {evt.response.id}")
 
     async def _handle_evt_text_delta(self, evt):
         # We receive text deltas (as opposed to audio transcript deltas) when
