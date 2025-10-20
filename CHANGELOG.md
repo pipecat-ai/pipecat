@@ -21,6 +21,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LLMContext`, it is not meant to be swapped out for another LLM service at
   runtime.)
 
+  Worth noting: whether or not you use the new context-setup pattern with
+  `AWSNovaSonicLLMService`, some types have changed under the hood:
+
+  ```python
+  ## BEFORE:
+
+  # Context frame type
+  frame: OpenAILLMContextFrame
+
+  # Context type
+  context: AWSNovaSonicLLMContext
+  # or
+  context: OpenAILLMContext
+
+  # Reading messages from context
+  messages = context.messages
+
+  ## AFTER:
+  # Context frame type
+  frame: LLMContextFrame
+
+  # Context type
+  context: LLMContext
+
+  # Reading messages from context
+  messages = context.get_messages()
+  ```
+
 - Added support for `bulbul:v3` model in `SarvamTTSService` and `SarvamHttpTTSService`.
 
 - Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
