@@ -129,7 +129,7 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         or answer the question. If the last message is an assistant response, simple say that you
         are ready to continue the conversation."""
 
-        self.ConvertedMessages(
+        return self.ConvertedMessages(
             messages=[
                 {
                     "role": "user",

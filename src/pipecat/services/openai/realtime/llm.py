@@ -169,6 +169,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
         self._messages_added_manually = {}
         self._pending_function_calls = {}  # Track function calls by call_id
+        self._completed_tool_calls = set()
 
         self._register_event_handler("on_conversation_item_created")
         self._register_event_handler("on_conversation_item_updated")
@@ -372,16 +373,7 @@ class OpenAIRealtimeLLMService(LLMService):
                 if isinstance(frame, LLMContextFrame)
                 else LLMContext.from_openai_context(frame.context)
             )
-            if not self._context:
-                # We got our initial context
-                # Run the LLM at next opportunity
-                self._context = context
-                await self._create_response()
-            else:
-                # We got an updated context
-                # Send results for any newly-completed function calls
-                # TODO: to implement
-                pass
+            await self._handle_context(context)
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -395,29 +387,31 @@ class OpenAIRealtimeLLMService(LLMService):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
-        elif isinstance(frame, RealtimeMessagesUpdateFrame):
-            # TODO: we don't need RealtimeMessagesUpdateFrame, I think...?
-            self._context = frame.context
         elif isinstance(frame, LLMUpdateSettingsFrame):
             self._session_properties = events.SessionProperties(**frame.settings)
             await self._update_settings()
         elif isinstance(frame, LLMSetToolsFrame):
             await self._update_settings()
-        elif isinstance(frame, RealtimeFunctionCallResultFrame):
-            await self._handle_function_call_result(frame.result_frame)
 
         await self.push_frame(frame, direction)
 
+    async def _handle_context(self, context: LLMContext):
+        if not self._context:
+            # We got our initial context
+            self._context = context
+            # Initialize our bookkeeping of already-completed tool calls in
+            # the context
+            await self._process_completed_function_calls(send_new_results=False)
+            # Run the LLM at next opportunity
+            await self._create_response()
+        else:
+            # We got an updated context
+            self._context = context
+            # Send results for any newly-completed function calls
+            await self._process_completed_function_calls(send_new_results=True)
+
     async def _handle_messages_append(self, frame):
         logger.error("!!! NEED TO IMPLEMENT MESSAGES APPEND")
-
-    async def _handle_function_call_result(self, frame):
-        item = events.ConversationItem(
-            type="function_call_output",
-            call_id=frame.tool_call_id,
-            output=json.dumps(frame.result),
-        )
-        await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 
     #
     # websocket communication
@@ -459,6 +453,7 @@ class OpenAIRealtimeLLMService(LLMService):
             if self._receive_task:
                 await self.cancel_task(self._receive_task, timeout=1.0)
                 self._receive_task = None
+            self._completed_tool_calls = set()
             self._disconnecting = False
         except Exception as e:
             logger.error(f"{self} error disconnecting: {e}")
@@ -801,9 +796,35 @@ class OpenAIRealtimeLLMService(LLMService):
             )
         )
 
+    async def _process_completed_function_calls(self, send_new_results: bool):
+        # Check for set of completed function calls in the context
+        sent_new_result = False
+        for message in self._context.get_messages():
+            if message.get("role") and message.get("content") != "IN_PROGRESS":
+                tool_call_id = message.get("tool_call_id")
+                if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                    # Found a newly-completed function call - send the result to the service
+                    if send_new_results:
+                        sent_new_result = True
+                        await self._send_tool_result(tool_call_id, message.get("content"))
+                    self._completed_tool_calls.add(tool_call_id)
+
+        # If we sent any new tool call results to the service, trigger another
+        # response
+        if sent_new_result:
+            await self._create_response()
+
     async def _send_user_audio(self, frame):
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
+
+    async def _send_tool_result(self, tool_call_id: str, result: str):
+        item = events.ConversationItem(
+            type="function_call_output",
+            call_id=tool_call_id,
+            output=json.dumps(result),
+        )
+        await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 
     def create_context_aggregator(
         self,
