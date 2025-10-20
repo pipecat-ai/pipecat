@@ -260,7 +260,10 @@ def _setup_webrtc_routes(
         # Prepare runner arguments with the callback to run your bot
         async def webrtc_connection_callback(connection):
             bot_module = _get_bot_module()
-            runner_args = SmallWebRTCRunnerArguments(webrtc_connection=connection)
+            runner_args = SmallWebRTCRunnerArguments(
+                webrtc_connection=connection,
+                body=request.request_data
+                )
             background_tasks.add_task(bot_module.bot, runner_args)
 
         # Delegate handling to SmallWebRTCRequestHandler

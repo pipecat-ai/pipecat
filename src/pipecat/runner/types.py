@@ -24,10 +24,13 @@ class RunnerArguments:
     handle_sigterm: bool = field(init=False)
     pipeline_idle_timeout_secs: int = field(init=False)
 
+    body: Optional[Any] = field(default_factory=dict)
+
     def __post_init__(self):
         self.handle_sigint = False
         self.handle_sigterm = False
         self.pipeline_idle_timeout_secs = 300
+        self.body = self.body or {}
 
 
 @dataclass
@@ -42,7 +45,6 @@ class DailyRunnerArguments(RunnerArguments):
 
     room_url: str
     token: Optional[str] = None
-    body: Optional[Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -55,7 +57,6 @@ class WebSocketRunnerArguments(RunnerArguments):
     """
 
     websocket: WebSocket
-    body: Optional[Any] = field(default_factory=dict)
 
 
 @dataclass
