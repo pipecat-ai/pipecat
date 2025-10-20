@@ -278,7 +278,7 @@ class OjinPersonaService(FrameProcessor):
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
 
         self.idle_frames: list[AnimationKeyframe] = []  # Keyframes of the idle animation
-        self.pending_speech_frames: queue.Queue[AnimationKeyframe] = queue.Queue()
+        self.pending_speech_frames: deque[AnimationKeyframe] = deque()
 
         self.is_mirrored_loop: bool = True
         self.fps = 25
@@ -384,7 +384,7 @@ class OjinPersonaService(FrameProcessor):
 
                 logger.debug(f"Received video frame {frame_idx}")
                 self._interaction.received_frames += 1
-                self.pending_speech_frames.put(animation_frame)
+                self.pending_speech_frames.append(animation_frame)
                 self.last_queued_frame_index = animation_frame.frame_idx
 
             if animation_frame.is_final_frame:
@@ -513,8 +513,7 @@ class OjinPersonaService(FrameProcessor):
             with self.pedning_audio_mutex:
                 self.pending_audio_to_play.clear()
 
-            with self.pending_speech_frames.mutex:
-                self.pending_speech_frames.queue.clear()
+            self.pending_speech_frames.clear()
             self.num_speech_frames_played = 0
             self.last_queued_frame_index = self.current_frame_index
 
@@ -754,7 +753,7 @@ class OjinPersonaService(FrameProcessor):
     def get_next_pending_frame_and_audio(self) -> tuple[AnimationKeyframe, bytes]:
         frame_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
-        frame = self.pending_speech_frames.get()
+        frame = self.pending_speech_frames.popleft()
         with self.pedning_audio_mutex:
             audio = self.pending_audio_to_play[:audio_bytes_length_for_one_frame]
             self.pending_audio_to_play = self.pending_audio_to_play[
@@ -794,10 +793,10 @@ class OjinPersonaService(FrameProcessor):
                 len(self.pending_speech_frames) != 0
                 and self.pending_speech_frames[0].frame_idx <= self.current_frame_index
             ):
-                logger.debug(
-                    f"played frame {self.pending_speech_frames[0].frame_idx} ==? {self.current_frame_index}"
-                )
                 animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
+                logger.debug(
+                    f"played frame {animation_frame.frame_idx} ==? {self.current_frame_index}"
+                )
                 self.num_speech_frames_played += 1
                 if animation_frame.is_final_frame:
                     # Restart number of frames for next interaction (which might already be generating frames)
