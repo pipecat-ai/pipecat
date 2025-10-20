@@ -48,6 +48,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -60,11 +61,6 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
 
 from . import events
-from .context import (
-    OpenAIRealtimeAssistantContextAggregator,
-    OpenAIRealtimeUserContextAggregator,
-)
-from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -832,8 +828,13 @@ class OpenAIRealtimeLLMService(LLMService):
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> OpenAIContextAggregatorPair:
+    ) -> LLMContextAggregatorPair:
         """Create an instance of OpenAIContextAggregatorPair from an OpenAILLMContext.
+
+        NOTE: this method exists only for backward compatibility. New code
+        should instead do:
+            context = LLMContext(...)
+            context_aggregator = LLMContextAggregatorPair(context)
 
         Constructor keyword arguments for both the user and assistant aggregators can be provided.
 
@@ -847,11 +848,7 @@ class OpenAIRealtimeLLMService(LLMService):
             the user and one for the assistant, encapsulated in an
             OpenAIContextAggregatorPair.
         """
-        context.set_llm_adapter(self.get_llm_adapter())
-
-        OpenAIRealtimeLLMContext.upgrade_to_realtime(context)
-        user = OpenAIRealtimeUserContextAggregator(context, params=user_params)
-
-        assistant_params.expect_stripped_words = False
-        assistant = OpenAIRealtimeAssistantContextAggregator(context, params=assistant_params)
-        return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
+        context = LLMContext.from_openai_context(context)
+        return LLMContextAggregatorPair(
+            context, user_params=user_params, assistant_params=assistant_params
+        )
