@@ -1282,13 +1282,13 @@ wheels = [
 
 [[package]]
 name = "daily-python"
-version = "0.19.9"
+version = "0.20.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/85/6064c3225e5b190e522e8f3bc6a460efc5e3e6632f16fd5f9799c44ba57a/daily_python-0.19.9-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:cbc558ad7d49e79b550bf7567b9ceae75e2864d4fcaf41c90377b620e38a2461", size = 13365213, upload-time = "2025-09-06T00:31:00.224Z" },
-    { url = "https://files.pythonhosted.org/packages/23/58/af986c6881180a46a7b60dd418ce58d6d7c0c4ffc48d261748067c679317/daily_python-0.19.9-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:446bb9ee848d88bc68ca29a2216793c9b5ebaf5991bf604daf76f7c5a53d5919", size = 11711673, upload-time = "2025-09-06T00:31:02.526Z" },
-    { url = "https://files.pythonhosted.org/packages/9d/48/1cad4c3e92cdb5ef06467d972c76a510fe5e807513334b10ad7f8c21bf74/daily_python-0.19.9-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:2facaf82b614404c642c70bbf0874fb045d8ad46400acb051470cd4df93cb4db", size = 13679393, upload-time = "2025-09-06T00:31:04.999Z" },
-    { url = "https://files.pythonhosted.org/packages/3c/e9/354f4699619e83d13e266256b2352b21741ac527e3e5ab5f2264d5c482cd/daily_python-0.19.9-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:ffc205efca7b47739efd358febab17577248c8db2ebc4d17d819307a83b9eefc", size = 14221932, upload-time = "2025-09-06T00:31:07.471Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/02/ce81ebf11a04cd133a5539e08f85060574711fff05a1d6ad29705f0755c1/daily_python-0.20.0-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:7da3f1df8cd9ef7f7fcc96ce688348dc903f62d82b6dd155a53bc64b7a74f3a7", size = 13259887, upload-time = "2025-10-16T22:14:12.262Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/1e/51f06f3486c978e1184af2271e800ce6a6e8a8f95d61ee6624bae88ae9cd/daily_python-0.20.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:d02fd7b8c8079ceaa550ef23db052cdf70a8ffaf8ab6a8bc1a1e97bf0b939464", size = 11642453, upload-time = "2025-10-16T22:14:14.477Z" },
+    { url = "https://files.pythonhosted.org/packages/71/c9/f767f0b479abd39330569ad61fb9db4661aae56cd74bb27c6f3483595463/daily_python-0.20.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:a5c8718982c221dc18b41fb0692c9f8435f115f72e74994c94d3b9c6dad7c534", size = 13634216, upload-time = "2025-10-16T22:14:16.235Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/10/5c6d7b000bee36c2a0587a092a34c7486d2de831fc8e44ed42b16a6bd99f/daily_python-0.20.0-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:ca9132aef1bdb5be663d1894b440dab1f998ebb3f45dfc31d44effabded4bc08", size = 14282189, upload-time = "2025-10-16T22:14:18.229Z" },
 ]
 
 [[package]]
@@ -4637,7 +4637,7 @@ requires-dist = [
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = "~=1.42.0" },
     { name = "cartesia", marker = "extra == 'cartesia'", specifier = "~=2.0.3" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
-    { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.19.9" },
+    { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.20.0" },
     { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = "~=4.7.0" },
     { name = "docstring-parser", specifier = "~=0.16" },
     { name = "einops", marker = "extra == 'moondream'", specifier = "~=0.8.0" },
@@ -4708,7 +4708,7 @@ requires-dist = [
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=0.1.10" },
     { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.0" },
     { name = "soxr", specifier = "~=0.5.0" },
-    { name = "speechmatics-rt", marker = "extra == 'speechmatics'", specifier = ">=0.4.0" },
+    { name = "speechmatics-rt", marker = "extra == 'speechmatics'", specifier = ">=0.5.0" },
     { name = "strands-agents", marker = "extra == 'strands'", specifier = ">=1.9.1,<2" },
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
     { name = "timm", marker = "extra == 'moondream'", specifier = "~=1.0.13" },
@@ -6619,14 +6619,14 @@ wheels = [
 
 [[package]]
 name = "speechmatics-rt"
-version = "0.4.2"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/17/2e/d694390d58b9b6807280441d1275856f5a316c3e8a815c2037502636bbea/speechmatics_rt-0.4.2.tar.gz", hash = "sha256:c0f7ed34442b0f505a12d1b19c8cc8dc2cc0b1a423aeb5669ca0738fc5e59f0d", size = 26142, upload-time = "2025-09-30T10:50:36.804Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/26/10359e1f16c2aa6a198eb11a9056f4a86a8bb8d4e610bbbe4a118b227b59/speechmatics_rt-0.5.0.tar.gz", hash = "sha256:ca974a186a012f946fd997deeaf3bf1c4f203f6d6e05a866172d27709183afc8", size = 26832, upload-time = "2025-10-15T15:54:25.695Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/c7/2cd551c71e14256ca463f31feec17f466b57c2730d636e20803e7a541104/speechmatics_rt-0.4.2-py3-none-any.whl", hash = "sha256:70b91ff750e2f7516eaf1839d39f7a8ac65ff6665638b837cf67bab9cc9967bc", size = 32131, upload-time = "2025-09-30T10:50:35.656Z" },
+    { url = "https://files.pythonhosted.org/packages/47/2e/9931ebe9360e9d385c68826b33137c2c9a4cfa361cd929d1ac6e72ebfe53/speechmatics_rt-0.5.0-py3-none-any.whl", hash = "sha256:58151488f891fa00cf7054f0cfab1b1eb94b55c3441be587f7941c726caef991", size = 32850, upload-time = "2025-10-15T15:54:24.5Z" },
 ]
 
 [[package]]
