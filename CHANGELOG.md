@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
 
 - Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the multilingual model.
-- 
+
 - Added support for trickle ICE to the `SmallWebRTCTransport`.
 
 - Added support for updating `OpenAITTSService` settings (`instructions` and
@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Package upgrades:
 
+  - `daily-python` upgraded to 0.20.0.
   - `openai` upgraded to support up to 2.x.x.
   - `openpipe` upgraded to support up to 5.x.x.
 
