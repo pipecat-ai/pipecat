@@ -265,6 +265,7 @@ class OjinPersonaService(FrameProcessor):
 
         assert self._settings.persona_config_id is not None
         self.num_speech_frames_played: int = 0
+        self.played_frame_idx = -1
         self._processed_queued_audio_task: Optional[asyncio.Task] = None
         self._run_loop_task: Optional[asyncio.Task] = None
 
@@ -284,7 +285,6 @@ class OjinPersonaService(FrameProcessor):
         self.fps = 25
         self.current_frame_index = -1
         self.last_queued_frame_index = -1
-        self.last_played_frame_index = -1
 
         self.pedning_audio_mutex: threading.Lock = threading.Lock()
         self.pending_audio_to_play = bytearray()
@@ -515,7 +515,7 @@ class OjinPersonaService(FrameProcessor):
 
             self.pending_speech_frames.clear()
             self.num_speech_frames_played = 0
-            self.last_queued_frame_index = self.current_frame_index
+            # self.last_queued_frame_index = self.current_frame_index
 
             self._interaction.close()
             self._interaction = None
@@ -646,8 +646,8 @@ class OjinPersonaService(FrameProcessor):
             assert self._client is not None
             start_generation_frame_index = (
                 self.last_queued_frame_index
-                if self.last_queued_frame_index > self.last_played_frame_index
-                else self.current_frame_index
+                if self.last_queued_frame_index > self.played_frame_idx
+                else self.played_frame_idx
             )
             start_generation_frame_index += self.extra_frames_lat
             logger.info(f"Starting interaction at frame index: {start_generation_frame_index}")
@@ -818,6 +818,8 @@ class OjinPersonaService(FrameProcessor):
                     await asyncio.sleep(0.005)
                     continue
 
+                # We use played_frame_idx since it will be the source of truth on what was displayed which might differ with the current playhead (current_play_index)
+                # This is needed to avoid ping-pong animation artifacts so we always play idle frames that follow speech frames even if they arrive too late
                 self.played_frame_idx += 1
                 self.num_speech_frames_played = 0
                 animation_frame = self._get_idle_frame_for_index(self.played_frame_idx)
