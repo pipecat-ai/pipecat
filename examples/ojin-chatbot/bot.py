@@ -25,8 +25,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.hume.hume import HumeSTSService
 from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
@@ -124,28 +123,11 @@ async def main():
         )
     )
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
-    )
-
     # Initialize LLM service
     llm = HumeSTSService(
-        api_key=self.config.get_variable(
-            "HUME_API_KEY",
-            "",
-        ),
-        config_id=self.config.get_variable(
-            "HUME_CONFIG_ID",
-            "",
-        ),
-        model=self.config.get_variable(
-            "HUME_MODEL",
-            "evi",
-        ),
-        system_prompt=self.config.welcome_settings.welcome_system_prompt,
+        api_key=os.getenv("HUME_API_KEY", ""),
+        config_id=os.getenv("HUME_CONFIG_ID", ""),
+        model=os.getenv("HUME_MODEL", "evi"),
     )
 
     messages = [
@@ -161,12 +143,10 @@ async def main():
     # DITTO_SERVER_URL: str = "wss://eu-central-1.models.ojin.foo/realtime"
     persona = OjinPersonaService(
         OjinPersonaSettings(
-            ws_url=os.getenv("OJIN_PROXY_URL", ""),
+            ws_url=os.getenv("OJIN_PROXY_URL", "wss://models.ojin.ai/realtime"),
             api_key=os.getenv("OJIN_API_KEY", ""),
             persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),
             image_size=(1280, 720),
-            idle_to_speech_seconds=2.0,
-            idle_sequence_duration=5,
             tts_audio_passthrough=False,
             push_bot_stopped_speaking_frames=False,
         )
@@ -180,19 +160,17 @@ async def main():
     fps_canvas = create_fps_overlay(tk_root, x=8, y=128, width=1280, height=120)
     tk_update_task = start_tk_updater(tk_root, interval_ms=10)
     tk_fps_update_task = start_tk_fps_udpater(
-        tk_root, persona.fsm_fps_tracker, fps_canvas, interval_ms=80
+        tk_root, persona._fsm_fps_tracker, fps_canvas, interval_ms=80
     )
     tk_fps_server_update_task = start_tk_fps_udpater(
-        tk_root, persona.server_fps_tracker, fps_server_canvas, interval_ms=80
+        tk_root, persona._server_fps_tracker, fps_server_canvas, interval_ms=80
     )
 
     pipeline = Pipeline(
         [
             audio_transport.input(),
-            stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
-            tts,  # TTS
             persona,
             image_converter,  # Convert image format from BGR to PPM
             tk_transport.output(),  # Transport video output

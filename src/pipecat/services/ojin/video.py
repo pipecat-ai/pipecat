@@ -194,10 +194,6 @@ class OjinPersonaSettings:
     cache_idle_sequence: bool = field(
         default=False
     )  # whether to cache the idle sequence loop to avoid doing inference while persona is not speaking
-    idle_sequence_duration: int = field(default=30)  # length of the idle sequence loop in seconds.
-    idle_to_speech_seconds: float = field(
-        default=0.75
-    )  # seconds to wait before starting speech, recommended not less than 0.75 to avoid missing frames. This ensures smooth transition between idle frames and speech frames
     tts_audio_passthrough: bool = field(
         default=False
     )  # whether to pass through TTS audio to the output
@@ -209,7 +205,7 @@ class OjinPersonaSettings:
     )  # If -1 then it will not end the interaction based on frame count only when receiving TTSStoppedFrame. If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
 
     extra_frames_lat: int = field(
-        default=15,
+        default=1,
     )  # round trip latency between server and client, make sure to specify extra room for error
 
 
