@@ -90,6 +90,11 @@ async def create_daily_room(
     if name:
         body["name"] = name
 
+    headers = {
+        "Authorization": f"Bearer {os.getenv('DAILY_API_KEY')}",
+        "Content-Type": "application/json",
+    }
+
     try:
         # Use tenacity's AsyncRetrying for automatic retry with exponential backoff
         async for attempt in AsyncRetrying(
@@ -99,21 +104,17 @@ async def create_daily_room(
             reraise=True,
         ):
             with attempt:
-                async with AsyncClient() as client:
+                async with AsyncClient(timeout=30) as client:
                     response = await client.post(
                         url="https://api.daily.co/v1/rooms",
-                        headers={
-                            "Authorization": f"Bearer {os.getenv('DAILY_API_KEY')}",
-                            "Content-Type": "application/json",
-                        },
+                        headers=headers,
                         json=body,
-                        timeout=30,
                     )
-
                     response.raise_for_status()
+                    return response.json()
 
-                room_data = response.json()
-                return room_data
+        # This line should never be reached due to reraise=True, but satisfies type checker
+        return None
 
     except RetryError as e:
         # All retries exhausted
@@ -157,18 +158,6 @@ async def create_room_with_progress(
     else:
         progress_dict["failed"] += 1
 
-    # Log progress periodically (every 10% or every 100 rooms, whichever is smaller)
-    total_processed = progress_dict["completed"] + progress_dict["failed"]
-    log_interval = min(100, max(1, total // 10))
-
-    if total_processed % log_interval == 0 or total_processed == total:
-        logger.info(
-            f"Progress: {total_processed}/{total} "
-            f"({(total_processed / total) * 100:.1f}%) - "
-            f"✅ {progress_dict['completed']} succeeded, "
-            f"❌ {progress_dict['failed']} failed"
-        )
-
     return result
 
 
@@ -195,10 +184,16 @@ async def test_create_rooms(
     # Shared progress tracking dictionary
     progress_dict = {"completed": 0, "failed": 0}
 
-    # Create tasks for concurrent room creation with progress tracking
-    tasks = []
-    for i in range(num_rooms):
-        task = create_room_with_progress(
+    # Start background progress logger
+    stop_event = asyncio.Event()
+    progress_task = asyncio.create_task(
+        periodic_progress_logger(progress_dict, num_rooms, progress_interval, stop_event)
+    )
+
+    # Create and execute all tasks concurrently
+    logger.info(f"Executing {num_rooms} concurrent room creation requests...")
+    tasks = [
+        create_room_with_progress(
             index=i,
             total=num_rooms,
             progress_dict=progress_dict,
@@ -207,16 +202,8 @@ async def test_create_rooms(
             exp_minutes=10,
             max_retries=5,
         )
-        tasks.append(task)
-
-    # Execute all tasks concurrently with periodic progress logging
-    logger.info(f"Executing {num_rooms} concurrent room creation requests...")
-
-    # Start background progress logger
-    stop_event = asyncio.Event()
-    progress_task = asyncio.create_task(
-        periodic_progress_logger(progress_dict, num_rooms, progress_interval, stop_event)
-    )
+        for i in range(num_rooms)
+    ]
 
     try:
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -226,17 +213,8 @@ async def test_create_rooms(
         await progress_task
 
     # Count successes and failures
-    success_count = 0
-    failed_count = 0
-
-    for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logger.error(f"Room {i + 1} failed with exception: {result}")
-            failed_count += 1
-        elif result is None:
-            failed_count += 1
-        else:
-            success_count += 1
+    success_count = sum(1 for r in results if r is not None and not isinstance(r, Exception))
+    failed_count = num_rooms - success_count
 
     elapsed_time = time.time() - start_time
 
