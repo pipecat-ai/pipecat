@@ -110,6 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         pattern_id="voice_tag",
         start_pattern="<voice>",
         end_pattern="</voice>",
+        type="voice",
         remove_match=True,
     )
 
