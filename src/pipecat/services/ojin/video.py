@@ -205,7 +205,7 @@ class OjinPersonaSettings:
     )  # If -1 then it will not end the interaction based on frame count only when receiving TTSStoppedFrame. If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
 
     extra_frames_lat: int = field(
-        default=1,
+        default=10,
     )  # round trip latency between server and client, make sure to specify extra room for error
 
 
