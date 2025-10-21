@@ -77,7 +77,7 @@ async def save_conversation(params: FunctionCallParams):
     )
     try:
         with open(filename, "w") as file:
-            messages = params.context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages()
             # remove the last message, which is the instruction we just gave to save the conversation
             messages.pop()
             json.dump(messages, file, indent=2)
@@ -94,6 +94,10 @@ async def load_conversation(params: FunctionCallParams):
             with open(filename, "r") as file:
                 params.context.set_messages(json.load(file))
                 await params.llm.reset_conversation()
+                # NOTE: we manually create a response here rather than relying
+                # on the function callback to trigger one since we've reset the
+                # conversation so the remote service doesn't know about the
+                # in-progress tool call.
                 await params.llm._create_response()
         except Exception as e:
             await params.result_callback({"success": False, "error": str(e)})
