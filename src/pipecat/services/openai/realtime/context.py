@@ -27,9 +27,6 @@
     context: OpenAIRealtimeLLMContext
     # or
     context: OpenAILLMContext
-
-    # Reading messages from context
-    messages = context.messages
     ```
 
     AFTER:
@@ -46,9 +43,6 @@
 
     # Context type
     context: LLMContext
-
-    # Reading messages from context
-    messages = context.get_messages()
     ```
 """
 
@@ -75,8 +69,6 @@ with warnings.catch_warnings():
         "context: OpenAIRealtimeLLMContext\n"
         "# or\n"
         "context: OpenAILLMContext\n\n"
-        "# Reading messages from context\n"
-        "messages = context.messages\n"
         "```\n\n"
         "AFTER:\n"
         "```\n"
@@ -89,8 +81,6 @@ with warnings.catch_warnings():
         "frame: LLMContextFrame\n\n"
         "# Context type\n"
         "context: LLMContext\n\n"
-        "# Reading messages from context\n"
-        "messages = context.get_messages()\n"
         "```\n",
     )
 
