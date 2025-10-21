@@ -401,9 +401,10 @@ class OpenAIRealtimeLLMService(LLMService):
             # Run the LLM at next opportunity
             await self._create_response()
         else:
-            # We got an updated context
+            # We got an updated context.
+            # This may contain a new user message or tool call result.
             self._context = context
-            # Send results for any newly-completed function calls
+            # Send results for newly-completed function calls, if any.
             await self._process_completed_function_calls(send_new_results=True)
 
     async def _handle_messages_append(self, frame):
@@ -758,7 +759,11 @@ class OpenAIRealtimeLLMService(LLMService):
         """
         logger.debug("Resetting conversation")
         await self._disconnect()
+
+        # Prepare to setup server-side conversation from local context again
         self._llm_needs_conversation_setup = True
+        await self._process_completed_function_calls(send_new_results=False)
+
         await self._connect()
 
     @traced_openai_realtime(operation="llm_request")
@@ -771,6 +776,10 @@ class OpenAIRealtimeLLMService(LLMService):
 
         # Configure the LLM for this session if needed
         if self._llm_needs_conversation_setup:
+            logger.debug(
+                f"Setting up conversation on OpenAI Realtime LLM service with initial messages: {adapter.get_messages_for_logging(self._context)}"
+            )
+
             # Send initial messages
             llm_invocation_params = adapter.get_llm_invocation_params(self._context)
             messages = llm_invocation_params["messages"]
@@ -785,7 +794,7 @@ class OpenAIRealtimeLLMService(LLMService):
             # We're done configuring the LLM for this session
             self._llm_needs_conversation_setup = False
 
-        logger.debug(f"Creating response: {adapter.get_messages_for_logging(self._context)}")
+        logger.debug(f"Creating response")
 
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()
@@ -809,8 +818,8 @@ class OpenAIRealtimeLLMService(LLMService):
                         await self._send_tool_result(tool_call_id, message.get("content"))
                     self._completed_tool_calls.add(tool_call_id)
 
-        # If we sent any new tool call results to the service, trigger another
-        # response
+        # If we reported any new tool call results to the service, trigger
+        # another response
         if sent_new_result:
             await self._create_response()
 
