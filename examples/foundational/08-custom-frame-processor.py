@@ -57,13 +57,10 @@ def format_metrics(metrics, indent=0):
 
 
 class MetricsFrameLogger(FrameProcessor):
-    """MetricsFrameLogger logs all MetericsFrames.
+    """MetricsFrameLogger formats and logs all MetericsFrames"""
 
-    AND it Always pushes all frames.
-    """
-
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -110,8 +107,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    metrics_frame_processor = MetricsFrameLogger()
-
     messages = [
         {
             "role": "system",
@@ -121,6 +116,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     context = LLMContext(messages)
     context_aggregator = LLMContextAggregatorPair(context)
+
+    metrics_frame_processor = MetricsFrameLogger()
 
     pipeline = Pipeline(
         [
