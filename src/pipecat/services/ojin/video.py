@@ -747,7 +747,7 @@ class OjinPersonaService(FrameProcessor):
         return self.idle_frames[mirror_frame_idx]
 
     def get_next_pending_frame_and_audio(self) -> tuple[AnimationKeyframe, bytes]:
-        frame = self.pending_speech_frames.get()
+        frame = self.pending_speech_frames.popleft()
 
         if frame.is_final_frame:
             with self.pedning_audio_mutex:
@@ -757,7 +757,7 @@ class OjinPersonaService(FrameProcessor):
 
         frame_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
-        frame = self.pending_speech_frames.popleft()
+
         with self.pedning_audio_mutex:
             audio = self.pending_audio_to_play[:audio_bytes_length_for_one_frame]
             self.pending_audio_to_play = self.pending_audio_to_play[
