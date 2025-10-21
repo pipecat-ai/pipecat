@@ -456,10 +456,14 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _ws_send(self, realtime_message):
         try:
-            if self._websocket:
+            if not self._disconnecting and self._websocket:
                 await self._websocket.send(json.dumps(realtime_message))
         except Exception as e:
-            if self._disconnecting:
+            if self._disconnecting or not self._websocket:
+                # We're in the process of disconnecting.
+                # (If not self._websocket, that could indicate that we
+                # somehow *started* the websocket send attempt while we still
+                # had a connection)
                 return
             logger.error(f"Error sending message to websocket: {e}")
             # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
