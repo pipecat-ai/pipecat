@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- It is now possible to start a bot from the `/start` endpoint when using the
+  runner Daily's transport. This follows the Pipecat Cloud format with
+  `createDailyRoom` and `body` fields in the POST request body.
+
 - Added an ellipsis character (`…`) to the end of sentence detection in the
   string utils.
 
