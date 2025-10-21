@@ -130,11 +130,11 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),  # Wait for StartedSpeaking to process
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world!"),
-            TTSTextFrame(text="How"),
-            TTSTextFrame(text="are"),
-            TTSTextFrame(text="you?"),
+            TTSTextFrame(text="Hello", aggregated_by="word"),
+            TTSTextFrame(text="world!", aggregated_by="word"),
+            TTSTextFrame(text="How", aggregated_by="word"),
+            TTSTextFrame(text="are", aggregated_by="word"),
+            TTSTextFrame(text="you?", aggregated_by="word"),
             SleepFrame(),  # Wait for text frames to queue
             BotStoppedSpeakingFrame(),
         ]
@@ -195,9 +195,9 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text=""),  # Empty text
-            TTSTextFrame(text="   "),  # Just whitespace
-            TTSTextFrame(text="\n"),  # Just newline
+            TTSTextFrame(text="", aggregated_by="word"),  # Empty text
+            TTSTextFrame(text="   ", aggregated_by="word"),  # Just whitespace
+            TTSTextFrame(text="\n", aggregated_by="word"),  # Just newline
             BotStoppedSpeakingFrame(),
             # Pipeline ends here; run_test will automatically send EndFrame
         ]
@@ -235,14 +235,14 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world!"),
+            TTSTextFrame(text="Hello", aggregated_by="word"),
+            TTSTextFrame(text="world!", aggregated_by="word"),
             SleepFrame(),
             InterruptionFrame(),  # User interrupts here
             SleepFrame(),
             BotStartedSpeakingFrame(),
-            TTSTextFrame(text="New"),
-            TTSTextFrame(text="response"),
+            TTSTextFrame(text="New", aggregated_by="word"),
+            TTSTextFrame(text="response", aggregated_by="word"),
             SleepFrame(),
             BotStoppedSpeakingFrame(),
         ]
@@ -299,8 +299,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world"),
+            TTSTextFrame(text="Hello", aggregated_by="word"),
+            TTSTextFrame(text="world", aggregated_by="word"),
             # Pipeline ends here; run_test will automatically send EndFrame
         ]
 
@@ -338,8 +338,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world"),
+            TTSTextFrame(text="Hello", aggregated_by="word"),
+            TTSTextFrame(text="world", aggregated_by="word"),
             SleepFrame(),  # Ensure messages are processed
             CancelFrame(),
         ]
@@ -401,8 +401,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Assistant"),
-            TTSTextFrame(text="message"),
+            TTSTextFrame(text="Assistant", aggregated_by="word"),
+            TTSTextFrame(text="message", aggregated_by="word"),
             BotStoppedSpeakingFrame(),
         ]
 
@@ -441,14 +441,14 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text=" there"),
-            TTSTextFrame(text="!"),
-            TTSTextFrame(text=" How"),
-            TTSTextFrame(text="'s"),
-            TTSTextFrame(text=" it"),
-            TTSTextFrame(text=" going"),
-            TTSTextFrame(text="?"),
+            TTSTextFrame(text="Hello", aggregated_by="word"),
+            TTSTextFrame(text=" there", aggregated_by="word"),
+            TTSTextFrame(text="!", aggregated_by="word"),
+            TTSTextFrame(text=" How", aggregated_by="word"),
+            TTSTextFrame(text="'s", aggregated_by="word"),
+            TTSTextFrame(text=" it", aggregated_by="word"),
+            TTSTextFrame(text=" going", aggregated_by="word"),
+            TTSTextFrame(text="?", aggregated_by="word"),
             BotStoppedSpeakingFrame(),
         ]
 

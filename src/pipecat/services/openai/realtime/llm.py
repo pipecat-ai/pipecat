@@ -673,7 +673,7 @@ class OpenAIRealtimeLLMService(LLMService):
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
-            await self.push_frame(TTSTextFrame(evt.delta))
+            await self.push_frame(TTSTextFrame(evt.delta, aggregated_by="sentence", spoken=True))
 
     async def _handle_evt_function_call_arguments_done(self, evt):
         """Handle completion of function call arguments.
