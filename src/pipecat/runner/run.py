@@ -309,7 +309,7 @@ def _setup_webrtc_routes(
     ):
         """Mimic Pipecat Cloud's proxy."""
         active_session = active_sessions.get(session_id)
-        if not active_session:
+        if active_session is None:
             return Response(content="Invalid or not-yet-ready session_id", status_code=404)
 
         if path.endswith("api/offer"):
