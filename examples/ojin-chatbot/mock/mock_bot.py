@@ -93,18 +93,18 @@ class ImageFormatConverter(FrameProcessor):
 
 
 async def main():
-    time_scale = 0.1
+    time_scale = 1.0
     input = MockTTSProcessor(
         {
             "audio_sequence": [
-                ("./mock/assets/long_audio_16k.wav", 18 * time_scale),
-                #("./mock/assets/long_audio_16k.wav", 23 * time_scale),
+                ("./mock/assets/long_audio_16k.wav", 32 * time_scale),
+                ("./mock/assets/long_audio_16k.wav", 39 * time_scale),
             ],
             "event_sequence": [
-                ("user_started_speaking", 16 * time_scale),
-                ("user_stopped_speaking", 17 * time_scale),
-                #("user_started_speaking", 21 * time_scale),
-                #("user_stopped_speaking", 22 * time_scale),
+                ("user_started_speaking", 30 * time_scale),
+                ("user_stopped_speaking", 31 * time_scale),
+                ("user_started_speaking", 37 * time_scale),
+                ("user_stopped_speaking", 38 * time_scale),
             ],
             "chunk_size": 600000,
             "chunk_delay": 0.2,
@@ -137,12 +137,10 @@ async def main():
     # DITTO_SERVER_URL: str = "wss://eu-central-1.models.ojin.foo/realtime"
     persona = OjinPersonaService(
         OjinPersonaSettings(
-            ws_url=os.getenv("OJIN_PROXY_URL", ""),
+            ws_url=os.getenv("OJIN_PROXY_URL", "wss://models.ojin.ai/realtime"),
             api_key=os.getenv("OJIN_API_KEY", ""),
             persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),
             image_size=(1280, 720),
-            idle_to_speech_seconds=1.0,
-            idle_sequence_duration=5,
             tts_audio_passthrough=False,
             push_bot_stopped_speaking_frames=False,
         )

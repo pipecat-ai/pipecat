@@ -194,10 +194,6 @@ class OjinPersonaSettings:
     cache_idle_sequence: bool = field(
         default=False
     )  # whether to cache the idle sequence loop to avoid doing inference while persona is not speaking
-    idle_sequence_duration: int = field(default=30)  # length of the idle sequence loop in seconds.
-    idle_to_speech_seconds: float = field(
-        default=0.75
-    )  # seconds to wait before starting speech, recommended not less than 0.75 to avoid missing frames. This ensures smooth transition between idle frames and speech frames
     tts_audio_passthrough: bool = field(
         default=False
     )  # whether to pass through TTS audio to the output
@@ -209,7 +205,7 @@ class OjinPersonaSettings:
     )  # If -1 then it will not end the interaction based on frame count only when receiving TTSStoppedFrame. If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
 
     extra_frames_lat: int = field(
-        default=15,
+        default=10,
     )  # round trip latency between server and client, make sure to specify extra room for error
 
 
@@ -751,9 +747,17 @@ class OjinPersonaService(FrameProcessor):
         return self.idle_frames[mirror_frame_idx]
 
     def get_next_pending_frame_and_audio(self) -> tuple[AnimationKeyframe, bytes]:
+        frame = self.pending_speech_frames.popleft()
+
+        if frame.is_final_frame:
+            with self.pedning_audio_mutex:
+                audio = self.pending_audio_to_play.copy()
+                self.pending_audio_to_play.clear()
+            return frame, audio
+
         frame_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
-        frame = self.pending_speech_frames.popleft()
+
         with self.pedning_audio_mutex:
             audio = self.pending_audio_to_play[:audio_bytes_length_for_one_frame]
             self.pending_audio_to_play = self.pending_audio_to_play[
