@@ -10,7 +10,8 @@ import base64
 import json
 import uuid
 import warnings
-from typing import AsyncGenerator, List, Literal, Optional, Union
+from enum import Enum
+from typing import AsyncGenerator, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -125,6 +126,72 @@ def language_to_cartesia_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+class CartesiaEmotion(str, Enum):
+    """Predefined Emotions supported by Cartesia."""
+
+    # Primary emotions supported by Cartesia
+    NEUTRAL = "neutral"
+    ANGRY = "angry"
+    EXCITED = "excited"
+    CONTENT = "content"
+    SAD = "sad"
+    SCARED = "scared"
+    # Additional emotions supported by Cartesia
+    HAPPY = "happy"
+    ENTHUSIASTIC = "enthusiastic"
+    ELATED = "elated"
+    EUPHORIC = "euphoric"
+    TRIUMPHANT = "triumphant"
+    AMAZED = "amazed"
+    SURPRISED = "surprised"
+    FLIRTATIOUS = "flirtatious"
+    JOKING_COMEDIC = "joking/comedic"
+    CURIOUS = "curious"
+    PEACEFUL = "peaceful"
+    SERENE = "serene"
+    CALM = "calm"
+    GRATEFUL = "grateful"
+    AFFECTIONATE = "affectionate"
+    TRUST = "trust"
+    SYMPATHETIC = "sympathetic"
+    ANTICIPATION = "anticipation"
+    MYSTERIOUS = "mysterious"
+    MAD = "mad"
+    OUTRAGED = "outraged"
+    FRUSTRATED = "frustrated"
+    AGITATED = "agitated"
+    THREATENED = "threatened"
+    DISGUSTED = "disgusted"
+    CONTEMPT = "contempt"
+    ENVIOUS = "envious"
+    SARCASTIC = "sarcastic"
+    IRONIC = "ironic"
+    DEJECTED = "dejected"
+    MELANCHOLIC = "melancholic"
+    DISAPPOINTED = "disappointed"
+    HURT = "hurt"
+    GUILTY = "guilty"
+    BORED = "bored"
+    TIRED = "tired"
+    REJECTED = "rejected"
+    NOSTALGIC = "nostalgic"
+    WISTFUL = "wistful"
+    APOLOGETIC = "apologetic"
+    HESITANT = "hesitant"
+    INSECURE = "insecure"
+    CONFUSED = "confused"
+    RESIGNED = "resigned"
+    ANXIOUS = "anxious"
+    PANICKED = "panicked"
+    ALARMED = "alarmed"
+    PROUD = "proud"
+    CONFIDENT = "confident"
+    DISTANT = "distant"
+    SKEPTICAL = "skeptical"
+    CONTEMPLATIVE = "contemplative"
+    DETERMINED = "determined"
+
+
 class CartesiaTTSService(AudioContextWordTTSService):
     """Cartesia TTS service with WebSocket streaming and word timestamps.
 
@@ -182,6 +249,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
             container: Audio container format.
             params: Additional input parameters for voice customization.
             text_aggregator: Custom text aggregator for processing input text.
+
+                .. deprecated:: 0.0.95
+                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
+
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -200,9 +271,17 @@ class CartesiaTTSService(AudioContextWordTTSService):
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            text_aggregator=text_aggregator or SkipTagsAggregator([("<spell>", "</spell>")]),
+            text_aggregator=text_aggregator,
             **kwargs,
         )
+
+        if not text_aggregator:
+            # Always skip tags added for spelled-out text
+            # Note: This is primarily to support backwards compatibility.
+            #    The preferred way of taking advantage of Cartesia SSML Tags is
+            #    to use an LLMTextProcessor and/or a text_transformer to identify
+            #    and insert these tags for the purpose of the TTS service alone.
+            self._text_aggregator = SkipTagsAggregator([("<spell>", "</spell>")])
 
         params = params or CartesiaTTSService.InputParams()
 
@@ -256,6 +335,27 @@ class CartesiaTTSService(AudioContextWordTTSService):
             The Cartesia-specific language code, or None if not supported.
         """
         return language_to_cartesia_language(language)
+
+    # A set of Cartesia-specific helpers for text transformations
+    def SPELL(text: str) -> str:
+        """Wrap text in Cartesia spell tag."""
+        return f"<spell>{text}</spell>"
+
+    def EMOTION_TAG(emotion: CartesiaEmotion) -> str:
+        """Convenience method to create an emotion tag."""
+        return f'<emotion value="{emotion}" />'
+
+    def PAUSE_TAG(seconds: float) -> str:
+        """Convenience method to create a pause tag."""
+        return f'<break time="{seconds}s" />'
+
+    def VOLUME_TAG(volume: float) -> str:
+        """Convenience method to create a volume tag."""
+        return f'<volume ratio="{volume}" />'
+
+    def SPEED_TAG(speed: float) -> str:
+        """Convenience method to create a speed tag."""
+        return f'<speed ratio="{speed}" />'
 
     def _is_cjk_language(self, language: str) -> bool:
         """Check if the given language is CJK (Chinese, Japanese, Korean).
