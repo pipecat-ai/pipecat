@@ -41,9 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   # or
   context: OpenAILLMContext
 
-  # Reading messages from context
-  messages = context.messages
-
   ## AFTER:
 
   # Context aggregator type
@@ -54,9 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   # Context type
   context: LLMContext
-
-  # Reading messages from context
-  messages = context.get_messages()
   ```
 
 - Added support for `bulbul:v3` model in `SarvamTTSService` and
