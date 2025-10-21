@@ -704,6 +704,29 @@ class RTVITextMessageData(BaseModel):
     text: str
 
 
+class RTVIBotOutputMessageData(RTVITextMessageData):
+    """Data for bot output RTVI messages.
+
+    Extends RTVITextMessageData to include metadata about the output.
+    """
+
+    spoken: bool = True  # Indicates if the text has been spoken by TTS
+    aggregated_by: Optional[Literal["word", "sentence"] | str] = None
+    # Indicates what form the text is in (e.g., by word, sentence, etc.)
+
+
+class RTVIBotOutputMessage(BaseModel):
+    """Message containing bot output text.
+
+    An event meant to wholistically represent what the bot is outputting,
+    along with metadata about the output and if it has been spoken.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["bot-output"] = "bot-output"
+    data: RTVIBotOutputMessageData
+
+
 class RTVIBotTranscriptionMessage(BaseModel):
     """Message containing bot transcription text.
 
@@ -960,6 +983,8 @@ class RTVIObserver(BaseObserver):
         self._last_user_audio_level = 0
         self._last_bot_audio_level = 0
 
+        self._skip_tts = None
+
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
 
@@ -1050,8 +1075,7 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVIBotTTSStoppedMessage())
         elif isinstance(frame, TTSTextFrame) and self._params.bot_tts_enabled:
             if isinstance(src, BaseOutputTransport):
-                message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-                await self.send_rtvi_message(message)
+                await self._handle_tts_text_frame(frame)
             else:
                 mark_as_seen = False
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
@@ -1115,14 +1139,63 @@ class RTVIObserver(BaseObserver):
         if message:
             await self.send_rtvi_message(message)
 
+    async def _handle_tts_text_frame(self, frame: TTSTextFrame):
+        """Handle TTS text output frames."""
+        # send the tts-text message
+        message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
+        await self.send_rtvi_message(message)
+        # send the bot-output message
+        message = RTVIBotOutputMessage(
+            data=RTVIBotOutputMessageData(
+                text=frame.text, spoken=frame.spoken, aggregated_by=frame.aggregated_by
+            )
+        )
+        await self.send_rtvi_message(message)
+
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
         message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
         await self.send_rtvi_message(message)
 
+        # initialize skip_tts on first LLMTextFrame
+        if self._skip_tts is None:
+            self._skip_tts = frame.skip_tts
+
+        messages = []
+        should_reset_transcription = False
         self._bot_transcription += frame.text
-        if match_endofsentence(self._bot_transcription):
-            await self._push_bot_transcription()
+
+        if not frame.skip_tts and self._skip_tts:
+            # We just switched from skipping TTS to not skipping TTS.
+            # Send and reset any existing transcription.
+            if len(self._bot_transcription) > 0:
+                message.append(
+                    RTVIBotOutputMessage(
+                        data=RTVIBotOutputMessageData(
+                            text=self._bot_transcription, spoken=False, aggregated_by="sentence"
+                        )
+                    )
+                )
+                should_reset_transcription = True
+
+        if match_endofsentence(self._bot_transcription) and len(self._bot_transcription) > 0:
+            messages.append(
+                RTVIBotTranscriptionMessage(data=RTVITextMessageData(text=self._bot_transcription))
+            )
+            if frame.skip_tts:
+                messages.append(
+                    RTVIBotOutputMessage(
+                        data=RTVIBotOutputMessageData(
+                            text=self._bot_transcription, spoken=False, aggregated_by="sentence"
+                        )
+                    )
+                )
+            should_reset_transcription = True
+
+        for msg in messages:
+            await self.send_rtvi_message(msg)
+        if should_reset_transcription:
+            self._bot_transcription = ""
 
     async def _handle_user_transcriptions(self, frame: Frame):
         """Handle user transcription frames."""
