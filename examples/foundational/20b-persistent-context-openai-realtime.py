@@ -73,7 +73,7 @@ async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(params.context.messages, indent=4)}"
+        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"
     )
     try:
         with open(filename, "w") as file:
@@ -214,7 +214,7 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = LLMContext([], tools)
+    context = LLMContext([{"role": "user", "content": "Say hello!"}], tools)
     context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
