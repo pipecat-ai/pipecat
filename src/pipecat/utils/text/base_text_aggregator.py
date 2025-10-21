@@ -12,7 +12,36 @@ aggregated text should be sent for speech synthesis.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional
+
+
+@dataclass
+class Aggregation:
+    """Data class representing aggregated text and its type.
+
+    An Aggregation object is created whenever a stream of text is aggregated by
+    a text aggregator. It contains the aggregated text and a type indicating
+    the nature of the aggregation.
+    """
+
+    def __init__(self, text: str, type: str):
+        """Initialize an aggregation instance.
+
+        Args:
+            text: The aggregated text content.
+            type: The type of aggregation the text represents (e.g., 'sentence', 'word', 'token', 'my_custom_aggregation').
+        """
+        self.text = text
+        self.type = type
+
+    def __str__(self) -> str:
+        """Return a string representation of the aggregation.
+
+        Returns:
+            A descriptive string showing the type and text of the aggregation.
+        """
+        return f"Aggregation by {self.type}: {self.text}"
 
 
 class BaseTextAggregator(ABC):
@@ -30,7 +59,7 @@ class BaseTextAggregator(ABC):
 
     @property
     @abstractmethod
-    def text(self) -> str:
+    def text(self) -> Aggregation:
         """Get the currently aggregated text.
 
         Subclasses must implement this property to return the text that has
@@ -42,12 +71,13 @@ class BaseTextAggregator(ABC):
         pass
 
     @abstractmethod
-    async def aggregate(self, text: str) -> Optional[str]:
+    async def aggregate(self, text: str) -> Optional[Aggregation]:
         """Aggregate the specified text with the currently accumulated text.
 
         This method should be implemented to define how the new text contributes
-        to the aggregation process. It returns the updated aggregated text if
-        it's ready to be processed, or None otherwise.
+        to the aggregation process. It returns the aggregated text and a string
+        describing how it was aggregated if it's ready to be processed,
+        or None otherwise.
 
         Subclasses should implement their specific logic for:
 
