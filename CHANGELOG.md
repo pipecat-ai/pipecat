@@ -112,6 +112,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where the `RTVIProcessor` was sending duplicate
   `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` messages.
 
+- Fixed an issue in `AWSBedrockLLMService` where both `temperature` and `top_p`
+  were always sent together, causing conflicts with models like Claude Sonnet 4.5
+  that don't allow both parameters simultaneously. The service now only includes
+  inference parameters that are explicitly set, and `InputParams` defaults have
+  been changed to `None` to rely on AWS Bedrock's built-in model defaults.
+
 - Fixed an issue in `RivaSegmentedSTTService` where a runtime error occurred due
   to a mismatch in the `_handle_transcription` method's signature.
 
