@@ -6,7 +6,7 @@
 
 """Custom frame types for OpenAI Realtime API integration.
 
-.. deprecated:: 0.0.92
+.. deprecated:: 0.0.91
     OpenAI Realtime no longer uses types from this module under the hood.
 
     It now works more like most LLM services in Pipecat, relying on updates to
