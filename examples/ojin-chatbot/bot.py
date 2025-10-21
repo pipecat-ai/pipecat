@@ -26,7 +26,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.hume.hume import HumeSTSService
-from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
+from pipecat.services.ojin.video import OjinPersonaInitializedFrame, OjinPersonaService, OjinPersonaSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
@@ -128,6 +128,7 @@ async def main():
         api_key=os.getenv("HUME_API_KEY", ""),
         config_id=os.getenv("HUME_CONFIG_ID", ""),
         model=os.getenv("HUME_MODEL", "evi"),
+        start_frame_cls=OjinPersonaInitializedFrame,
     )
 
     messages = [
@@ -154,17 +155,7 @@ async def main():
 
     # Create image format converter
     image_converter = ImageFormatConverter()
-
-    # Create FPS overlay and start Tk updater
-    fps_server_canvas = create_fps_overlay(tk_root, x=8, y=8, width=1280, height=120)
-    fps_canvas = create_fps_overlay(tk_root, x=8, y=128, width=1280, height=120)
     tk_update_task = start_tk_updater(tk_root, interval_ms=10)
-    tk_fps_update_task = start_tk_fps_udpater(
-        tk_root, persona._fsm_fps_tracker, fps_canvas, interval_ms=80
-    )
-    tk_fps_server_update_task = start_tk_fps_udpater(
-        tk_root, persona._server_fps_tracker, fps_server_canvas, interval_ms=80
-    )
 
     pipeline = Pipeline(
         [
