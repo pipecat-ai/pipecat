@@ -74,6 +74,7 @@ class HumeSTSService(LLMService):
         config_id: str,
         model: str = "evi",
         system_prompt: str | None = None,
+        start_frame_cls: type[Frame] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -88,6 +89,7 @@ class HumeSTSService(LLMService):
         self.system_prompt = system_prompt
         self._context: OpenAIRealtimeLLMContext | None = None
         self._hume_context: Context | None = None
+        self._start_frame_cls = start_frame_cls or HumeStartFrame
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -107,7 +109,7 @@ class HumeSTSService(LLMService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, HumeStartFrame):
+        if isinstance(frame, self._start_frame_cls):
             await self._connect()
         elif isinstance(frame, InputAudioRawFrame):
             if self._connection:
