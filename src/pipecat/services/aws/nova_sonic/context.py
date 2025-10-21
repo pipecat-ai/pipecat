@@ -27,9 +27,6 @@ including conversation history management and role-specific message processing.
     context: AWSNovaSonicLLMContext
     # or
     context: OpenAILLMContext
-
-    # Reading messages from context
-    messages = context.messages
     ```
 
     AFTER:
@@ -43,9 +40,6 @@ including conversation history management and role-specific message processing.
 
     # Context type
     context: LLMContext
-
-    # Reading messages from context
-    messages = context.get_messages()
     ```
 """
 
@@ -70,8 +64,6 @@ with warnings.catch_warnings():
         "context: AWSNovaSonicLLMContext\n"
         "# or\n"
         "context: OpenAILLMContext\n\n"
-        "# Reading messages from context\n"
-        "messages = context.messages\n"
         "```\n\n"
         "AFTER:\n"
         "```\n"
@@ -82,8 +74,6 @@ with warnings.catch_warnings():
         "frame: LLMContextFrame\n\n"
         "# Context type\n"
         "context: LLMContext\n\n"
-        "# Reading messages from context\n"
-        "messages = context.messages\n"
         "```",
         DeprecationWarning,
         stacklevel=2,
