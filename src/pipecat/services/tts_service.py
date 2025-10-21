@@ -101,6 +101,8 @@ class TTSService(AIService):
         sample_rate: Optional[int] = None,
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
         text_aggregator: Optional[BaseTextAggregator] = None,
+        # Types of text aggregations that should not be spoken.
+        skip_aggregator_types: Optional[List[str]] = [],
         # Text filter executed after text has been aggregated.
         text_filters: Optional[Sequence[BaseTextFilter]] = None,
         text_filter: Optional[BaseTextFilter] = None,
@@ -120,6 +122,7 @@ class TTSService(AIService):
             pause_frame_processing: Whether to pause frame processing during audio generation.
             sample_rate: Output sample rate for generated audio.
             text_aggregator: Custom text aggregator for processing incoming text.
+            skip_aggregator_types: List of aggregation types that should not be spoken.
             text_filters: Sequence of text filters to apply after aggregation.
             text_filter: Single text filter (deprecated, use text_filters).
 
@@ -142,6 +145,7 @@ class TTSService(AIService):
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
+        self._skip_aggregator_types: List[str] = skip_aggregator_types or []
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
         self._tracing_enabled: bool = False
@@ -368,10 +372,14 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            sentence = self._text_aggregator.text
+            aggregate = self._text_aggregator.text
             await self._text_aggregator.reset()
             self._processing_text = False
-            await self._push_tts_frames(sentence)
+            await self._push_tts_frames(
+                text=aggregate.text,
+                should_speak=aggregate.type not in self._skip_aggregator_types,
+                aggregated_by=aggregate.type,
+            )
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
                     await self.push_frame(frame, direction)
@@ -380,7 +388,7 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
-            await self._push_tts_frames(frame.text)
+            await self._push_tts_frames(frame.text, should_speak=True, aggregated_by="word")
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
@@ -472,42 +480,51 @@ class TTSService(AIService):
         text: Optional[str] = None
         if not self._aggregate_sentences:
             text = frame.text
+            should_speak = True
+            aggregated_by = "token"
         else:
-            text = await self._text_aggregator.aggregate(frame.text)
+            aggregate = await self._text_aggregator.aggregate(frame.text)
+            if aggregate:
+                text = aggregate.text
+                should_speak = aggregate.type not in self._skip_aggregator_types
+                aggregated_by = aggregate.type
 
         if text:
-            await self._push_tts_frames(text)
+            logger.trace(f"Pushing TTS frames for text: {text}, {should_speak}, {aggregated_by}")
+            await self._push_tts_frames(text, should_speak, aggregated_by)
 
-    async def _push_tts_frames(self, text: str):
-        # Remove leading newlines only
-        text = text.lstrip("\n")
+    async def _push_tts_frames(self, text: str, should_speak: bool, aggregated_by: str):
+        if should_speak:
+            # Remove leading newlines only
+            text = text.lstrip("\n")
 
-        # Don't send only whitespace. This causes problems for some TTS models. But also don't
-        # strip all whitespace, as whitespace can influence prosody.
-        if not text.strip():
-            return
+            # Don't send only whitespace. This causes problems for some TTS models. But also don't
+            # strip all whitespace, as whitespace can influence prosody.
+            if not text.strip():
+                return
 
-        # This is just a flag that indicates if we sent something to the TTS
-        # service. It will be cleared if we sent text because of a TTSSpeakFrame
-        # or when we received an LLMFullResponseEndFrame
-        self._processing_text = True
+            # This is just a flag that indicates if we sent something to the TTS
+            # service. It will be cleared if we sent text because of a TTSSpeakFrame
+            # or when we received an LLMFullResponseEndFrame
+            self._processing_text = True
 
-        await self.start_processing_metrics()
+            await self.start_processing_metrics()
 
-        # Process all filter.
-        for filter in self._text_filters:
-            await filter.reset_interruption()
-            text = await filter.filter(text)
+            # Process all filter.
+            for filter in self._text_filters:
+                await filter.reset_interruption()
+                text = await filter.filter(text)
 
-        if text:
-            await self.process_generator(self.run_tts(text))
+            if text:
+                await self.push_frame(TTSTextFrame(text, spoken=True, aggregated_by=aggregated_by))
+                await self.process_generator(self.run_tts(text))
 
-        await self.stop_processing_metrics()
+            await self.stop_processing_metrics()
 
-        if self._push_text_frames:
+        if self._push_text_frames or not should_speak:
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
-            frame = TTSTextFrame(text)
+            frame = TTSTextFrame(text, spoken=should_speak, aggregated_by=aggregated_by)
             frame.includes_inter_frame_spaces = self.includes_inter_frame_spaces
             await self.push_frame(frame)
 
@@ -635,7 +652,7 @@ class WordTTSService(TTSService):
                 frame = TTSStoppedFrame()
                 frame.pts = last_pts
             else:
-                frame = TTSTextFrame(word)
+                frame = TTSTextFrame(word, spoken=True, aggregated_by="word")
                 frame.pts = self._initial_word_timestamp + timestamp
             if frame:
                 last_pts = frame.pts

@@ -686,7 +686,7 @@ class OpenAIRealtimeLLMService(LLMService):
         # We receive audio transcript deltas (as opposed to text deltas) when
         # the output modality is "audio" (the default)
         if evt.delta:
-            frame = TTSTextFrame(evt.delta)
+            frame = TTSTextFrame(evt.delta, aggregated_by="sentence")
             # OpenAI Realtime text already includes any necessary inter-chunk spaces
             frame.includes_inter_frame_spaces = True
             await self.push_frame(frame)

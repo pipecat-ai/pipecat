@@ -1646,7 +1646,7 @@ class GeminiLiveLLMService(LLMService):
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
-        frame = TTSTextFrame(text=text)
+        frame = TTSTextFrame(text=text, aggregated_by="sentence")
         # Gemini Live text already includes any necessary inter-chunk spaces
         frame.includes_inter_frame_spaces = True
 

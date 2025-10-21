@@ -652,7 +652,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
-            await self.push_frame(TTSTextFrame(evt.delta))
+            await self.push_frame(TTSTextFrame(evt.delta, aggregated_by="sentence", spoken=True))
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
