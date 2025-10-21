@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an ellipsis character (`…`) to the end of sentence detection in the
+  string utils.
+
 - Expanded support for universal `LLMContext` to `AWSNovaSonicLLMService`.
   As a reminder, the context-setup pattern when using `LLMContext` is:
 
@@ -110,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` messages.
 
 - Fixed an issue in `RivaSegmentedSTTService` where a runtime error occurred due
-  to a mismatch in the _handle_transcription method's signature.
+  to a mismatch in the `_handle_transcription` method's signature.
 
 - Fixed multiple pipeline task cancellation issues. `asyncio.CancelledError` is
   now handled properly in `PipelineTask` making it possible to cancel an asyncio
