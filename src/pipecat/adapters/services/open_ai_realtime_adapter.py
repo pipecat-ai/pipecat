@@ -93,7 +93,7 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         # message as a single input.
 
         if not universal_context_messages:
-            return self.ConvertedMessages()
+            return self.ConvertedMessages(messages=[])
 
         messages = copy.deepcopy(universal_context_messages)
         system_instruction = None
