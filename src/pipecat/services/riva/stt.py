@@ -656,11 +656,11 @@ class RivaSegmentedSTTService(SegmentedSTTService):
 
             except AttributeError as ae:
                 logger.error(f"Unexpected response structure from Riva: {ae}")
-                yield ErrorFrame(f"Unexpected Riva response format: {str(ae)}")
+                yield ErrorFrame(f"Unexpected Riva response format: {str(ae)}", fatal=True)
 
         except Exception as e:
-            logger.exception(f"Riva Canary ASR error: {e}")
-            yield ErrorFrame(f"Riva Canary ASR error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
 
 
 class ParakeetSTTService(RivaSTTService):

@@ -375,7 +375,7 @@ class WhisperSTTService(SegmentedSTTService):
         """
         if not self._model:
             logger.error(f"{self} error: Whisper model not available")
-            yield ErrorFrame("Whisper model not available")
+            yield ErrorFrame("Whisper model not available", fatal=True)
             return
 
         await self.start_processing_metrics()
@@ -517,5 +517,5 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 )
 
         except Exception as e:
-            logger.exception(f"MLX Whisper transcription error: {e}")
-            yield ErrorFrame(f"MLX Whisper transcription error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)

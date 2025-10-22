@@ -21,6 +21,7 @@ from pipecat import __version__ as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -205,9 +206,9 @@ class AssemblyAISTTService(STTService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"Failed to connect to AssemblyAI: {e}")
+            logger.error(f"{self} exception: {e}")
             self._connected = False
-            await self.push_error(ErrorFrame(error=e, fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
             raise
 
     async def _disconnect(self):
@@ -232,7 +233,8 @@ class AssemblyAISTTService(STTService):
                     logger.warning("Timed out waiting for termination message from server")
 
             except Exception as e:
-                logger.warning(f"Error during termination handshake: {e}")
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
 
             if self._receive_task:
                 await self.cancel_task(self._receive_task)
@@ -240,8 +242,8 @@ class AssemblyAISTTService(STTService):
             await self._websocket.close()
 
         except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
-            await self.push_error(ErrorFrame(error=e, fatal=False))
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
 
         finally:
             self._websocket = None
@@ -260,11 +262,13 @@ class AssemblyAISTTService(STTService):
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:
-                    logger.error(f"Error processing WebSocket message: {e}")
+                    logger.error(f"{self} exception: {e}")
+                    await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
                     break
 
         except Exception as e:
-            logger.error(f"Fatal error in receive handler: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
 
     def _parse_message(self, message: Dict[str, Any]) -> BaseMessage:
         """Parse a raw message into the appropriate message type."""
@@ -293,7 +297,8 @@ class AssemblyAISTTService(STTService):
             elif isinstance(parsed_message, TerminationMessage):
                 await self._handle_termination(parsed_message)
         except Exception as e:
-            logger.error(f"Error handling message: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""

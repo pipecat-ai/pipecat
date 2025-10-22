@@ -184,7 +184,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             await self._disconnect_websocket()
 
         except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
         finally:
             # Reset state only after everything is cleaned up
             self._websocket = None
@@ -207,9 +208,9 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             logger.debug("Connected to Deepgram Flux Websocket")
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
             self._websocket = None
-            await self.push_error(ErrorFrame(error=e, fatal=False))
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -227,7 +228,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
-            await self.push_error(ErrorFrame(error=e, fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
@@ -334,8 +335,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         try:
             await self._websocket.send(audio)
         except Exception as e:
-            logger.error(f"Failed to send audio to Flux: {e}")
-            yield ErrorFrame(f"Failed to send audio to Flux:  {e}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
             return
 
         yield None
@@ -412,7 +413,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                     # Skip malformed messages
                     continue
                 except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+                    logger.error(f"{self} exception: {e}")
+                    await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
                     # Error will be handled inside WebsocketService->_receive_task_handler
                     raise
             else:

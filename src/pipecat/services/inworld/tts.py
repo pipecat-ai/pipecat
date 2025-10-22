@@ -365,7 +365,9 @@ class InworldTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Inworld API error: {error_text}")
-                    await self.push_error(ErrorFrame(f"Inworld API error: {error_text}"))
+                    await self.push_error(
+                        ErrorFrame(error=f"Inworld API error: {error_text}", fatal=True)
+                    )
                     return
 
                 # ================================================================================
@@ -393,7 +395,7 @@ class InworldTTSService(TTSService):
             # ================================================================================
             # Log any unexpected errors and notify the pipeline
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
         finally:
             # ================================================================================
             # STEP 8: CLEANUP AND COMPLETION
@@ -508,7 +510,7 @@ class InworldTTSService(TTSService):
         # Extract the base64-encoded audio content from response
         if "audioContent" not in response_data:
             logger.error("No audioContent in Inworld API response")
-            await self.push_error(ErrorFrame("No audioContent in response"))
+            await self.push_error(ErrorFrame(error="No audioContent in response", fatal=True))
             return
 
         # ================================================================================

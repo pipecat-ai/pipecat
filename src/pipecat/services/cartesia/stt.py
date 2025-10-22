@@ -20,6 +20,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -275,8 +276,8 @@ class CartesiaSTTService(WebsocketSTTService):
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self}: unable to connect to Cartesia: {e}")
-            await self.push_error(ErrorFrame(error=e, fatal=False))
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
 
     async def _disconnect_websocket(self):
         try:
@@ -285,6 +286,7 @@ class CartesiaSTTService(WebsocketSTTService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
@@ -364,3 +366,45 @@ class CartesiaSTTService(WebsocketSTTService):
                         language,
                     )
                 )
+<<<<<<< HEAD
+=======
+
+    async def _disconnect(self):
+        if self._receiver_task:
+            self._receiver_task.cancel()
+            try:
+                await self._receiver_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            self._receiver_task = None
+
+        if self._connection and self._connection.state is State.OPEN:
+            logger.debug("Disconnecting from Cartesia")
+
+            await self._connection.close()
+            self._connection = None
+
+    async def start_metrics(self):
+        """Start performance metrics collection for transcription processing."""
+        await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle speech events.
+
+        Args:
+            frame: The frame to process.
+            direction: Direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self.start_metrics()
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            # Send finalize command to flush the transcription session
+            if self._connection and self._connection.state is State.OPEN:
+                await self._connection.send("finalize")
+>>>>>>> d87e4051 (Update STT and TTS services to use consistent error handling pattern)
