@@ -52,7 +52,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/",
-        model: str = "gemini-2.0-flash",
+        model: str = "gemini-2.5-flash",
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -60,7 +60,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         Args:
             api_key: Google API key for authentication.
             base_url: Base URL for Google's OpenAI-compatible API.
-            model: Google model name to use (e.g., "gemini-2.0-flash").
+            model: Google model name to use (e.g., "gemini-2.5-flash").
             **kwargs: Additional arguments passed to the parent OpenAILLMService.
         """
         import warnings

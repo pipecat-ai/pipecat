@@ -698,7 +698,7 @@ class GoogleLLMService(LLMService):
 
         Args:
             api_key: Google AI API key for authentication.
-            model: Model name to use. Defaults to "gemini-2.0-flash".
+            model: Model name to use. Defaults to "gemini-2.5-flash".
             params: Input parameters for the model.
             system_instruction: System instruction/prompt for the model.
             tools: List of available tools/functions.

@@ -57,9 +57,9 @@ from pipecat.utils.time import time_now_iso8601
 load_dotenv(override=True)
 
 
-TRANSCRIBER_MODEL = "gemini-2.0-flash-001"
-CLASSIFIER_MODEL = "gemini-2.0-flash-001"
-CONVERSATION_MODEL = "gemini-2.0-flash-001"
+TRANSCRIBER_MODEL = "gemini-2.5-flash"
+CLASSIFIER_MODEL = "gemini-2.5-flash"
+CONVERSATION_MODEL = "gemini-2.5-flash"
 
 transcriber_system_instruction = """You are an audio transcriber. You are receiving audio from a user. Your job is to
 transcribe the input audio to text exactly as it was said by the user.
