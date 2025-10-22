@@ -595,8 +595,10 @@ class OjinPersonaService(FrameProcessor):
         )
 
         if interaction_to_use is None:
-            logger.error("Trying to process audio input when no interaction is available")
-            return
+            await self._start_speech_interaction()
+            interaction_to_use = self._interaction
+
+        assert interaction_to_use is not None
 
         interaction_to_use.pending_audio.extend(resampled_audio)
 
@@ -649,7 +651,7 @@ class OjinPersonaService(FrameProcessor):
             logger.info(
                 f"Starting interaction at frame index: {start_generation_frame_index}"
             )
-            self._client.start_interaction()
+            await self._client.start_interaction()
         else:
             logger.exception(
                 f"Error trying to start interaction in interaction_state: {self._interaction.state} and persona_state: {self.persona_state}"
