@@ -366,8 +366,6 @@ class CartesiaSTTService(WebsocketSTTService):
                         language,
                     )
                 )
-<<<<<<< HEAD
-=======
 
     async def _disconnect(self):
         if self._receiver_task:
@@ -407,4 +405,3 @@ class CartesiaSTTService(WebsocketSTTService):
             # Send finalize command to flush the transcription session
             if self._connection and self._connection.state is State.OPEN:
                 await self._connection.send("finalize")
->>>>>>> d87e4051 (Update STT and TTS services to use consistent error handling pattern)
