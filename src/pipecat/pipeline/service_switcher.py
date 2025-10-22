@@ -138,13 +138,13 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                 active_service: The currently active service.
                 direction: The direction of frame flow to filter.
             """
+            self._wrapped_service = wrapped_service
+            self._active_service = active_service
 
             async def filter(_: Frame) -> bool:
                 return self._wrapped_service == self._active_service
 
-            super().__init__(filter, direction)
-            self._wrapped_service = wrapped_service
-            self._active_service = active_service
+            super().__init__(filter, direction, block_system_frames=True)
 
         async def process_frame(self, frame, direction):
             """Process a frame through the filter, handling special internal filter-updating frames."""

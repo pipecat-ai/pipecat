@@ -12,7 +12,7 @@ allowing for flexible frame filtering logic in processing pipelines.
 
 from typing import Awaitable, Callable
 
-from pipecat.frames.frames import EndFrame, Frame, SystemFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -28,6 +28,7 @@ class FunctionFilter(FrameProcessor):
         self,
         filter: Callable[[Frame], Awaitable[bool]],
         direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        block_system_frames: bool = False,
     ):
         """Initialize the function filter.
 
@@ -36,10 +37,12 @@ class FunctionFilter(FrameProcessor):
                 frame should pass through, False otherwise.
             direction: The direction to apply filtering. Only frames moving in
                 this direction will be filtered. Defaults to DOWNSTREAM.
+            block_system_frames: Whether to block system frames. Defaults to False.
         """
         super().__init__()
         self._filter = filter
         self._direction = direction
+        self._block_system_frames = block_system_frames
 
     #
     # Frame processor
@@ -49,9 +52,19 @@ class FunctionFilter(FrameProcessor):
     # direction of this gate
     def _should_passthrough_frame(self, frame, direction):
         """Check if a frame should pass through without filtering."""
-        # Ignore system frames, end frames and frames that are not following the
-        # direction of this gate
-        return isinstance(frame, (SystemFrame, EndFrame)) or direction != self._direction
+        # Always passthrough frames in the wrong direction
+        if direction != self._direction:
+            return True
+
+        # Always passthrough lifecycle frames
+        if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
+            return True
+
+        # If not blocking system frames, passthrough all other system frames
+        if not self._block_system_frames and isinstance(frame, SystemFrame):
+            return True
+
+        return False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame through the filter.
