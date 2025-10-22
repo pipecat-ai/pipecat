@@ -26,8 +26,9 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.stt import CartesiaSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.tts import DeepgramTTSService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.stt_service import STTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -68,12 +69,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         services=[stt_cartesia, stt_deepgram], strategy_type=ServiceSwitcherStrategyManual
     )
 
-    tts = CartesiaTTSService(
+    tts_cartesia = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",
+    )
+    tts_deepgram = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    tts_switcher = ServiceSwitcher(
+        services=[tts_cartesia, tts_deepgram], strategy_type=ServiceSwitcherStrategyManual
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+    llm_switcher = ServiceSwitcher(
+        services=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
+    )
 
     messages = [
         {
@@ -90,8 +99,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             transport.input(),  # Transport user input
             stt_switcher,
             context_aggregator.user(),  # User responses
-            llm,  # LLM
-            tts,  # TTS
+            llm_switcher,  # LLM
+            tts_switcher,  # TTS
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
@@ -115,6 +124,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await asyncio.sleep(15)
         print(f"Switching to {stt_deepgram}")
         await task.queue_frames([ManuallySwitchServiceFrame(service=stt_deepgram)])
+        await asyncio.sleep(15)
+        print(f"Switching to {llm_google}")
+        await task.queue_frames([ManuallySwitchServiceFrame(service=llm_google)])
+        await asyncio.sleep(15)
+        print(f"Switching to {tts_deepgram}")
+        await task.queue_frames([ManuallySwitchServiceFrame(service=tts_deepgram)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

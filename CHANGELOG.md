@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `FunctionFilter` now has a `block_system_frames` arg, which controls whether
+- `FunctionFilter` now has a `filter_system_frames` arg, which controls whether
   or not SystemFrames are filtered.
 
 - Upgraded `aws_sdk_bedrock_runtime` to v0.1.1 to resolve potential CPU issues
