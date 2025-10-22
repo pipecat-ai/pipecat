@@ -106,6 +106,19 @@ class LLMContext:
         self._tools: ToolsSchema | NotGiven = LLMContext._normalize_and_validate_tools(tools)
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
 
+    @property
+    def messages(self) -> List[LLMContextMessage]:
+        """Get the current messages list.
+
+        NOTE: This is equivalent to calling `get_messages()` with no filter. If
+        you want to filter out LLM-specific messages that don't pertain to your
+        LLM, use `get_messages()` directly.
+
+        Returns:
+            List of conversation messages.
+        """
+        return self.get_messages()
+
     def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:
         """Get the current messages list.
 
@@ -113,7 +126,8 @@ class LLMContext:
             llm_specific_filter: Optional filter to return LLM-specific
                 messages for the given LLM, in addition to the standard
                 messages. If messages end up being filtered, an error will be
-                logged.
+                logged; this is intended to catch accidental use of
+                incompatible LLM-specific messages.
 
         Returns:
             List of conversation messages.
