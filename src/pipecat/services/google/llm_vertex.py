@@ -97,7 +97,7 @@ class GoogleVertexLLMService(OpenAILLMService):
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        model: str = "google/gemini-2.0-flash-001",
+        model: str = "google/gemini-2.5-flash",
         location: Optional[str] = None,
         project_id: Optional[str] = None,
         **kwargs,
@@ -107,7 +107,7 @@ class GoogleVertexLLMService(OpenAILLMService):
         Args:
             credentials: JSON string of service account credentials.
             credentials_path: Path to the service account JSON file.
-            model: Model identifier (e.g., "google/gemini-2.0-flash-001").
+            model: Model identifier (e.g., "google/gemini-2.5-flash").
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
             **kwargs: Additional arguments passed to OpenAILLMService.
