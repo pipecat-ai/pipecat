@@ -51,7 +51,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         credentials_path: Optional[str] = None,
         location: str,
         project_id: str,
-        model="google/gemini-2.0-flash-live-preview-04-09", # can it be "gemini-2.5-flash-native-audio-preview-09-2025"?
+        model="google/gemini-2.0-flash-live-preview-04-09",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,

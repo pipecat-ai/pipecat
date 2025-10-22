@@ -534,7 +534,7 @@ class GeminiLiveLLMService(LLMService):
         *,
         api_key: str,
         base_url: Optional[str] = None,
-        model="models/gemini-2.0-flash-live-001", # e.g. "gemini-2.5-flash-native-audio-preview-09-2025"
+        model="models/gemini-2.0-flash-live-001",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
