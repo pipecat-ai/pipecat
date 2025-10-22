@@ -28,7 +28,7 @@ class FunctionFilter(FrameProcessor):
         self,
         filter: Callable[[Frame], Awaitable[bool]],
         direction: FrameDirection = FrameDirection.DOWNSTREAM,
-        block_system_frames: bool = False,
+        filter_system_frames: bool = False,
     ):
         """Initialize the function filter.
 
@@ -37,19 +37,17 @@ class FunctionFilter(FrameProcessor):
                 frame should pass through, False otherwise.
             direction: The direction to apply filtering. Only frames moving in
                 this direction will be filtered. Defaults to DOWNSTREAM.
-            block_system_frames: Whether to block system frames. Defaults to False.
+            filter_system_frames: Whether to filter system frames. Defaults to False.
         """
         super().__init__()
         self._filter = filter
         self._direction = direction
-        self._block_system_frames = block_system_frames
+        self._filter_system_frames = filter_system_frames
 
     #
     # Frame processor
     #
 
-    # Ignore system frames, end frames and frames that are not following the
-    # direction of this gate
     def _should_passthrough_frame(self, frame, direction):
         """Check if a frame should pass through without filtering."""
         # Always passthrough frames in the wrong direction
@@ -60,8 +58,8 @@ class FunctionFilter(FrameProcessor):
         if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
             return True
 
-        # If not blocking system frames, passthrough all other system frames
-        if not self._block_system_frames and isinstance(frame, SystemFrame):
+        # If not filtering system frames, passthrough all other system frames
+        if not self._filter_system_frames and isinstance(frame, SystemFrame):
             return True
 
         return False

@@ -144,7 +144,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             async def filter(_: Frame) -> bool:
                 return self._wrapped_service == self._active_service
 
-            super().__init__(filter, direction, block_system_frames=True)
+            super().__init__(filter, direction, filter_system_frames=True)
 
         async def process_frame(self, frame, direction):
             """Process a frame through the filter, handling special internal filter-updating frames."""
