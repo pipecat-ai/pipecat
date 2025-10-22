@@ -34,7 +34,7 @@ dependencies = [
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai>=1.74.0,<=1.99.1",
+    "openai>=1.74.0,<3",
     # Pinning numba to resolve package dependencies
     "numba==0.61.2",
     "wait_for2>=0.4.1; python_version<'3.12'",
@@ -55,7 +55,7 @@ azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "pipecat-ai[websockets-base]" ]
 cerebras = []
 deepseek = []
-daily = [ "daily-python~=0.19.9" ]
+daily = [ "daily-python~=0.20.0" ]
 deepgram = [ "deepgram-sdk~=4.7.0" ]
 elevenlabs = [ "pipecat-ai[websockets-base]" ]
 fal = [ "fal-client~=0.5.9" ]
@@ -84,7 +84,7 @@ nim = []
 neuphonic = [ "pipecat-ai[websockets-base]" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 openai = [ "pipecat-ai[websockets-base]" ]
-openpipe = [ "openpipe~=4.50.0" ]
+openpipe = [ "openpipe>=4.50.0,<6" ]
 openrouter = []
 perplexity = []
 playht = [ "pipecat-ai[websockets-base]" ]
@@ -102,7 +102,7 @@ silero = [ "onnxruntime>=1.20.1,<2" ]
 simli = [ "simli-ai~=0.1.10"]
 soniox = [ "pipecat-ai[websockets-base]" ]
 soundfile = [ "soundfile~=0.13.0" ]
-speechmatics = [ "speechmatics-rt>=0.4.0" ]
+speechmatics = [ "speechmatics-rt>=0.5.0" ]
 strands = [ "strands-agents>=1.9.1,<2" ]
 tavus=[]
 together = []

@@ -286,6 +286,7 @@ class AWSTranscribeSTTService(STTService):
 
                 logger.info(f"{self} Successfully connected to AWS Transcribe")
 
+                await self._call_event_handler("on_connected")
             except Exception as e:
                 logger.error(f"{self} Failed to connect to AWS Transcribe: {e}")
                 await self._disconnect()
@@ -310,6 +311,7 @@ class AWSTranscribeSTTService(STTService):
             logger.warning(f"{self} Error closing WebSocket connection: {e}")
         finally:
             self._ws_client = None
+            await self._call_event_handler("on_disconnected")
 
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert internal language enum to AWS Transcribe language code.

@@ -5,13 +5,153 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.91] - 2025-10-21
+
+### Added
+
+- It is now possible to start a bot from the `/start` endpoint when using the
+  runner Daily's transport. This follows the Pipecat Cloud format with
+  `createDailyRoom` and `body` fields in the POST request body.
+
+- Added an ellipsis character (`…`) to the end of sentence detection in the
+  string utils.
+
+- Expanded support for universal `LLMContext` to `AWSNovaSonicLLMService`.
+  As a reminder, the context-setup pattern when using `LLMContext` is:
+
+  ```python
+  context = LLMContext(messages, tools)
+  context_aggregator = LLMContextAggregatorPair(context)
+  ```
+
+  (Note that even though `AWSNovaSonicLLMService` now supports the universal
+  `LLMContext`, it is not meant to be swapped out for another LLM service at
+  runtime.)
+
+  Worth noting: whether or not you use the new context-setup pattern with
+  `AWSNovaSonicLLMService`, some types have changed under the hood:
+
+  ```python
+  ## BEFORE:
+
+  # Context aggregator type
+  context_aggregator: AWSNovaSonicContextAggregatorPair
+
+  # Context frame type
+  frame: OpenAILLMContextFrame
+
+  # Context type
+  context: AWSNovaSonicLLMContext
+  # or
+  context: OpenAILLMContext
+
+  ## AFTER:
+
+  # Context aggregator type
+  context_aggregator: LLMContextAggregatorPair
+
+  # Context frame type
+  frame: LLMContextFrame
+
+  # Context type
+  context: LLMContext
+  ```
+
+- Added support for `bulbul:v3` model in `SarvamTTSService` and
+  `SarvamHttpTTSService`.
+
+- Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
+
+- Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the
+  multilingual model.
+
+- Added support for trickle ICE to the `SmallWebRTCTransport`.
+
+- Added support for updating `OpenAITTSService` settings (`instructions` and
+  `speed`) at runtime via `TTSUpdateSettingsFrame`.
+
+- Added `--whatsapp` flag to runner to better surface WhatsApp transport logs.
+
+- Added `on_connected` and `on_disconnected` events to TTS and STT
+  websocket-based services.
+
+- Added an `aggregate_sentences` arg in `ElevenLabsHttpTTSService`, where the
+  default value is True.
+
+- Added a `room_properties` arg to the Daily runner's `configure()` method,
+  allowing `DailyRoomProperties` to be provided.
+
+- The runner `--folder` argument now supports downloading files from
+  subdirectories.
+
+### Changed
+
+- `RunnerArguments` now include the `body` field, so there's no need to add it
+  to subclasses. Also, all `RunnerArguments` fields are now keyword-only.
+
+- `CartesiaSTTService` now inherits from `WebsocketSTTService`.
+
+- Package upgrades:
+
+  - `daily-python` upgraded to 0.20.0.
+  - `openai` upgraded to support up to 2.x.x.
+  - `openpipe` upgraded to support up to 5.x.x.
+
+- `SpeechmaticsSTTService` updated dependencies for `speechmatics-rt>=0.5.0`.
+
+### Deprecated
+
+- The `send_transcription_frames` argument to `AWSNovaSonicLLMService` is
+  deprecated. Transcription frames are now always sent. They go upstream, to be
+  handled by the user context aggregator. See "Added" section for details.
+
+- Types in `pipecat.services.aws.nova_sonic.context` have been deprecated due
+  to changes to support `LLMContext`. See "Changed" section for details.
 
 ### Fixed
+
+- Fixed an issue where the `RTVIProcessor` was sending duplicate
+  `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` messages.
+
+- Fixed an issue in `AWSBedrockLLMService` where both `temperature` and `top_p`
+  were always sent together, causing conflicts with models like Claude Sonnet 4.5
+  that don't allow both parameters simultaneously. The service now only includes
+  inference parameters that are explicitly set, and `InputParams` defaults have
+  been changed to `None` to rely on AWS Bedrock's built-in model defaults.
+
+- Fixed an issue in `RivaSegmentedSTTService` where a runtime error occurred due
+  to a mismatch in the `_handle_transcription` method's signature.
+
+- Fixed multiple pipeline task cancellation issues. `asyncio.CancelledError` is
+  now handled properly in `PipelineTask` making it possible to cancel an asyncio
+  task that it's executing a `PipelineRunner` cleanly. Also,
+  `PipelineTask.cancel()` does not block anymore waiting for the `CancelFrame`
+  to reach the end of the pipeline (going back to the behavior in < 0.0.83).
+
+- Fixed an issue in `ElevenLabsTTSService` and `ElevenLabsHttpTTSService` where
+  the Flash models would split words, resulting in a space being inserted
+  between words.
+
+- Fixed an issue where audio filters' `stop()` would not be called when using
+  `CancelFrame`.
+
+- Fixed an issue in `ElevenLabsHttpTTSService`, where
+  `apply_text_normalization` was incorrectly set as a query parameter. It's now
+  being added as a request parameter.
 
 - Fixed an issue where `RimeHttpTTSService` and `PiperTTSService` could generate
   incorrectly 16-bit aligned audio frames, potentially leading to internal
   errors or static audio.
+
+- Fixed an issue in `SpeechmaticsSTTService` where `AdditionalVocabEntry` items
+  needed to have `sounds_like` for the session to start.
+
+### Other
+
+- Added foundational example `47-sentry-metrics.py`, demonstrating how to use the
+  `SentryMetrics` processor.
+
+- Added foundational example `14x-function-calling-openpipe.py`.
 
 ## [0.0.90] - 2025-10-10
 

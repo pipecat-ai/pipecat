@@ -577,6 +577,7 @@ class SpeechmaticsSTTService(STTService):
                 ),
             )
             logger.debug(f"{self} Connected to Speechmatics STT service")
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} Error connecting to Speechmatics: {e}")
             self._client = None
@@ -595,6 +596,7 @@ class SpeechmaticsSTTService(STTService):
             logger.error(f"{self} Error closing Speechmatics client: {e}")
         finally:
             self._client = None
+            await self._call_event_handler("on_disconnected")
 
     def _process_config(self) -> None:
         """Create a formatted STT transcription config.
@@ -618,7 +620,7 @@ class SpeechmaticsSTTService(STTService):
             transcription_config.additional_vocab = [
                 {
                     "content": e.content,
-                    "sounds_like": e.sounds_like,
+                    **({"sounds_like": e.sounds_like} if e.sounds_like else {}),
                 }
                 for e in self._params.additional_vocab
             ]

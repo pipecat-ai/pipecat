@@ -205,6 +205,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
             logger.debug("Connected to Deepgram Flux Websocket")
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -225,6 +226,9 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def _send_close_stream(self) -> None:
         """Sends a CloseStream control message to the Deepgram Flux WebSocket API.

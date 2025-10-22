@@ -730,12 +730,16 @@ class GoogleSTTService(STTService):
         self._request_queue = asyncio.Queue()
         self._streaming_task = self.create_task(self._stream_audio())
 
+        await self._call_event_handler("on_connected")
+
     async def _disconnect(self):
         """Clean up streaming recognition resources."""
         if self._streaming_task:
             logger.debug("Disconnecting from Google Speech-to-Text")
             await self.cancel_task(self._streaming_task)
             self._streaming_task = None
+
+        await self._call_event_handler("on_disconnected")
 
     async def _request_generator(self):
         """Generates requests for the streaming recognize method."""

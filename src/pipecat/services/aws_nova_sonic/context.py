@@ -8,18 +8,14 @@
 
 This module provides specialized context aggregators and message handling for AWS Nova Sonic,
 including conversation history management and role-specific message processing.
+
+.. deprecated:: 0.0.91
+    AWS Nova Sonic no longer uses types from this module under the hood.
+    It now uses `LLMContext` and `LLMContextAggregatorPair`.
+    Using the new patterns should allow you to not need types from this module.
+
+    See deprecation warning in pipecat.services.aws.nova_sonic.context for more
+    details.
 """
 
-import warnings
-
 from pipecat.services.aws.nova_sonic.context import *
-
-with warnings.catch_warnings():
-    warnings.simplefilter("always")
-    warnings.warn(
-        "Types in pipecat.services.aws_nova_sonic.context are deprecated. "
-        "Please use the equivalent types from "
-        "pipecat.services.aws.nova_sonic.context instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )

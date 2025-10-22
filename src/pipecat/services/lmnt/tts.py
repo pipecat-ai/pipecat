@@ -222,6 +222,7 @@ class LmntTTSService(InterruptibleTTSService):
             # Send initialization message
             await self._websocket.send(json.dumps(init_msg))
 
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -243,6 +244,7 @@ class LmntTTSService(InterruptibleTTSService):
         finally:
             self._started = False
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         """Get the WebSocket connection if available."""

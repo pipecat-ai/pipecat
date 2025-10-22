@@ -76,15 +76,27 @@ class SarvamHttpTTSService(TTSService):
 
     Example::
 
-        tts = SarvamTTSService(
+        tts = SarvamHttpTTSService(
             api_key="your-api-key",
             voice_id="anushka",
             model="bulbul:v2",
             aiohttp_session=session,
-            params=SarvamTTSService.InputParams(
+            params=SarvamHttpTTSService.InputParams(
                 language=Language.HI,
                 pitch=0.1,
                 pace=1.2
+            )
+        )
+
+        # For bulbul v3 beta with any speaker:
+        tts_v3 = SarvamHttpTTSService(
+            api_key="your-api-key",
+            voice_id="speaker_name",
+            model="bulbul:v3,
+            aiohttp_session=session,
+            params=SarvamHttpTTSService.InputParams(
+                language=Language.HI,
+                temperature=0.8
             )
         )
     """
@@ -105,6 +117,14 @@ class SarvamHttpTTSService(TTSService):
         pace: Optional[float] = Field(default=1.0, ge=0.3, le=3.0)
         loudness: Optional[float] = Field(default=1.0, ge=0.1, le=3.0)
         enable_preprocessing: Optional[bool] = False
+        temperature: Optional[float] = Field(
+            default=0.6,
+            ge=0.01,
+            le=1.0,
+            description="Controls the randomness of the output for bulbul v3 beta. "
+            "Lower values make the output more focused and deterministic, while "
+            "higher values make it more random. Range: 0.01 to 1.0. Default: 0.6.",
+        )
 
     def __init__(
         self,
@@ -124,7 +144,7 @@ class SarvamHttpTTSService(TTSService):
             api_key: Sarvam AI API subscription key.
             aiohttp_session: Shared aiohttp session for making requests.
             voice_id: Speaker voice ID (e.g., "anushka", "meera"). Defaults to "anushka".
-            model: TTS model to use ("bulbul:v1" or "bulbul:v2"). Defaults to "bulbul:v2".
+            model: TTS model to use ("bulbul:v2" or "bulbul:v3-beta" or "bulbul:v3"). Defaults to "bulbul:v2".
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
             sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000). If None, uses default.
             params: Additional voice and preprocessing parameters. If None, uses defaults.
@@ -138,15 +158,31 @@ class SarvamHttpTTSService(TTSService):
         self._base_url = base_url
         self._session = aiohttp_session
 
+        # Build base settings common to all models
         self._settings = {
             "language": (
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
-            "pitch": params.pitch,
-            "pace": params.pace,
-            "loudness": params.loudness,
             "enable_preprocessing": params.enable_preprocessing,
         }
+
+        # Add model-specific parameters
+        if model in ("bulbul:v3-beta", "bulbul:v3"):
+            self._settings.update(
+                {
+                    "temperature": getattr(params, "temperature", 0.6),
+                    "model": model,
+                }
+            )
+        else:
+            self._settings.update(
+                {
+                    "pitch": params.pitch,
+                    "pace": params.pace,
+                    "loudness": params.loudness,
+                    "model": model,
+                }
+            )
 
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -275,6 +311,18 @@ class SarvamTTSService(InterruptibleTTSService):
                 pace=1.2
             )
         )
+
+        # For bulbul v3 beta with any speaker and temperature:
+        # Note: pace and loudness are not supported for bulbul v3 and bulbul v3 beta
+        tts_v3 = SarvamTTSService(
+            api_key="your-api-key",
+            voice_id="speaker_name",
+            model="bulbul:v3",
+            params=SarvamTTSService.InputParams(
+                language=Language.HI,
+                temperature=0.8
+            )
+        )
     """
 
     class InputParams(BaseModel):
@@ -310,6 +358,14 @@ class SarvamTTSService(InterruptibleTTSService):
         output_audio_codec: Optional[str] = "linear16"
         output_audio_bitrate: Optional[str] = "128k"
         language: Optional[Language] = Language.EN
+        temperature: Optional[float] = Field(
+            default=0.6,
+            ge=0.01,
+            le=1.0,
+            description="Controls the randomness of the output for bulbul v3 beta. "
+            "Lower values make the output more focused and deterministic, while "
+            "higher values make it more random. Range: 0.01 to 1.0. Default: 0.6.",
+        )
 
     def __init__(
         self,
@@ -329,6 +385,7 @@ class SarvamTTSService(InterruptibleTTSService):
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
             model: Identifier of the Sarvam speech model (default "bulbul:v2").
+                Supports "bulbul:v2", "bulbul:v3-beta" and "bulbul:v3".
             voice_id: Voice identifier for synthesis (default "anushka").
             url: WebSocket URL for connecting to the TTS backend (default production URL).
             aiohttp_session: Optional shared aiohttp session. To maintain backward compatibility.
@@ -371,15 +428,12 @@ class SarvamTTSService(InterruptibleTTSService):
         self._api_key = api_key
         self.set_model_name(model)
         self.set_voice(voice_id)
-        # Configuration parameters
+        # Build base settings common to all models
         self._settings = {
             "target_language_code": (
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
-            "pitch": params.pitch,
-            "pace": params.pace,
             "speaker": voice_id,
-            "loudness": params.loudness,
             "speech_sample_rate": 0,
             "enable_preprocessing": params.enable_preprocessing,
             "min_buffer_size": params.min_buffer_size,
@@ -387,6 +441,24 @@ class SarvamTTSService(InterruptibleTTSService):
             "output_audio_codec": params.output_audio_codec,
             "output_audio_bitrate": params.output_audio_bitrate,
         }
+
+        # Add model-specific parameters
+        if model in ("bulbul:v3-beta", "bulbul:v3"):
+            self._settings.update(
+                {
+                    "temperature": getattr(params, "temperature", 0.6),
+                    "model": model,
+                }
+            )
+        else:
+            self._settings.update(
+                {
+                    "pitch": params.pitch,
+                    "pace": params.pace,
+                    "loudness": params.loudness,
+                    "model": model,
+                }
+            )
         self._started = False
 
         self._receive_task = None
@@ -525,6 +597,7 @@ class SarvamTTSService(InterruptibleTTSService):
             logger.debug("Connected to Sarvam TTS Websocket")
             await self._send_config()
 
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -556,6 +629,10 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._started = False
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
