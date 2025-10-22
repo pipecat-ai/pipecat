@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded `aws_sdk_bedrock_runtime` to v0.1.1 to resolve potential CPU issues
   when running `AWSNovaSonicLLMService`.
 
+### Fixed
+
+- Fixed an issue in the runner where starting a DailyTransport room via
+  `/start` didn't support using the `DAILY_SAMPLE_ROOM_URL` env var.
+
 ## [0.0.91] - 2025-10-21
 
 ### Added
