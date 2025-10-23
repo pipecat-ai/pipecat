@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `FunctionFilter` now has a `filter_system_frames` arg, which controls whether
+  or not SystemFrames are filtered.
+
 - Upgraded `aws_sdk_bedrock_runtime` to v0.1.1 to resolve potential CPU issues
   when running `AWSNovaSonicLLMService`.
 
@@ -16,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue in the runner where starting a DailyTransport room via
   `/start` didn't support using the `DAILY_SAMPLE_ROOM_URL` env var.
+
+- Fixed an issue in `ServiceSwitcher` where the `STTService`s would result in
+  all STT services producing `TranscriptionFrame`s.
 
 ## [0.0.91] - 2025-10-21
 
