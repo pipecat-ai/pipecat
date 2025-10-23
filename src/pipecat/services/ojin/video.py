@@ -270,7 +270,7 @@ class OjinPersonaService(FrameProcessor):
         self._fsm_fps_tracker = FPSTracker("OjinPersonaService")
 
         self._receive_msg_task: Optional[asyncio.Task] = None
-
+        self._cancelled_interaction_ids: set[str] = set()
         self._interaction: Optional[OjinPersonaInteraction] = None
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
 
@@ -360,6 +360,11 @@ class OjinPersonaService(FrameProcessor):
             )
 
         elif isinstance(message, OjinPersonaInteractionResponseMessage):
+
+            if message.interaction_id in self._cancelled_interaction_ids:
+                logger.info("Received interaction response for cancelled interaction")
+                return
+
             if self._interaction is not None and message.interaction_id != self._interaction.interaction_id:
                 logger.info("Interaction ID changed, server started a different interaction")
                 self._interaction.interaction_id = message.interaction_id
@@ -493,25 +498,25 @@ class OjinPersonaService(FrameProcessor):
             self._pending_interaction.close()
             self._pending_interaction = None
 
-        if self._interaction is None or self._interaction.interaction_id is None:
-            logger.debug("Trying to interrupt an interaction but none is active")
-            return
-
-        logger.debug(f"Try interrupt interaction in state {self._interaction.state}")
-        if self._interaction.state != InteractionState.INACTIVE:
-            logger.warning("Sending CancelInteractionMessage")
-            assert self._client is not None
-            await self._client.send_message(OjinPersonaCancelInteractionMessage())
-            # TODO(mouad): interpolate towards silence instead of hard stop?
-            with self.pedning_audio_mutex:
-                self.pending_audio_to_play.clear()
-
-            self.pending_speech_frames.clear()
-            self.num_speech_frames_played = 0
-            # self.last_queued_frame_index = self.current_frame_index
-
+        if self._interaction is not None:
+            logger.debug(f"Try interrupt interaction in state {self._interaction.state}")
+            if self._interaction.state != InteractionState.INACTIVE:
+                assert self._client is not None
+                logger.warning("Sending CancelInteractionMessage")
+                await self._client.send_message(OjinPersonaCancelInteractionMessage())
+            self._cancelled_interaction_ids.add(self._interaction.interaction_id)
             self._interaction.close()
-            self._interaction = None
+            self._interaction = None        
+               
+        # TODO(mouad): interpolate towards silence instead of hard stop?
+        with self.pedning_audio_mutex:
+            self.pending_audio_to_play.clear()
+
+        self.pending_speech_frames.clear()
+        self.num_speech_frames_played = 0
+        # self.last_queued_frame_index = self.current_frame_index
+
+           
 
     def compute_frame_index_for_server(self) -> int:
         start_generation_frame_index = self.last_queued_frame_index if self.last_queued_frame_index > self.current_frame_index else self.current_frame_index
