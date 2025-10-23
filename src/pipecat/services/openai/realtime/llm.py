@@ -885,8 +885,11 @@ class OpenAIRealtimeLLMService(LLMService):
             "    context_aggregator.assistant(),\n"
             "  ]\n"
             ")\n\n"
-            "Once you've done that (if needed), you can dismiss this warning "
-            "by updating to the new context-setup pattern:\n\n"
+            "Also, LLMTextFrames are no longer pushed from "
+            "OpenAIRealtimeLLMService when it's configured with "
+            "output_modalities=['audio']. Listen for TTSTextFrames instead.\n\n"
+            "Once you've made the appropriate changes (if needed), you can"
+            "dismiss this warning by updating to the new context-setup pattern:\n\n"
             "  context = LLMContext(messages, tools)\n"
             "  context_aggregator = LLMContextAggregatorPair(context)\n"
         )
