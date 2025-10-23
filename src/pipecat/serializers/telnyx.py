@@ -14,6 +14,7 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import (
     alaw_to_pcm,
     create_stream_resampler,
@@ -28,9 +29,8 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
-    KeypadEntry,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -137,7 +137,7 @@ class TelnyxFrameSerializer(FrameSerializer):
             self._hangup_attempted = True
             await self._hang_up_call()
             return None
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear"}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):

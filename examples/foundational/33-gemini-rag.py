@@ -47,7 +47,6 @@ Customization options:
 - change the function calling logic
 """
 
-import argparse
 import json
 import os
 import time
@@ -56,18 +55,27 @@ from dotenv import load_dotenv
 from google import genai
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
@@ -116,11 +124,7 @@ async def query_knowledge_base(params: FunctionCallParams):
 
     # for our case, the first two messages are the instructions and the user message
     # so we remove them.
-    conversation_turns = params.context.messages[2:]
-    # convert to standard messages
-    messages = []
-    for turn in conversation_turns:
-        messages.extend(params.context.to_standard_messages(turn))
+    conversation_turns = params.context.get_messages()[2:]
 
     def _is_tool_call(turn):
         if turn.get("role", None) == "tool":
@@ -130,7 +134,7 @@ async def query_knowledge_base(params: FunctionCallParams):
         return False
 
     # filter out tool calls
-    messages = [turn for turn in messages if not _is_tool_call(turn)]
+    messages = [turn for turn in conversation_turns if not _is_tool_call(turn)]
     # use the last 3 turns as the conversation history/context
     messages = messages[-3:]
     messages_json = json.dumps(messages, ensure_ascii=False, indent=2)
@@ -161,22 +165,25 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
@@ -191,25 +198,20 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         api_key=os.getenv("GOOGLE_API_KEY"),
     )
     llm.register_function("query_knowledge_base", query_knowledge_base)
-    tools = [
-        {
-            "function_declarations": [
-                {
-                    "name": "query_knowledge_base",
-                    "description": "Query the knowledge base for the answer to the question.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "question": {
-                                "type": "string",
-                                "description": "The question to query the knowledge base with.",
-                            },
-                        },
-                    },
-                },
-            ],
+
+    query_function = FunctionSchema(
+        name="query_knowledge_base",
+        description="Query the knowledge base for the answer to the question.",
+        properties={
+            "question": {
+                "type": "string",
+                "description": "The question to query the knowledge base with.",
+            },
         },
-    ]
+        required=["question"],
+    )
+    tools = ToolsSchema(standard_tools=[query_function])
+
     system_prompt = """\
 You are a helpful assistant who converses with a user and answers questions.
 
@@ -222,8 +224,8 @@ Your response will be turned into speech so use only simple words and punctuatio
         {"role": "user", "content": "Greet the user."},
     ]
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
@@ -242,24 +244,31 @@ Your response will be turned into speech so use only simple words and punctuatio
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Start conversation - empty prompt to let LLM follow system instructions
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

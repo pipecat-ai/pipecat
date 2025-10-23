@@ -10,7 +10,6 @@ import asyncio
 import datetime
 import os
 import re
-import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator
@@ -20,9 +19,9 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -74,7 +73,7 @@ class DiarizationFocusMode(str, Enum):
 class AdditionalVocabEntry:
     """Additional vocabulary entry.
 
-    Attributes:
+    Parameters:
         content: The word to add to the dictionary.
         sounds_like: Similar words to the word.
     """
@@ -87,7 +86,7 @@ class AdditionalVocabEntry:
 class DiarizationKnownSpeaker:
     """Known speakers for speaker diarization.
 
-    Attributes:
+    Parameters:
         label: The label of the speaker.
         speaker_identifiers: One or more data strings for the speaker.
     """
@@ -191,7 +190,7 @@ class SpeakerFragments:
             passive_format = active_format
         return {
             "text": self._format_text(active_format if self.is_active else passive_format),
-            "user_id": self.speaker_id,
+            "user_id": self.speaker_id or "",
             "timestamp": self.timestamp,
             "language": self.language,
             "result": [frag.result for frag in self.fragments],
@@ -463,8 +462,14 @@ class SpeechmaticsSTTService(STTService):
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Adds audio to the audio buffer and yields None."""
-        await self._client.send_audio(audio)
-        yield None
+        try:
+            if self._client:
+                await self._client.send_audio(audio)
+            yield None
+        except Exception as e:
+            logger.error(f"Speechmatics error: {e}")
+            yield ErrorFrame(f"Speechmatics error: {e}", fatal=False)
+            await self._disconnect()
 
     def update_params(
         self,
@@ -520,7 +525,7 @@ class SpeechmaticsSTTService(STTService):
         )
 
         # Log the event
-        logger.debug("Connected to Speechmatics STT service")
+        logger.debug(f"{self} Connecting to Speechmatics STT service")
 
         # Recognition started event
         @self._client.on(ServerMessageType.RECOGNITION_STARTED)
@@ -562,30 +567,36 @@ class SpeechmaticsSTTService(STTService):
                 )
 
         # Start session
-        await self._client.start_session(
-            transcription_config=self._transcription_config,
-            audio_format=AudioFormat(
-                encoding=self._params.audio_encoding,
-                sample_rate=self.sample_rate,
-                chunk_size=self._params.chunk_size,
-            ),
-        )
+        try:
+            await self._client.start_session(
+                transcription_config=self._transcription_config,
+                audio_format=AudioFormat(
+                    encoding=self._params.audio_encoding,
+                    sample_rate=self.sample_rate,
+                    chunk_size=self._params.chunk_size,
+                ),
+            )
+            logger.debug(f"{self} Connected to Speechmatics STT service")
+            await self._call_event_handler("on_connected")
+        except Exception as e:
+            logger.error(f"{self} Error connecting to Speechmatics: {e}")
+            self._client = None
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service."""
         # Disconnect the client
+        logger.debug(f"{self} Disconnecting from Speechmatics STT service")
         try:
             if self._client:
-                await asyncio.wait_for(self._client.close(), timeout=1.0)
+                await asyncio.wait_for(self._client.close(), timeout=5.0)
+                logger.debug(f"{self} Disconnected from Speechmatics STT service")
         except asyncio.TimeoutError:
-            logger.warning("Timeout while closing Speechmatics client connection")
+            logger.warning(f"{self} Timeout while closing Speechmatics client connection")
         except Exception as e:
-            logger.error(f"Error closing Speechmatics client: {e}")
+            logger.error(f"{self} Error closing Speechmatics client: {e}")
         finally:
             self._client = None
-
-        # Log the event
-        logger.debug("Disconnected from Speechmatics STT service")
+            await self._call_event_handler("on_disconnected")
 
     def _process_config(self) -> None:
         """Create a formatted STT transcription config.
@@ -609,7 +620,7 @@ class SpeechmaticsSTTService(STTService):
             transcription_config.additional_vocab = [
                 {
                     "content": e.content,
-                    "sounds_like": e.sounds_like,
+                    **({"sounds_like": e.sounds_like} if e.sounds_like else {}),
                 }
                 for e in self._params.additional_vocab
             ]
@@ -739,14 +750,13 @@ class SpeechmaticsSTTService(STTService):
             return
 
         # Frames to send
-        upstream_frames: list[Frame] = []
         downstream_frames: list[Frame] = []
 
         # If VAD is enabled, then send a speaking frame
         if self._params.enable_vad and not self._is_speaking:
             logger.debug("User started speaking")
             self._is_speaking = True
-            upstream_frames += [BotInterruptionFrame()]
+            await self.push_interruption_task_frame_and_wait()
             downstream_frames += [UserStartedSpeakingFrame()]
 
         # If final, then re-parse into TranscriptionFrame
@@ -783,10 +793,6 @@ class SpeechmaticsSTTService(STTService):
             logger.debug("User stopped speaking")
             self._is_speaking = False
             downstream_frames += [UserStoppedSpeakingFrame()]
-
-        # Send UPSTREAM frames
-        for frame in upstream_frames:
-            await self.push_frame(frame, FrameDirection.UPSTREAM)
 
         # Send the DOWNSTREAM frames
         for frame in downstream_frames:
@@ -1096,6 +1102,8 @@ def _check_deprecated_args(kwargs: dict, params: SpeechmaticsSTTService.InputPar
 
     # Show deprecation warnings
     def _deprecation_warning(old: str, new: str | None = None):
+        import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             if new:

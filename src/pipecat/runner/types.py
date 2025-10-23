@@ -10,8 +10,8 @@ These types are used by the development runner to pass transport-specific
 information to bot functions.
 """
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 from fastapi import WebSocket
 
@@ -20,7 +20,16 @@ from fastapi import WebSocket
 class RunnerArguments:
     """Base class for runner session arguments."""
 
-    pass
+    # Use kw_only so subclasses don't need to worry about ordering.
+    handle_sigint: bool = field(init=False, kw_only=True)
+    handle_sigterm: bool = field(init=False, kw_only=True)
+    pipeline_idle_timeout_secs: int = field(init=False, kw_only=True)
+    body: Optional[Any] = field(default_factory=dict, kw_only=True)
+
+    def __post_init__(self):
+        self.handle_sigint = False
+        self.handle_sigterm = False
+        self.pipeline_idle_timeout_secs = 300
 
 
 @dataclass
@@ -34,8 +43,7 @@ class DailyRunnerArguments(RunnerArguments):
     """
 
     room_url: str
-    token: str
-    body: Any
+    token: Optional[str] = None
 
 
 @dataclass
@@ -44,6 +52,7 @@ class WebSocketRunnerArguments(RunnerArguments):
 
     Parameters:
         websocket: WebSocket connection for audio streaming
+        body: Additional request data
     """
 
     websocket: WebSocket

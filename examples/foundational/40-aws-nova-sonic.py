@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
+
 import os
 from datetime import datetime
 
@@ -14,15 +14,19 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.aws_nova_sonic import AWSNovaSonicLLMService
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 # Load environment variables
 load_dotenv(override=True)
@@ -83,7 +87,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     # Specify initial system instruction.
@@ -116,9 +120,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     llm.register_function("get_current_weather", fetch_weather_from_api)
 
     # Set up context and context management.
-    # AWSNovaSonicService will adapt OpenAI LLM context objects with standard message format to
-    # what's expected by Nova Sonic.
-    context = OpenAILLMContext(
+    context = LLMContext(
         messages=[
             {"role": "system", "content": f"{system_instruction}"},
             {
@@ -128,7 +130,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         ],
         tools=tools,
     )
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     pipeline = Pipeline(
@@ -148,6 +150,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     # Handle client connection event
@@ -155,7 +158,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
         # HACK: for now, we need this special way of triggering the first assistant response in AWS
         # Nova Sonic. Note that this trigger requires a special corresponding bit of text in the
         # system instruction. In the future, simply queueing the context frame should be sufficient.
@@ -168,11 +171,17 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         await task.cancel()
 
     # Run the pipeline
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

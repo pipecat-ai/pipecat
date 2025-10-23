@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
 )
@@ -60,6 +61,7 @@ class AzureSTTService(STTService):
         region: str,
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
+        endpoint_id: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the Azure STT service.
@@ -69,6 +71,7 @@ class AzureSTTService(STTService):
             region: Azure region for the Speech service (e.g., 'eastus').
             language: Language for speech recognition. Defaults to English (US).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
+            endpoint_id: Custom model endpoint id.
             **kwargs: Additional arguments passed to parent STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -78,6 +81,9 @@ class AzureSTTService(STTService):
             region=region,
             speech_recognition_language=language_to_azure_language(language),
         )
+
+        if endpoint_id:
+            self._speech_config.endpoint_id = endpoint_id
 
         self._audio_stream = None
         self._speech_recognizer = None
@@ -135,6 +141,7 @@ class AzureSTTService(STTService):
         self._speech_recognizer = SpeechRecognizer(
             speech_config=self._speech_config, audio_config=audio_config
         )
+        self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
         self._speech_recognizer.recognized.connect(self._on_handle_recognized)
         self._speech_recognizer.start_continuous_recognition_async()
 
@@ -190,5 +197,17 @@ class AzureSTTService(STTService):
             )
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()
+            )
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_recognizing(self, event):
+        if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
+            language = getattr(event.result, "language", None) or self._settings.get("language")
+            frame = InterimTranscriptionFrame(
+                event.result.text,
+                self._user_id,
+                time_now_iso8601(),
+                language,
+                result=event,
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())

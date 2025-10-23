@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
+
 import os
 from dataclasses import dataclass
 
@@ -12,13 +12,17 @@ from dotenv import load_dotenv
 from google.genai.types import Content, Part
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    StartInterruptionFrame,
+    LLMRunFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -27,14 +31,17 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.google.tts import GoogleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
@@ -90,9 +97,8 @@ class UserAudioCollector(FrameProcessor):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             self._context.add_audio_frames_message(audio_frames=self._audio_frames)
-            await self._user_context_aggregator.push_frame(
-                self._user_context_aggregator.get_context_frame()
-            )
+            await self._user_context_aggregator.push_frame(LLMRunFrame())
+
         elif isinstance(frame, InputAudioRawFrame):
             if self._user_speaking:
                 self._audio_frames.append(frame)
@@ -148,7 +154,7 @@ class TranscriptExtractor(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class TanscriptionContextFixup(FrameProcessor):
+class TranscriptionContextFixup(FrameProcessor):
     def __init__(self, context):
         super().__init__()
         self._context = context
@@ -179,9 +185,7 @@ class TanscriptionContextFixup(FrameProcessor):
 
         if isinstance(frame, MagicDemoTranscriptionFrame):
             self._transcript = frame.text
-        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(
-            frame, StartInterruptionFrame
-        ):
+        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, InterruptionFrame):
             self.swap_user_audio()
             self.add_transcript_back_to_inference_output()
             self._transcript = ""
@@ -196,22 +200,25 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     llm = GoogleLLMService(
@@ -238,11 +245,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         },
     ]
 
-    context = OpenAILLMContext(messages)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(context)
     audio_collector = UserAudioCollector(context, context_aggregator.user())
     pull_transcript_out_of_llm_output = TranscriptExtractor(context)
-    fixup_context_messages = TanscriptionContextFixup(context)
+    fixup_context_messages = TranscriptionContextFixup(context)
 
     pipeline = Pipeline(
         [
@@ -264,6 +271,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
@@ -271,19 +279,25 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         logger.info(f"Client connected")
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

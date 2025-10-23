@@ -19,19 +19,22 @@ from loguru import logger
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    OutputTransportReadyFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
-from pipecat.transports.services.tavus import TavusCallbacks, TavusParams, TavusTransportClient
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
+from pipecat.transports.tavus.transport import TavusCallbacks, TavusParams, TavusTransportClient
 
 
 class TavusVideoService(AIService):
@@ -81,6 +84,7 @@ class TavusVideoService(AIService):
         self._send_task: Optional[asyncio.Task] = None
         # This is the custom track destination expected by Tavus
         self._transport_destination: Optional[str] = "stream"
+        self._transport_ready = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the Tavus video service.
@@ -145,19 +149,21 @@ class TavusVideoService(AIService):
             format=video_frame.color_format,
         )
         frame.transport_source = video_source
-        await self.push_frame(frame)
+        if self._transport_ready:
+            await self.push_frame(frame)
 
     async def _on_participant_audio_data(
         self, participant_id: str, audio: AudioData, audio_source: str
     ):
         """Handle incoming audio data from participants."""
-        frame = OutputAudioRawFrame(
+        frame = SpeechOutputAudioRawFrame(
             audio=audio.audio_frames,
             sample_rate=audio.sample_rate,
             num_channels=audio.num_channels,
         )
         frame.transport_source = audio_source
-        await self.push_frame(frame)
+        if self._transport_ready:
+            await self.push_frame(frame)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -216,11 +222,21 @@ class TavusVideoService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions()
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
             await self._handle_audio_frame(frame)
+        elif isinstance(frame, OutputTransportReadyFrame):
+            self._transport_ready = True
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSStartedFrame):
+            await self.start_ttfb_metrics()
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            # We constantly receive audio through WebRTC, but most of the time it is silence.
+            # As soon as we receive actual audio, the base output transport will create a
+            # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
+            await self.stop_ttfb_metrics()
         else:
             await self.push_frame(frame, direction)
 
@@ -238,13 +254,12 @@ class TavusVideoService(AIService):
     async def _create_send_task(self):
         """Create the audio sending task if it doesn't exist."""
         if not self._send_task:
-            self._queue = WatchdogQueue(self.task_manager)
+            self._queue = asyncio.Queue()
             self._send_task = self.create_task(self._send_task_handler())
 
     async def _cancel_send_task(self):
         """Cancel the audio sending task if it exists."""
         if self._send_task:
-            self._queue.cancel()
             await self.cancel_task(self._send_task)
             self._send_task = None
 

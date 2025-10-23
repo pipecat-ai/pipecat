@@ -13,6 +13,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -21,11 +22,10 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
-    KeypadEntry,
+    InterruptionFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    StartInterruptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -61,6 +61,8 @@ class TwilioFrameSerializer(FrameSerializer):
         call_sid: Optional[str] = None,
         account_sid: Optional[str] = None,
         auth_token: Optional[str] = None,
+        region: Optional[str] = None,
+        edge: Optional[str] = None,
         params: Optional[InputParams] = None,
     ):
         """Initialize the TwilioFrameSerializer.
@@ -70,13 +72,42 @@ class TwilioFrameSerializer(FrameSerializer):
             call_sid: The associated Twilio Call SID (optional, but required for auto hang-up).
             account_sid: Twilio account SID (required for auto hang-up).
             auth_token: Twilio auth token (required for auto hang-up).
+            region: Twilio region (e.g., "au1", "ie1"). Must be specified with edge.
+            edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
             params: Configuration parameters.
         """
+        self._params = params or TwilioFrameSerializer.InputParams()
+
+        # Validate hangup-related parameters if auto_hang_up is enabled
+        if self._params.auto_hang_up:
+            # Validate required credentials
+            missing_credentials = []
+            if not call_sid:
+                missing_credentials.append("call_sid")
+            if not account_sid:
+                missing_credentials.append("account_sid")
+            if not auth_token:
+                missing_credentials.append("auth_token")
+
+            if missing_credentials:
+                raise ValueError(
+                    f"auto_hang_up is enabled but missing required parameters: {', '.join(missing_credentials)}"
+                )
+
+            # Validate region and edge are both provided if either is specified
+            if (region and not edge) or (edge and not region):
+                raise ValueError(
+                    "Both edge and region parameters are required if one is set. "
+                    f"Twilio's FQDN format requires both: api.{{edge}}.{{region}}.twilio.com. "
+                    f"Got: region='{region}', edge='{edge}'"
+                )
+
         self._stream_sid = stream_sid
         self._call_sid = call_sid
         self._account_sid = account_sid
         self._auth_token = auth_token
-        self._params = params or TwilioFrameSerializer.InputParams()
+        self._region = region
+        self._edge = edge
 
         self._twilio_sample_rate = self._params.twilio_sample_rate
         self._sample_rate = 0  # Pipeline input rate
@@ -122,7 +153,7 @@ class TwilioFrameSerializer(FrameSerializer):
             self._hangup_attempted = True
             await self._hang_up_call()
             return None
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -144,7 +175,7 @@ class TwilioFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
-        elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             return json.dumps(frame.message)
 
         # Return None for unhandled frames
@@ -158,25 +189,14 @@ class TwilioFrameSerializer(FrameSerializer):
             account_sid = self._account_sid
             auth_token = self._auth_token
             call_sid = self._call_sid
+            region = self._region
+            edge = self._edge
 
-            if not call_sid or not account_sid or not auth_token:
-                missing = []
-                if not call_sid:
-                    missing.append("call_sid")
-                if not account_sid:
-                    missing.append("account_sid")
-                if not auth_token:
-                    missing.append("auth_token")
-
-                logger.warning(
-                    f"Cannot hang up Twilio call: missing required parameters: {', '.join(missing)}"
-                )
-                return
+            region_prefix = f"{region}." if region else ""
+            edge_prefix = f"{edge}." if edge else ""
 
             # Twilio API endpoint for updating calls
-            endpoint = (
-                f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
-            )
+            endpoint = f"https://api.{edge_prefix}{region_prefix}twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
 
             # Create basic auth from account_sid and auth_token
             auth = aiohttp.BasicAuth(account_sid, auth_token)

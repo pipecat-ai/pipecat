@@ -20,6 +20,7 @@ from loguru import logger
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -27,8 +28,10 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputImageRawFrame,
     OutputTransportReadyFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -37,7 +40,6 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.heygen.api import NewSessionRequest
 from pipecat.services.heygen.client import HEY_GEN_SAMPLE_RATE, HeyGenCallbacks, HeyGenClient
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 # Using the same values that we do in the BaseOutputTransport
 AVATAR_VAD_STOP_SECS = 0.35
@@ -108,6 +110,7 @@ class HeyGenVideoService(AIService):
             api_key=self._api_key,
             session=self._session,
             params=TransportParams(
+                audio_in_sample_rate=48000,
                 audio_in_enabled=True,
                 video_in_enabled=True,
                 audio_out_enabled=True,
@@ -157,7 +160,7 @@ class HeyGenVideoService(AIService):
 
     async def _on_participant_audio_data(self, audio_frame: AudioRawFrame):
         """Handle incoming audio data from participants."""
-        frame = OutputAudioRawFrame(
+        frame = SpeechOutputAudioRawFrame(
             audio=audio_frame.audio,
             sample_rate=audio_frame.sample_rate,
             num_channels=audio_frame.num_channels,
@@ -182,7 +185,7 @@ class HeyGenVideoService(AIService):
     async def stop(self, frame: EndFrame):
         """Stop the HeyGen video service gracefully.
 
-        Performs cleanup by ending the conversation and canceling ongoing tasks
+        Performs cleanup by ending the conversation and cancelling ongoing tasks
         in a controlled manner.
 
         Args:
@@ -231,8 +234,24 @@ class HeyGenVideoService(AIService):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
             await self._handle_audio_frame(frame)
+        elif isinstance(frame, TTSStartedFrame):
+            await self.start_ttfb_metrics()
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            # We constantly receive audio through WebRTC, but most of the time it is silence.
+            # As soon as we receive actual audio, the base output transport will create a
+            # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
+            await self.stop_ttfb_metrics()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
+
+    def can_generate_metrics(self) -> bool:
+        """Check if the service can generate metrics.
+
+        Returns:
+            True if metrics generation is supported.
+        """
+        return True
 
     async def _handle_user_started_speaking(self):
         """Handle the event when a user starts speaking.
@@ -240,7 +259,7 @@ class HeyGenVideoService(AIService):
         Manages the interruption flow by:
         1. Setting the interruption flag
         2. Signaling the client to interrupt current speech
-        3. Canceling ongoing audio sending tasks
+        3. Cancelling ongoing audio sending tasks
         4. Creating a new send task
         5. Activating the avatar's listening animation
         """
@@ -260,21 +279,14 @@ class HeyGenVideoService(AIService):
         await self._client.stop()
 
     async def _create_send_task(self):
-        """Create the audio sending task if it doesn't exist.
-
-        Initializes a new WatchdogQueue and creates a task for handling audio sending.
-        """
+        """Create the audio sending task if it doesn't exist."""
         if not self._send_task:
-            self._queue = WatchdogQueue(self.task_manager)
+            self._queue = asyncio.Queue()
             self._send_task = self.create_task(self._send_task_handler())
 
     async def _cancel_send_task(self):
-        """Cancel the audio sending task if it exists.
-
-        Cancels and cleans up the audio sending task and associated queue.
-        """
+        """Cancel the audio sending task if it exists."""
         if self._send_task:
-            self._queue.cancel()
             await self.cancel_task(self._send_task)
             self._send_task = None
 

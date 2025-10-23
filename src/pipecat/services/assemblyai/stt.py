@@ -174,11 +174,16 @@ class AssemblyAISTTService(STTService):
 
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
-        params = {
-            k: str(v).lower() if isinstance(v, bool) else v
-            for k, v in self._connection_params.model_dump().items()
-            if v is not None
-        }
+        params = {}
+        for k, v in self._connection_params.model_dump().items():
+            if v is not None:
+                if k == "keyterms_prompt":
+                    params[k] = json.dumps(v)
+                elif isinstance(v, bool):
+                    params[k] = str(v).lower()
+                else:
+                    params[k] = v
+
         if params:
             query_string = urlencode(params)
             return f"{self._api_endpoint_base_url}?{query_string}"
@@ -197,6 +202,8 @@ class AssemblyAISTTService(STTService):
             )
             self._connected = True
             self._receive_task = self.create_task(self._receive_task_handler())
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"Failed to connect to AssemblyAI: {e}")
             self._connected = False
@@ -219,10 +226,7 @@ class AssemblyAISTTService(STTService):
                 await self._websocket.send(json.dumps({"type": "Terminate"}))
 
                 try:
-                    await asyncio.wait_for(
-                        self._termination_event.wait(),
-                        timeout=5.0,
-                    )
+                    await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     logger.warning("Timed out waiting for termination message from server")
 
@@ -241,17 +245,16 @@ class AssemblyAISTTService(STTService):
             self._websocket = None
             self._connected = False
             self._receive_task = None
+            await self._call_event_handler("on_disconnected")
 
     async def _receive_task_handler(self):
         """Handle incoming WebSocket messages."""
         try:
             while self._connected:
                 try:
-                    message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
+                    message = await self._websocket.recv()
                     data = json.loads(message)
                     await self._handle_message(data)
-                except asyncio.TimeoutError:
-                    self.reset_watchdog()
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:

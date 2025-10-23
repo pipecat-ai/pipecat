@@ -208,7 +208,7 @@ class SonioxSTTService(STTService):
         if self._receive_task:
             # Task cannot cancel itself. If task called _cleanup() we expect it to cancel itself.
             if self._receive_task != asyncio.current_task():
-                await self.wait_for_task(self._receive_task)
+                await self._receive_task
             self._receive_task = None
 
     async def stop(self, frame: EndFrame):
@@ -284,7 +284,7 @@ class SonioxSTTService(STTService):
         """Connection has to be open all the time."""
         try:
             while True:
-                logger.debug("Sending keepalive message")
+                logger.trace("Sending keepalive message")
                 if self._websocket and self._websocket.state is State.OPEN:
                     await self._websocket.send(KEEPALIVE_MESSAGE)
                 else:

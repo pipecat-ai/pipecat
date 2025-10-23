@@ -6,11 +6,21 @@
 
 """OpenAI Realtime LLM adapter for Pipecat."""
 
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, TypedDict
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.processors.aggregators.llm_context import LLMContext
+
+
+class OpenAIRealtimeLLMInvocationParams(TypedDict):
+    """Context-based parameters for invoking OpenAI Realtime API.
+
+    This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
+    """
+
+    pass
 
 
 class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
@@ -19,6 +29,39 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
     Converts Pipecat's tool schemas into the specific format required by
     OpenAI's Realtime API for function calling capabilities.
     """
+
+    @property
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for OpenAI Realtime."""
+        raise NotImplementedError("Universal LLMContext is not yet supported for OpenAI Realtime.")
+
+    def get_llm_invocation_params(self, context: LLMContext) -> OpenAIRealtimeLLMInvocationParams:
+        """Get OpenAI Realtime-specific LLM invocation parameters from a universal LLM context.
+
+        This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
+
+        Args:
+            context: The LLM context containing messages, tools, etc.
+
+        Returns:
+            Dictionary of parameters for invoking OpenAI Realtime's API.
+        """
+        raise NotImplementedError("Universal LLMContext is not yet supported for OpenAI Realtime.")
+
+    def get_messages_for_logging(self, context) -> List[Dict[str, Any]]:
+        """Get messages from a universal LLM context in a format ready for logging about OpenAI Realtime.
+
+        Removes or truncates sensitive data like image content for safe logging.
+
+        This is a placeholder until support for universal LLMContext machinery is added for OpenAI Realtime.
+
+        Args:
+            context: The LLM context containing messages.
+
+        Returns:
+            List of messages in a format ready for logging about OpenAI Realtime.
+        """
+        raise NotImplementedError("Universal LLMContext is not yet supported for OpenAI Realtime.")
 
     @staticmethod
     def _to_openai_realtime_function_format(function: FunctionSchema) -> Dict[str, Any]:

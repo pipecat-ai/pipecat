@@ -77,6 +77,17 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
         logger.trace("Auto-detected: PLIVO")
         return "plivo"
 
+    # Exotel detection
+    if (
+        message_data.get("event") == "start"
+        and "start" in message_data
+        and "stream_sid" in message_data.get("start", {})
+        and "call_sid" in message_data.get("start", {})
+        and "account_sid" in message_data.get("start", {})
+    ):
+        logger.trace("Auto-detected: EXOTEL")
+        return "exotel"
+
     logger.trace("Auto-detection failed - unknown format")
     return "unknown"
 
@@ -88,15 +99,47 @@ async def parse_telephony_websocket(websocket: WebSocket):
         tuple: (transport_type: str, call_data: dict)
 
         call_data contains provider-specific fields:
-        - Twilio: {"stream_id": str, "call_id": str}
-        - Telnyx: {"stream_id": str, "call_control_id": str, "outbound_encoding": str}
-        - Plivo: {"stream_id": str, "call_id": str}
+
+        - Twilio::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+                "body": dict
+            }
+
+        - Telnyx::
+
+            {
+                "stream_id": str,
+                "call_control_id": str,
+                "outbound_encoding": str,
+                "from": str,
+                "to": str,
+            }
+
+        - Plivo::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+            }
+
+        - Exotel::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+                "account_sid": str,
+                "from": str,
+                "to": str,
+            }
 
     Example usage::
 
         transport_type, call_data = await parse_telephony_websocket(websocket)
-        if transport_type == "telnyx":
-            outbound_encoding = call_data["outbound_encoding"]
+        if transport_type == "twilio":
+            user_id = call_data["body"]["user_id"]
     """
     # Read first two messages
     start_data = websocket.iter_text()
@@ -139,9 +182,12 @@ async def parse_telephony_websocket(websocket: WebSocket):
         # Extract provider-specific data
         if transport_type == "twilio":
             start_data = call_data_raw.get("start", {})
+            body_data = start_data.get("customParameters", {})
             call_data = {
                 "stream_id": start_data.get("streamSid"),
                 "call_id": start_data.get("callSid"),
+                # All custom parameters
+                "body": body_data,
             }
 
         elif transport_type == "telnyx":
@@ -151,6 +197,8 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "outbound_encoding": call_data_raw.get("start", {})
                 .get("media_format", {})
                 .get("encoding"),
+                "from": call_data_raw.get("start", {}).get("from", ""),
+                "to": call_data_raw.get("start", {}).get("to", ""),
             }
 
         elif transport_type == "plivo":
@@ -158,6 +206,16 @@ async def parse_telephony_websocket(websocket: WebSocket):
             call_data = {
                 "stream_id": start_data.get("streamId"),
                 "call_id": start_data.get("callId"),
+            }
+
+        elif transport_type == "exotel":
+            start_data = call_data_raw.get("start", {})
+            call_data = {
+                "stream_id": start_data.get("stream_sid"),
+                "call_id": start_data.get("call_sid"),
+                "account_sid": start_data.get("account_sid"),
+                "from": start_data.get("from", ""),
+                "to": start_data.get("to", ""),
             }
 
         else:
@@ -183,7 +241,7 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     """
     # Import conditionally to avoid dependency issues
     try:
-        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
         if isinstance(transport, SmallWebRTCTransport):
             return client.pc_id
@@ -191,7 +249,7 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
         pass
 
     try:
-        from pipecat.transports.services.daily import DailyTransport
+        from pipecat.transports.daily.transport import DailyTransport
 
         if isinstance(transport, DailyTransport):
             return client["id"]
@@ -213,7 +271,7 @@ async def maybe_capture_participant_camera(
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
     try:
-        from pipecat.transports.services.daily import DailyTransport
+        from pipecat.transports.daily.transport import DailyTransport
 
         if isinstance(transport, DailyTransport):
             await transport.capture_participant_video(
@@ -234,12 +292,13 @@ async def maybe_capture_participant_screen(
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
     try:
-        from pipecat.transports.services.daily import DailyTransport
+        from pipecat.transports.daily.transport import DailyTransport
 
         if isinstance(transport, DailyTransport):
             await transport.capture_participant_video(
                 client["id"], framerate=framerate, video_source="screenVideo"
             )
+
     except ImportError:
         pass
 
@@ -254,6 +313,7 @@ def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
     Returns:
         Cleaned SDP text with filtered ICE candidates.
     """
+    logger.debug("Removing unsupported ICE candidates from SDP")
     result = []
     lines = text.splitlines()
     for line in lines:
@@ -262,7 +322,7 @@ def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
                 result.append(line)
         else:
             result.append(line)
-    return "\r\n".join(result)
+    return "\r\n".join(result) + "\r\n"
 
 
 def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
@@ -274,15 +334,16 @@ def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
     Returns:
         SDP text with sha-384 and sha-512 fingerprints removed.
     """
+    logger.debug("Removing unsupported fingerprints from SDP")
     result = []
     lines = text.splitlines()
     for line in lines:
         if not re.search("sha-384", line) and not re.search("sha-512", line):
             result.append(line)
-    return "\r\n".join(result)
+    return "\r\n".join(result) + "\r\n"
 
 
-def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
+def smallwebrtc_sdp_munging(sdp: str, host: Optional[str]) -> str:
     """Apply SDP modifications for SmallWebRTC compatibility.
 
     Args:
@@ -293,7 +354,8 @@ def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
         Modified SDP string with fingerprint and ICE candidate cleanup.
     """
     sdp = _smallwebrtc_sdp_cleanup_fingerprints(sdp)
-    sdp = _smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
+    if host:
+        sdp = _smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
     return sdp
 
 
@@ -338,7 +400,7 @@ async def _create_telephony_transport(
     Returns:
         Configured FastAPIWebsocketTransport ready for telephony use.
     """
-    from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport
+    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
 
     if params is None:
         raise ValueError(
@@ -379,10 +441,17 @@ async def _create_telephony_transport(
             auth_id=os.getenv("PLIVO_AUTH_ID", ""),
             auth_token=os.getenv("PLIVO_AUTH_TOKEN", ""),
         )
+    elif transport_type == "exotel":
+        from pipecat.serializers.exotel import ExotelFrameSerializer
+
+        params.serializer = ExotelFrameSerializer(
+            stream_sid=call_data["stream_id"],
+            call_sid=call_data["call_id"],
+        )
     else:
         raise ValueError(
             f"Unsupported telephony provider: {transport_type}. "
-            f"Supported providers: twilio, telnyx, plivo"
+            f"Supported providers: twilio, telnyx, plivo, exotel"
         )
 
     return FastAPIWebsocketTransport(websocket=websocket, params=params)
@@ -399,7 +468,7 @@ async def create_transport(
     Args:
         runner_args: Arguments from the runner.
         transport_params: Dict mapping transport names to parameter factory functions.
-            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo"
+            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo", "exotel"
             Values should be functions that return transport parameters when called.
 
     Returns:
@@ -440,6 +509,12 @@ async def create_transport(
                 vad_analyzer=SileroVADAnalyzer(),
                 # add_wav_header and serializer will be set automatically
             ),
+            "exotel": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                # add_wav_header and serializer will be set automatically
+            ),
         }
 
         transport = await create_transport(runner_args, transport_params)
@@ -448,7 +523,7 @@ async def create_transport(
     if isinstance(runner_args, DailyRunnerArguments):
         params = _get_transport_params("daily", transport_params)
 
-        from pipecat.transports.services.daily import DailyTransport
+        from pipecat.transports.daily.transport import DailyTransport
 
         return DailyTransport(
             runner_args.room_url,
@@ -460,7 +535,7 @@ async def create_transport(
     elif isinstance(runner_args, SmallWebRTCRunnerArguments):
         params = _get_transport_params("webrtc", transport_params)
 
-        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
         return SmallWebRTCTransport(
             params=params,

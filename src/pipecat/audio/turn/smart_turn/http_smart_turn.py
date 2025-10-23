@@ -104,11 +104,15 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
             logger.error(f"Failed to send raw request to Daily Smart Turn: {e}")
             raise Exception("Failed to send raw request to Daily Smart Turn.")
 
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         """Predict end-of-turn using remote HTTP ML service."""
         try:
             serialized_array = self._serialize_array(audio_array)
-            return await self._send_raw_request(serialized_array)
+            loop = asyncio.get_running_loop()
+            future = asyncio.run_coroutine_threadsafe(
+                self._send_raw_request(serialized_array), loop
+            )
+            return future.result()
         except Exception as e:
             logger.error(f"Smart turn prediction failed: {str(e)}")
             # Return an incomplete prediction when a failure occurs

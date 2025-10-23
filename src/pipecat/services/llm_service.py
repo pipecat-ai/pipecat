@@ -25,7 +25,6 @@ from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
-from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
@@ -37,10 +36,15 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
+    InterruptionFrame,
+    LLMConfigureOutputFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartFrame,
-    StartInterruptionFrame,
     UserImageRequestFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -89,7 +93,7 @@ class FunctionCallParams:
     tool_call_id: str
     arguments: Mapping[str, Any]
     llm: "LLMService"
-    context: OpenAILLMContext
+    context: OpenAILLMContext | LLMContext
     result_callback: FunctionCallResultCallback
 
 
@@ -108,6 +112,7 @@ class FunctionCallRegistryItem:
     function_name: Optional[str]
     handler: FunctionCallHandler | "DirectFunctionWrapper"
     cancel_on_interruption: bool
+    handler_deprecated: bool
 
 
 @dataclass
@@ -129,7 +134,7 @@ class FunctionCallRunnerItem:
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any]
-    context: OpenAILLMContext
+    context: OpenAILLMContext | LLMContext
     run_llm: Optional[bool] = None
 
 
@@ -177,6 +182,7 @@ class LLMService(AIService):
         self._function_call_tasks: Dict[asyncio.Task, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
         self._tracing_enabled: bool = False
+        self._skip_tts: bool = False
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
@@ -188,6 +194,30 @@ class LLMService(AIService):
             The adapter instance used for LLM communication.
         """
         return self._adapter
+
+    def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
+        """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.
+
+        Args:
+            message: The message content.
+
+        Returns:
+            A LLMSpecificMessage instance.
+        """
+        return self.get_llm_adapter().create_llm_specific_message(message)
+
+    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Must be implemented by subclasses.
+
+        Args:
+            context: The LLM context containing conversation history.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
 
     def create_context_aggregator(
         self,
@@ -250,10 +280,24 @@ class LLMService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
+        elif isinstance(frame, LLMConfigureOutputFrame):
+            self._skip_tts = frame.skip_tts
 
-    async def _handle_interruptions(self, _: StartInterruptionFrame):
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Pushes a frame.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame pushing.
+        """
+        if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
+            frame.skip_tts = self._skip_tts
+
+        await super().push_frame(frame, direction)
+
+    async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
@@ -282,12 +326,25 @@ class LLMService(AIService):
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
         """
+        signature = inspect.signature(handler)
+        handler_deprecated = len(signature.parameters) > 1
+        if handler_deprecated:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
+                    DeprecationWarning,
+                )
+
         # Registering a function with the function_name set to None will run
         # that handler for all functions
         self._functions[function_name] = FunctionCallRegistryItem(
             function_name=function_name,
             handler=handler,
             cancel_on_interruption=cancel_on_interruption,
+            handler_deprecated=handler_deprecated,
         )
 
         # Start callbacks are now deprecated.
@@ -325,6 +382,7 @@ class LLMService(AIService):
             function_name=wrapper.name,
             handler=wrapper,
             cancel_on_interruption=cancel_on_interruption,
+            handler_deprecated=False,
         )
 
     def unregister_function(self, function_name: Optional[str]):
@@ -418,7 +476,9 @@ class LLMService(AIService):
             else:
                 await self._sequential_runner_queue.put(runner_item)
 
-    async def _call_start_function(self, context: OpenAILLMContext, function_name: str):
+    async def _call_start_function(
+        self, context: OpenAILLMContext | LLMContext, function_name: str
+    ):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](function_name, self, context)
         elif None in self._start_callbacks.keys():
@@ -473,7 +533,7 @@ class LLMService(AIService):
             self._function_call_tasks[task] = runner_item
             # Since we run tasks sequentially we don't need to call
             # task.add_done_callback(self._function_call_task_finished).
-            await self.wait_for_task(task)
+            await task
             del self._function_call_tasks[task]
 
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
@@ -552,17 +612,7 @@ class LLMService(AIService):
             )
         else:
             # Handler is a FunctionCallHandler
-            signature = inspect.signature(item.handler)
-            if len(signature.parameters) > 1:
-                import warnings
-
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
-                        DeprecationWarning,
-                    )
-
+            if item.handler_deprecated:
                 await item.handler(
                     runner_item.function_name,
                     runner_item.tool_call_id,
@@ -612,7 +662,3 @@ class LLMService(AIService):
     def _function_call_task_finished(self, task: asyncio.Task):
         if task in self._function_call_tasks:
             del self._function_call_tasks[task]
-            # The task is finished so this should exit immediately. We need to
-            # do this because otherwise the task manager would report a dangling
-            # task if we don't remove it.
-            asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())

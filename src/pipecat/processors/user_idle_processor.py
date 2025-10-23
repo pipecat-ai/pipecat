@@ -17,12 +17,10 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
 
 
 class UserIdleProcessor(FrameProcessor):
@@ -78,7 +76,7 @@ class UserIdleProcessor(FrameProcessor):
         self._interrupted = False
         self._conversation_started = False
         self._idle_task = None
-        self._idle_event = None
+        self._idle_event = asyncio.Event()
 
     def _wrap_callback(
         self,
@@ -138,9 +136,6 @@ class UserIdleProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            self._idle_event = WatchdogEvent(self.task_manager)
-
         # Check for end frames before processing
         if isinstance(frame, (EndFrame, CancelFrame)):
             # Stop the idle task, if it exists
@@ -189,15 +184,13 @@ class UserIdleProcessor(FrameProcessor):
 
         Runs in a loop until cancelled or callback indicates completion.
         """
-        while True:
+        running = True
+        while running:
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 if not self._interrupted:
                     self._retry_count += 1
-                    should_continue = await self._callback(self, self._retry_count)
-                    if not should_continue:
-                        await self._stop()
-                        break
+                    running = await self._callback(self, self._retry_count)
             finally:
                 self._idle_event.clear()

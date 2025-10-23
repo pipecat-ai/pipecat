@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import glob
 import json
 import os
@@ -13,27 +12,32 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
 
 BASE_FILENAME = "/tmp/pipecat_conversation_"
-tts = None
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
@@ -63,11 +67,11 @@ async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(params.context.messages, indent=4)}"
+        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"
     )
     try:
         with open(filename, "w") as file:
-            messages = params.context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages()
             # remove the last message, which is the instruction we just gave to save the conversation
             messages.pop()
             json.dump(messages, file, indent=2)
@@ -84,9 +88,9 @@ async def load_conversation(params: FunctionCallParams):
         with open(filename, "r") as file:
             params.context.set_messages(json.load(file))
             logger.debug(
-                f"loaded conversation from {filename}\n{json.dumps(params.context.messages, indent=4)}"
+                f"loaded conversation from {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"
             )
-        await tts.say("Ok, I've loaded that conversation.")
+        await params.llm.queue_frame(TTSSpeakFrame("Ok, I've loaded that conversation."))
     except Exception as e:
         await params.result_callback({"success": False, "error": str(e)})
 
@@ -97,71 +101,58 @@ messages = [
         "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
     },
 ]
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_weather",
-            "description": "Get the current weather",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "The city and state, e.g. San Francisco, CA",
-                    },
-                    "format": {
-                        "type": "string",
-                        "enum": ["celsius", "fahrenheit"],
-                        "description": "The temperature unit to use. Infer this from the users location.",
-                    },
-                },
-                "required": ["location", "format"],
-            },
+
+weather_function = FunctionSchema(
+    name="get_current_weather",
+    description="Get the current weather",
+    properties={
+        "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
+        },
+        "format": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "description": "The temperature unit to use. Infer this from the users location.",
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "save_conversation",
-            "description": "Save the current conversatione. Use this function to persist the current conversation to external storage.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
+    required=["location", "format"],
+)
+
+save_conversation_function = FunctionSchema(
+    name="save_conversation",
+    description="Save the current conversatione. Use this function to persist the current conversation to external storage.",
+    properties={},
+    required=[],
+)
+
+get_filenames_function = FunctionSchema(
+    name="get_saved_conversation_filenames",
+    description="Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
+    properties={},
+    required=[],
+)
+
+load_conversation_function = FunctionSchema(
+    name="load_conversation",
+    description="Load a conversation history. Use this function to load a conversation history into the current session.",
+    properties={
+        "filename": {
+            "type": "string",
+            "description": "The filename of the conversation history to load.",
+        }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_saved_conversation_filenames",
-            "description": "Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "load_conversation",
-            "description": "Load a conversation history. Use this function to load a conversation history into the current session.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "filename": {
-                        "type": "string",
-                        "description": "The filename of the conversation history to load.",
-                    }
-                },
-                "required": ["filename"],
-            },
-        },
-    },
-]
+    required=["filename"],
+)
+
+tools = ToolsSchema(
+    standard_tools=[
+        weather_function,
+        save_conversation_function,
+        get_filenames_function,
+        load_conversation_function,
+    ]
+)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -171,25 +162,28 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    global tts
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -205,8 +199,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
@@ -226,25 +220,32 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

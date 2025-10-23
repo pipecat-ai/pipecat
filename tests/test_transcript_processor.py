@@ -14,7 +14,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    StartInterruptionFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
@@ -129,13 +129,13 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         # Create test frames simulating bot speaking multiple text chunks
         frames_to_send = [
             BotStartedSpeakingFrame(),
-            SleepFrame(sleep=0.1),  # Wait for StartedSpeaking to process
+            SleepFrame(),  # Wait for StartedSpeaking to process
             TTSTextFrame(text="Hello"),
             TTSTextFrame(text="world!"),
             TTSTextFrame(text="How"),
             TTSTextFrame(text="are"),
             TTSTextFrame(text="you?"),
-            SleepFrame(sleep=0.1),  # Wait for text frames to queue
+            SleepFrame(),  # Wait for text frames to queue
             BotStoppedSpeakingFrame(),
         ]
 
@@ -151,8 +151,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             TTSTextFrame,
             TTSTextFrame,
             TTSTextFrame,
-            BotStoppedSpeakingFrame,
             TranscriptionUpdateFrame,
+            BotStoppedSpeakingFrame,
         ]
 
         # Run test
@@ -179,7 +179,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(message.timestamp)
 
         # All frames should be passed through in order, with update at end
-        downstream_update = cast(TranscriptionUpdateFrame, received_frames[-1])
+        downstream_update = cast(TranscriptionUpdateFrame, received_frames[-2])
         self.assertEqual(downstream_update.messages[0].content, "Hello world! How are you?")
 
     async def test_empty_text_handling(self):
@@ -194,7 +194,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             BotStartedSpeakingFrame(),
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
             TTSTextFrame(text=""),  # Empty text
             TTSTextFrame(text="   "),  # Just whitespace
             TTSTextFrame(text="\n"),  # Just newline
@@ -234,16 +234,16 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         # Simulate bot being interrupted mid-sentence
         frames_to_send = [
             BotStartedSpeakingFrame(),
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
             TTSTextFrame(text="Hello"),
             TTSTextFrame(text="world!"),
-            SleepFrame(sleep=0.1),
-            StartInterruptionFrame(),  # User interrupts here
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
+            InterruptionFrame(),  # User interrupts here
+            SleepFrame(),
             BotStartedSpeakingFrame(),
             TTSTextFrame(text="New"),
             TTSTextFrame(text="response"),
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
             BotStoppedSpeakingFrame(),
         ]
 
@@ -252,13 +252,13 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             BotStartedSpeakingFrame,
             TTSTextFrame,  # "Hello"
             TTSTextFrame,  # "world!"
-            StartInterruptionFrame,
+            InterruptionFrame,
             TranscriptionUpdateFrame,  # First message (emitted due to interruption)
             BotStartedSpeakingFrame,
             TTSTextFrame,  # "New"
             TTSTextFrame,  # "response"
-            BotStoppedSpeakingFrame,
             TranscriptionUpdateFrame,  # Second message
+            BotStoppedSpeakingFrame,
         ]
 
         # Run test
@@ -298,7 +298,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             BotStartedSpeakingFrame(),
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
             TTSTextFrame(text="Hello"),
             TTSTextFrame(text="world"),
             # Pipeline ends here; run_test will automatically send EndFrame
@@ -337,10 +337,10 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             BotStartedSpeakingFrame(),
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
             TTSTextFrame(text="Hello"),
             TTSTextFrame(text="world"),
-            SleepFrame(sleep=0.1),  # Ensure messages are processed
+            SleepFrame(),  # Ensure messages are processed
             CancelFrame(),
         ]
 
@@ -400,7 +400,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         # Test assistant processor
         frames_to_send = [
             BotStartedSpeakingFrame(),
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
             TTSTextFrame(text="Assistant"),
             TTSTextFrame(text="message"),
             BotStoppedSpeakingFrame(),
@@ -440,7 +440,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         # Test the specific pattern shared
         frames_to_send = [
             BotStartedSpeakingFrame(),
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
             TTSTextFrame(text="Hello"),
             TTSTextFrame(text=" there"),
             TTSTextFrame(text="!"),

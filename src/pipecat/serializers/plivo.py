@@ -13,6 +13,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -21,11 +22,10 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
-    KeypadEntry,
+    InterruptionFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    StartInterruptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -122,7 +122,7 @@ class PlivoFrameSerializer(FrameSerializer):
             self._hangup_attempted = True
             await self._hang_up_call()
             return None
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clearAudio", "streamId": self._stream_id}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -148,7 +148,7 @@ class PlivoFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
-        elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             return json.dumps(frame.message)
 
         # Return None for unhandled frames

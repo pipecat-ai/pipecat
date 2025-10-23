@@ -1,0 +1,11 @@
+agent_name = "quickstart"
+image = "your_username/quickstart:0.1"
+secret_set = "quickstart-secrets"
+agent_profile = "agent-1x"
+
+# RECOMMENDED: Set an image pull secret:
+# https://docs.pipecat.ai/deployment/pipecat-cloud/fundamentals/secrets#image-pull-secrets
+# image_credentials = "your_image_pull_secret"
+
+[scaling]
+	min_agents = 1

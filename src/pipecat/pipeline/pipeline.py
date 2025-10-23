@@ -11,7 +11,7 @@ in sequence and manages frame flow between them, along with helper classes
 for pipeline source and sink operations.
 """
 
-from typing import Callable, Coroutine, List
+from typing import Callable, Coroutine, List, Optional
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
@@ -26,13 +26,14 @@ class PipelineSource(FrameProcessor):
     provided upstream handler function.
     """
 
-    def __init__(self, upstream_push_frame: Callable[[Frame, FrameDirection], Coroutine]):
+    def __init__(self, upstream_push_frame: Callable[[Frame, FrameDirection], Coroutine], **kwargs):
         """Initialize the pipeline source.
 
         Args:
             upstream_push_frame: Coroutine function to handle upstream frames.
+            **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True, **kwargs)
         self._upstream_push_frame = upstream_push_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -59,13 +60,16 @@ class PipelineSink(FrameProcessor):
     provided downstream handler function.
     """
 
-    def __init__(self, downstream_push_frame: Callable[[Frame, FrameDirection], Coroutine]):
+    def __init__(
+        self, downstream_push_frame: Callable[[Frame, FrameDirection], Coroutine], **kwargs
+    ):
         """Initialize the pipeline sink.
 
         Args:
             downstream_push_frame: Coroutine function to handle downstream frames.
+            **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True, **kwargs)
         self._downstream_push_frame = downstream_push_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -92,25 +96,59 @@ class Pipeline(BasePipeline):
     provides metrics collection from contained processors.
     """
 
-    def __init__(self, processors: List[FrameProcessor]):
+    def __init__(
+        self,
+        processors: List[FrameProcessor],
+        *,
+        source: Optional[FrameProcessor] = None,
+        sink: Optional[FrameProcessor] = None,
+    ):
         """Initialize the pipeline with a list of processors.
 
         Args:
             processors: List of frame processors to connect in sequence.
+            source: An optional pipeline source processor.
+            sink: An optional pipeline sink processor.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
 
         # Add a source and a sink queue so we can forward frames upstream and
         # downstream outside of the pipeline.
-        self._source = PipelineSource(self.push_frame)
-        self._sink = PipelineSink(self.push_frame)
+        self._source = source or PipelineSource(self.push_frame, name=f"{self}::Source")
+        self._sink = sink or PipelineSink(self.push_frame, name=f"{self}::Sink")
         self._processors: List[FrameProcessor] = [self._source] + processors + [self._sink]
 
         self._link_processors()
 
     #
-    # BasePipeline
+    # Frame processor
     #
+
+    @property
+    def processors(self):
+        """Return the list of sub-processors contained within this processor.
+
+        Only compound processors (e.g. pipelines and parallel pipelines) have
+        sub-processors. Non-compound processors will return an empty list.
+
+        Returns:
+            The list of sub-processors if this is a compound processor.
+        """
+        return self._processors
+
+    @property
+    def entry_processors(self) -> List["FrameProcessor"]:
+        """Return the list of entry processors for this processor.
+
+        Entry processors are the first processors in a compound processor
+        (e.g. pipelines, parallel pipelines). Note that pipelines can also be an
+        entry processor as pipelines are processors themselves. Non-compound
+        processors will simply return an empty list.
+
+        Returns:
+            The list of entry processors.
+        """
+        return [self._source]
 
     def processors_with_metrics(self):
         """Return processors that can generate metrics.
@@ -122,16 +160,11 @@ class Pipeline(BasePipeline):
             List of frame processors that can generate metrics.
         """
         services = []
-        for p in self._processors:
-            if isinstance(p, BasePipeline):
-                services.extend(p.processors_with_metrics())
-            elif p.can_generate_metrics():
+        for p in self.processors:
+            if p.can_generate_metrics():
                 services.append(p)
+            services.extend(p.processors_with_metrics())
         return services
-
-    #
-    # Frame processor
-    #
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the pipeline and all contained processors.
@@ -175,7 +208,5 @@ class Pipeline(BasePipeline):
         """Link all processors in sequence and set their parent."""
         prev = self._processors[0]
         for curr in self._processors[1:]:
-            prev.set_parent(self)
             prev.link(curr)
             prev = curr
-        prev.set_parent(self)

@@ -21,8 +21,8 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -120,12 +120,14 @@ class FishAudioTTSService(InterruptibleTTSService):
         if model:
             import warnings
 
-            warnings.warn(
-                "Parameter 'model' is deprecated and will be removed in a future version. "
-                "Use 'reference_id' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'model' is deprecated and will be removed in a future version. "
+                    "Use 'reference_id' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             reference_id = model
 
         self._api_key = api_key
@@ -223,6 +225,8 @@ class FishAudioTTSService(InterruptibleTTSService):
             start_message = {"event": "start", "request": {"text": "", **self._settings}}
             await self._websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"Fish Audio initialization error: {e}")
             self._websocket = None
@@ -243,6 +247,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             self._request_id = None
             self._started = False
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def flush_audio(self):
         """Flush any buffered audio by sending a flush event to Fish Audio."""
@@ -257,7 +262,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
         self._request_id = None

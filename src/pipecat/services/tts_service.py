@@ -8,7 +8,17 @@
 
 import asyncio
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from loguru import logger
 
@@ -20,10 +30,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
-    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -37,7 +47,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
@@ -50,6 +59,25 @@ class TTSService(AIService):
     Provides common functionality for TTS services including text aggregation,
     filtering, audio generation, and frame management. Supports configurable
     sentence aggregation, silence insertion, and frame processing control.
+
+    Event handlers:
+        on_connected: Called when connected to the STT service.
+        on_connected: Called when disconnected from the STT service.
+        on_connection_error: Called when a connection to the STT service error occurs.
+
+    Example::
+
+        @tts.event_handler("on_connected")
+        async def on_connected(tts: TTSService):
+            logger.debug(f"TTS connected")
+
+        @tts.event_handler("on_disconnected")
+        async def on_disconnected(tts: TTSService):
+            logger.debug(f"TTS disconnected")
+
+        @tts.event_handler("on_connection_error")
+        async def on_connection_error(stt: TTSService, error: str):
+            logger.error(f"TTS connection error: {error}")
     """
 
     def __init__(
@@ -133,6 +161,10 @@ class TTSService(AIService):
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
         self._processing_text: bool = False
+
+        self._register_event_handler("on_connected")
+        self._register_event_handler("on_disconnected")
+        self._register_event_handler("on_connection_error")
 
     @property
     def sample_rate(self) -> int:
@@ -258,7 +290,7 @@ class TTSService(AIService):
                     self._settings[key] = self.language_to_service_language(value)
             elif key == "model":
                 self.set_model_name(value)
-            elif key == "voice":
+            elif key == "voice" or key == "voice_id":
                 self.set_voice(value)
             elif key == "text_filter":
                 for filter in self._text_filters:
@@ -269,9 +301,22 @@ class TTSService(AIService):
     async def say(self, text: str):
         """Immediately speak the provided text.
 
+        .. deprecated:: 0.0.79
+            Push a `TTSSpeakFrame` instead to ensure frame ordering is maintained.
+
         Args:
             text: The text to speak.
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`TTSService.say()` is deprecated. Push a `TTSSpeakFrame` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         await self.queue_frame(TTSSpeakFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -287,12 +332,17 @@ class TTSService(AIService):
         await super().process_frame(frame, direction)
 
         if (
+            isinstance(frame, (TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame))
+            and frame.skip_tts
+        ):
+            await self.push_frame(frame, direction)
+        elif (
             isinstance(frame, TextFrame)
             and not isinstance(frame, InterimTranscriptionFrame)
             and not isinstance(frame, TranscriptionFrame)
         ):
             await self._process_text_frame(frame)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption(frame, direction)
             await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
@@ -350,14 +400,44 @@ class TTSService(AIService):
         await super().push_frame(frame, direction)
 
         if self._push_stop_frames and (
-            isinstance(frame, StartInterruptionFrame)
+            isinstance(frame, InterruptionFrame)
             or isinstance(frame, TTSStartedFrame)
             or isinstance(frame, TTSAudioRawFrame)
             or isinstance(frame, TTSStoppedFrame)
         ):
             await self._stop_frame_queue.put(frame)
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _stream_audio_frames_from_iterator(
+        self, iterator: AsyncIterator[bytes], *, strip_wav_header: bool
+    ) -> AsyncGenerator[Frame, None]:
+        buffer = bytearray()
+        need_to_strip_wav_header = strip_wav_header
+        async for chunk in iterator:
+            if need_to_strip_wav_header and chunk.startswith(b"RIFF"):
+                chunk = chunk[44:]
+                need_to_strip_wav_header = False
+
+            # Append to current buffer.
+            buffer.extend(chunk)
+
+            # Round to nearest even number.
+            aligned_length = len(buffer) & ~1  # 111111111...11110
+            if aligned_length > 0:
+                aligned_chunk = buffer[:aligned_length]
+                buffer = buffer[aligned_length:]  # keep any leftover byte
+
+                if len(aligned_chunk) > 0:
+                    frame = TTSAudioRawFrame(bytes(aligned_chunk), self.sample_rate, 1)
+                    yield frame
+
+        if len(buffer) > 0:
+            # Make sure we don't need an extra padding byte.
+            if len(buffer) % 2 == 1:
+                buffer.extend(b"\x00")
+            frame = TTSAudioRawFrame(bytes(buffer), self.sample_rate, 1)
+            yield frame
+
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._processing_text = False
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
@@ -417,18 +497,16 @@ class TTSService(AIService):
         while True:
             try:
                 frame = await asyncio.wait_for(
-                    self._stop_frame_queue.get(), self._stop_frame_timeout_s
+                    self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
                 )
                 if isinstance(frame, TTSStartedFrame):
                     has_started = True
-                elif isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+                elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
                     has_started = False
             except asyncio.TimeoutError:
                 if has_started:
                     await self.push_frame(TTSStoppedFrame())
                     has_started = False
-            finally:
-                self.reset_watchdog()
 
 
 class WordTTSService(TTSService):
@@ -508,14 +586,14 @@ class WordTTSService(TTSService):
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         self._llm_response_started = False
         self.reset_word_timestamps()
 
     def _create_words_task(self):
         if not self._words_task:
-            self._words_queue = WatchdogQueue(self.task_manager)
+            self._words_queue = asyncio.Queue()
             self._words_task = self.create_task(self._words_task_handler())
 
     async def _stop_words_task(self):
@@ -571,7 +649,6 @@ class WebsocketTTSService(TTSService, WebsocketService):
         """
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        self._register_event_handler("on_connection_error")
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
@@ -598,7 +675,7 @@ class InterruptibleTTSService(WebsocketTTSService):
         # user interrupts we need to reconnect.
         self._bot_speaking = False
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         if self._bot_speaking:
             await self._disconnect()
@@ -623,15 +700,6 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
     """Base class for websocket-based TTS services that support word timestamps.
 
     Combines word timestamp functionality with websocket connectivity.
-
-    Event handlers:
-        on_connection_error: Called when a websocket connection error occurs.
-
-    Example::
-
-        @tts.event_handler("on_connection_error")
-        async def on_connection_error(tts: TTSService, error: str):
-            logger.error(f"TTS connection error: {error}")
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -643,7 +711,6 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
         """
         WordTTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        self._register_event_handler("on_connection_error")
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
@@ -670,7 +737,7 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
         # user interrupts we need to reconnect.
         self._bot_speaking = False
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         if self._bot_speaking:
             await self._disconnect()
@@ -786,7 +853,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
             # Indicate no more audio contexts are available. this will end the
             # task cleanly after all contexts have been processed.
             await self._contexts_queue.put(None)
-            await self.wait_for_task(self._audio_context_task)
+            await self._audio_context_task
             self._audio_context_task = None
 
     async def cancel(self, frame: CancelFrame):
@@ -798,20 +865,19 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         await super().cancel(frame)
         await self._stop_audio_context_task()
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self._stop_audio_context_task()
         self._create_audio_context_task()
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
-            self._contexts_queue = WatchdogQueue(self.task_manager)
+            self._contexts_queue = asyncio.Queue()
             self._contexts: Dict[str, asyncio.Queue] = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
         if self._audio_context_task:
-            self._contexts_queue.cancel()
             await self.cancel_task(self._audio_context_task)
             self._audio_context_task = None
 
@@ -848,12 +914,10 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         while running:
             try:
                 frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
-                self.reset_watchdog()
                 if frame:
                     await self.push_frame(frame)
                 running = frame is not None
             except asyncio.TimeoutError:
-                self.reset_watchdog()
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
                 break

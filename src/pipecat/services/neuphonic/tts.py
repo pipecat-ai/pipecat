@@ -25,9 +25,9 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
@@ -36,7 +36,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -225,7 +224,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -294,6 +293,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
             headers = {"x-api-key": self._api_key}
 
             self._websocket = await websocket_connect(url, additional_headers=headers)
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -312,10 +313,11 @@ class NeuphonicTTSService(InterruptibleTTSService):
         finally:
             self._started = False
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def _receive_messages(self):
         """Receive and process messages from Neuphonic WebSocket."""
-        async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
+        async for message in self._websocket:
             if isinstance(message, str):
                 msg = json.loads(message)
                 if msg.get("data") and msg["data"].get("audio"):
@@ -327,9 +329,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10 if self.task_manager.task_watchdog_enabled else 3
+        KEEPALIVE_SLEEP = 10
         while True:
-            self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
             await self._send_keepalive()
 

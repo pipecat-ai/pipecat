@@ -14,13 +14,14 @@ Quick Links
 * `Join our Community <https://discord.gg/pipecat>`_
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :caption: API Reference
    :hidden:
 
    Adapters <api/pipecat.adapters>
    Audio <api/pipecat.audio>
    Clocks <api/pipecat.clocks>
+   Extensions <api/pipecat.extensions>
    Frames <api/pipecat.frames>
    Metrics <api/pipecat.metrics>
    Observers <api/pipecat.observers>

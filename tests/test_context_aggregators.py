@@ -8,25 +8,31 @@ import json
 import unittest
 from typing import Any
 
+from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
+    Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     InterimTranscriptionFrame,
+    InterruptionFrame,
+    InterruptionTaskFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OpenAILLMContextAssistantTimestampFrame,
     SpeechControlParamsFrame,
-    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.task import PipelineParams
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -36,6 +42,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.anthropic.llm import (
     AnthropicAssistantContextAggregator,
     AnthropicLLMContext,
@@ -102,8 +109,8 @@ class BaseTestUserContextAggregator:
         ]
         expected_down_frames = [
             UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
+            UserStoppedSpeakingFrame,
         ]
         await run_test(
             aggregator,
@@ -127,8 +134,8 @@ class BaseTestUserContextAggregator:
         ]
         expected_down_frames = [
             UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
+            UserStoppedSpeakingFrame,
         ]
         await run_test(
             aggregator,
@@ -158,8 +165,8 @@ class BaseTestUserContextAggregator:
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
             UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
+            UserStoppedSpeakingFrame,
         ]
         await run_test(
             aggregator,
@@ -298,8 +305,8 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             SpeechControlParamsFrame,
             UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
+            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
@@ -481,6 +488,103 @@ class BaseTestUserContextAggregator:
         )
         self.check_message_content(context, 0, "How are you?")
 
+    async def test_min_words_interruption_strategy_one_word(self):
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        class ContextProcessor(FrameProcessor):
+            def __init__(self):
+                super().__init__()
+                self.context_received = False
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, OpenAILLMContextFrame):
+                    self.context_received = True
+
+                await self.push_frame(frame, direction)
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+        context_processor = ContextProcessor()
+        pipeline = Pipeline([aggregator, context_processor])
+
+        frames_to_send = [
+            BotStartedSpeakingFrame(),
+            UserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Can", user_id="cat", timestamp=""),
+            SleepFrame(),
+            UserStoppedSpeakingFrame(),
+        ]
+        expected_down_frames = [
+            BotStartedSpeakingFrame,
+            UserStartedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            pipeline_params=PipelineParams(
+                interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)]
+            ),
+        )
+        assert not context_processor.context_received
+
+    async def test_min_words_interruption_strategy_two_words(self):
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        class ContextProcessor(FrameProcessor):
+            def __init__(self):
+                super().__init__()
+                self.context_received = False
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, OpenAILLMContextFrame):
+                    self.context_received = True
+                elif isinstance(frame, InterruptionFrame):
+                    self.context_received = False
+
+                await self.push_frame(frame, direction)
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+        context_processor = ContextProcessor()
+        pipeline = Pipeline([aggregator, context_processor])
+
+        frames_to_send = [
+            BotStartedSpeakingFrame(),
+            UserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Can you", user_id="cat", timestamp=""),
+            SleepFrame(),
+            UserStoppedSpeakingFrame(),
+        ]
+        expected_up_frames = [InterruptionTaskFrame]
+        expected_down_frames = [
+            BotStartedSpeakingFrame,
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+            UserStoppedSpeakingFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_up_frames=expected_up_frames,
+            expected_down_frames=expected_down_frames,
+            pipeline_params=PipelineParams(
+                interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)]
+            ),
+        )
+        self.check_message_content(context, 0, "Can you")
+        # If the context is not received or it has been cleared by the
+        # interruption then we have an issue.
+        assert context_processor.context_received
+
 
 class BaseTestAssistantContextAggreagator:
     CONTEXT_CLASS = None  # To be set in subclasses
@@ -618,7 +722,7 @@ class BaseTestAssistantContextAggreagator:
             TextFrame(text="Pipecat."),
             LLMFullResponseEndFrame(),
             SleepFrame(AGGREGATION_SLEEP),
-            StartInterruptionFrame(),
+            InterruptionFrame(),
             LLMFullResponseStartFrame(),
             TextFrame(text="How are "),
             TextFrame(text="you?"),
@@ -626,7 +730,7 @@ class BaseTestAssistantContextAggreagator:
         ]
         expected_down_frames = [
             *self.EXPECTED_CONTEXT_FRAMES,
-            StartInterruptionFrame,
+            InterruptionFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(

@@ -16,7 +16,8 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import ErrorFrame, Frame, LLMMessagesFrame
+from pipecat.frames.frames import ErrorFrame, Frame, LLMContextFrame, LLMMessagesFrame
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -120,6 +121,7 @@ class Mem0MemoryService(FrameProcessor):
         try:
             logger.debug(f"Storing {len(messages)} messages in Mem0")
             params = {
+                "async_mode": True,
                 "messages": messages,
                 "metadata": {"platform": "pipecat"},
                 "output_format": "v1.1",
@@ -163,7 +165,7 @@ class Mem0MemoryService(FrameProcessor):
                     ("run_id", self.run_id),
                 ]
                 clauses = [{name: value} for name, value in id_pairs if value is not None]
-                filters = {"AND": clauses} if clauses else {}
+                filters = {"OR": clauses} if clauses else {}
                 results = self.memory_client.search(
                     query=query,
                     filters=filters,
@@ -179,11 +181,11 @@ class Mem0MemoryService(FrameProcessor):
             logger.error(f"Error retrieving memories from Mem0: {e}")
             return []
 
-    def _enhance_context_with_memories(self, context: OpenAILLMContext, query: str):
+    def _enhance_context_with_memories(self, context: LLMContext | OpenAILLMContext, query: str):
         """Enhance the LLM context with relevant memories.
 
         Args:
-            context: The OpenAILLMContext to enhance with memory information.
+            context: The LLM context to enhance with memory information.
             query: The query to search for relevant memories.
         """
         # Skip if this is the same query we just processed
@@ -221,11 +223,11 @@ class Mem0MemoryService(FrameProcessor):
         context = None
         messages = None
 
-        if isinstance(frame, OpenAILLMContextFrame):
+        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
             context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
             messages = frame.messages
-            context = OpenAILLMContext.from_messages(messages)
+            context = LLMContext(messages)
 
         if context:
             try:

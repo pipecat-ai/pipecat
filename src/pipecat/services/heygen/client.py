@@ -31,7 +31,6 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.heygen.api import HeyGenApi, HeyGenSession, NewSessionRequest
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 try:
     from livekit import rtc
@@ -104,7 +103,7 @@ class HeyGenClient:
         self._connected = False
         self._session_request = session_request
         self._callbacks = callbacks
-        self._event_queue: Optional[WatchdogQueue] = None
+        self._event_queue: Optional[asyncio.Queue] = None
         self._event_task = None
         # Currently supporting to capture the audio and video from a single participant
         self._video_task = None
@@ -149,7 +148,7 @@ class HeyGenClient:
         try:
             await self._initialize()
 
-            self._event_queue = WatchdogQueue(self._task_manager)
+            self._event_queue = asyncio.Queue()
             self._event_task = self._task_manager.create_task(
                 self._callback_task_handler(self._event_queue),
                 f"{self}::event_callback_task",
@@ -170,7 +169,6 @@ class HeyGenClient:
                 self._connected = False
 
             if self._event_task and self._task_manager:
-                self._event_queue.cancel()
                 await self._task_manager.cancel_task(self._event_task)
                 self._event_task = None
         except Exception as e:
@@ -231,11 +229,9 @@ class HeyGenClient:
         """Handle incoming WebSocket messages."""
         while self._connected:
             try:
-                message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
+                message = await self._websocket.recv()
                 parsed_message = json.loads(message)
                 await self._handle_ws_server_event(parsed_message)
-            except asyncio.TimeoutError:
-                self._task_manager.task_reset_watchdog()
             except ConnectionClosedOK:
                 break
             except Exception as e:
@@ -248,7 +244,7 @@ class HeyGenClient:
         if event_type == "agent.state":
             logger.debug(f"HeyGenClient ws received agent status: {event}")
         else:
-            logger.error(f"HeyGenClient ws received unknown event: {event_type}")
+            logger.trace(f"HeyGenClient ws received unknown event: {event_type}")
 
     async def _ws_disconnect(self) -> None:
         """Disconnect from HeyGen websocket endpoint."""
@@ -362,7 +358,7 @@ class HeyGenClient:
         """Simulate audio playback timing with appropriate delays."""
         # Only sleep after we've sent the first second of audio
         # This appears to reduce the latency to receive the answer from HeyGen
-        if self._audio_seconds_sent < 1.0:
+        if self._audio_seconds_sent < 3.0:
             self._audio_seconds_sent += self._send_interval
             self._next_send_time = time.monotonic() + self._send_interval
             return
@@ -397,7 +393,9 @@ class HeyGenClient:
             participant_id: Identifier of the participant to capture audio from
             callback: Async function to handle received audio frames
         """
-        logger.debug(f"capture_participant_audio: {participant_id}")
+        logger.debug(
+            f"capture_participant_audio: {participant_id}, sample_rate: {self._in_sample_rate}"
+        )
         self._audio_frame_callback = callback
         if self._audio_task is not None:
             logger.warning(
@@ -411,7 +409,9 @@ class HeyGenClient:
             for track_pub in participant.track_publications.values():
                 if track_pub.kind == rtc.TrackKind.KIND_AUDIO and track_pub.track is not None:
                     logger.debug(f"Starting audio capture for existing track: {track_pub.sid}")
-                    audio_stream = rtc.AudioStream(track_pub.track)
+                    audio_stream = rtc.AudioStream(
+                        track=track_pub.track, sample_rate=self._in_sample_rate
+                    )
                     self._audio_task = self._task_manager.create_task(
                         self._process_audio_frames(audio_stream), name="HeyGenClient_Receive_Audio"
                     )
@@ -540,7 +540,7 @@ class HeyGenClient:
                     and self._audio_task is None
                 ):
                     logger.debug(f"Creating audio stream processor for track: {publication.sid}")
-                    audio_stream = rtc.AudioStream(track)
+                    audio_stream = rtc.AudioStream(track=track, sample_rate=self._in_sample_rate)
                     self._audio_task = self._task_manager.create_task(
                         self._process_audio_frames(audio_stream), name="HeyGenClient_Receive_Audio"
                     )
@@ -563,7 +563,7 @@ class HeyGenClient:
                 )
 
             await self._livekit_room.connect(
-                self._heyGen_session.url, self._heyGen_session.access_token
+                self._heyGen_session.url, self._heyGen_session.livekit_agent_token
             )
             logger.debug(f"Successfully connected to LiveKit room: {self._livekit_room.name}")
             logger.debug(f"Local participant SID: {self._livekit_room.local_participant.sid}")

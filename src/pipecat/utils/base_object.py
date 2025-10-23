@@ -14,11 +14,31 @@ and async cleanup for all Pipecat components.
 import asyncio
 import inspect
 from abc import ABC
-from typing import Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from pipecat.utils.utils import obj_count, obj_id
+
+
+@dataclass
+class EventHandler:
+    """Data class to store event handlers information.
+
+    This data class stores the event name, a list of handlers to run for this
+    event, and whether these handlers will be executed in a task.
+
+    Parameters:
+        name (str): The name of the event handler.
+        handlers (List[Any]): A list of functions to be called when this event is triggered.
+        is_sync (bool): Indicates whether the functions are executed in a task.
+
+    """
+
+    name: str
+    handlers: List[Any]
+    is_sync: bool
 
 
 class BaseObject(ABC):
@@ -29,18 +49,19 @@ class BaseObject(ABC):
     classes in the framework should inherit from this base class.
     """
 
-    def __init__(self, *, name: Optional[str] = None):
+    def __init__(self, *, name: Optional[str] = None, **kwargs):
         """Initialize the base object.
 
         Args:
             name: Optional custom name for the object. If not provided,
                 generates a name using the class name and instance count.
+            **kwargs: Additional arguments passed to parent class.
         """
         self._id: int = obj_id()
         self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
 
         # Registered event handlers.
-        self._event_handlers: dict = {}
+        self._event_handlers: Dict[str, EventHandler] = {}
 
         # Set of tasks being executed. When a task finishes running it gets
         # automatically removed from the set. When we cleanup we wait for all
@@ -102,20 +123,23 @@ class BaseObject(ABC):
                 Can be sync or async.
         """
         if event_name in self._event_handlers:
-            self._event_handlers[event_name].append(handler)
+            self._event_handlers[event_name].handlers.append(handler)
         else:
             logger.warning(f"Event handler {event_name} not registered")
 
-    def _register_event_handler(self, event_name: str):
+    def _register_event_handler(self, event_name: str, sync: bool = False):
         """Register an event handler type.
 
         Args:
             event_name: The name of the event type to register.
+            sync: Whether this event handler will be executed in a task.
         """
         if event_name not in self._event_handlers:
-            self._event_handlers[event_name] = []
+            self._event_handlers[event_name] = EventHandler(
+                name=event_name, handlers=[], is_sync=sync
+            )
         else:
-            logger.warning(f"Event handler {event_name} not registered")
+            logger.warning(f"Event handler {event_name} already registered")
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
         """Call all registered handlers for the specified event.
@@ -125,34 +149,43 @@ class BaseObject(ABC):
             *args: Positional arguments to pass to event handlers.
             **kwargs: Keyword arguments to pass to event handlers.
         """
-        # If we haven't registered an event handler, we don't need to do
-        # anything.
-        if not self._event_handlers.get(event_name):
+        if event_name not in self._event_handlers:
             return
 
-        # Create the task.
-        task = asyncio.create_task(self._run_task(event_name, *args, **kwargs))
+        event_handler = self._event_handlers[event_name]
 
-        # Add it to our list of event tasks.
-        self._event_tasks.add((event_name, task))
+        for handler in event_handler.handlers:
+            if event_handler.is_sync:
+                # Just run the handler.
+                await self._run_handler(event_handler.name, handler, *args, **kwargs)
+            else:
+                # Create the task. Note that this is a task per each function
+                # handler. Users can register to an event handler multiple
+                # times.
+                task = asyncio.create_task(
+                    self._run_handler(event_handler.name, handler, *args, **kwargs)
+                )
 
-        # Remove the task from the event tasks list when the task completes.
-        task.add_done_callback(self._event_task_finished)
+                # Add it to our list of event tasks.
+                self._event_tasks.add((event_name, task))
 
-    async def _run_task(self, event_name: str, *args, **kwargs):
+                # Remove the task from the event tasks list when the task completes.
+                task.add_done_callback(self._event_task_finished)
+
+    async def _run_handler(self, event_name: str, handler, *args, **kwargs):
         """Execute all handlers for an event.
 
         Args:
-            event_name: The name of the event being handled.
+            event_name: The event name for this handler.
+            handler: The handler function to run.
             *args: Positional arguments to pass to handlers.
             **kwargs: Keyword arguments to pass to handlers.
         """
         try:
-            for handler in self._event_handlers[event_name]:
-                if inspect.iscoroutinefunction(handler):
-                    await handler(self, *args, **kwargs)
-                else:
-                    handler(self, *args, **kwargs)
+            if inspect.iscoroutinefunction(handler):
+                await handler(self, *args, **kwargs)
+            else:
+                handler(self, *args, **kwargs)
         except Exception as e:
             logger.exception(f"Exception in event handler {event_name}: {e}")
 

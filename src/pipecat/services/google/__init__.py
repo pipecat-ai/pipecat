@@ -9,6 +9,7 @@ import sys
 from pipecat.services import DeprecatedModuleProxy
 
 from .frames import *
+from .gemini_live import *
 from .image import *
 from .llm import *
 from .llm_openai import *

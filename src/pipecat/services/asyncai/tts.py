@@ -20,8 +20,8 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -29,7 +29,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -53,6 +52,10 @@ def language_to_async_language(language: Language) -> Optional[str]:
     """
     BASE_LANGUAGES = {
         Language.EN: "en",
+        Language.FR: "fr",
+        Language.ES: "es",
+        Language.DE: "de",
+        Language.IT: "it",
     }
 
     result = BASE_LANGUAGES.get(language)
@@ -116,7 +119,6 @@ class AsyncAITTSService(InterruptibleTTSService):
         """
         super().__init__(
             aggregate_sentences=aggregate_sentences,
-            push_text_frames=False,
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,
@@ -233,6 +235,8 @@ class AsyncAITTSService(InterruptibleTTSService):
             }
 
             await self._get_websocket().send(json.dumps(init_msg))
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -250,6 +254,7 @@ class AsyncAITTSService(InterruptibleTTSService):
         finally:
             self._websocket = None
             self._started = False
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
@@ -272,13 +277,11 @@ class AsyncAITTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
 
     async def _receive_messages(self):
-        async for message in WatchdogAsyncIterator(
-            self._get_websocket(), manager=self.task_manager
-        ):
+        async for message in self._get_websocket():
             msg = json.loads(message)
             if not msg:
                 continue
@@ -301,9 +304,8 @@ class AsyncAITTSService(InterruptibleTTSService):
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10 if self.task_manager.task_watchdog_enabled else 3
+        KEEPALIVE_SLEEP = 3
         while True:
-            self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
@@ -335,7 +337,7 @@ class AsyncAITTSService(InterruptibleTTSService):
                 yield TTSStartedFrame()
                 self._started = True
 
-            msg = self._build_msg(text=text)
+            msg = self._build_msg(text=text, force=True)
 
             try:
                 await self._get_websocket().send(msg)
