@@ -247,7 +247,7 @@ class UltravoxSTTService(AIService):
             logger.info("Model warm-up completed successfully")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     def _generate_silent_audio(self, sample_rate=16000, duration_sec=1.0):
         """Generate silent audio as a numpy array.
@@ -362,7 +362,7 @@ class UltravoxSTTService(AIService):
             # Check if we have valid frames before processing
             if not self._buffer.frames:
                 logger.warning("No audio frames to process")
-                yield ErrorFrame("No audio frames to process", fatal=False)
+                yield ErrorFrame("No audio frames to process")
                 return
 
             # Process audio frames
@@ -377,9 +377,7 @@ class UltravoxSTTService(AIService):
                             if arr.size > 0:  # Check if array is not empty
                                 audio_arrays.append(arr)
                         except Exception as e:
-                            await self.push_error(
-                                ErrorFrame(error=f"{self} error: {e}", fatal=False)
-                            )
+                            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                     # Handle numpy array data
                     elif isinstance(f.audio, np.ndarray):
                         if f.audio.size > 0:  # Check if array is not empty
@@ -393,7 +391,7 @@ class UltravoxSTTService(AIService):
             # Only proceed if we have valid audio arrays
             if not audio_arrays:
                 logger.warning("No valid audio data found in frames")
-                yield ErrorFrame("No valid audio data found in frames", fatal=False)
+                yield ErrorFrame("No valid audio data found in frames")
                 return
 
             # Concatenate audio frames - all should be int16 now
@@ -440,18 +438,18 @@ class UltravoxSTTService(AIService):
 
                 except Exception as e:
                     logger.error(f"{self} exception: {e}")
-                    yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+                    yield ErrorFrame(error=f"{self} error: {e}")
             else:
                 logger.error("No model available for text generation")
-                yield ErrorFrame("No model available for text generation", fatal=True)
+                yield ErrorFrame("No model available for text generation")
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             import traceback
 
             logger.error(traceback.format_exc())
-            yield ErrorFrame(f"Error processing audio: {str(e)}", fatal=True)
+            yield ErrorFrame(f"Error processing audio: {str(e)}")
         finally:
             self._buffer.is_processing = False
             self._buffer.frames = []

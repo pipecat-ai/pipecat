@@ -297,7 +297,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -311,7 +311,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._started = False
             self._websocket = None
@@ -377,7 +377,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -385,7 +385,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
 
 class NeuphonicHttpTTSService(TTSService):
@@ -550,7 +550,7 @@ class NeuphonicHttpTTSService(TTSService):
                     error_text = await response.text()
                     error_message = f"Neuphonic API error: HTTP {response.status} - {error_text}"
                     logger.error(error_message)
-                    yield ErrorFrame(error=error_message, fatal=True)
+                    yield ErrorFrame(error=error_message)
                     return
 
                 await self.start_tts_usage_metrics(text)
@@ -580,7 +580,7 @@ class NeuphonicHttpTTSService(TTSService):
 
                     except Exception as e:
                         logger.error(f"{self} exception: {e}")
-                        await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+                        await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                         # Don't yield error frame for individual message failures
                         continue
 
@@ -589,7 +589,7 @@ class NeuphonicHttpTTSService(TTSService):
             raise
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

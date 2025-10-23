@@ -116,4 +116,4 @@ class DeepgramTTSService(TTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))

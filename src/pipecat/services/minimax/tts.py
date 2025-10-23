@@ -278,7 +278,7 @@ class MiniMaxHttpTTSService(TTSService):
                 if response.status != 200:
                     error_message = f"MiniMax TTS error: HTTP {response.status}"
                     logger.error(error_message)
-                    yield ErrorFrame(error=error_message, fatal=True)
+                    yield ErrorFrame(error=error_message)
                     return
 
                 await self.start_tts_usage_metrics(text)
@@ -352,7 +352,7 @@ class MiniMaxHttpTTSService(TTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

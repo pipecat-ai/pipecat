@@ -277,7 +277,7 @@ class PlayHTTTSService(InterruptibleTTSService):
             await self._call_event_handler("on_connection_error", f"{e}")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -291,7 +291,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._request_id = None
             self._websocket = None
@@ -362,9 +362,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                             self._request_id = None
                     elif "error" in msg:
                         logger.error(f"{self} error: {msg}")
-                        await self.push_error(
-                            ErrorFrame(error=f"{self} error: {msg['error']}", fatal=True)
-                        )
+                        await self.push_error(ErrorFrame(error=f"{self} error: {msg['error']}"))
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
@@ -407,7 +405,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -418,7 +416,7 @@ class PlayHTTTSService(InterruptibleTTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class PlayHTHttpTTSService(TTSService):
@@ -639,7 +637,7 @@ class PlayHTHttpTTSService(TTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

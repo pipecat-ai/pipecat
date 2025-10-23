@@ -213,7 +213,7 @@ class HumeTTSService(TTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             # Ensure TTFB timer is stopped even on early failures
             await self.stop_ttfb_metrics()

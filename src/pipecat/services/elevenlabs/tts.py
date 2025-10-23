@@ -420,7 +420,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     )
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._context_id = None
             self._started = False
 
@@ -533,7 +533,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             self._websocket = None
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -549,7 +549,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._started = False
             self._context_id = None
@@ -580,7 +580,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 )
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._context_id = None
             self._started = False
             self._partial_word = ""
@@ -732,13 +732,13 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
                 yield TTSStoppedFrame()
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 self._started = False
                 return
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
 
 class ElevenLabsHttpTTSService(WordTTSService):
@@ -1026,7 +1026,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"{self} error: {error_text}")
-                    yield ErrorFrame(error=f"ElevenLabs API error: {error_text}", fatal=True)
+                    yield ErrorFrame(error=f"ElevenLabs API error: {error_text}")
                     return
 
                 await self.start_tts_usage_metrics(text)
@@ -1074,7 +1074,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         continue
                     except Exception as e:
                         logger.error(f"{self} exception: {e}")
-                        await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+                        await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                         continue
 
                 # After processing all chunks, emit any remaining partial word
@@ -1099,7 +1099,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             # Let the parent class handle TTSStoppedFrame

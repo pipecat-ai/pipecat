@@ -92,8 +92,7 @@ class PiperTTSService(TTSService):
                         f"{self} error getting audio (status: {response.status}, error: {error})"
                     )
                     yield ErrorFrame(
-                        error=f"Error getting audio (status: {response.status}, error: {error})",
-                        fatal=True,
+                        error=f"Error getting audio (status: {response.status}, error: {error})"
                     )
                     return
 
@@ -110,7 +109,7 @@ class PiperTTSService(TTSService):
                     yield frame
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             logger.debug(f"{self}: Finished TTS [{text}]")
             await self.stop_ttfb_metrics()

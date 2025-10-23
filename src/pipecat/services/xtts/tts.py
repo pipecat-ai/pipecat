@@ -161,8 +161,7 @@ class XTTSService(TTSService):
                 )
                 await self.push_error(
                     ErrorFrame(
-                        error=f"Error getting studio speakers (status: {r.status}, error: {text})",
-                        fatal=True,
+                        error=f"Error getting studio speakers (status: {r.status}, error: {text})"
                     )
                 )
                 return
@@ -203,9 +202,7 @@ class XTTSService(TTSService):
             if r.status != 200:
                 text = await r.text()
                 logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
-                yield ErrorFrame(
-                    error=f"Error getting audio (status: {r.status}, error: {text})", fatal=True
-                )
+                yield ErrorFrame(error=f"Error getting audio (status: {r.status}, error: {text})")
                 return
 
             await self.start_tts_usage_metrics(text)

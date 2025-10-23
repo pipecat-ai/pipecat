@@ -1008,7 +1008,7 @@ class GeminiLiveLLMService(LLMService):
             self._connection_task = self.create_task(self._connection_task_handler(config=config))
 
         except Exception as e:
-            await self.push_error(ErrorFrame(error=f"{self} Initialization error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} Initialization error: {e}"))
 
     async def _connection_task_handler(self, config: LiveConnectConfig):
         async with self._client.aio.live.connect(model=self._model_name, config=config) as session:
@@ -1089,9 +1089,7 @@ class GeminiLiveLLMService(LLMService):
                 f"Max consecutive failures ({MAX_CONSECUTIVE_FAILURES}) reached, "
                 "treating as fatal error"
             )
-            await self.push_error(
-                ErrorFrame(error=f"{self} Error in receive loop: {error}", fatal=True)
-            )
+            await self.push_error(ErrorFrame(error=f"{self} Error in receive loop: {error}"))
             return False
         else:
             logger.info(
@@ -1549,7 +1547,7 @@ class GeminiLiveLLMService(LLMService):
         # cost/stability implications for a service cluster, let's just treat a
         # send-side error as fatal.
         if not self._disconnecting:
-            await self.push_error(ErrorFrame(error=f"{self} Send error: {error}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} Send error: {error}"))
 
     def create_context_aggregator(
         self,

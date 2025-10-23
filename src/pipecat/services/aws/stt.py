@@ -141,7 +141,7 @@ class AWSTranscribeSTTService(STTService):
                 logger.warning("WebSocket connection not established after connect")
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 retry_count += 1
                 if retry_count < max_retries:
                     await asyncio.sleep(1)  # Wait before retrying
@@ -183,7 +183,7 @@ class AWSTranscribeSTTService(STTService):
                     await self._connect()
                 except Exception as e:
                     logger.error(f"{self} exception: {e}")
-                    yield ErrorFrame(error=f"{self} error: {e}", fatal=False)
+                    yield ErrorFrame(error=f"{self} error: {e}")
                     return
 
             # Format the audio data according to AWS event stream format
@@ -201,12 +201,12 @@ class AWSTranscribeSTTService(STTService):
                 # Don't yield error here - we'll retry on next frame
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+                yield ErrorFrame(error=f"{self} error: {e}")
                 await self._disconnect()
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
             await self._disconnect()
 
     async def _connect(self):
@@ -290,7 +290,7 @@ class AWSTranscribeSTTService(STTService):
                 await self._call_event_handler("on_connected")
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 await self._disconnect()
                 raise
 
@@ -311,7 +311,7 @@ class AWSTranscribeSTTService(STTService):
             await self._ws_client.close()
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._ws_client = None
             await self._call_event_handler("on_disconnected")
@@ -530,9 +530,7 @@ class AWSTranscribeSTTService(STTService):
                 elif headers.get(":message-type") == "exception":
                     error_msg = payload.get("Message", "Unknown error")
                     logger.error(f"{self} Exception from AWS: {error_msg}")
-                    await self.push_frame(
-                        ErrorFrame(f"AWS Transcribe error: {error_msg}", fatal=False)
-                    )
+                    await self.push_frame(ErrorFrame(f"AWS Transcribe error: {error_msg}"))
                 else:
                     logger.debug(f"{self} Other message type received: {headers}")
                     logger.debug(f"{self} Payload: {payload}")
@@ -541,5 +539,5 @@ class AWSTranscribeSTTService(STTService):
                 break
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 break

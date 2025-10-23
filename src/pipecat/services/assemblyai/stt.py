@@ -208,7 +208,7 @@ class AssemblyAISTTService(STTService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             self._connected = False
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             raise
 
     async def _disconnect(self):
@@ -234,7 +234,7 @@ class AssemblyAISTTService(STTService):
 
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
             if self._receive_task:
                 await self.cancel_task(self._receive_task)
@@ -243,7 +243,7 @@ class AssemblyAISTTService(STTService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
         finally:
             self._websocket = None
@@ -263,12 +263,12 @@ class AssemblyAISTTService(STTService):
                     break
                 except Exception as e:
                     logger.error(f"{self} exception: {e}")
-                    await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+                    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                     break
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     def _parse_message(self, message: Dict[str, Any]) -> BaseMessage:
         """Parse a raw message into the appropriate message type."""
@@ -298,7 +298,7 @@ class AssemblyAISTTService(STTService):
                 await self._handle_termination(parsed_message)
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""

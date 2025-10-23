@@ -328,7 +328,7 @@ class AzureTTSService(AzureBaseTTSService):
             if self._speech_synthesizer is None:
                 error_msg = "Speech synthesizer not initialized."
                 logger.error(error_msg)
-                yield ErrorFrame(error=error_msg, fatal=True)
+                yield ErrorFrame(error=error_msg)
                 return
 
             try:
@@ -356,14 +356,14 @@ class AzureTTSService(AzureBaseTTSService):
 
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 yield TTSStoppedFrame()
                 # Could add reconnection logic here if needed
                 return
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
 
 class AzureHttpTTSService(AzureBaseTTSService):
@@ -441,6 +441,4 @@ class AzureHttpTTSService(AzureBaseTTSService):
             logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")
             if cancellation_details.reason == CancellationReason.Error:
                 logger.error(f"{self} error: {cancellation_details.error_details}")
-                yield ErrorFrame(
-                    error=f"{self} error: {cancellation_details.error_details}", fatal=True
-                )
+                yield ErrorFrame(error=f"{self} error: {cancellation_details.error_details}")

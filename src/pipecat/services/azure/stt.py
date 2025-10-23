@@ -122,7 +122,7 @@ class AzureSTTService(STTService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
     async def start(self, frame: StartFrame):
         """Start the speech recognition service.
@@ -152,7 +152,7 @@ class AzureSTTService(STTService):
             self._speech_recognizer.start_continuous_recognition_async()
         except Exception as e:
             logger.error(f"{self} exception during initialization: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def stop(self, frame: EndFrame):
         """Stop the speech recognition service.

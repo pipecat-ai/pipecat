@@ -297,7 +297,7 @@ class SonioxSTTService(STTService):
             logger.debug("WebSocket connection closed, keepalive task stopped.")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _receive_task_handler(self):
         if not self._websocket:
@@ -378,8 +378,7 @@ class SonioxSTTService(STTService):
                     )
                     await self.push_error(
                         ErrorFrame(
-                            error=f"{self} error: {error_code} (_receive_task_handler) - {error_message}",
-                            fatal=True,
+                            error=f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
                         )
                     )
 
@@ -396,4 +395,4 @@ class SonioxSTTService(STTService):
             pass
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))

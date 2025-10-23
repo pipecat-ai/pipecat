@@ -147,6 +147,6 @@ class GroqTTSService(TTSService):
                     yield TTSAudioRawFrame(bytes, frame_rate, channels)
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
         yield TTSStoppedFrame()

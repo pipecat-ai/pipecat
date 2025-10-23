@@ -94,7 +94,7 @@ class WebsocketService(ABC):
                 if self._reconnect_on_error:
                     retry_count += 1
                     if retry_count >= MAX_RETRIES:
-                        await report_error(ErrorFrame(message, fatal=True))
+                        await report_error(ErrorFrame(message))
                         break
 
                     logger.warning(f"{self} connection error, will retry: {e}")

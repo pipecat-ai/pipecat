@@ -468,7 +468,7 @@ class SpeechmaticsSTTService(STTService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=False)
+            yield ErrorFrame(error=f"{self} error: {e}")
             await self._disconnect()
 
     def update_params(
@@ -515,7 +515,7 @@ class SpeechmaticsSTTService(STTService):
             )
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             raise RuntimeError(f"error sending message to STT: {e}")
 
     async def _connect(self) -> None:
@@ -582,7 +582,7 @@ class SpeechmaticsSTTService(STTService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._client = None
 
     async def _disconnect(self) -> None:
@@ -597,7 +597,7 @@ class SpeechmaticsSTTService(STTService):
             logger.warning(f"{self} Timeout while closing Speechmatics client connection")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._client = None
             await self._call_event_handler("on_disconnected")

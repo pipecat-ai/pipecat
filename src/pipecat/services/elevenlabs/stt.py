@@ -336,4 +336,4 @@ class ElevenLabsSTTService(SegmentedSTTService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")

@@ -255,9 +255,7 @@ class SarvamHttpTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Sarvam API error: {error_text}")
-                    await self.push_error(
-                        ErrorFrame(error=f"Sarvam API error: {error_text}", fatal=True)
-                    )
+                    await self.push_error(ErrorFrame(error=f"Sarvam API error: {error_text}"))
                     return
 
                 response_data = await response.json()
@@ -267,7 +265,7 @@ class SarvamHttpTTSService(TTSService):
             # Decode base64 audio data
             if "audios" not in response_data or not response_data["audios"]:
                 logger.error("No audio data received from Sarvam API")
-                await self.push_error(ErrorFrame(error="No audio data received", fatal=True))
+                await self.push_error(ErrorFrame(error="No audio data received"))
                 return
 
             # Get the first audio (there should be only one for single text input)
@@ -289,7 +287,7 @@ class SarvamHttpTTSService(TTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
@@ -578,7 +576,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             # Reset state only after everything is cleaned up
             self._started = False
@@ -603,7 +601,7 @@ class SarvamTTSService(InterruptibleTTSService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -620,7 +618,7 @@ class SarvamTTSService(InterruptibleTTSService):
             logger.debug("Configuration sent successfully")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             raise
 
     async def _disconnect_websocket(self):
@@ -633,7 +631,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._started = False
             self._websocket = None
@@ -663,7 +661,7 @@ class SarvamTTSService(InterruptibleTTSService):
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
 
-                    await self.push_frame(ErrorFrame(error=f"TTS Error: {error_msg}", fatal=True))
+                    await self.push_frame(ErrorFrame(error=f"TTS Error: {error_msg}"))
 
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
@@ -720,7 +718,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -728,4 +726,4 @@ class SarvamTTSService(InterruptibleTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))

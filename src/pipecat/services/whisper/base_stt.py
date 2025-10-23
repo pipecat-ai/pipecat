@@ -229,7 +229,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
     async def _transcribe(self, audio: bytes) -> Transcription:
         """Transcribe audio data to text.

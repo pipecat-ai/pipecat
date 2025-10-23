@@ -229,7 +229,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -244,7 +244,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._request_id = None
             self._started = False
@@ -287,7 +287,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}", fatal=False))
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -324,7 +324,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(ormsgpack.packb(flush_message))
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -333,4 +333,4 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}", fatal=True)
+            yield ErrorFrame(error=f"{self} error: {e}")
