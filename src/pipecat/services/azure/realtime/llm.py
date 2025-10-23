@@ -38,7 +38,7 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
         Args:
             api_key: The API key for the Azure OpenAI service.
             base_url: The full Azure WebSocket endpoint URL including api-version and deployment.
-                Example: "wss://my-project.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment=my-realtime-deployment"
+                Example: "wss://my-project.openai.azure.com/openai/realtime?api-version=2025-04-01-preview&deployment=my-realtime-deployment"
             **kwargs: Additional arguments passed to parent OpenAIRealtimeLLMService.
         """
         super().__init__(base_url=base_url, api_key=api_key, **kwargs)
