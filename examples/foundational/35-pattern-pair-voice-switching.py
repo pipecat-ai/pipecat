@@ -111,7 +111,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         start_pattern="<voice>",
         end_pattern="</voice>",
         type="voice",
-        remove_match=True,
+        action="remove",  # Remove tags from final text
     )
 
     # Register handler for voice switching

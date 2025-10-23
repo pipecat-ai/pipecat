@@ -12,7 +12,7 @@ support for custom handlers and configurable pattern removal.
 """
 
 import re
-from typing import Awaitable, Callable, List, Optional, Tuple
+from typing import Awaitable, Callable, List, Literal, Optional, Tuple
 
 from loguru import logger
 
@@ -83,9 +83,9 @@ class PatternPairAggregator(BaseTextAggregator):
         Returns:
             The text that has been accumulated in the buffer.
         """
-        start, curtype = self._match_start_of_pattern(self._text)
-        if curtype:
-            return Aggregation(self._text, curtype)
+        pattern_start = self._match_start_of_pattern(self._text)
+        if pattern_start:
+            return Aggregation(self._text, pattern_start[1].get("type", "sentence"))
         return Aggregation(self._text, "sentence")
 
     def add_pattern_pair(
@@ -94,7 +94,7 @@ class PatternPairAggregator(BaseTextAggregator):
         start_pattern: str,
         end_pattern: str,
         type: str,
-        remove_match: bool = True,
+        action: Literal["remove", "keep", "aggregate"] = "remove",
     ) -> "PatternPairAggregator":
         """Add a pattern pair to detect in the text.
 
@@ -108,7 +108,12 @@ class PatternPairAggregator(BaseTextAggregator):
             end_pattern: Pattern that marks the end of content.
             type: The type of aggregation the matched content represents
                   (e.g., 'code', 'speaker', 'custom').
-            remove_match: Whether to remove the matched content from the text returned.
+            action: What to do when a complete pattern is matched:
+                    - "remove": Remove the matched pattern from the text.
+                    - "keep": Keep the matched pattern in the text and treat it as
+                                normal text.
+                    - "aggregate": Return the matched pattern as a separate
+                                   aggregation object.
 
         Returns:
             Self for method chaining.
@@ -117,7 +122,7 @@ class PatternPairAggregator(BaseTextAggregator):
             "start": start_pattern,
             "end": end_pattern,
             "type": type,
-            "remove_match": remove_match,
+            "action": action,
         }
         return self
 
@@ -162,7 +167,7 @@ class PatternPairAggregator(BaseTextAggregator):
             # Escape special regex characters in the patterns
             start = re.escape(pattern_info["start"])
             end = re.escape(pattern_info["end"])
-            remove_match = pattern_info["remove_match"]
+            action = pattern_info["action"]
             match_type = pattern_info["type"]
 
             # Create regex to match from start pattern to end pattern
@@ -190,7 +195,7 @@ class PatternPairAggregator(BaseTextAggregator):
                         logger.error(f"Error in pattern handler for {pattern_id}: {e}")
 
                 # Remove the pattern from the text if configured
-                if remove_match:
+                if action == "remove":
                     processed_text = processed_text.replace(full_match, "", 1)
                     # modified = True
                 else:
@@ -198,7 +203,7 @@ class PatternPairAggregator(BaseTextAggregator):
 
         return all_matches, processed_text
 
-    def _match_start_of_pattern(self, text: str) -> Optional[Tuple[int, str]]:
+    def _match_start_of_pattern(self, text: str) -> Optional[Tuple[int, dict]]:
         """Check if text contains incomplete pattern pairs.
 
         Determines whether the text contains any start patterns without
@@ -225,9 +230,9 @@ class PatternPairAggregator(BaseTextAggregator):
             # Which is why we base the return on the first found.
             if start_count > end_count:
                 start_index = text.find(start)
-                return [start_index, pattern_info["type"]]
+                return [start_index, pattern_info]
 
-        return None, None
+        return None
 
     async def aggregate(self, text: str) -> Optional[PatternMatch]:
         """Aggregate text and process pattern pairs.
@@ -258,17 +263,22 @@ class PatternPairAggregator(BaseTextAggregator):
                 logger.warning(
                     f"Multiple patterns matched: {[p.pattern_id for p in patterns]}. Only the first pattern will be returned."
                 )
-            self._text = ""
-            return patterns[0]
+            # If the pattern found is set to be aggregated, return it
+            action = self._patterns[patterns[0].pattern_id].get("action", "remove")
+            if action == "aggregate":
+                self._text = ""
+                print(f"Returning pattern: {patterns[0]}")
+                return patterns[0]
 
         # Check if we have incomplete patterns
-        start, curtype = self._match_start_of_pattern(self._text)
-        if start is not None:
-            # Still waiting for complete patterns
-            if start == 0:
+        pattern_start = self._match_start_of_pattern(self._text)
+        if pattern_start is not None:
+            # If the start pattern is at the beginning or should not be separately aggregated, return None
+            if pattern_start[0] == 0 or pattern_start[1].get("action", "remove") != "aggregate":
                 return None
-            result = self._text[:start]
-            self._text = self._text[start:]
+            # Otherwise, strip the text up to the start pattern and return it
+            result = self._text[: pattern_start[0]]
+            self._text = self._text[pattern_start[0] :]
             return PatternMatch(f"_sentence", result, result, "sentence")
 
         # Find sentence boundary if no incomplete patterns
