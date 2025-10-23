@@ -15,7 +15,6 @@ service-specific adapter.
 """
 
 import base64
-import copy
 import io
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
@@ -125,6 +124,33 @@ class LLMContext:
         Returns:
             List of conversation messages.
         """
+        return self.get_messages()
+
+    def get_messages_for_persistent_storage(self) -> List[LLMContextMessage]:
+        """Get messages suitable for persistent storage.
+
+        NOTE: the only reason this method exists is because we're "silently"
+        switching from OpenAILLMContext to LLMContext under the hood in some
+        services and don't want to trip up users who may have been relying on
+        this method, which is part of the public API of OpenAILLMContext but
+        doesn't need to be for LLMContext.
+
+        .. deprecated::
+            Use `get_messages()` instead.
+
+        Returns:
+            List of conversation messages.
+        """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "get_messages_for_persistent_storage() is deprecated, use get_messages() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         return self.get_messages()
 
     def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:
