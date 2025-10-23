@@ -114,19 +114,15 @@ class IVRProcessor(FrameProcessor):
     def _setup_xml_patterns(self):
         """Set up XML pattern detection and handlers."""
         # Register DTMF pattern
-        self._aggregator.add_pattern_pair(
-            "dtmf", "<dtmf>", "</dtmf>", type="dtmf", remove_match=True
-        )
+        self._aggregator.add_pattern_pair("dtmf", "<dtmf>", "</dtmf>", type="dtmf", action="remove")
         self._aggregator.on_pattern_match("dtmf", self._handle_dtmf_action)
 
         # Register mode pattern
-        self._aggregator.add_pattern_pair(
-            "mode", "<mode>", "</mode>", type="mode", remove_match=True
-        )
+        self._aggregator.add_pattern_pair("mode", "<mode>", "</mode>", type="mode", action="remove")
         self._aggregator.on_pattern_match("mode", self._handle_mode_action)
 
         # Register IVR pattern
-        self._aggregator.add_pattern_pair("ivr", "<ivr>", "</ivr>", type="ivr", remove_match=True)
+        self._aggregator.add_pattern_pair("ivr", "<ivr>", "</ivr>", type="ivr", action="remove")
         self._aggregator.on_pattern_match("ivr", self._handle_ivr_action)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -163,7 +159,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing DTMF content.
         """
-        value = match.content
+        value = match.text
         logger.debug(f"DTMF detected: {value}")
 
         try:
@@ -184,7 +180,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing IVR status content.
         """
-        status = match.content
+        status = match.text
         logger.trace(f"IVR status detected: {status}")
 
         # Convert string to enum, with validation
@@ -215,7 +211,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing mode content.
         """
-        mode = match.content
+        mode = match.text
         logger.debug(f"Mode detected: {mode}")
         if mode == "conversation":
             await self._handle_conversation()
