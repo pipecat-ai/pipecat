@@ -82,6 +82,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by context aggregators, to update its internal state. Listen for
   `LLMContextFrame`s for context updates.
 
+  Finally, `LLMTextFrame`s are no longer pushed from `OpenAIRealtimeLLMService`
+  when it's configured with `output_modalities=['audio']`. If you need
+  to process its output, listen for `TTSTextFrame`s instead.
+
 - Expanded support for universal `LLMContext` to `GeminiLiveLLMService`.
   As a reminder, the context-setup pattern when using `LLMContext` is:
 
