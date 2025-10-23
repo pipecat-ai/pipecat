@@ -5,6 +5,7 @@
 #
 
 
+import asyncio
 import os
 from datetime import datetime
 
@@ -14,7 +15,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame, TranscriptionMessage
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -53,6 +54,18 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     )
 
 
+async def get_news(params: FunctionCallParams):
+    await params.result_callback(
+        {
+            "news": [
+                "Massive UFO currently hovering above New York City",
+                "Stock markets reach all-time highs",
+                "Living dinosaur species discovered in the Amazon rainforest",
+            ],
+        }
+    )
+
+
 async def fetch_restaurant_recommendation(params: FunctionCallParams):
     await params.result_callback({"name": "The Golden Dragon"})
 
@@ -72,6 +85,13 @@ weather_function = FunctionSchema(
         },
     },
     required=["location", "format"],
+)
+
+get_news_function = FunctionSchema(
+    name="get_news",
+    description="Get the current news.",
+    properties={},
+    required=[],
 )
 
 restaurant_function = FunctionSchema(
@@ -141,10 +161,6 @@ even if you're asked about them.
 You are participating in a voice conversation. Keep your responses concise, short, and to the point
 unless specifically asked to elaborate on a topic.
 
-You have access to the following tools:
-- get_current_weather: Get the current weather for a given location.
-- get_restaurant_recommendation: Get a restaurant recommendation for a given location.
-
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
     )
 
@@ -158,6 +174,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     # llm.register_function(None, fetch_weather_from_api)
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+    llm.register_function("get_news", get_news)
 
     transcript = TranscriptProcessor()
 
@@ -198,6 +215,16 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         logger.info(f"Client connected")
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
+
+        async def set_tools_after_delay():
+            await asyncio.sleep(15)
+            new_tools = ToolsSchema(
+                standard_tools=[weather_function, restaurant_function, get_news_function]
+            )
+            logger.info("Registering new tool with LLMSetToolsFrame")
+            await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
+
+        asyncio.create_task(set_tools_after_delay())
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
