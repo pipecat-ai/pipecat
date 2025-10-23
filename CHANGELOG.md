@@ -21,9 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LLMContext`, it is not meant to be swapped out for another LLM service at
   runtime.)
 
-  Note: `TranscriptionFrame`s now go upstream from `OpenAIRealtimeLLMService`,
-  so if you're using `TranscriptProcessor`, say, you'll want to adjust
-  accordingly:
+  Note: `TranscriptionFrame`s and `InterimTranscriptionFrame`s now go upstream
+  from `OpenAIRealtimeLLMService`, so if you're using `TranscriptProcessor`,
+  say, you'll want to adjust accordingly:
 
   ```python
   pipeline = Pipeline(

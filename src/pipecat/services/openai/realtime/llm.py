@@ -139,6 +139,28 @@ class OpenAIRealtimeLLMService(LLMService):
                     stacklevel=2,
                 )
 
+        # Log warning about transcription frame direction change in 0.0.92
+        logger.warning(
+            "As of version 0.0.92, TranscriptionFrames and InterimTranscriptionFrames "
+            "now go upstream from OpenAIRealtimeLLMService, so if you're using "
+            "TranscriptProcessor, say, you'll want to adjust accordingly:\n\n"
+            "pipeline = Pipeline(\n"
+            "  [\n"
+            "    transport.input(),\n"
+            "    context_aggregator.user(),\n\n"
+            "    # BEFORE\n"
+            "    llm,\n"
+            "    transcript.user(),\n\n"
+            "    # AFTER\n"
+            "    transcript.user(),\n"
+            "    llm,\n\n"
+            "    transport.output(),\n"
+            "    transcript.assistant(),\n"
+            "    context_aggregator.assistant(),\n"
+            "  ]\n"
+            ")"
+        )
+
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
 
