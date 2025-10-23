@@ -29,7 +29,7 @@ from openai.types.chat import (
 )
 from PIL import Image
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
 
 if TYPE_CHECKING:
@@ -83,9 +83,17 @@ class LLMContext:
         Returns:
             New LLMContext instance with converted messages and settings.
         """
+        # Convert tools to ToolsSchema if needed.
+        # If the tools are already a ToolsSchema, this is a no-op.
+        # Otherwise, we wrap them in a shim ToolsSchema.
+        converted_tools = openai_context.tools
+        if isinstance(converted_tools, list):
+            converted_tools = ToolsSchema(
+                standard_tools=[], custom_tools={AdapterType.SHIM: converted_tools}
+            )
         return LLMContext(
             messages=openai_context.get_messages(),
-            tools=openai_context.tools,
+            tools=converted_tools,
             tool_choice=openai_context.tool_choice,
         )
 
