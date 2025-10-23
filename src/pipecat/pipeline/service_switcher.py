@@ -21,10 +21,22 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class ServiceSwitcherStrategy:
-    """Base class for service switching strategies."""
+    """Base class for service switching strategies.
+
+    Note:
+        Strategy classes are instantiated internally by ServiceSwitcher.
+        Developers should pass the strategy class (not an instance) to ServiceSwitcher.
+    """
 
     def __init__(self, services: List[FrameProcessor]):
-        """Initialize the service switcher strategy with a list of services."""
+        """Initialize the service switcher strategy with a list of services.
+
+        Note:
+            This is called internally by ServiceSwitcher. Do not instantiate directly.
+
+        Args:
+            services: List of frame processors to switch between.
+        """
         self.services = services
         self.active_service: Optional[FrameProcessor] = None
 
@@ -46,10 +58,24 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
 
     This strategy allows the user to manually select which service is active.
     The initial active service is the first one in the list.
+
+    Example::
+
+        stt_switcher = ServiceSwitcher(
+            services=[stt_1, stt_2],
+            strategy_type=ServiceSwitcherStrategyManual
+        )
     """
 
     def __init__(self, services: List[FrameProcessor]):
-        """Initialize the manual service switcher strategy with a list of services."""
+        """Initialize the manual service switcher strategy with a list of services.
+
+        Note:
+            This is called internally by ServiceSwitcher. Do not instantiate directly.
+
+        Args:
+            services: List of frame processors to switch between.
+        """
         super().__init__(services)
         self.active_service = services[0] if services else None
 
@@ -85,7 +111,12 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     """A pipeline that switches between different services at runtime."""
 
     def __init__(self, services: List[FrameProcessor], strategy_type: Type[StrategyType]):
-        """Initialize the service switcher with a list of services and a switching strategy."""
+        """Initialize the service switcher with a list of services and a switching strategy.
+
+        Args:
+            services: List of frame processors to switch between.
+            strategy_type: The strategy class to use for switching between services.
+        """
         strategy = strategy_type(services)
         super().__init__(*self._make_pipeline_definitions(services, strategy))
         self.services = services
@@ -100,14 +131,20 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             active_service: FrameProcessor,
             direction: FrameDirection,
         ):
-            """Initialize the service switcher filter with a strategy and direction."""
+            """Initialize the service switcher filter with a strategy and direction.
+
+            Args:
+                wrapped_service: The service that this filter wraps.
+                active_service: The currently active service.
+                direction: The direction of frame flow to filter.
+            """
+            self._wrapped_service = wrapped_service
+            self._active_service = active_service
 
             async def filter(_: Frame) -> bool:
                 return self._wrapped_service == self._active_service
 
-            super().__init__(filter, direction)
-            self._wrapped_service = wrapped_service
-            self._active_service = active_service
+            super().__init__(filter, direction, filter_system_frames=True)
 
         async def process_frame(self, frame, direction):
             """Process a frame through the filter, handling special internal filter-updating frames."""
