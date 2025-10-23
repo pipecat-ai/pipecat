@@ -121,7 +121,7 @@ class OpenAIRealtimeLLMService(LLMService):
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             send_transcription_frames: Whether to emit transcription frames.
 
-                .. deprecated:: 0.0.91
+                .. deprecated:: 0.0.92
                     This parameter is deprecated and will be removed in a future version.
                     Transcription frames are always sent.
 

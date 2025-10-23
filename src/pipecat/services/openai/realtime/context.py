@@ -6,7 +6,7 @@
 
 """OpenAI Realtime LLM context and aggregator implementations.
 
-.. deprecated:: 0.0.91
+.. deprecated:: 0.0.92
     OpenAI Realtime no longer uses types from this module under the hood.
     It now uses `LLMContext` and `LLMContextAggregatorPair`.
     Using the new patterns should allow you to not need types from this module.
