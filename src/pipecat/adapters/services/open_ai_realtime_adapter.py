@@ -75,7 +75,25 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             List of messages in a format ready for logging about OpenAI Realtime.
         """
-        return self._from_universal_context_messages(self.get_messages(context)).messages
+        # NOTE: this is the same as in OpenAIAdapter, as that's what it was
+        # prior to a refactor. Worth noting that for OpenAI Realtime
+        # specifically, not everything handled here is necessarily supported
+        # (or supported yet).
+        msgs = []
+        for message in self.get_messages(context):
+            msg = copy.deepcopy(message)
+            if "content" in msg:
+                if isinstance(msg["content"], list):
+                    for item in msg["content"]:
+                        if item["type"] == "image_url":
+                            if item["image_url"]["url"].startswith("data:image/"):
+                                item["image_url"]["url"] = "data:image/..."
+                        if item["type"] == "input_audio":
+                            item["input_audio"]["data"] = "..."
+            if "mime_type" in msg and msg["mime_type"].startswith("image/"):
+                msg["data"] = "..."
+            msgs.append(msg)
+        return msgs
 
     @dataclass
     class ConvertedMessages:
