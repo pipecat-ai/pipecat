@@ -141,19 +141,19 @@ async def get_recording_s3_url(
     return (recording_url, recording_url, status)
 
 
-async def get_recent_recordings(limit: int = 100) -> list[str]:
-    """Get list of recent recording IDs from Daily API.
+async def get_recent_rooms(limit: int = 100) -> list[str]:
+    """Get list of recent room names from Daily API.
 
     Args:
-        limit: Maximum number of recordings to retrieve (default 100)
+        limit: Maximum number of rooms to retrieve (default 100, max 100)
 
     Returns:
-        List of recording IDs (strings)
+        List of room names (strings)
     """
     try:
         async with AsyncClient() as client:
             response = await client.get(
-                url="https://api.daily.co/v1/recordings",
+                url=f"https://api.daily.co/v1/rooms?limit={min(limit, 100)}",
                 headers={
                     "Authorization": f"Bearer {os.getenv('DAILY_API_KEY')}",
                     "Content-Type": "application/json",
@@ -163,66 +163,39 @@ async def get_recent_recordings(limit: int = 100) -> list[str]:
             response.raise_for_status()
 
         data = response.json()
-        recordings = data.get("data", [])
-        recording_ids = [rec.get("id") for rec in recordings[:limit] if rec.get("id")]
+        rooms = data.get("data", [])
+        room_names = [room.get("name") for room in rooms if room.get("name")]
 
-        logger.info(f"Retrieved {len(recording_ids)} recording IDs from Daily API")
-        return recording_ids
+        logger.info(f"Retrieved {len(room_names)} room names from Daily API")
+        return room_names
 
     except Exception as e:
-        logger.exception(f"Failed to get recordings from Daily API: {e}")
+        logger.exception(f"Failed to get rooms from Daily API: {e}")
         return []
 
 
 async def main():
-    """Test get_recording_s3_url_with_retry with recent recordings."""
+    """Test get_recording_s3_url_with_retry with recent rooms."""
     logger.info("Starting recording fetch test...")
 
-    # Step 1: Get the most recent 100 recordings
-    logger.info("Fetching recent recordings...")
-    recording_ids = await get_recent_recordings(limit=100)
+    # Step 1: Get the most recent 100 rooms
+    logger.info("Fetching recent rooms...")
+    room_names = await get_recent_rooms(limit=100)
 
-    if not recording_ids:
-        logger.error("No recordings found. Cannot proceed with test.")
+    if not room_names:
+        logger.error("No rooms found. Cannot proceed with test.")
         return
 
-    logger.info(f"Found {len(recording_ids)} recordings to fetch")
+    logger.info(f"Found {len(room_names)} rooms to check for recordings")
 
-    # Fetch access links for each recording concurrently
-    logger.info(
-        f"Attempting to fetch access links for {len(recording_ids)} recordings concurrently..."
-    )
+    # Call get_recording_s3_url_with_retry on each room concurrently
+    logger.info(f"Attempting to fetch recordings for {len(room_names)} rooms concurrently...")
 
-    # Create tasks for all recordings
-    async def get_recording_link(recording_id: str) -> Tuple[Optional[str], Optional[str]]:
-        """Get download link for a specific recording ID."""
-        try:
-            headers = {
-                "Authorization": f"Bearer {os.getenv('DAILY_API_KEY')}",
-                "Content-Type": "application/json",
-            }
-
-            async with AsyncClient(timeout=180) as client:
-                # Get the recording access link
-                link_response = await client.get(
-                    url=f"https://api.daily.co/v1/recordings/{recording_id}/access-link",
-                    headers=headers,
-                )
-                link_response.raise_for_status()
-                link_data = link_response.json()
-
-            recording_url = link_data.get("download_link")
-            if not recording_url:
-                logger.warning(f"No download link found for recording {recording_id}")
-                return (None, None)
-
-            return (recording_url, recording_url)
-
-        except Exception as e:
-            logger.exception(f"Failed to get access link for recording {recording_id}: {e}")
-            return (None, None)
-
-    tasks = [get_recording_link(recording_id) for recording_id in recording_ids]
+    # Create tasks for all rooms
+    tasks = [
+        get_recording_s3_url_with_retry(room_id=room_name, max_retries=3)
+        for room_name in room_names
+    ]
 
     # Execute all tasks concurrently
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -232,34 +205,32 @@ async def main():
     not_found_count = 0
     failed_count = 0
 
-    for i, (recording_id, result) in enumerate(zip(recording_ids, results), 1):
+    for i, (room_name, result) in enumerate(zip(room_names, results), 1):
         if isinstance(result, Exception):
             failed_count += 1
-            logger.error(f"❌ [{i}/{len(recording_ids)}] Failed for {recording_id}: {result}")
+            logger.error(f"❌ [{i}/{len(room_names)}] Failed for {room_name}: {result}")
         elif isinstance(result, tuple) and len(result) == 2:
             recording_url, recording_signed_url = result
             if recording_url:
                 success_count += 1
-                logger.info(
-                    f"✅ [{i}/{len(recording_ids)}] Found recording link for {recording_id}"
-                )
-                logger.debug(f"   URL: {recording_url}")
+                logger.info(f"✅ [{i}/{len(room_names)}] Found recording for {room_name}")
+                logger.debug(f"   URL: {recording_url[:80]}...")
             else:
                 not_found_count += 1
-                logger.debug(f"ℹ️  [{i}/{len(recording_ids)}] No link for {recording_id}")
+                logger.debug(f"ℹ️  [{i}/{len(room_names)}] No recording for {room_name}")
         else:
             failed_count += 1
-            logger.error(f"❌ [{i}/{len(recording_ids)}] Unexpected result type for {recording_id}")
+            logger.error(f"❌ [{i}/{len(room_names)}] Unexpected result type for {room_name}")
 
     # Summary
     logger.info("\n" + "=" * 60)
     logger.info("RECORDING FETCH TEST SUMMARY")
     logger.info("=" * 60)
-    logger.info(f"Total recordings checked: {len(recording_ids)}")
+    logger.info(f"Total rooms checked: {len(room_names)}")
     logger.info(f"✅ Recordings found: {success_count}")
     logger.info(f"ℹ️  No recordings: {not_found_count}")
     logger.info(f"❌ Failed: {failed_count}")
-    logger.info(f"Success rate: {(success_count / len(recording_ids) * 100):.2f}%")
+    logger.info(f"Success rate: {(success_count / len(room_names) * 100):.2f}%")
     logger.info("=" * 60)
 
 
