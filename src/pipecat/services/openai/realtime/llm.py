@@ -113,7 +113,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
         Args:
             api_key: OpenAI API key for authentication.
-            model: OpenAI model name. Defaults to "gpt-4o-realtime-preview-2025-06-03".
+            model: OpenAI model name. Defaults to "gpt-realtime".
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.openai.com/v1/realtime".
             session_properties: Configuration properties for the realtime session.
