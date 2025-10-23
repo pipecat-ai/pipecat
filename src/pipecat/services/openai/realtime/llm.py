@@ -139,28 +139,6 @@ class OpenAIRealtimeLLMService(LLMService):
                     stacklevel=2,
                 )
 
-        # Log warning about transcription frame direction change in 0.0.92
-        logger.warning(
-            "As of version 0.0.92, TranscriptionFrames and InterimTranscriptionFrames "
-            "now go upstream from OpenAIRealtimeLLMService, so if you're using "
-            "TranscriptProcessor, say, you'll want to adjust accordingly:\n\n"
-            "pipeline = Pipeline(\n"
-            "  [\n"
-            "    transport.input(),\n"
-            "    context_aggregator.user(),\n\n"
-            "    # BEFORE\n"
-            "    llm,\n"
-            "    transcript.user(),\n\n"
-            "    # AFTER\n"
-            "    transcript.user(),\n"
-            "    llm,\n\n"
-            "    transport.output(),\n"
-            "    transcript.assistant(),\n"
-            "    context_aggregator.assistant(),\n"
-            "  ]\n"
-            ")"
-        )
-
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
 
@@ -883,6 +861,36 @@ class OpenAIRealtimeLLMService(LLMService):
             the user and one for the assistant, encapsulated in an
             OpenAIContextAggregatorPair.
         """
+        # Log warning about transcription frame direction change in 0.0.92.
+        # We're putting this warning here rather than in the constructor so
+        # that it shows up for folks who haven't updated their code at all
+        # since 0.0.92, gives them a way to acknowledge and dismiss the
+        # warning, and encourages adoption of a new preferred pattern.
+        logger.warning(
+            "As of version 0.0.92, TranscriptionFrames and InterimTranscriptionFrames "
+            "now go upstream from OpenAIRealtimeLLMService, so if you're using "
+            "TranscriptProcessor, say, you'll want to adjust accordingly:\n\n"
+            "pipeline = Pipeline(\n"
+            "  [\n"
+            "    transport.input(),\n"
+            "    context_aggregator.user(),\n\n"
+            "    # BEFORE\n"
+            "    llm,\n"
+            "    transcript.user(),\n\n"
+            "    # AFTER\n"
+            "    transcript.user(),\n"
+            "    llm,\n\n"
+            "    transport.output(),\n"
+            "    transcript.assistant(),\n"
+            "    context_aggregator.assistant(),\n"
+            "  ]\n"
+            ")\n\n"
+            "Once you've done that (if needed), you can dismiss this warning "
+            "by updating to the new context-setup pattern:\n\n"
+            "  context = LLMContext(messages, tools)\n"
+            "  context_aggregator = LLMContextAggregatorPair(context)\n"
+        )
+
         context = LLMContext.from_openai_context(context)
         return LLMContextAggregatorPair(
             context, user_params=user_params, assistant_params=assistant_params
