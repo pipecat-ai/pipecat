@@ -242,7 +242,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             Converts to Google Content with::
 
                 Content(
-                    role="model",
+                    role="user",
                     parts=[Part(function_call=FunctionCall(name="search", args={"query": "test"}))]
                 )
         """
@@ -273,7 +273,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     )
                 )
         elif role == "tool":
-            role = "model"
+            role = "user"
             try:
                 response = json.loads(message["content"])
                 if isinstance(response, dict):
@@ -285,11 +285,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 # This occurs with a UserImageFrame, for example, where we get a plain "COMPLETED" string.
                 response_dict = {"value": message["content"]}
             parts.append(
-                Part(
-                    function_response=FunctionResponse(
-                        name="tool_call_result",  # seems to work to hard-code the same name every time
-                        response=response_dict,
-                    )
+                Part.from_function_response(
+                    name="tool_call_result",  # seems to work to hard-code the same name every time
+                    response=response_dict,
                 )
             )
         elif isinstance(content, str):
