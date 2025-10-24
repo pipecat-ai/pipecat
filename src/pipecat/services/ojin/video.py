@@ -451,8 +451,7 @@ class OjinPersonaService(FrameProcessor):
                 image_bytes = idle_frame.image_bytes
                 # audio_bytes is already set to silence
                 
-                if self._state == PersonaState.SPEAKING:
-                    logger.debug(f"Waiting for speech frame (playing idle {self._played_frame_idx})")
+                logger.debug(f"Playing idle frame {self._played_frame_idx}")
 
             # Output frame and audio
             image_frame = OutputImageRawFrame(
