@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `DailyTransport` updates: `start_dialout()` now returns two values:
+  `session_id` and `error`. `start_recording()` now returns two values:
+  `stream_id` and `error`.
+
 - `FunctionFilter` now has a `filter_system_frames` arg, which controls whether
   or not SystemFrames are filtered.
 
