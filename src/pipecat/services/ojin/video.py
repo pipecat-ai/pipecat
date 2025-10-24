@@ -282,7 +282,7 @@ class OjinPersonaService(FrameProcessor):
                 video_frame = VideoFrame(
                     frame_idx=frame_idx,
                     image_bytes=message.video_frame_bytes,
-                    audio_bytes=message.audio_bytes if hasattr(message, 'audio_bytes') else bytes(),
+                    audio_bytes=message.audio_frame_bytes,
                     is_final=message.is_final_response,
                 )
                 
