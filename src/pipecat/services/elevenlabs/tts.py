@@ -419,7 +419,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                         json.dumps({"context_id": self._context_id, "close_context": True})
                     )
             except Exception as e:
-                logger.warning(f"Error closing context for voice settings update: {e}")
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._context_id = None
             self._started = False
 
@@ -530,8 +531,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            logger.error(f"{self} exception: {e}")
             self._websocket = None
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -546,7 +548,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self._websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._started = False
             self._context_id = None
@@ -576,7 +579,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     json.dumps({"context_id": self._context_id, "close_context": True})
                 )
             except Exception as e:
-                logger.error(f"Error closing context on interruption: {e}")
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._context_id = None
             self._started = False
             self._partial_word = ""
@@ -726,13 +730,15 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 else:
                     await self._send_text(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                logger.error(f"{self} exception: {e}")
                 yield TTSStoppedFrame()
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 self._started = False
                 return
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
 
 class ElevenLabsHttpTTSService(WordTTSService):
@@ -1067,7 +1073,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         logger.warning(f"Failed to parse JSON from stream: {e}")
                         continue
                     except Exception as e:
-                        logger.error(f"Error processing response: {e}", exc_info=True)
+                        logger.error(f"{self} exception: {e}")
+                        await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                         continue
 
                 # After processing all chunks, emit any remaining partial word
@@ -1091,8 +1098,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
                     self._previous_text = text
 
         except Exception as e:
-            logger.error(f"Error in run_tts: {e}")
-            yield ErrorFrame(error=str(e))
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             # Let the parent class handle TTSStoppedFrame
