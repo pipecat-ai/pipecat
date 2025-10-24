@@ -216,6 +216,24 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
             text = response.text.strip()
 
+            # Calculate audio duration for usage metrics
+            # For 16-bit PCM audio: duration = bytes / (sample_rate * 2)
+            audio_duration = len(audio) / (self.sample_rate * 2)
+
+            # Get performance metrics from metrics object
+            ttft = self._metrics.ttfb
+            processing_time = self._metrics.processing_time
+
+            # Pass comprehensive metrics including processing time, TTFT, and ground truth (if available)
+            await self.start_stt_usage_metrics(
+                audio_duration=audio_duration,
+                transcript=text,
+                processing_time=processing_time,
+                ttft=ttft,
+                sample_rate=self.sample_rate,
+                ground_truth=self._ground_truth,
+            )
+
             if text:
                 await self._handle_transcription(text, True, self._language)
                 logger.debug(f"Transcription: [{text}]")

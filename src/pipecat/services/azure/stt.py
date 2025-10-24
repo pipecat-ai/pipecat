@@ -188,6 +188,36 @@ class AzureSTTService(STTService):
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             language = getattr(event.result, "language", None) or self._settings.get("language")
+
+            # Calculate audio duration from event if available
+            audio_duration = getattr(event.result, "duration", None)
+            if audio_duration:
+                audio_duration = audio_duration.total_seconds()
+
+            # Get performance metrics
+            ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+            processing_time = self._metrics.processing_time if hasattr(self, "_metrics") else None
+
+            # Get confidence if available (Azure provides this in some result types)
+            confidence = getattr(event.result, "confidence", None)
+
+            # Calculate STT usage metrics if we have audio duration
+            if audio_duration:
+                asyncio.run_coroutine_threadsafe(
+                    self.start_stt_usage_metrics(
+                        audio_duration=audio_duration,
+                        transcript=event.result.text,
+                        processing_time=processing_time,
+                        ttft=ttft,
+                        confidence=confidence,
+                        sample_rate=self.sample_rate,
+                        channels=1,
+                        encoding="LINEAR16",
+                        ground_truth=self._ground_truth,
+                    ),
+                    self.get_event_loop(),
+                )
+
             frame = TranscriptionFrame(
                 event.result.text,
                 self._user_id,

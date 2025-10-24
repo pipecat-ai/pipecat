@@ -310,6 +310,41 @@ class RivaSTTService(STTService):
             if transcript and len(transcript) > 0:
                 await self.stop_ttfb_metrics()
                 if result.is_final:
+                    # Calculate audio duration if available
+                    audio_duration = None
+                    if hasattr(result, "audio_processed") and result.audio_processed:
+                        # audio_processed is in seconds
+                        audio_duration = result.audio_processed
+
+                    # Get performance metrics
+                    ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+                    processing_time = (
+                        self._metrics.processing_time if hasattr(self, "_metrics") else None
+                    )
+
+                    # Get confidence from alternative if available
+                    confidence = None
+                    if (
+                        hasattr(result.alternatives[0], "confidence")
+                        and result.alternatives[0].confidence
+                    ):
+                        confidence = result.alternatives[0].confidence
+
+                    # Calculate STT usage metrics
+                    if audio_duration:
+                        await self.start_stt_usage_metrics(
+                            audio_duration=audio_duration,
+                            transcript=transcript,
+                            processing_time=processing_time,
+                            ttft=ttft,
+                            confidence=confidence,
+                            sample_rate=self.sample_rate,
+                            channels=1,
+                            encoding="LINEAR16",
+                            cost_per_minute=self._cost_per_minute,
+                            ground_truth=self._ground_truth,
+                        )
+
                     await self.stop_processing_metrics()
                     await self.push_frame(
                         TranscriptionFrame(
