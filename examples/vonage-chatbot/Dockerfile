@@ -20,7 +20,7 @@ RUN pip install --upgrade pip && \
 COPY . .
 
 # Install the local pipecat package (so imports like pipecat.serializers.vonage work)
-RUN pip install --no-cache-dir -e .
+RUN pip install -e ".[openai,websocket,vonage,silero,runner]"
 
 # Expose the desired port (WebSocket server)
 EXPOSE 8005
