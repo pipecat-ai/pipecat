@@ -221,7 +221,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         self, message: LLMContextMessage, *, params: MessageConversionParams
     ) -> MessageConversionResult:
         if isinstance(message, LLMSpecificMessage):
-            return message.message
+            return self.MessageConversionResult(content=message.message)
         return self._from_standard_message(message, params=params)
 
     def _from_standard_message(
