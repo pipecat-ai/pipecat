@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
 )
@@ -184,6 +185,7 @@ class HumeSTSService(LLMService):
         if msg_type == "audio_output":
             if not self.active_conversation:
                 self.active_conversation = True
+                await self.push_frame(TTSStartedFrame())
                 await self.push_frame(LLMFullResponseStartFrame())
 
             wav_data = base64.b64decode(message.data.encode("utf-8"))
