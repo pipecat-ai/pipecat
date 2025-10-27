@@ -1,5 +1,4 @@
 import asyncio
-import math
 import os
 import time
 from collections import deque
@@ -30,8 +29,6 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -510,14 +507,4 @@ class OjinPersonaService(FrameProcessor):
             await self._client.send_message(OjinPersonaCancelInteractionMessage())       
 
         self.set_state(PersonaState.INTERRUPTING)
-
-        #TODO Remove this once the server sends last frame flag
-        # Clear speech frames buffer
-        self._speech_frames.clear()
-        
-        # Clear pending audio input
-        self._pending_audio_input.clear()                        
-        self.set_state(PersonaState.IDLE)
-       
-
     
