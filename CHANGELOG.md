@@ -167,6 +167,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `MoondreamService` to process `VisionImageRawFrame`.
+
+- `VisionService` expects `VisionImageRawFrame` in order to analyze images.
+
 - `DailyTransport` triggers `on_error` event if transcription can't be started
   or stopped.
 
