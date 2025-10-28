@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for including images or audio to LLM context messages using
+  `LLMContext.create_image_message()` and `LLMContext.create_audio_message()`.
+  For example, when creating `LLMMessagesAppendFrame`:
+
+  ```python
+  message = LLMContext.create_image_message(image=..., size= ...)
+  await self.push_frame(LLMMessagesAppendFrame(messages=[message], run_llm=True))
+  ```
+
 - New event handlers for the `DeepgramFluxSTTService`: `on_start_of_turn`,
   `on_turn_resumed`, `on_end_of_turn`, `on_eager_end_of_turn`, `on_update`.
 
