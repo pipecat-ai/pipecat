@@ -14,8 +14,7 @@ visual content.
 from abc import abstractmethod
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import Frame, LLMContextFrame
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.frames.frames import Frame, VisionImageRawFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 
@@ -38,15 +37,15 @@ class VisionService(AIService):
         self._describe_text = None
 
     @abstractmethod
-    async def run_vision(self, context: LLMContext) -> AsyncGenerator[Frame, None]:
-        """Process the latest image in the context and generate results.
+    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+        """Process the given vision image and generate results.
 
         This method must be implemented by subclasses to provide actual computer
         vision functionality such as image description, object detection, or
         visual question answering.
 
         Args:
-            context: The context to process, containing image data.
+            frame: The vision image frame to process.
 
         Yields:
             Frame: Frames containing the vision analysis results, typically TextFrame
@@ -66,9 +65,9 @@ class VisionService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMContextFrame):
+        if isinstance(frame, VisionImageRawFrame):
             await self.start_processing_metrics()
-            await self.process_generator(self.run_vision(frame.context))
+            await self.process_generator(self.run_vision(frame))
             await self.stop_processing_metrics()
         else:
             await self.push_frame(frame, direction)
