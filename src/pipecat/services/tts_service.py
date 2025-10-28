@@ -23,6 +23,7 @@ from typing import (
 from loguru import logger
 
 from pipecat.frames.frames import (
+    AggregatedLLMTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -516,15 +517,24 @@ class TTSService(AIService):
                 text = await filter.filter(text)
 
             if text:
-                await self.push_frame(TTSTextFrame(text, spoken=True, aggregated_by=aggregated_by))
+                if not self._push_text_frames:
+                    # If we are not pushing text frames, we send a TTSTextFrame
+                    # before the audio so downstream processors know what text
+                    # is being spoken. Here, we assume this flag is used when the TTS
+                    # provider supports word timestamps and the TTSTextFrames will be
+                    # generated in the word_task_handler.
+                    await self.push_frame(AggregatedLLMTextFrame(text, aggregated_by=aggregated_by))
                 await self.process_generator(self.run_tts(text))
 
             await self.stop_processing_metrics()
 
-        if self._push_text_frames or not should_speak:
-            # We send the original text after the audio. This way, if we are
+        if not should_speak:
+            await self.push_frame(AggregatedLLMTextFrame(text, aggregated_by=aggregated_by))
+        elif self._push_text_frames:
+            # In the case where the TTS service does not support word timestamps,
+            # we send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
-            frame = TTSTextFrame(text, spoken=should_speak, aggregated_by=aggregated_by)
+            frame = TTSTextFrame(text, aggregated_by=aggregated_by)
             frame.includes_inter_frame_spaces = self.includes_inter_frame_spaces
             await self.push_frame(frame)
 
@@ -652,7 +662,7 @@ class WordTTSService(TTSService):
                 frame = TTSStoppedFrame()
                 frame.pts = last_pts
             else:
-                frame = TTSTextFrame(word, spoken=True, aggregated_by="word")
+                frame = TTSTextFrame(word, aggregated_by="word")
                 frame.pts = self._initial_word_timestamp + timestamp
             if frame:
                 last_pts = frame.pts

@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.frames.frames import (
+    AggregatedLLMTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -1023,6 +1024,16 @@ class RTVIObserver(BaseObserver):
         if self._rtvi:
             await self._rtvi.push_transport_message(model, exclude_none)
 
+    async def send_aggregated_llm_text(self, text: str, aggregated_by: Optional[str] = None):
+        """Send aggregated LLM text as a bot output message.
+
+        Args:
+            text: The aggregated text to send.
+            aggregated_by: The method of aggregation (e.g., "word", "sentence").
+        """
+        if self._rtvi:
+            await self._rtvi.push_aggregated_llm_text(text, aggregated_by)
+
     async def on_push_frame(self, data: FramePushed):
         """Process a frame being pushed through the pipeline.
 
@@ -1073,11 +1084,13 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVIBotTTSStoppedMessage())
-        elif isinstance(frame, TTSTextFrame) and self._params.bot_tts_enabled:
-            if isinstance(src, BaseOutputTransport):
-                await self._handle_tts_text_frame(frame)
-            else:
+        elif isinstance(frame, AggregatedLLMTextFrame):
+            if isinstance(frame, TTSTextFrame) and not isinstance(src, BaseOutputTransport):
+                # This check is to make sure we handle the frame when it has gone
+                # through the transport and has correct timing.
                 mark_as_seen = False
+            else:
+                await self._handle_aggregated_llm_text(frame)
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
         elif isinstance(frame, RTVIServerMessageFrame):
@@ -1139,18 +1152,19 @@ class RTVIObserver(BaseObserver):
         if message:
             await self.send_rtvi_message(message)
 
-    async def _handle_tts_text_frame(self, frame: TTSTextFrame):
-        """Handle TTS text output frames."""
-        # send the tts-text message
-        message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self.send_rtvi_message(message)
-        # send the bot-output message
+    async def _handle_aggregated_llm_text(self, frame: AggregatedLLMTextFrame):
+        """Handle aggregated LLM text output frames."""
+        isTTS = isinstance(frame, TTSTextFrame)
         message = RTVIBotOutputMessage(
             data=RTVIBotOutputMessageData(
-                text=frame.text, spoken=frame.spoken, aggregated_by=frame.aggregated_by
+                text=frame.text, spoken=isTTS, aggregated_by=frame.aggregated_by
             )
         )
         await self.send_rtvi_message(message)
+
+        if isTTS and self._params.bot_tts_enabled:
+            tts_message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
+            await self.send_rtvi_message(tts_message)
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
@@ -1161,41 +1175,26 @@ class RTVIObserver(BaseObserver):
         if self._skip_tts is None:
             self._skip_tts = frame.skip_tts
 
-        messages = []
-        should_reset_transcription = False
+        orig_text = self._bot_transcription
         self._bot_transcription += frame.text
 
-        if not frame.skip_tts and self._skip_tts:
-            # We just switched from skipping TTS to not skipping TTS.
-            # Send and reset any existing transcription.
-            if len(self._bot_transcription) > 0:
-                message.append(
-                    RTVIBotOutputMessage(
-                        data=RTVIBotOutputMessageData(
-                            text=self._bot_transcription, spoken=False, aggregated_by="sentence"
-                        )
-                    )
-                )
-                should_reset_transcription = True
-
         if match_endofsentence(self._bot_transcription) and len(self._bot_transcription) > 0:
-            messages.append(
+            # TODO: Remove this message when we fully deprecate bot-transcription messages.
+            await self.send_rtvi_message(
                 RTVIBotTranscriptionMessage(data=RTVITextMessageData(text=self._bot_transcription))
             )
             if frame.skip_tts:
-                messages.append(
-                    RTVIBotOutputMessage(
-                        data=RTVIBotOutputMessageData(
-                            text=self._bot_transcription, spoken=False, aggregated_by="sentence"
-                        )
-                    )
+                await self.send_aggregated_llm_text(
+                    text=self._bot_transcription, aggregated_by="sentence"
                 )
-            should_reset_transcription = True
-
-        for msg in messages:
-            await self.send_rtvi_message(msg)
-        if should_reset_transcription:
             self._bot_transcription = ""
+        elif not frame.skip_tts and self._skip_tts:
+            # We just switched from skipping TTS to not skipping TTS.
+            # Send any dangling transcription.
+            if len(orig_text) > 0:
+                await self.send_aggregated_llm_text(text=orig_text, aggregated_by="sentence")
+                self._bot_transcription = frame.text
+        self._skip_tts = frame.skip_tts
 
     async def _handle_user_transcriptions(self, frame: Frame):
         """Handle user transcription frames."""
@@ -1321,7 +1320,7 @@ class RTVIProcessor(FrameProcessor):
         # Default to 0.3.0 which is the last version before actually having a
         # "client-version".
         self._client_version = [0, 3, 0]
-        self._skip_tts: bool = False  # Keep in sync with llm_service.py
+        self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
 
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
@@ -1429,6 +1428,12 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(frame)
 
+    async def push_aggregated_llm_text(self, text: str, aggregated_by: Optional[str] = None):
+        """Push an aggregated LLM text frame."""
+        frame = AggregatedLLMTextFrame(text=text, aggregated_by=aggregated_by)
+        frame.skip_tts = True
+        await self.push_frame(frame)
+
     async def handle_message(self, message: RTVIMessage):
         """Handle an incoming RTVI message.
 
@@ -1514,7 +1519,7 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, RTVIActionFrame):
             await self._action_queue.put(frame)
         elif isinstance(frame, LLMConfigureOutputFrame):
-            self._skip_tts = frame.skip_tts
+            self._llm_skip_tts = frame.skip_tts
             await self.push_frame(frame, direction)
         # Other frames
         else:
@@ -1770,9 +1775,9 @@ class RTVIProcessor(FrameProcessor):
         opts = data.options if data.options is not None else RTVISendTextOptions()
         if opts.run_immediately:
             await self.interrupt_bot()
-        cur_skip_tts = self._skip_tts
+        cur_llm_skip_tts = self._llm_skip_tts
         should_skip_tts = not opts.audio_response
-        toggle_skip_tts = cur_skip_tts != should_skip_tts
+        toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
             await self.push_frame(output_frame)
@@ -1782,7 +1787,7 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(text_frame)
         if toggle_skip_tts:
-            output_frame = LLMConfigureOutputFrame(skip_tts=cur_skip_tts)
+            output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)
 
     async def _handle_update_context(self, data: RTVIAppendToContextData):

@@ -111,7 +111,8 @@ class PatternPairAggregator(BaseTextAggregator):
             action: What to do when a complete pattern is matched:
                     - "remove": Remove the matched pattern from the text.
                     - "keep": Keep the matched pattern in the text and treat it as
-                                normal text.
+                              normal text. This allows you to register handlers for
+                              the pattern without affecting the aggregation logic.
                     - "aggregate": Return the matched pattern as a separate
                                    aggregation object.
 
@@ -259,12 +260,14 @@ class PatternPairAggregator(BaseTextAggregator):
 
         #
         if len(patterns) > 0:
+            print(f"Found patterns: {[str(p) for p in patterns]}")
             if len(patterns) > 1:
                 logger.warning(
                     f"Multiple patterns matched: {[p.pattern_id for p in patterns]}. Only the first pattern will be returned."
                 )
             # If the pattern found is set to be aggregated, return it
             action = self._patterns[patterns[0].pattern_id].get("action", "remove")
+            print(f"Pattern action: {action}")
             if action == "aggregate":
                 self._text = ""
                 print(f"Returning pattern: {patterns[0]}")

@@ -1027,7 +1027,7 @@ class AWSNovaSonicLLMService(LLMService):
         logger.debug(f"Assistant response text added: {text}")
 
         # Report the text of the assistant response.
-        frame = TTSTextFrame(text, aggregated_by="sentence", spoken=True)
+        frame = TTSTextFrame(text, aggregated_by="sentence")
         frame.includes_inter_frame_spaces = True
         await self.push_frame(frame)
 
@@ -1062,9 +1062,7 @@ class AWSNovaSonicLLMService(LLMService):
                 # TTSTextFrame would be ignored otherwise (the interruption frame
                 # would have cleared the assistant aggregator state).
                 await self.push_frame(LLMFullResponseStartFrame())
-                frame = TTSTextFrame(
-                    self._assistant_text_buffer, aggregated_by="sentence", spoken=True
-                )
+                frame = TTSTextFrame(self._assistant_text_buffer, aggregated_by="sentence")
                 frame.includes_inter_frame_spaces = True
                 await self.push_frame(frame)
             self._may_need_repush_assistant_text = False
