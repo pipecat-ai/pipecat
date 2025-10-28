@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `daily-python` to 0.21.0.
 
+- `SimliVideoService` now accepts `api_key` and `face_id` parameters directly,
+  with optional `params` for `max_session_length` and `max_idle_time`
+  configuration, aligning with other Pipecat service patterns.
+
 - Updated the default model to `sonic-3` for `CartesiaTTSService` and
   `CartesiaHttpTTSService`.
 
@@ -19,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Upgraded `aws_sdk_bedrock_runtime` to v0.1.1 to resolve potential CPU issues
   when running `AWSNovaSonicLLMService`.
+
+### Deprecated
+
+- `SimliVideoService` `simli_config` parameter is deprecated. Use `api_key` and
+  `face_id` parameters instead.
 
 ### Removed
 
