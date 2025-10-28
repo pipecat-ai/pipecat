@@ -2,6 +2,7 @@
 
 import base64
 import io
+import time
 import wave
 from dataclasses import dataclass
 
@@ -33,8 +34,10 @@ from pipecat.frames.frames import (
     SystemFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
@@ -89,6 +92,8 @@ class HumeSTSService(LLMService):
         self.system_prompt = system_prompt
         self._context: OpenAIRealtimeLLMContext | None = None
         self._hume_context: Context | None = None
+        self._user_stopped_time: float | None = None
+        self._time_to_first_audio_list = []
         self._start_frame_cls = start_frame_cls or HumeStartFrame
 
     async def start(self, frame: StartFrame):
@@ -111,6 +116,8 @@ class HumeSTSService(LLMService):
         await super().process_frame(frame, direction)
         if isinstance(frame, self._start_frame_cls):
             await self._connect()
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_stopped_time = time.perf_counter()
         elif isinstance(frame, InputAudioRawFrame):
             if self._connection:
                 encoded_audio = base64.b64encode(frame.audio).decode("utf-8")
@@ -184,6 +191,12 @@ class HumeSTSService(LLMService):
         if msg_type == "audio_output":
             if not self.active_conversation:
                 self.active_conversation = True
+                if self._user_stopped_time is not None:
+                    self._time_to_first_audio_list.append(
+                        time.perf_counter() - self._user_stopped_time
+                    )
+                self._user_stopped_time = None
+                await self.push_frame(TTSStartedFrame())
                 await self.push_frame(LLMFullResponseStartFrame())
 
             wav_data = base64.b64decode(message.data.encode("utf-8"))

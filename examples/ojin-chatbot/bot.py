@@ -26,8 +26,11 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.hume.hume import HumeSTSService
-from pipecat.services.ojin.video import OjinPersonaInitializedFrame, OjinPersonaService, OjinPersonaSettings
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.ojin.video import (
+    OjinPersonaInitializedFrame,
+    OjinPersonaService,
+    OjinPersonaSettings,
+)
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
@@ -149,7 +152,7 @@ async def main():
             persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),
             image_size=(1280, 720),
             tts_audio_passthrough=False,
-            push_bot_stopped_speaking_frames=False,
+            extra_frames_lat=15,
         )
     )
 
