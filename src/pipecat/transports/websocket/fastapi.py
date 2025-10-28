@@ -105,6 +105,8 @@ class FastAPIWebsocketClient:
             _: The start frame (unused).
         """
         self._leave_counter += 1
+        # Reset closing flag when setting up a new connection
+        self._closing = False
 
     def receive(self) -> typing.AsyncIterator[bytes | str]:
         """Get an async iterator for receiving WebSocket messages.
