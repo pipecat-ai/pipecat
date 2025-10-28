@@ -173,9 +173,7 @@ class OjinPersonaService(FrameProcessor):
                 logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
 
                 if attempt < self._settings.client_connect_max_retries - 1:
-                    logger.info(
-                        f"Retrying in {self._settings.client_reconnect_delay} seconds..."
-                    )
+                    logger.info(f"Retrying in {self._settings.client_reconnect_delay} seconds...")
                     await asyncio.sleep(self._settings.client_reconnect_delay)
 
         logger.error(
@@ -201,8 +199,6 @@ class OjinPersonaService(FrameProcessor):
 
             # Track timestamp for debugging time to first video frame
             self._tts_started_timestamp = time.perf_counter()
-            if self._client is not None:
-                await self._client.send_message(OjinPersonaCancelInteractionMessage())
 
             self.set_state(PersonaState.IDLE)
             await self.push_frame(frame, direction)
@@ -256,9 +252,7 @@ class OjinPersonaService(FrameProcessor):
 
             self._server_fps_tracker.start()
             if message.parameters is not None:
-                self._is_mirrored_loop = message.parameters.get(
-                    "is_mirrored_loop", True
-                )
+                self._is_mirrored_loop = message.parameters.get("is_mirrored_loop", True)
 
             logger.info("Requesting idle frames")
             # Request idle frames from server
@@ -308,9 +302,7 @@ class OjinPersonaService(FrameProcessor):
                     self._time_to_first_frame_measurements.append(
                         self._tts_first_frame_timestamp - self._tts_started_timestamp
                     )
-                    logger.info(
-                        f"First video frame for interaction_id: {message.interaction_id}"
-                    )
+                    logger.info(f"First video frame for interaction_id: {message.interaction_id}")
 
                     logger.info(
                         f"Time to first video frame: {self._time_to_first_frame_measurements[-1] * 1000:.2f}ms "
@@ -355,9 +347,7 @@ class OjinPersonaService(FrameProcessor):
                 logger.error("Ojin couldn't create a model from supplied persona ID.")
             elif message.payload.code == "INVALID_PERSONA_ID_CONFIGURATION":
                 is_fatal = True
-                logger.error(
-                    "Ojin couldn't load the configuration from the supplied persona ID."
-                )
+                logger.error("Ojin couldn't load the configuration from the supplied persona ID.")
 
             if is_fatal:
                 await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
@@ -415,9 +405,7 @@ class OjinPersonaService(FrameProcessor):
             await asyncio.sleep(0.1)
 
         silence_duration = 1 / self.fps
-        audio_bytes_length_for_one_frame = 2 * int(
-            silence_duration * OJIN_PERSONA_SAMPLE_RATE
-        )
+        audio_bytes_length_for_one_frame = 2 * int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
         silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
 
         start_ts = time.perf_counter()
@@ -485,9 +473,7 @@ class OjinPersonaService(FrameProcessor):
 
                 if self._state == PersonaState.IDLE:
                     if self._played_frame_idx % 25 == 0:
-                        logger.debug(
-                            f"Playing idle frame (%25) {self._played_frame_idx}"
-                        )
+                        logger.debug(f"Playing idle frame (%25) {self._played_frame_idx}")
                 else:
                     logger.debug(f"Playing idle frame {self._played_frame_idx}")
 
