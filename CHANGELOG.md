@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guides the vision service on how to analyze the image.
 
 - Added support for including images or audio to LLM context messages using
-  `LLMContext.create_image_message()` and `LLMContext.create_audio_message()`.
-  For example, when creating `LLMMessagesAppendFrame`:
+  `LLMContext.create_image_message()` or `LLMContext.create_image_url_message()`
+  (not all LLMs support URLs) and `LLMContext.create_audio_message()`. For
+  example, when creating `LLMMessagesAppendFrame`:
 
   ```python
   message = LLMContext.create_image_message(image=..., size= ...)

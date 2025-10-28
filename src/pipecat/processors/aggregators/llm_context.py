@@ -115,6 +115,28 @@ class LLMContext:
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
 
     @staticmethod
+    def create_image_url_message(
+        *,
+        role: str = "user",
+        url: str,
+        text: Optional[str] = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing an image URL.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            url: The URL of the image.
+            text: Optional text to include with the image.
+        """
+        content = []
+        if text:
+            content.append({"type": "text", "text": text})
+
+        content.append({"type": "image_url", "image_url": {"url": url}})
+
+        return {"role": role, "content": content}
+
+    @staticmethod
     def create_image_message(
         *,
         role: str = "user",
@@ -135,19 +157,9 @@ class LLMContext:
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        url = f"data:image/jpeg;base64,{encoded_image}"
 
-        content = []
-        if text:
-            content.append({"type": "text", "text": text})
-
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
-            },
-        )
-
-        return {"role": role, "content": content}
+        return LLMContext.create_image_url_message(role=role, url=url, text=text)
 
     @staticmethod
     def create_audio_message(
