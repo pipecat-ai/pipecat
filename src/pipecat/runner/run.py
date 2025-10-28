@@ -794,10 +794,6 @@ def main():
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
         return
 
-    if args.transport in TELEPHONY_TRANSPORTS and not args.proxy:
-        logger.error(f"For telephony transports, you need to specify `--proxy PROXY`.")
-        return
-
     # Log level
     logger.remove()
     logger.add(sys.stderr, level="TRACE" if args.verbose else "DEBUG")
