@@ -201,6 +201,8 @@ class OjinPersonaService(FrameProcessor):
 
             # Track timestamp for debugging time to first video frame
             self._tts_started_timestamp = time.perf_counter()
+            if self._client is not None:
+                await self._client.send_message(OjinPersonaCancelInteractionMessage())
 
             self.set_state(PersonaState.IDLE)
             await self.push_frame(frame, direction)
