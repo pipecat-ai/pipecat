@@ -216,6 +216,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `HumeTTSService` that was only using Octave 2, which does
+  not support the `description` field. Now, if a description is provided, it
+  switches to Octave 1.
+
 - Fixed an issue where `DailyTransport` would timeout prematurely on join and on
   leave.
 
@@ -225,7 +229,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `ServiceSwitcher` where the `STTService`s would result in
   all STT services producing `TranscriptionFrame`s.
 
-- Fixed an issue in `HumeTTSService` that was only using Octave 2, which does not support the `description` field. Now, if a description is provided, it switches to Octave 1.
+### Other
+
+- Updated all vision 12-series foundational examples to use function calling to
+  request for a camera image and also to push `LLMMessagesAppendFrame` with the
+  retrieved image. For the specific `Moondream` example (`12-describe-video.py`)
+  we now use a regular LLM and a parallel pipeline with the `MoondreamService`.
 
 ## [0.0.91] - 2025-10-21
 

@@ -5,86 +5,53 @@
 #
 
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import (
-    Frame,
-    LLMContextFrame,
-    TextFrame,
-    TTSSpeakFrame,
-    UserImageRawFrame,
-    UserImageRequestFrame,
-)
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.user_response import UserResponseAggregator
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
     get_transport_client_id,
     maybe_capture_participant_camera,
 )
-from pipecat.services.aws.llm import AWSBedrockLLMService
+from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
 
-class UserImageRequester(FrameProcessor):
-    """Converts incoming text into requests for user images."""
+async def fetch_user_image(params: FunctionCallParams):
+    user_id = params.arguments["user_id"]
+    question = params.arguments["question"]
+    logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
-    def __init__(self, participant_id: Optional[str] = None):
-        super().__init__()
-        self._participant_id = participant_id
+    # Request the user image frame. Note that this image is associated to a
+    # function call and will be handled by the LLM assistant aggregators.
+    await params.llm.request_image_frame(
+        user_id=user_id,
+        function_name=params.function_name,
+        tool_call_id=params.tool_call_id,
+        text_content=question,
+    )
 
-    def set_participant_id(self, participant_id: str):
-        self._participant_id = participant_id
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if self._participant_id and isinstance(frame, TextFrame):
-            await self.push_frame(
-                UserImageRequestFrame(self._participant_id, context=frame.text),
-                FrameDirection.UPSTREAM,
-            )
-        else:
-            await self.push_frame(frame, direction)
-
-
-class UserImageProcessor(FrameProcessor):
-    """Converts incoming user images into context frames."""
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, UserImageRawFrame):
-            if frame.request and frame.request.context:
-                # Note: AWS Bedrock does not yet support the universal LLMContext
-                context = LLMContext()
-                context.add_image_frame_message(
-                    image=frame.image,
-                    text=frame.request.context,
-                    size=frame.size,
-                    format=frame.format,
-                )
-                frame = LLMContextFrame(context)
-                await self.push_frame(frame)
-        else:
-            await self.push_frame(frame, direction)
+    await params.result_callback(None)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -111,40 +78,53 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    user_response = UserResponseAggregator()
-
-    # Initialize the image requester without setting the participant ID yet
-    image_requester = UserImageRequester()
-
-    image_processor = UserImageProcessor()
-
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    # AWS for vision analysis
-    aws = AWSBedrockLLMService(
-        aws_region="us-west-2",
-        model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-        # Note: usually, prefer providing latency="optimized" param.
-        # Here we can't because AWS Bedrock doesn't support it for Claude 3.7,
-        # which we need for image input.
-        params=AWSBedrockLLMService.InputParams(temperature=0.8),
-    )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
+    # Anthropic for vision analysis
+    llm = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    llm.register_function("fetch_user_image", fetch_user_image)
+
+    fetch_image_function = FunctionSchema(
+        name="fetch_user_image",
+        description="Called when the user requests a description of their camera feed",
+        properties={
+            "user_id": {
+                "type": "string",
+                "description": "The ID of the user to grab the image from",
+            },
+            "question": {
+                "type": "string",
+                "description": "The question that the user is asking about the image",
+            },
+        },
+        required=["user_id", "question"],
+    )
+    tools = ToolsSchema(standard_tools=[fetch_image_function])
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
+        },
+    ]
+
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
+
     pipeline = Pipeline(
         [
-            transport.input(),
-            stt,
-            user_response,
-            image_requester,
-            image_processor,
-            aws,
-            tts,
-            transport.output(),
+            transport.input(),  # Transport user input
+            stt,  # STT
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -165,10 +145,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         # Set the participant ID in the image requester
         client_id = get_transport_client_id(transport, client)
-        image_requester.set_participant_id(client_id)
 
-        # Welcome message
-        await task.queue_frame(TTSSpeakFrame("Hi there! Feel free to ask me about what I see."))
+        # Kick off the conversation.
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
+            }
+        )
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
