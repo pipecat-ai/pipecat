@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded `aws_sdk_bedrock_runtime` to v0.1.1 to resolve potential CPU issues
   when running `AWSNovaSonicLLMService`.
 
+### Removed
+
+- Removed the `aiohttp_session` arg from `SarvamTTSService` as it's no longer
+  used.
+
 ### Fixed
 
 - Fixed an issue where `DailyTransport` would timeout prematurely on join and on
