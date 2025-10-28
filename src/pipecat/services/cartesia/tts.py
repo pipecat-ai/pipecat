@@ -10,6 +10,7 @@ import base64
 import json
 import uuid
 import warnings
+from dataclasses import dataclass
 from typing import AsyncGenerator, List, Literal, Optional, Union
 
 from loguru import logger
@@ -46,6 +47,27 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class GenerationConfig:
+    """Configuration for Cartesia Sonic-3 generation parameters.
+
+    Sonic-3 interprets these parameters as guidance to ensure natural speech.
+    Test against your content for best results.
+
+    Parameters:
+        volume: Volume multiplier for generated speech. Valid range: [0.5, 2.0]. Default is 1.0.
+        speed: Speed multiplier for generated speech. Valid range: [0.6, 1.5]. Default is 1.0.
+        emotion: Single emotion string to guide the emotional tone. Examples include neutral,
+            angry, excited, content, sad, scared. Over 60 emotions are supported. For best
+            results, use with recommended voices: Leo, Jace, Kyle, Gavin, Maya, Tessa, Dana,
+            and Marian.
+    """
+
+    volume: Optional[float] = None
+    speed: Optional[float] = None
+    emotion: Optional[str] = None
 
 
 def language_to_cartesia_language(language: Language) -> Optional[str]:
@@ -101,16 +123,19 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control.
-            emotion: List of emotion controls.
+            speed: Voice speed control for non-Sonic-3 models (literal values).
+            emotion: List of emotion controls for non-Sonic-3 models.
 
                 .. deprecated:: 0.0.68
                         The `emotion` parameter is deprecated and will be removed in a future version.
+            generation_config: Generation configuration for Sonic-3 models. Includes volume,
+                speed (numeric), and emotion (string) parameters.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = []
+        generation_config: Optional[GenerationConfig] = None
 
     def __init__(
         self,
@@ -179,6 +204,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             else "en",
             "speed": params.speed,
             "emotion": params.emotion,
+            "generation_config": params.generation_config,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -296,6 +322,17 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
         if self._settings["speed"]:
             msg["speed"] = self._settings["speed"]
+
+        if self._settings["generation_config"]:
+            gen_config = {}
+            if self._settings["generation_config"].volume is not None:
+                gen_config["volume"] = self._settings["generation_config"].volume
+            if self._settings["generation_config"].speed is not None:
+                gen_config["speed"] = self._settings["generation_config"].speed
+            if self._settings["generation_config"].emotion is not None:
+                gen_config["emotion"] = self._settings["generation_config"].emotion
+            if gen_config:
+                msg["generation_config"] = gen_config
 
         return json.dumps(msg)
 
@@ -482,16 +519,19 @@ class CartesiaHttpTTSService(TTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control.
-            emotion: List of emotion controls.
+            speed: Voice speed control for non-Sonic-3 models (literal values).
+            emotion: List of emotion controls for non-Sonic-3 models.
 
                 .. deprecated:: 0.0.68
                         The `emotion` parameter is deprecated and will be removed in a future version.
+            generation_config: Generation configuration for Sonic-3 models. Includes volume,
+                speed (numeric), and emotion (string) parameters.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = Field(default_factory=list)
+        generation_config: Optional[GenerationConfig] = None
 
     def __init__(
         self,
@@ -539,6 +579,7 @@ class CartesiaHttpTTSService(TTSService):
             else "en",
             "speed": params.speed,
             "emotion": params.emotion,
+            "generation_config": params.generation_config,
         }
         self.set_voice(voice_id)
         self.set_model_name(model)
@@ -631,6 +672,17 @@ class CartesiaHttpTTSService(TTSService):
 
             if self._settings["speed"]:
                 payload["speed"] = self._settings["speed"]
+
+            if self._settings["generation_config"]:
+                gen_config = {}
+                if self._settings["generation_config"].volume is not None:
+                    gen_config["volume"] = self._settings["generation_config"].volume
+                if self._settings["generation_config"].speed is not None:
+                    gen_config["speed"] = self._settings["generation_config"].speed
+                if self._settings["generation_config"].emotion is not None:
+                    gen_config["emotion"] = self._settings["generation_config"].emotion
+                if gen_config:
+                    payload["generation_config"] = gen_config
 
             yield TTSStartedFrame()
 
