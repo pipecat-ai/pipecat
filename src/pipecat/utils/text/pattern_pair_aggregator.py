@@ -12,12 +12,27 @@ support for custom handlers and configurable pattern removal.
 """
 
 import re
-from typing import Awaitable, Callable, List, Literal, Optional, Tuple
+from enum import Enum
+from typing import Awaitable, Callable, List, Optional, Tuple
 
 from loguru import logger
 
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator
+
+
+class MatchAction(Enum):
+    """Actions to take when a pattern pair is matched.
+
+    Parameters:
+        REMOVE: Remove the matched pattern from the text.
+        KEEP: Keep the matched pattern in the text as normal text.
+        AGGREGATE: Return the matched pattern as a separate aggregation object.
+    """
+
+    REMOVE = "remove"
+    KEEP = "keep"
+    AGGREGATE = "aggregate"
 
 
 class PatternMatch(Aggregation):
@@ -94,7 +109,7 @@ class PatternPairAggregator(BaseTextAggregator):
         start_pattern: str,
         end_pattern: str,
         type: str,
-        action: Literal["remove", "keep", "aggregate"] = "remove",
+        action: MatchAction = MatchAction.REMOVE,
     ) -> "PatternPairAggregator":
         """Add a pattern pair to detect in the text.
 
@@ -109,12 +124,12 @@ class PatternPairAggregator(BaseTextAggregator):
             type: The type of aggregation the matched content represents
                   (e.g., 'code', 'speaker', 'custom').
             action: What to do when a complete pattern is matched:
-                    - "remove": Remove the matched pattern from the text.
-                    - "keep": Keep the matched pattern in the text and treat it as
-                              normal text. This allows you to register handlers for
-                              the pattern without affecting the aggregation logic.
-                    - "aggregate": Return the matched pattern as a separate
-                                   aggregation object.
+                    - MatchAction.REMOVE: Remove the matched pattern from the text.
+                    - MatchAction.KEEP: Keep the matched pattern in the text and treat it as
+                                        normal text. This allows you to register handlers for
+                                        the pattern without affecting the aggregation logic.
+                    - MatchAction.AGGREGATE: Return the matched pattern as a separate
+                                             aggregation object.
 
         Returns:
             Self for method chaining.
@@ -196,7 +211,7 @@ class PatternPairAggregator(BaseTextAggregator):
                         logger.error(f"Error in pattern handler for {pattern_id}: {e}")
 
                 # Remove the pattern from the text if configured
-                if action == "remove":
+                if action == MatchAction.REMOVE:
                     processed_text = processed_text.replace(full_match, "", 1)
                     # modified = True
                 else:
@@ -260,15 +275,13 @@ class PatternPairAggregator(BaseTextAggregator):
 
         #
         if len(patterns) > 0:
-            print(f"Found patterns: {[str(p) for p in patterns]}")
             if len(patterns) > 1:
                 logger.warning(
                     f"Multiple patterns matched: {[p.pattern_id for p in patterns]}. Only the first pattern will be returned."
                 )
             # If the pattern found is set to be aggregated, return it
-            action = self._patterns[patterns[0].pattern_id].get("action", "remove")
-            print(f"Pattern action: {action}")
-            if action == "aggregate":
+            action = self._patterns[patterns[0].pattern_id].get("action", MatchAction.REMOVE)
+            if action == MatchAction.AGGREGATE:
                 self._text = ""
                 print(f"Returning pattern: {patterns[0]}")
                 return patterns[0]
@@ -277,7 +290,10 @@ class PatternPairAggregator(BaseTextAggregator):
         pattern_start = self._match_start_of_pattern(self._text)
         if pattern_start is not None:
             # If the start pattern is at the beginning or should not be separately aggregated, return None
-            if pattern_start[0] == 0 or pattern_start[1].get("action", "remove") != "aggregate":
+            if (
+                pattern_start[0] == 0
+                or pattern_start[1].get("action", MatchAction.REMOVE) != MatchAction.AGGREGATE
+            ):
                 return None
             # Otherwise, strip the text up to the start pattern and return it
             result = self._text[: pattern_start[0]]

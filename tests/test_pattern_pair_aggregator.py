@@ -7,7 +7,11 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
+from pipecat.utils.text.pattern_pair_aggregator import (
+    MatchAction,
+    PatternMatch,
+    PatternPairAggregator,
+)
 
 
 class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
@@ -22,14 +26,14 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
             start_pattern="<test>",
             end_pattern="</test>",
             type="test",
-            action="remove",
+            action=MatchAction.REMOVE,
         )
         self.aggregator.add_pattern_pair(
             pattern_id="code_pattern",
             start_pattern="<code>",
             end_pattern="</code>",
             type="code",
-            action="aggregate",
+            action=MatchAction.AGGREGATE,
         )
 
         # Register the mock handler
@@ -122,7 +126,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
             start_pattern="<voice>",
             end_pattern="</voice>",
             type="voice",
-            action="remove",
+            action=MatchAction.REMOVE,
         )
 
         self.aggregator.add_pattern_pair(
@@ -130,7 +134,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
             start_pattern="<em>",
             end_pattern="</em>",
             type="emphasis",
-            action="keep",  # Keep emphasis tags
+            action=MatchAction.KEEP,  # Keep emphasis tags
         )
 
         self.aggregator.on_pattern_match("voice", voice_handler)
