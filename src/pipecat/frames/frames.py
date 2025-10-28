@@ -1306,6 +1306,24 @@ class UserImageRawFrame(InputImageRawFrame):
 
 
 @dataclass
+class VisionImageRawFrame(InputImageRawFrame):
+    """Raw image input frame to be analyzed by vision services.
+
+    This is just an image with an associated text describing how the vision
+    service should analyze the image.
+
+    Parameters:
+        text: Description of how the vision service should analyze the image.
+    """
+
+    text: str
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, source: {self.transport_source}, size: {self.size}, format: {self.format}, text: {self.text})"
+
+
+@dataclass
 class InputDTMFFrame(DTMFFrame, SystemFrame):
     """DTMF keypress input frame from transport."""
 

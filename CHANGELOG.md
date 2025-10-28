@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `VisionImageRawFrame`. This is an input image frame with an associated
+  text. It is usually processed by vision services (e.g. Moondream). The text
+  guides the vision service on how to analyze the image.
+
 - Added support for including images or audio to LLM context messages using
   `LLMContext.create_image_message()` and `LLMContext.create_audio_message()`.
   For example, when creating `LLMMessagesAppendFrame`:
