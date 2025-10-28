@@ -195,6 +195,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `UserResponseAggregator` is deprecated and will be removed in a future version.
+
 - The `send_transcription_frames` argument to `OpenAIRealtimeLLMService` is
   deprecated. Transcription frames are now always sent. They go upstream, to be
   handled by the user context aggregator. See "Added" section for details.
