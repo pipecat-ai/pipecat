@@ -119,7 +119,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         voice_id: str,
         cartesia_version: str = "2025-04-16",
         url: str = "wss://api.cartesia.ai/tts/websocket",
-        model: str = "sonic-2",
+        model: str = "sonic-3",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
@@ -135,7 +135,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             voice_id: ID of the voice to use for synthesis.
             cartesia_version: API version string for Cartesia service.
             url: WebSocket URL for Cartesia TTS API.
-            model: TTS model to use (e.g., "sonic-2").
+            model: TTS model to use (e.g., "sonic-3").
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             container: Audio container format.
@@ -498,7 +498,7 @@ class CartesiaHttpTTSService(TTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = "sonic-2",
+        model: str = "sonic-3",
         base_url: str = "https://api.cartesia.ai",
         cartesia_version: str = "2024-11-13",
         sample_rate: Optional[int] = None,
@@ -512,7 +512,7 @@ class CartesiaHttpTTSService(TTSService):
         Args:
             api_key: Cartesia API key for authentication.
             voice_id: ID of the voice to use for synthesis.
-            model: TTS model to use (e.g., "sonic-2").
+            model: TTS model to use (e.g., "sonic-3").
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
             sample_rate: Audio sample rate. If None, uses default.
