@@ -1027,7 +1027,7 @@ class AWSNovaSonicLLMService(LLMService):
         logger.debug(f"Assistant response text added: {text}")
 
         # Report the text of the assistant response.
-        await self.push_frame(TTSTextFrame(text, aggregated_by="sentence", spoken=True))
+        await self.push_frame(TTSTextFrame(text, aggregated_by="sentence"))
 
         # HACK: here we're also buffering the assistant text ourselves as a
         # backup rather than relying solely on the assistant context aggregator
@@ -1061,7 +1061,7 @@ class AWSNovaSonicLLMService(LLMService):
                 # would have cleared the assistant aggregator state).
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.push_frame(
-                    TTSTextFrame(self._assistant_text_buffer, aggregated_by="sentence", spoken=True)
+                    TTSTextFrame(self._assistant_text_buffer, aggregated_by="sentence")
                 )
             self._may_need_repush_assistant_text = False
 

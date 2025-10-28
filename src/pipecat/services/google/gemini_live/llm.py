@@ -1459,7 +1459,7 @@ class GeminiLiveLLMService(LLMService):
         self._llm_output_buffer += text
 
         await self.push_frame(LLMTextFrame(text=text))
-        await self.push_frame(TTSTextFrame(text=text, aggregated_by="sentence", spoken=True))
+        await self.push_frame(TTSTextFrame(text=text, aggregated_by="sentence"))
 
     async def _handle_msg_grounding_metadata(self, message: LiveServerMessage):
         """Handle dedicated grounding metadata messages."""
