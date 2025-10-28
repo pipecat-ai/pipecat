@@ -184,11 +184,15 @@ class HumeTTSService(TTSService):
             # Hume emits mono PCM at 48 kHz; downstream can resample if needed.
             # We buffer audio bytes before sending to prevent glitches.
             self._audio_bytes = b""
+
+            # Use version "2" by default if no description is provided
+            # Version "1" is needed when description is used
+            version = "1" if self._params.description is not None else "2"
             async for chunk in self._client.tts.synthesize_json_streaming(
                 utterances=[utterance],
                 format=pcm_fmt,
                 instant_mode=True,
-                version="2",
+                version=version,
             ):
                 audio_b64 = getattr(chunk, "audio", None)
                 if not audio_b64:
