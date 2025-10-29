@@ -64,7 +64,7 @@ You have three tools available to you:
 
 After you've responded to the user three times, do two things, in order:
 1. Politely let them know that that's all the time you have today and say goodbye.
-2. Call the end_conversation tool to gracefully end the conversation.
+2. *WITHOUT WAITING FOR THE USER TO RESPOND*, call the end_conversation tool to gracefully end the conversation.
 """
 
 

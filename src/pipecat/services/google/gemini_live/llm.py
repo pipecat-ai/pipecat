@@ -689,7 +689,7 @@ class GeminiLiveLLMService(LLMService):
         self._run_llm_when_session_ready = False
 
         self._user_is_speaking = False
-        self._bot_is_speaking = False
+        self._bot_is_responding = False
         self._user_audio_buffer = bytearray()
         self._user_transcription_buffer = ""
         self._last_transcription_sent = ""
@@ -870,9 +870,10 @@ class GeminiLiveLLMService(LLMService):
     #
 
     async def _handle_interruption(self):
-        if self._bot_is_speaking:
-            await self._set_bot_is_speaking(False)
-            await self.push_frame(TTSStoppedFrame())
+        if self._bot_is_responding:
+            await self._set_bot_is_responding(False)
+            if self._settings.get("modalities") == GeminiModalities.AUDIO:
+                await self.push_frame(TTSStoppedFrame())
             # Do not send LLMFullResponseEndFrame here - an interruption
             # already tells the assistant context aggregator that the response
             # is over.
@@ -905,7 +906,7 @@ class GeminiLiveLLMService(LLMService):
         """
         # Defer EndFrame handling until after the bot turn is finished
         if isinstance(frame, EndFrame):
-            if self._bot_is_speaking:
+            if self._bot_is_responding:
                 logger.debug("Deferring handling EndFrame until bot turn is finished")
                 self._end_frame_pending_bot_turn_finished = frame
                 return
@@ -994,13 +995,13 @@ class GeminiLiveLLMService(LLMService):
                                 )
                             self._completed_tool_calls.add(tool_call_id)
 
-    async def _set_bot_is_speaking(self, speaking: bool):
-        if self._bot_is_speaking == speaking:
+    async def _set_bot_is_responding(self, responding: bool):
+        if self._bot_is_responding == responding:
             return
 
-        self._bot_is_speaking = speaking
+        self._bot_is_responding = responding
 
-        if not self._bot_is_speaking and self._end_frame_pending_bot_turn_finished:
+        if not self._bot_is_responding and self._end_frame_pending_bot_turn_finished:
             await self.queue_frame(self._end_frame_pending_bot_turn_finished)
             self._end_frame_pending_bot_turn_finished = None
 
@@ -1390,8 +1391,10 @@ class GeminiLiveLLMService(LLMService):
         # part.text is added when `modalities` is set to TEXT; otherwise, it's None
         text = part.text
         if text:
-            if not self._bot_text_buffer:
-                # TEXT modality case: send service start frame
+            if not self._bot_is_responding:
+                # Update bot responding state and send service start frame
+                # (AUDIO modality case)
+                await self._set_bot_is_responding(True)
                 await self.push_frame(LLMFullResponseStartFrame())
 
             self._bot_text_buffer += text
@@ -1402,6 +1405,8 @@ class GeminiLiveLLMService(LLMService):
         if msg.server_content and msg.server_content.grounding_metadata:
             self._accumulated_grounding_metadata = msg.server_content.grounding_metadata
 
+        # If we have no audio, stop here.
+        # All logic below this point pertains to the AUDIO modality.
         inline_data = part.inline_data
         if not inline_data:
             return
@@ -1427,9 +1432,10 @@ class GeminiLiveLLMService(LLMService):
         if not audio:
             return
 
-        # AUDIO modality case: update bot speaking state and send service start frames
-        if not self._bot_is_speaking:
-            await self._set_bot_is_speaking(True)
+        # Update bot responding state and send service start frames
+        # (AUDIO modality case)
+        if not self._bot_is_responding:
+            await self._set_bot_is_responding(True)
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
@@ -1487,15 +1493,15 @@ class GeminiLiveLLMService(LLMService):
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
 
-        if not text:
-            # AUDIO modality case
-            if self._bot_is_speaking:
-                await self._set_bot_is_speaking(False)
+        if self._bot_is_responding:
+            await self._set_bot_is_responding(False)
+            if not text:
+                # AUDIO modality case
                 await self.push_frame(TTSStoppedFrame())
                 await self.push_frame(LLMFullResponseEndFrame())
-        else:
-            # TEXT modality case
-            await self.push_frame(LLMFullResponseEndFrame())
+            else:
+                # TEXT modality case
+                await self.push_frame(LLMFullResponseEndFrame())
 
     @traced_stt
     async def _handle_user_transcription(
@@ -1580,8 +1586,8 @@ class GeminiLiveLLMService(LLMService):
         # well. These messages also contain much *more* text (it looks further
         # ahead). That means that on an interruption our recorded context will
         # contain some text that was actually never spoken.
-        if not self._bot_is_speaking:
-            await self._set_bot_is_speaking(True)
+        if not self._bot_is_responding:
+            await self._set_bot_is_responding(True)
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
