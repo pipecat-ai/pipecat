@@ -47,6 +47,12 @@ load_dotenv(override=True)
 
 
 async def fetch_user_image(params: FunctionCallParams):
+    """Fetch the user image.
+
+    When called, this function pushes a UserImageRequestFrame upstream to the
+    transport. As a result, the transport will request the user image and push a
+    UserImageRawFrame downstream.
+    """
     user_id = params.arguments["user_id"]
     question = params.arguments["question"]
     logger.debug(f"Requesting image with user_id={user_id}, question={question}")
@@ -61,7 +67,13 @@ async def fetch_user_image(params: FunctionCallParams):
 
 
 class UserImageProcessor(FrameProcessor):
-    """Converts incoming user images into context frames."""
+    """Converts incoming user images into vision frames.
+
+    This processor handles the UserImageRawFrame from the transport, converts it
+    to a VisionImageRawFrame and pushes it downstream so it can be handled by a
+    vision service.
+
+    """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
