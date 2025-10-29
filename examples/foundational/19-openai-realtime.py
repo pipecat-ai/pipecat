@@ -222,6 +222,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
 
+        # Add a new tool at runtime after a delay.
         async def set_tools_after_delay():
             await asyncio.sleep(15)
             new_tools = ToolsSchema(
