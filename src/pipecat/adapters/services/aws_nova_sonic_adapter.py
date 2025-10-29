@@ -16,7 +16,7 @@ from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
 
 
@@ -210,4 +210,18 @@ class AWSNovaSonicLLMAdapter(BaseLLMAdapter[AWSNovaSonicLLMInvocationParams]):
             List of dictionaries in AWS Nova Sonic function format.
         """
         functions_schema = tools_schema.standard_tools
-        return [self._to_aws_nova_sonic_function_format(func) for func in functions_schema]
+        standard_tools = [
+            self._to_aws_nova_sonic_function_format(func) for func in functions_schema
+        ]
+
+        # For backward compatibility, AWS Nova Sonic can still be used with
+        # tools in dict format, even though it always uses `LLMContext` under
+        # the hood (via `LLMContext.from_openai_context()`).
+        # To support this behavior, we use "shimmed" custom tools here.
+        # (We maintain this backward compatibility because users aren't
+        # *knowingly* opting into the new `LLMContext`.)
+        shimmed_tools = []
+        if tools_schema.custom_tools:
+            shimmed_tools = tools_schema.custom_tools.get(AdapterType.SHIM, [])
+
+        return standard_tools + shimmed_tools
