@@ -895,6 +895,7 @@ class OpenAIRealtimeLLMService(LLMService):
         )
 
         context = LLMContext.from_openai_context(context)
+        assistant_params.expect_stripped_words = False
         return LLMContextAggregatorPair(
             context, user_params=user_params, assistant_params=assistant_params
         )
