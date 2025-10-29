@@ -38,6 +38,14 @@ load_dotenv(override=True)
 
 
 async def fetch_user_image(params: FunctionCallParams):
+    """Fetch the user image and push it to the LLM.
+
+    When called, this function pushes a UserImageRequestFrame upstream to the
+    transport. As a result, the transport will request the user image and push a
+    UserImageRawFrame downstream associated to this request. When the
+    UserImageRawFrame reaches the LLM assistant aggregator, the image will be
+    added to the context.
+    """
     user_id = params.arguments["user_id"]
     question = params.arguments["question"]
     logger.debug(f"Requesting image with user_id={user_id}, question={question}")
