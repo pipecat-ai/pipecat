@@ -21,6 +21,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response import LLMAssistantAggregatorParams
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
@@ -186,7 +187,12 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         tools,
     )
 
-    context_aggregator = LLMContextAggregatorPair(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        # `expect_stripped_words=False` needed when OpenAI Realtime used with
+        # "audio" modality (the default)
+        assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
+    )
 
     pipeline = Pipeline(
         [

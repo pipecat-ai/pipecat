@@ -14,7 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   ```python
   context = LLMContext(messages, tools)
-  context_aggregator = LLMContextAggregatorPair(context)
+  context_aggregator = LLMContextAggregatorPair(
+    context,
+    # This part is `OpenAIRealtimeLLMService`-specific.
+    # `expect_stripped_words=False` needed when OpenAI Realtime used with
+    # "audio" modality (the default).
+    assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
+  )
   ```
 
   (Note that even though `OpenAIRealtimeLLMService` now supports the universal
