@@ -873,7 +873,9 @@ class GeminiLiveLLMService(LLMService):
         if self._bot_is_speaking:
             await self._set_bot_is_speaking(False)
             await self.push_frame(TTSStoppedFrame())
-            await self.push_frame(LLMFullResponseEndFrame())
+            # Do not send LLMFullResponseEndFrame here - an interruption
+            # already tells the assistant context aggregator that the response
+            # is over.
 
     async def _handle_user_started_speaking(self, frame):
         self._user_is_speaking = True
@@ -1388,6 +1390,7 @@ class GeminiLiveLLMService(LLMService):
         text = part.text
         if text:
             if not self._bot_text_buffer:
+                # TEXT modality case: send service start frame
                 await self.push_frame(LLMFullResponseStartFrame())
 
             self._bot_text_buffer += text
@@ -1423,6 +1426,7 @@ class GeminiLiveLLMService(LLMService):
         if not audio:
             return
 
+        # AUDIO modality case: update bot speaking state and send service start frames
         if not self._bot_is_speaking:
             await self._set_bot_is_speaking(True)
             await self.push_frame(TTSStartedFrame())
@@ -1464,7 +1468,6 @@ class GeminiLiveLLMService(LLMService):
     @traced_gemini_live(operation="llm_response")
     async def _handle_msg_turn_complete(self, message: LiveServerMessage):
         """Handle the turn complete message."""
-        await self._set_bot_is_speaking(False)
         text = self._bot_text_buffer
 
         # Trace the complete LLM response (this will be handled by the decorator)
@@ -1483,13 +1486,15 @@ class GeminiLiveLLMService(LLMService):
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
 
-        # Only push the TTSStoppedFrame if the bot is outputting audio
-        # when text is found, modalities is set to TEXT and no audio
-        # is produced.
         if not text:
-            await self.push_frame(TTSStoppedFrame())
-
-        await self.push_frame(LLMFullResponseEndFrame())
+            # AUDIO modality case
+            if self._bot_is_speaking:
+                await self._set_bot_is_speaking(False)
+                await self.push_frame(TTSStoppedFrame())
+                await self.push_frame(LLMFullResponseEndFrame())
+        else:
+            # TEXT modality case
+            await self.push_frame(LLMFullResponseEndFrame())
 
     @traced_stt
     async def _handle_user_transcription(
