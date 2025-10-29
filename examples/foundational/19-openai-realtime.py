@@ -223,15 +223,11 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         await task.queue_frames([LLMRunFrame()])
 
         # Add a new tool at runtime after a delay.
-        async def set_tools_after_delay():
-            await asyncio.sleep(15)
-            new_tools = ToolsSchema(
-                standard_tools=[weather_function, restaurant_function, get_news_function]
-            )
-            logger.info("Registering new tool with LLMSetToolsFrame")
-            await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
-
-        asyncio.create_task(set_tools_after_delay())
+        await asyncio.sleep(15)
+        new_tools = ToolsSchema(
+            standard_tools=[weather_function, restaurant_function, get_news_function]
+        )
+        await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
