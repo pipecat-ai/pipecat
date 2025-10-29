@@ -213,7 +213,6 @@ class PatternPairAggregator(BaseTextAggregator):
                 # Remove the pattern from the text if configured
                 if action == MatchAction.REMOVE:
                     processed_text = processed_text.replace(full_match, "", 1)
-                    # modified = True
                 else:
                     all_matches.append(pattern_match)
 
@@ -273,7 +272,6 @@ class PatternPairAggregator(BaseTextAggregator):
 
         self._text = processed_text
 
-        #
         if len(patterns) > 0:
             if len(patterns) > 1:
                 logger.warning(
@@ -283,7 +281,6 @@ class PatternPairAggregator(BaseTextAggregator):
             action = self._patterns[patterns[0].pattern_id].get("action", MatchAction.REMOVE)
             if action == MatchAction.AGGREGATE:
                 self._text = ""
-                print(f"Returning pattern: {patterns[0]}")
                 return patterns[0]
 
         # Check if we have incomplete patterns

@@ -43,7 +43,6 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_pattern_match_and_removal(self):
         # First part doesn't complete the pattern
         result = await self.aggregator.aggregate("Hello <test>pattern")
-        print(f"result: {result}")
         self.assertIsNone(result)
         self.assertEqual(self.aggregator.text.text, "Hello <test>pattern")
         self.assertEqual(self.aggregator.text.type, "test")
@@ -74,7 +73,6 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_pattern_match_and_aggregate(self):
         # First part doesn't complete the pattern
         result = await self.aggregator.aggregate("Here is code <code>pattern")
-        print(f"result: {result}")
         self.assertEqual(result.text, "Here is code ")
         self.assertEqual(self.aggregator.text.text, "<code>pattern")
         self.assertEqual(self.aggregator.text.type, "code")
@@ -89,6 +87,8 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_args.pattern_id, "code_pattern")
         self.assertEqual(call_args.full_match, "<code>pattern content</code>")
         self.assertEqual(call_args.text, "pattern content")
+        self.assertEqual(result.text, "pattern content")
+        self.assertEqual(result.type, "code")
 
         # Next sentence should be processed separately
         result = await self.aggregator.aggregate(" This is another sentence.")

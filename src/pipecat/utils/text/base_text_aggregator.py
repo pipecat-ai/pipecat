@@ -23,17 +23,14 @@ class Aggregation:
     An Aggregation object is created whenever a stream of text is aggregated by
     a text aggregator. It contains the aggregated text and a type indicating
     the nature of the aggregation.
+
+    Parameters:
+        text: The aggregated text content.
+        type: The type of aggregation the text represents (e.g., 'sentence', 'word', 'token', 'my_custom_aggregation').
     """
 
-    def __init__(self, text: str, type: str):
-        """Initialize an aggregation instance.
-
-        Args:
-            text: The aggregated text content.
-            type: The type of aggregation the text represents (e.g., 'sentence', 'word', 'token', 'my_custom_aggregation').
-        """
-        self.text = text
-        self.type = type
+    text: str
+    type: str
 
     def __str__(self) -> str:
         """Return a string representation of the aggregation.

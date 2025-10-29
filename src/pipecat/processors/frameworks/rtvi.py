@@ -719,7 +719,7 @@ class RTVIBotOutputMessageData(RTVITextMessageData):
 class RTVIBotOutputMessage(BaseModel):
     """Message containing bot output text.
 
-    An event meant to wholistically represent what the bot is outputting,
+    An event meant to holistically represent what the bot is outputting,
     along with metadata about the output and if it has been spoken.
     """
 
