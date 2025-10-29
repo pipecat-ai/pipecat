@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `ResembleAITTSService` for Resemble AI Text-to-Speech Websocket integration.
+
 ### Changed
 
 - `FunctionFilter` now has a `filter_system_frames` arg, which controls whether
