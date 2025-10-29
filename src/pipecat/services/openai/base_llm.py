@@ -66,6 +66,7 @@ class BaseOpenAILLMService(LLMService):
             top_p: Top-p (nucleus) sampling parameter (0.0 to 1.0).
             max_tokens: Maximum tokens in response (deprecated, use max_completion_tokens).
             max_completion_tokens: Maximum completion tokens to generate.
+            service_tier: Service tier to use (e.g., "auto", "flex", "priority").
             extra: Additional model-specific parameters.
         """
 
@@ -83,6 +84,7 @@ class BaseOpenAILLMService(LLMService):
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         max_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
         max_completion_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
+        service_tier: Optional[str] = Field(default_factory=lambda: NOT_GIVEN)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -125,6 +127,7 @@ class BaseOpenAILLMService(LLMService):
             "top_p": params.top_p,
             "max_tokens": params.max_tokens,
             "max_completion_tokens": params.max_completion_tokens,
+            "service_tier": params.service_tier,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self._retry_timeout_secs = retry_timeout_secs
@@ -236,6 +239,7 @@ class BaseOpenAILLMService(LLMService):
             "top_p": self._settings["top_p"],
             "max_tokens": self._settings["max_tokens"],
             "max_completion_tokens": self._settings["max_completion_tokens"],
+            "service_tier": self._settings["service_tier"],
         }
 
         # Messages, tools, tool_choice

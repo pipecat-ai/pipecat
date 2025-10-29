@@ -79,8 +79,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = AWSBedrockLLMService(
         aws_region="us-west-2",
-        model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
-        params=AWSBedrockLLMService.InputParams(temperature=0.8, latency="optimized"),
+        model="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        params=AWSBedrockLLMService.InputParams(temperature=0.8),
     )
 
     # You can also register a function_name of None to get all functions

@@ -70,7 +70,7 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
                 # handle disconnections in the send/recv code paths.
                 return
 
-            logger.info(f"Connecting to {self.base_url}, api key: {self.api_key}")
+            logger.info(f"Connecting to {self.base_url}")
             self._websocket = await websocket_connect(
                 uri=self.base_url,
                 additional_headers={

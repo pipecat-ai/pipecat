@@ -744,32 +744,27 @@ class DailyTransportClient(EventHandler):
 
         self._client.set_user_name(self._bot_name)
 
-        try:
-            (data, error) = await self._join()
+        (data, error) = await self._join()
 
-            if not error:
-                self._joined = True
-                self._joining = False
-                # Increment leave counter if we successfully joined.
-                self._leave_counter += 1
-
-                logger.info(f"Joined {self._room_url}")
-
-                if self._params.transcription_enabled:
-                    await self.start_transcription(self._params.transcription_settings)
-
-                await self._callbacks.on_joined(data)
-
-                self._joined_event.set()
-            else:
-                error_msg = f"Error joining {self._room_url}: {error}"
-                logger.error(error_msg)
-                await self._callbacks.on_error(error_msg)
-        except asyncio.TimeoutError:
-            error_msg = f"Time out joining {self._room_url}"
-            logger.error(error_msg)
+        if not error:
+            self._joined = True
             self._joining = False
+            # Increment leave counter if we successfully joined.
+            self._leave_counter += 1
+
+            logger.info(f"Joined {self._room_url}")
+
+            if self._params.transcription_enabled:
+                await self.start_transcription(self._params.transcription_settings)
+
+            await self._callbacks.on_joined(data)
+
+            self._joined_event.set()
+        else:
+            error_msg = f"Error joining {self._room_url}: {error}"
+            logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
+            self._joining = False
 
     async def _join(self):
         """Execute the actual room join operation."""
@@ -828,7 +823,7 @@ class DailyTransportClient(EventHandler):
             },
         )
 
-        return await asyncio.wait_for(future, timeout=10)
+        return await future
 
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
@@ -854,17 +849,12 @@ class DailyTransportClient(EventHandler):
         for track_name, _ in self._custom_audio_tracks.items():
             await self.remove_custom_audio_track(track_name)
 
-        try:
-            error = await self._leave()
-            if not error:
-                logger.info(f"Left {self._room_url}")
-                await self._callbacks.on_left()
-            else:
-                error_msg = f"Error leaving {self._room_url}: {error}"
-                logger.error(error_msg)
-                await self._callbacks.on_error(error_msg)
-        except asyncio.TimeoutError:
-            error_msg = f"Time out leaving {self._room_url}"
+        error = await self._leave()
+        if not error:
+            logger.info(f"Left {self._room_url}")
+            await self._callbacks.on_left()
+        else:
+            error_msg = f"Error leaving {self._room_url}: {error}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
 
@@ -875,7 +865,7 @@ class DailyTransportClient(EventHandler):
 
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
-        return await asyncio.wait_for(future, timeout=10)
+        return await future
 
     def _cleanup(self):
         """Cleanup the Daily client instance."""
