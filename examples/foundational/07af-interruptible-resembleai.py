@@ -63,8 +63,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = ResembleAITTSService(
-        api_key="hFntvvXuiUSGZtJ9lbO2pwtt",
-        voice_uuid="b482265e",
+        api_key=os.getenv("RESEMBLE_API_KEY"),
+        voice_uuid=os.getenv("RESEMBLE_VOICE_UUID"),
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
