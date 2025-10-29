@@ -777,12 +777,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
             return
 
-        del self._function_calls_in_progress[frame.request.tool_call_id]
-
-        # Update context with the image frame
-        self._update_function_call_result(
-            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
-        )
         self._context.add_image_frame_message(
             format=frame.format,
             size=frame.size,
@@ -792,6 +786,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)
+
+        # Notify who ever requested the image that we have added it to the context.
+        if frame.request and frame.request.request_event:
+            frame.request.request_event.set()
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
         self._started += 1

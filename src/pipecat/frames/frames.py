@@ -11,6 +11,7 @@ including data frames, system frames, and control frames for audio, video, text,
 and LLM processing.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
@@ -1218,6 +1219,7 @@ class UserImageRequestFrame(SystemFrame):
     function_name: Optional[str] = None
     tool_call_id: Optional[str] = None
     video_source: Optional[str] = None
+    request_event: Optional[asyncio.Event] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, video_source: {self.video_source}, function: {self.function_name}, request: {self.tool_call_id})"
