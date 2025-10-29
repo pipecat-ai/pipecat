@@ -231,10 +231,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
-- Updated all vision 12-series foundational examples to use function calling to
-  request for a camera image and also to push `LLMMessagesAppendFrame` with the
-  retrieved image. For the specific `Moondream` example (`12-describe-video.py`)
-  we now use a regular LLM and a parallel pipeline with the `MoondreamService`.
+- Updated all vision 12-series foundational examples to load images from a file
+  and push `LLMMessagesAppendFrame` with the loaded image.
+
+- Added 14-series video examples for different services. These new examples
+  request an image from the user camera through a function call.
 
 ## [0.0.91] - 2025-10-21
 
