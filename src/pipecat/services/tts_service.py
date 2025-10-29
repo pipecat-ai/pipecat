@@ -8,7 +8,17 @@
 
 import asyncio
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from loguru import logger
 
@@ -49,6 +59,25 @@ class TTSService(AIService):
     Provides common functionality for TTS services including text aggregation,
     filtering, audio generation, and frame management. Supports configurable
     sentence aggregation, silence insertion, and frame processing control.
+
+    Event handlers:
+        on_connected: Called when connected to the STT service.
+        on_connected: Called when disconnected from the STT service.
+        on_connection_error: Called when a connection to the STT service error occurs.
+
+    Example::
+
+        @tts.event_handler("on_connected")
+        async def on_connected(tts: TTSService):
+            logger.debug(f"TTS connected")
+
+        @tts.event_handler("on_disconnected")
+        async def on_disconnected(tts: TTSService):
+            logger.debug(f"TTS disconnected")
+
+        @tts.event_handler("on_connection_error")
+        async def on_connection_error(stt: TTSService, error: str):
+            logger.error(f"TTS connection error: {error}")
     """
 
     def __init__(
@@ -132,6 +161,10 @@ class TTSService(AIService):
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
         self._processing_text: bool = False
+
+        self._register_event_handler("on_connected")
+        self._register_event_handler("on_disconnected")
+        self._register_event_handler("on_connection_error")
 
     @property
     def sample_rate(self) -> int:
@@ -374,6 +407,36 @@ class TTSService(AIService):
         ):
             await self._stop_frame_queue.put(frame)
 
+    async def _stream_audio_frames_from_iterator(
+        self, iterator: AsyncIterator[bytes], *, strip_wav_header: bool
+    ) -> AsyncGenerator[Frame, None]:
+        buffer = bytearray()
+        need_to_strip_wav_header = strip_wav_header
+        async for chunk in iterator:
+            if need_to_strip_wav_header and chunk.startswith(b"RIFF"):
+                chunk = chunk[44:]
+                need_to_strip_wav_header = False
+
+            # Append to current buffer.
+            buffer.extend(chunk)
+
+            # Round to nearest even number.
+            aligned_length = len(buffer) & ~1  # 111111111...11110
+            if aligned_length > 0:
+                aligned_chunk = buffer[:aligned_length]
+                buffer = buffer[aligned_length:]  # keep any leftover byte
+
+                if len(aligned_chunk) > 0:
+                    frame = TTSAudioRawFrame(bytes(aligned_chunk), self.sample_rate, 1)
+                    yield frame
+
+        if len(buffer) > 0:
+            # Make sure we don't need an extra padding byte.
+            if len(buffer) % 2 == 1:
+                buffer.extend(b"\x00")
+            frame = TTSAudioRawFrame(bytes(buffer), self.sample_rate, 1)
+            yield frame
+
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._processing_text = False
         await self._text_aggregator.handle_interruption()
@@ -586,7 +649,6 @@ class WebsocketTTSService(TTSService, WebsocketService):
         """
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        self._register_event_handler("on_connection_error")
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
@@ -638,15 +700,6 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
     """Base class for websocket-based TTS services that support word timestamps.
 
     Combines word timestamp functionality with websocket connectivity.
-
-    Event handlers:
-        on_connection_error: Called when a websocket connection error occurs.
-
-    Example::
-
-        @tts.event_handler("on_connection_error")
-        async def on_connection_error(tts: TTSService, error: str):
-            logger.error(f"TTS connection error: {error}")
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -658,7 +711,6 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
         """
         WordTTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        self._register_event_handler("on_connection_error")
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
