@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `ServiceSwitcher` where the `STTService`s would result in
   all STT services producing `TranscriptionFrame`s.
 
+- Fixed an issue in `HumeTTSService` that was only using Octave 2, which does not support the `description` field. Now, if a description is provided, it switches to Octave 1.
+
 ## [0.0.91] - 2025-10-21
 
 ### Added
