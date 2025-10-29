@@ -16,7 +16,6 @@ import json
 import time
 from typing import Any, List, Literal, Optional, Union
 
-from aiortc.sdp import candidate_from_sdp
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
 
@@ -210,24 +209,18 @@ class SmallWebRTCConnection(BaseObject):
     def __init__(
         self,
         ice_servers: Optional[Union[List[str], List[IceServer]]] = None,
-        signaling_ws=None,
-        enable_trickling: bool = False,
-        name: Optional[str] = None,
         connection_timeout_secs: int = 60,
     ):
         """Initialize the WebRTC connection.
 
         Args:
             ice_servers: List of ICE servers as URLs or IceServer objects.
-            signaling_ws: WebSocket connection for signaling (used for ICE trickling).
-            enable_trickling: Enable ICE trickling support.
-            name: Optional name for the connection (used as pc_id).
             connection_timeout_secs: Timeout in seconds for connecting to the peer.
 
         Raises:
             TypeError: If ice_servers contains mixed types or unsupported types.
         """
-        super().__init__(name=name)
+        super().__init__()
         if not ice_servers:
             self.ice_servers: List[IceServer] = []
         elif all(isinstance(s, IceServer) for s in ice_servers):
@@ -243,9 +236,6 @@ class SmallWebRTCConnection(BaseObject):
             VIDEO_TRANSCEIVER_INDEX: self.video_input_track,
             SCREEN_VIDEO_TRANSCEIVER_INDEX: self.screen_video_input_track,
         }
-        self._signaling_ws = signaling_ws
-        self._enable_trickling = enable_trickling
-        self._ice_candidate_queue = []  # For queuing incoming remote candidates
         self.connection_timeout_secs = connection_timeout_secs
 
         self._initialize()
@@ -380,172 +370,6 @@ class SmallWebRTCConnection(BaseObject):
             type: The SDP type (usually "offer").
         """
         await self._create_answer(sdp, type)
-
-    async def initialize_with_trickling(self, sdp: str, type: str):
-        """Initialize connection with ICE trickling support.
-
-        Args:
-            sdp: The SDP offer string.
-            type: The SDP type (usually "offer").
-
-        Returns:
-            The SDP answer without waiting for ICE gathering.
-        """
-        # Set remote description
-        offer = RTCSessionDescription(sdp=sdp, type=type)
-        await self._pc.setRemoteDescription(offer)
-
-        # Force transceivers to sendrecv
-        self.force_transceivers_to_send_recv()
-
-        local_answer = await self._pc.createAnswer()
-
-        # Store answer immediately (will have no ICE candidates yet)
-        self._answer = RTCSessionDescription(sdp=local_answer.sdp, type=local_answer.type)
-
-        # Start setLocalDescription in background (non-blocking)
-        asyncio.create_task(self._set_local_description_async(local_answer))
-
-        # Start polling for candidates immediately
-        if self._signaling_ws and self._enable_trickling:
-            asyncio.create_task(self._poll_and_trickle_candidates())
-
-        # Process any queued ICE candidates
-        if self._ice_candidate_queue:
-            asyncio.create_task(self._process_queued_ice_candidates())
-
-        return self._answer
-
-    async def _set_local_description_async(self, answer):
-        """Run blocking setLocalDescription in background task."""
-        try:
-            # This will block for 1-3 seconds but in background!
-            await self._pc.setLocalDescription(answer)
-            logger.debug(
-                f"setLocalDescription complete. gathering state: {self._pc.iceGatheringState}"
-            )
-            # Update answer with complete ICE candidates
-            self._answer = self._pc.localDescription
-            logger.debug("Updated answer with complete ICE candidates")
-        except Exception as e:
-            logger.error(f"Error in setLocalDescription: {e}")
-
-    async def _poll_and_trickle_candidates(self):
-        """Wait for ICE gathering to complete and send all candidates via WebSocket.
-
-        Currently aiortc and aioice do not support triclking of ice candidates. When
-        a support for trickling ice candidates is supported, we can fix this method to
-        actually trickle the candidates.
-        """
-        if not self._signaling_ws:
-            return
-
-        # Wait for gathering to complete (with timeout)
-        max_wait = 10  # 10 seconds max
-        start_time = asyncio.get_event_loop().time()
-
-        while self._pc.iceGatheringState != "complete":
-            elapsed = asyncio.get_event_loop().time() - start_time
-            if elapsed > max_wait:
-                logger.warning(f"ICE gathering timeout after {max_wait}s")
-                break
-            await asyncio.sleep(0.1)
-
-        if self._pc.iceGatheringState != "complete":
-            logger.warning("ICE gathering did not complete, no candidates to send")
-            return
-
-        elapsed = asyncio.get_event_loop().time() - start_time
-        logger.debug(f"ICE gathering complete after {elapsed:.1f}s")
-
-        # Parse candidates from the local description
-        if not self._pc.localDescription:
-            logger.warning("No local description available")
-            return
-
-        sdp = self._pc.localDescription.sdp
-        media_index = -1
-        current_mid = None
-
-        # Parse SDP and send candidates
-        for line in sdp.split("\n"):
-            line = line.strip()
-
-            if line.startswith("m="):
-                media_index += 1
-                current_mid = None  # Will be set by a=mid line
-
-            elif line.startswith("a=mid:"):
-                current_mid = line[6:]  # Remove 'a=mid:' prefix
-
-            elif line.startswith("a=candidate:"):
-                candidate_str = line[12:]  # Remove 'a=candidate:' prefix
-                sdp_mid = current_mid if current_mid else str(media_index)
-
-                try:
-                    await self._signaling_ws.send_json(
-                        {
-                            "type": "ice-candidate",
-                            "payload": {
-                                "candidate": {
-                                    "candidate": f"candidate:{candidate_str}",
-                                    "sdpMid": sdp_mid,
-                                    "sdpMLineIndex": media_index,
-                                },
-                                "pc_id": self._pc_id,
-                            },
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to send ICE candidate: {e}")
-
-        # Send end-of-candidates signal
-        try:
-            await self._signaling_ws.send_json(
-                {"type": "ice-candidate", "payload": {"candidate": None, "pc_id": self._pc_id}}
-            )
-            logger.debug("Sent end-of-candidates signal")
-        except Exception as e:
-            logger.error(f"Failed to send end-of-candidates: {e}")
-
-    async def add_ice_candidate(self, candidate: dict):
-        """Add ICE candidate received from client.
-
-        Args:
-            candidate: ICE candidate dictionary from client.
-        """
-        if self._pc.remoteDescription:
-            try:
-                # Parse candidate string
-                candidate_str = candidate.get("candidate")
-                if not candidate_str:
-                    logger.debug("End of ICE candidates")
-                    return
-
-                # Remove "candidate:" prefix if present (browser format)
-                if candidate_str.startswith("candidate:"):
-                    candidate_str = candidate_str[10:]  # Remove "candidate:" prefix
-
-                # Use aiortc's built-in parser
-                ice_candidate = candidate_from_sdp(candidate_str)
-
-                # Add sdpMid and sdpMLineIndex from the candidate dict
-                ice_candidate.sdpMid = candidate.get("sdpMid")
-                ice_candidate.sdpMLineIndex = candidate.get("sdpMLineIndex")
-
-                await self._pc.addIceCandidate(ice_candidate)
-            except Exception as e:
-                logger.error(f"Failed to add ICE candidate: {e}")
-        else:
-            # Queue if remote description not set yet
-            self._ice_candidate_queue.append(candidate)
-            logger.debug("Queued ICE candidate (no remote description yet)")
-
-    async def _process_queued_ice_candidates(self):
-        """Process queued ICE candidates once remote description is set."""
-        while self._ice_candidate_queue:
-            candidate = self._ice_candidate_queue.pop(0)
-            await self.add_ice_candidate(candidate)
 
     async def connect(self):
         """Connect the WebRTC peer connection and handle initial setup."""

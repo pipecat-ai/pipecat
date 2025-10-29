@@ -746,6 +746,9 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
+            consecutive_failures = 0
+            max_consecutive_failures = 40
+
             async for frame in self._next_frame():
                 # No need to push EndFrame, it's pushed from process_frame().
                 if isinstance(frame, EndFrame):
@@ -765,6 +768,26 @@ class BaseOutputTransport(FrameProcessor):
                 except Exception as e:
                     logger.error(f"{self} Error writing {frame} to transport: {e}")
                     push_downstream = False
+
+                # Handle write failures
+                if not push_downstream and isinstance(frame, OutputAudioRawFrame):
+                    consecutive_failures += 1
+                    logger.warning(
+                        f"{self} Failed to write audio frame (consecutive failures: {consecutive_failures}/{max_consecutive_failures})"
+                    )
+
+                    # Break out if we've failed too many times consecutively
+                    if consecutive_failures >= max_consecutive_failures:
+                        logger.error(
+                            f"{self} Breaking out of audio task handler after {consecutive_failures} consecutive failures"
+                        )
+                        break
+
+                    # Sleep before retrying
+                    await asyncio.sleep(0.5)
+                else:
+                    # Reset counter on successful write
+                    consecutive_failures = 0
 
                 # If we were able to send to the transport, push the frame
                 # downstream in case anyone else needs it.
