@@ -984,14 +984,15 @@ class GeminiLiveLLMService(LLMService):
             if message.parts:
                 for part in message.parts:
                     if part.function_response:
-                        # Found a newly-completed function call - send the result to the service
                         tool_call_id = part.function_response.id
                         tool_name = part.function_response.name
-                        if send_new_results:
-                            await self._tool_result(
-                                tool_call_id, tool_name, part.function_response.response
-                            )
-                        self._completed_tool_calls.add(tool_call_id)
+                        if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                            # Found a newly-completed function call - send the result to the service
+                            if send_new_results:
+                                await self._tool_result(
+                                    tool_call_id, tool_name, part.function_response.response
+                                )
+                            self._completed_tool_calls.add(tool_call_id)
 
     async def _set_bot_is_speaking(self, speaking: bool):
         if self._bot_is_speaking == speaking:
