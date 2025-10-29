@@ -223,7 +223,7 @@ class GeminiLiveContext(OpenAILLMContext):
     Provides Gemini-specific context management including system instruction
     extraction and message format conversion for the Live API.
 
-    .. deprecated:: 0.0.93
+    .. deprecated:: 0.0.92
         Gemini Live no longer uses `GeminiLiveContext` under the hood.
         It now uses `LLMContext`.
     """
@@ -352,7 +352,7 @@ class GeminiLiveUserContextAggregator(OpenAIUserContextAggregator):
     Extends OpenAI user aggregator to handle Gemini-specific message passing
     while maintaining compatibility with the standard aggregation pipeline.
 
-    .. deprecated:: 0.0.93
+    .. deprecated:: 0.0.92
         Gemini Live no longer expects a `GeminiLiveUserContextAggregator`.
         It now expects a `LLMUserAggregator`.
     """
@@ -393,7 +393,7 @@ class GeminiLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
     to prevent duplicate context entries, as Gemini Live pushes both
     LLMTextFrames and TTSTextFrames.
 
-    .. deprecated:: 0.0.93
+    .. deprecated:: 0.0.92
         Gemini Live no longer uses `GeminiLiveAssistantContextAggregator` under the hood.
         It now uses `LLMAssistantAggregator`.
     """
@@ -443,7 +443,7 @@ class GeminiLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
 class GeminiLiveContextAggregatorPair:
     """Pair of user and assistant context aggregators for Gemini Live.
 
-    .. deprecated:: 0.0.93
+    .. deprecated:: 0.0.92
         `GeminiLiveContextAggregatorPair` is deprecated.
         Use `LLMContextAggregatorPair` instead.
 
