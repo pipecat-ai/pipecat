@@ -13,14 +13,15 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -69,11 +70,11 @@ async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(params.context.messages, indent=4)}"
+        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"
     )
     try:
         with open(filename, "w") as file:
-            messages = params.context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages()
             # remove the last message, which is the instruction we just gave to save the conversation
             messages.pop()
             json.dump(messages, file, indent=2)
@@ -90,6 +91,10 @@ async def load_conversation(params: FunctionCallParams):
             with open(filename, "r") as file:
                 params.context.set_messages(json.load(file))
                 await params.llm.reset_conversation()
+                # NOTE: we manually create a response here rather than relying
+                # on the function callback to trigger one since we've reset the
+                # conversation so the remote service doesn't know about the
+                # in-progress tool call.
                 await params.llm._create_response()
         except Exception as e:
             await params.result_callback({"success": False, "error": str(e)})
@@ -97,14 +102,12 @@ async def load_conversation(params: FunctionCallParams):
     asyncio.create_task(_reset())
 
 
-tools = [
-    {
-        "type": "function",
-        "name": "get_current_weather",
-        "description": "Get the current weather",
-        "parameters": {
-            "type": "object",
-            "properties": {
+tools = ToolsSchema(
+    standard_tools=[
+        FunctionSchema(
+            name="get_current_weather",
+            description="Get the current weather",
+            properties={
                 "location": {
                     "type": "string",
                     "description": "The city and state, e.g. San Francisco, CA",
@@ -115,45 +118,33 @@ tools = [
                     "description": "The temperature unit to use. Infer this from the users location.",
                 },
             },
-            "required": ["location", "format"],
-        },
-    },
-    {
-        "type": "function",
-        "name": "save_conversation",
-        "description": "Save the current conversatione. Use this function to persist the current conversation to external storage.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "type": "function",
-        "name": "get_saved_conversation_filenames",
-        "description": "Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "type": "function",
-        "name": "load_conversation",
-        "description": "Load a conversation history. Use this function to load a conversation history into the current session.",
-        "parameters": {
-            "type": "object",
-            "properties": {
+            required=["location", "format"],
+        ),
+        FunctionSchema(
+            name="save_conversation",
+            description="Save the current conversatione. Use this function to persist the current conversation to external storage.",
+            properties={},
+            required=[],
+        ),
+        FunctionSchema(
+            name="get_saved_conversation_filenames",
+            description="Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
+            properties={},
+            required=[],
+        ),
+        FunctionSchema(
+            name="load_conversation",
+            description="Load a conversation history. Use this function to load a conversation history into the current session.",
+            properties={
                 "filename": {
                     "type": "string",
                     "description": "The filename of the conversation history to load.",
                 }
             },
-            "required": ["filename"],
-        },
-    },
-]
+            required=["filename"],
+        ),
+    ]
+)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -224,8 +215,8 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = OpenAILLMContext([], tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext([{"role": "user", "content": "Say hello!"}], tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

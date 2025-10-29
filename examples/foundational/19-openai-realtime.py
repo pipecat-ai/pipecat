@@ -5,6 +5,7 @@
 #
 
 
+import asyncio
 import os
 from datetime import datetime
 
@@ -14,12 +15,14 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame, TranscriptionMessage
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response import LLMAssistantAggregatorParams
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -52,6 +55,18 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     )
 
 
+async def get_news(params: FunctionCallParams):
+    await params.result_callback(
+        {
+            "news": [
+                "Massive UFO currently hovering above New York City",
+                "Stock markets reach all-time highs",
+                "Living dinosaur species discovered in the Amazon rainforest",
+            ],
+        }
+    )
+
+
 async def fetch_restaurant_recommendation(params: FunctionCallParams):
     await params.result_callback({"name": "The Golden Dragon"})
 
@@ -71,6 +86,13 @@ weather_function = FunctionSchema(
         },
     },
     required=["location", "format"],
+)
+
+get_news_function = FunctionSchema(
+    name="get_news",
+    description="Get the current news.",
+    properties={},
+    required=[],
 )
 
 restaurant_function = FunctionSchema(
@@ -140,10 +162,6 @@ even if you're asked about them.
 You are participating in a voice conversation. Keep your responses concise, short, and to the point
 unless specifically asked to elaborate on a topic.
 
-You have access to the following tools:
-- get_current_weather: Get the current weather for a given location.
-- get_restaurant_recommendation: Get a restaurant recommendation for a given location.
-
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
     )
 
@@ -157,25 +175,31 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     # llm.register_function(None, fetch_weather_from_api)
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+    llm.register_function("get_news", get_news)
 
     transcript = TranscriptProcessor()
 
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
-    context = OpenAILLMContext(
+    context = LLMContext(
         [{"role": "user", "content": "Say hello!"}],
         tools,
     )
 
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        # `expect_stripped_words=False` needed when OpenAI Realtime used with
+        # "audio" modality (the default)
+        assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             context_aggregator.user(),
+            transcript.user(),  # LLM pushes TranscriptionFrames upstream
             llm,  # LLM
-            transcript.user(),  # Placed after the LLM, as LLM pushes TranscriptionFrames downstream
             transport.output(),  # Transport bot output
             transcript.assistant(),  # After the transcript output, to time with the audio output
             context_aggregator.assistant(),
@@ -197,6 +221,13 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         logger.info(f"Client connected")
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
+
+        # Add a new tool at runtime after a delay.
+        await asyncio.sleep(15)
+        new_tools = ToolsSchema(
+            standard_tools=[weather_function, restaurant_function, get_news_function]
+        )
+        await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
