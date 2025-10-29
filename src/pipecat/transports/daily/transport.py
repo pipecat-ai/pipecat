@@ -2479,7 +2479,11 @@ class DailyTransport(BaseTransport):
     async def _on_joined(self, data):
         """Handle room joined events."""
         if self._params.transcription_enabled:
-            await self.start_transcription(self._params.transcription_settings)
+            # We report an error because we are starting transcription
+            # internally and if it fails we need to know.
+            error = await self.start_transcription(self._params.transcription_settings)
+            if error:
+                await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
 
     async def _on_left(self):
@@ -2489,7 +2493,11 @@ class DailyTransport(BaseTransport):
     async def _on_before_leave(self):
         """Handle before leave room events."""
         if self._params.transcription_enabled:
-            await self.stop_transcription()
+            # We report an error because we are stopping transcription
+            # internally and if it fails we need to know.
+            error = await self.stop_transcription()
+            if error:
+                await self._on_error(f"Unable to stop transcription: {error}")
         await self._call_event_handler("on_before_leave")
 
     async def _on_error(self, error):

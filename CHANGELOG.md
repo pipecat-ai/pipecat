@@ -145,6 +145,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `DailyTransport` triggers `on_error` event if transcription can't be started
+  or stopped.
+
 - `DailyTransport` updates: `start_dialout()` now returns two values:
   `session_id` and `error`. `start_recording()` now returns two values:
   `stream_id` and `error`.
