@@ -20,10 +20,10 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
+from pipecat.services.speechmatics.tts import SpeechmaticsTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -51,35 +51,41 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Speechmatics STT Service Example
+    """Speechmatics STT and TTS Service Example
 
-    This example demonstrates using Speechmatics Speech-to-Text service with speaker diarization and intelligent speaker management. Key features:
+    This example demonstrates using Speechmatics Speech-to-Text and Text-to-Speech services
+    with speaker diarization and intelligent speaker management. Key features:
 
-    1. Speaker Diarization
+    1. Speaker Diarization (STT)
        - Automatically identifies and distinguishes between different speakers
        - First speaker is identified as 'S1', others get subsequent IDs
        - Uses `enable_diarization` parameter to manage speaker detection
 
-    2. Smart Speaker Control
+    2. Smart Speaker Control (STT)
        - `focus_speakers` parameter lets you target specific speakers (e.g. ["S1"])
        - Other speakers will be wrapped in PASSIVE tags
        - Only processes speech from focused speakers
        - Words from all speakers are wrapped with XML tags for clear speaker identification
        - Other speakers' speech only sent when focused speaker is active
 
-    3. Voice Activity Detection
+    3. Voice Activity Detection (STT)
        - Built-in VAD using `enable_vad` parameter
        - Remove `vad_analyzer` from `transport` config to use module's VAD
        - Emits speaker started/stopped events
 
-    4. Configuration Options
+    4. Text-to-Speech (TTS)
+       - Low latency streaming audio synthesis
+       - Multiple voice options available including `sarah`, `theo`, and `megan`
+
+    5. Configuration Options
        - `operating_point` parameter defaults to `ENHANCED` for optimal accuracy
        - Configurable `end_of_utterance_silence_trigger` (default 0.5s)
        - Customizable speaker formatting
        - Additional diarization settings available
 
-    For detailed information about operating points and configuration:
-    https://docs.speechmatics.com/rt-api-ref
+    For detailed information:
+    - STT: https://docs.speechmatics.com/rt-api-ref
+    - TTS: https://docs.speechmatics.com/text-to-speech/quickstart
     """
 
     logger.info(f"Starting bot")
@@ -97,10 +103,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
     )
 
-    tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY"),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
-        model="eleven_turbo_v2_5",
+    tts = SpeechmaticsTTSService(
+        api_key=os.getenv("SPEECHMATICS_API_KEY"),
+        params=SpeechmaticsTTSService.InputParams(
+            voice="sarah",
+        ),
     )
 
     llm = OpenAILLMService(
@@ -112,7 +119,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         {
             "role": "system",
             "content": (
-                "You are a helpful British assistant called Alfred. "
+                "You are a helpful British assistant called Sarah. "
                 "Your goal is to demonstrate your capabilities in a succinct way. "
                 "Your output will be converted to audio so don't include special characters in your answers. "
                 "Always include punctuation in your responses. "
