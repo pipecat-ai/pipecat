@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   (Note that even though `OpenAIRealtimeLLMService` now supports the universal
   `LLMContext`, it is not meant to be swapped out for another LLM service at
-  runtime.)
+  runtime with `LLMSwitcher`.)
 
   Note: `TranscriptionFrame`s and `InterimTranscriptionFrame`s now go upstream
   from `OpenAIRealtimeLLMService`, so if you're using `TranscriptProcessor`,
@@ -108,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   (Note that even though `GeminiLiveLLMService` now supports the universal
   `LLMContext`, it is not meant to be swapped out for another LLM service at
-  runtime.)
+  runtime with `LLMSwitcher`.)
 
   Worth noting: whether or not you use the new context-setup pattern with
   `GeminiLiveLLMService`, some types have changed under the hood:
@@ -212,7 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   (Note that even though `AWSNovaSonicLLMService` now supports the universal
   `LLMContext`, it is not meant to be swapped out for another LLM service at
-  runtime.)
+  runtime with `LLMSwitcher`.)
 
   Worth noting: whether or not you use the new context-setup pattern with
   `AWSNovaSonicLLMService`, some types have changed under the hood:
