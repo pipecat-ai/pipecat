@@ -8,9 +8,9 @@
 
 import os
 from typing import AsyncGenerator, Optional
+from urllib.parse import urlencode
 
 import aiohttp
-import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
@@ -23,6 +23,15 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+
+try:
+    from speechmatics.rt import __version__
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use Speechmatics, you need to `pip install pipecat-ai[speechmatics]`."
+    )
+    raise Exception(f"Missing module: {e}")
 
 
 class SpeechmaticsTTSService(TTSService):
@@ -111,7 +120,7 @@ class SpeechmaticsTTSService(TTSService):
             "text": text,
         }
 
-        url = f"{self._base_url}/generate/{self._voice_id}?output_format=pcm_16000"
+        url = _get_endpoint_url(self._base_url, self._voice_id, self.sample_rate)
 
         try:
             await self.start_ttfb_metrics()
@@ -172,3 +181,22 @@ class SpeechmaticsTTSService(TTSService):
             yield ErrorFrame(error=f"Speechmatics TTS error: {str(e)}")
         finally:
             yield TTSStoppedFrame()
+
+
+def _get_endpoint_url(base_url: str, voice: str, sample_rate: int) -> str:
+    """Format the TTS endpoint URL with voice, output format, and version params.
+
+    Args:
+        base_url: The base URL for the TTS endpoint.
+        voice: The voice model to use.
+        sample_rate: The audio sample rate.
+
+    Returns:
+        str: The formatted TTS endpoint URL.
+    """
+    query_params = {}
+    query_params["output_format"] = f"pcm_{sample_rate}"
+    query_params["sm-app"] = f"pipecat/{__version__}"
+    query = urlencode(query_params)
+
+    return f"{base_url}/generate/{voice}?{query}"
