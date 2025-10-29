@@ -47,7 +47,7 @@ PROMPT_SWITCH_LANGUAGE = "Say something in Spanish."
 EVAL_SWITCH_LANGUAGE = "The user is now talking in Spanish."
 
 # Vision
-PROMPT_VISION = ("What do you see?", Image.open(ASSETS_DIR / "cat.jpg"))
+PROMPT_VISION = ("Briefly describe what you see.", Image.open(ASSETS_DIR / "cat.jpg"))
 EVAL_VISION = "A cat description."
 
 # Voicemail
@@ -110,18 +110,9 @@ TESTS_07 = [
     # ("07u-interruptible-ultravox.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
 ]
 
-TESTS_12 = [
-    ("12-describe-video.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
-    ("12a-describe-video-gemini-flash.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
-    ("12b-describe-video-gpt-4o.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
-    ("12c-describe-video-anthropic.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
-]
-
 TESTS_14 = [
     ("14-function-calling.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14a-function-calling-anthropic.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
-    ("14b-function-calling-anthropic-video.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
-    ("14d-function-calling-video.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14e-function-calling-google.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14f-function-calling-groq.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14g-function-calling-grok.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
@@ -137,6 +128,12 @@ TESTS_14 = [
     ("14v-function-calling-openai.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14w-function-calling-mistral.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14x-function-calling-openpipe.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
+    # Video
+    ("14d-function-calling-anthropic-video.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
+    ("14d-function-calling-aws-video.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
+    ("14d-function-calling-gemini-flash-video.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
+    ("14d-function-calling-moondream-video.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
+    ("14d-function-calling-openai-video.py", PROMPT_VISION, EVAL_VISION, BOT_SPEAKS_FIRST),
     # Currently not working.
     # ("14c-function-calling-together.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     # ("14l-function-calling-deepseek.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
@@ -211,7 +208,6 @@ TESTS_44 = [
 
 TESTS = [
     *TESTS_07,
-    *TESTS_12,
     *TESTS_14,
     *TESTS_15,
     *TESTS_19,
