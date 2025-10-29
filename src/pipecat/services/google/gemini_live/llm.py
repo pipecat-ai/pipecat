@@ -17,6 +17,7 @@ import json
 import random
 import time
 import uuid
+import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
@@ -56,10 +57,12 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -219,6 +222,10 @@ class GeminiLiveContext(OpenAILLMContext):
 
     Provides Gemini-specific context management including system instruction
     extraction and message format conversion for the Live API.
+
+    .. deprecated:: 0.0.92
+        Gemini Live no longer uses `GeminiLiveContext` under the hood.
+        It now uses `LLMContext`.
     """
 
     @staticmethod
@@ -231,6 +238,22 @@ class GeminiLiveContext(OpenAILLMContext):
         Returns:
             The upgraded Gemini context instance.
         """
+        # This warning is here rather than `__init__` since `upgrade()` was the
+        # "main" way that GeminiLiveContext instances were created.
+        # Almost no users should be seeing this message anyway, as
+        # GeminiLiveContext instances were typically created under the hood:
+        # the user would pass an OpenAILLMContext instance, which would be
+        # upgraded without them necessarily knowing.
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "GeminiLiveContext is deprecated. "
+                "Gemini Live no longer uses GeminiLiveContext under the hood. "
+                "It now uses LLMContext.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, GeminiLiveContext):
             logger.debug(f"Upgrading to Gemini Live Context: {obj}")
             obj.__class__ = GeminiLiveContext
@@ -328,7 +351,27 @@ class GeminiLiveUserContextAggregator(OpenAIUserContextAggregator):
 
     Extends OpenAI user aggregator to handle Gemini-specific message passing
     while maintaining compatibility with the standard aggregation pipeline.
+
+    .. deprecated:: 0.0.92
+        Gemini Live no longer expects a `GeminiLiveUserContextAggregator`.
+        It now expects a `LLMUserAggregator`.
     """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize Gemini Live user context aggregator."""
+        # Almost no users should be seeing this message, as
+        # `GeminiLiveUserContextAggregator`` instances were typically created
+        # under the hood, as part of `llm.create_context_aggregator()`.
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "GeminiLiveUserContextAggregator is deprecated. "
+                "Gemini Live no longer expects a GeminiLiveUserContextAggregator. "
+                "It now expects a LLMUserAggregator.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(*args, **kwargs)
 
     async def process_frame(self, frame, direction):
         """Process incoming frames for user context aggregation.
@@ -349,7 +392,27 @@ class GeminiLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
     Handles assistant response aggregation while filtering out LLMTextFrames
     to prevent duplicate context entries, as Gemini Live pushes both
     LLMTextFrames and TTSTextFrames.
+
+    .. deprecated:: 0.0.92
+        Gemini Live no longer uses `GeminiLiveAssistantContextAggregator` under the hood.
+        It now uses `LLMAssistantAggregator`.
     """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize Gemini Live assistant context aggregator."""
+        # Almost no users should be seeing this message, as
+        # `GeminiLiveAssistantContextAggregator` instances were typically
+        # created under the hood, as part of `llm.create_context_aggregator()`.
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "GeminiLiveAssistantContextAggregator is deprecated. "
+                "Gemini Live no longer uses GeminiLiveAssistantContextAggregator under the hood. "
+                "It now uses LLMAssistantAggregator.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__(*args, **kwargs)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames for assistant context aggregation.
@@ -380,6 +443,10 @@ class GeminiLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
 class GeminiLiveContextAggregatorPair:
     """Pair of user and assistant context aggregators for Gemini Live.
 
+    .. deprecated:: 0.0.92
+        `GeminiLiveContextAggregatorPair` is deprecated.
+        Use `LLMContextAggregatorPair` instead.
+
     Parameters:
         _user: The user context aggregator instance.
         _assistant: The assistant context aggregator instance.
@@ -387,6 +454,19 @@ class GeminiLiveContextAggregatorPair:
 
     _user: GeminiLiveUserContextAggregator
     _assistant: GeminiLiveAssistantContextAggregator
+
+    def __post_init__(self):
+        # Almost no users should be seeing this message, as
+        # `GeminiLiveContextAggregatorPair` instances were typically created
+        # under the hood, with `llm.create_context_aggregator()`.
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "GeminiLiveContextAggregatorPair is deprecated. "
+                "Use LLMContextAggregatorPair instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     def user(self) -> GeminiLiveUserContextAggregator:
         """Get the user context aggregator.
@@ -609,7 +689,7 @@ class GeminiLiveLLMService(LLMService):
         self._run_llm_when_session_ready = False
 
         self._user_is_speaking = False
-        self._bot_is_speaking = False
+        self._bot_is_responding = False
         self._user_audio_buffer = bytearray()
         self._user_transcription_buffer = ""
         self._last_transcription_sent = ""
@@ -664,6 +744,9 @@ class GeminiLiveLLMService(LLMService):
 
         # Initialize the API client. Subclasses can override this if needed.
         self.create_client()
+
+        # Bookkeeping for tool calls
+        self._completed_tool_calls = set()
 
     def create_client(self):
         """Create the Gemini API client instance. Subclasses can override this."""
@@ -787,9 +870,13 @@ class GeminiLiveLLMService(LLMService):
     #
 
     async def _handle_interruption(self):
-        await self._set_bot_is_speaking(False)
-        await self.push_frame(TTSStoppedFrame())
-        await self.push_frame(LLMFullResponseEndFrame())
+        if self._bot_is_responding:
+            await self._set_bot_is_responding(False)
+            if self._settings.get("modalities") == GeminiModalities.AUDIO:
+                await self.push_frame(TTSStoppedFrame())
+            # Do not send LLMFullResponseEndFrame here - an interruption
+            # already tells the assistant context aggregator that the response
+            # is over.
 
     async def _handle_user_started_speaking(self, frame):
         self._user_is_speaking = True
@@ -807,7 +894,6 @@ class GeminiLiveLLMService(LLMService):
 
     #
     # frame processing
-    #
     # StartFrame, StopFrame, CancelFrame implemented in base class
     #
 
@@ -820,7 +906,7 @@ class GeminiLiveLLMService(LLMService):
         """
         # Defer EndFrame handling until after the bot turn is finished
         if isinstance(frame, EndFrame):
-            if self._bot_is_speaking:
+            if self._bot_is_responding:
                 logger.debug("Deferring handling EndFrame until bot turn is finished")
                 self._end_frame_pending_bot_turn_finished = frame
                 return
@@ -829,22 +915,13 @@ class GeminiLiveLLMService(LLMService):
 
         if isinstance(frame, TranscriptionFrame):
             await self.push_frame(frame, direction)
-        elif isinstance(frame, OpenAILLMContextFrame):
-            context: GeminiLiveContext = GeminiLiveContext.upgrade(frame.context)
-            # For now, we'll only trigger inference here when either:
-            #   1. We have not seen a context frame before
-            #   2. The last message is a tool call result
-            if not self._context:
-                self._context = context
-                if frame.context.tools:
-                    self._tools = frame.context.tools
-                await self._create_initial_response()
-            elif context.messages and context.messages[-1].get("role") == "tool":
-                # Support just one tool call per context frame for now
-                tool_result_message = context.messages[-1]
-                await self._tool_result(tool_result_message)
-        elif isinstance(frame, LLMContextFrame):
-            raise NotImplementedError("Universal LLMContext is not yet supported for Gemini Live.")
+        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+            context = (
+                frame.context
+                if isinstance(frame, LLMContextFrame)
+                else LLMContext.from_openai_context(frame.context)
+            )
+            await self._handle_context(context)
         elif isinstance(frame, InputTextRawFrame):
             await self._send_user_text(frame.text)
             await self.push_frame(frame, direction)
@@ -883,13 +960,48 @@ class GeminiLiveLLMService(LLMService):
         else:
             await self.push_frame(frame, direction)
 
-    async def _set_bot_is_speaking(self, speaking: bool):
-        if self._bot_is_speaking == speaking:
+    async def _handle_context(self, context: LLMContext):
+        if not self._context:
+            # We got our initial context
+            self._context = context
+            if context.tools:
+                self._tools = context.tools
+            # Initialize our bookkeeping of already-completed tool calls in
+            # the context
+            await self._process_completed_function_calls(send_new_results=False)
+            await self._create_initial_response()
+        else:
+            # We got an updated context.
+            # This may contain a new user message or tool call result.
+            self._context = context
+            # Send results for newly-completed function calls, if any.
+            await self._process_completed_function_calls(send_new_results=True)
+
+    async def _process_completed_function_calls(self, send_new_results: bool):
+        # Check for set of completed function calls in the context
+        adapter: GeminiLLMAdapter = self.get_llm_adapter()
+        messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
+        for message in messages:
+            if message.parts:
+                for part in message.parts:
+                    if part.function_response:
+                        tool_call_id = part.function_response.id
+                        tool_name = part.function_response.name
+                        if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                            # Found a newly-completed function call - send the result to the service
+                            if send_new_results:
+                                await self._tool_result(
+                                    tool_call_id, tool_name, part.function_response.response
+                                )
+                            self._completed_tool_calls.add(tool_call_id)
+
+    async def _set_bot_is_responding(self, responding: bool):
+        if self._bot_is_responding == responding:
             return
 
-        self._bot_is_speaking = speaking
+        self._bot_is_responding = responding
 
-        if not self._bot_is_speaking and self._end_frame_pending_bot_turn_finished:
+        if not self._bot_is_responding and self._end_frame_pending_bot_turn_finished:
             await self.queue_frame(self._end_frame_pending_bot_turn_finished)
             self._end_frame_pending_bot_turn_finished = None
 
@@ -1116,6 +1228,7 @@ class GeminiLiveLLMService(LLMService):
             if self._session:
                 await self._session.close()
                 self._session = None
+            self._completed_tool_calls = set()
             self._disconnecting = False
         except Exception as e:
             logger.error(f"{self} error disconnecting: {e}")
@@ -1195,7 +1308,8 @@ class GeminiLiveLLMService(LLMService):
             self._run_llm_when_session_ready = True
             return
 
-        messages = self._context.get_messages_for_initializing_history()
+        adapter: GeminiLLMAdapter = self.get_llm_adapter()
+        messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
         if not messages:
             return
 
@@ -1223,8 +1337,9 @@ class GeminiLiveLLMService(LLMService):
 
         # Create a throwaway context just for the purpose of getting messages
         # in the right format
-        context = GeminiLiveContext.upgrade(OpenAILLMContext(messages=messages_list))
-        messages = context.get_messages_for_initializing_history()
+        context = LLMContext(messages=messages_list)
+        adapter: GeminiLLMAdapter = self.get_llm_adapter()
+        messages = adapter.get_llm_invocation_params(context).get("messages", [])
 
         if not messages:
             return
@@ -1239,17 +1354,16 @@ class GeminiLiveLLMService(LLMService):
             await self._handle_send_error(e)
 
     @traced_gemini_live(operation="llm_tool_result")
-    async def _tool_result(self, tool_result_message):
+    async def _tool_result(
+        self, tool_call_id: str, tool_name: str, tool_result_message: Dict[str, Any]
+    ):
         """Send tool result back to the API."""
         if self._disconnecting or not self._session:
             return
 
         # For now we're shoving the name into the tool_call_id field, so this
         # will work until we revisit that.
-        id = tool_result_message.get("tool_call_id")
-        name = tool_result_message.get("tool_call_name")
-        result = json.loads(tool_result_message.get("content") or "")
-        response = FunctionResponse(name=name, id=id, response=result)
+        response = FunctionResponse(name=tool_name, id=tool_call_id, response=tool_result_message)
 
         try:
             await self._session.send_tool_response(function_responses=response)
@@ -1277,7 +1391,10 @@ class GeminiLiveLLMService(LLMService):
         # part.text is added when `modalities` is set to TEXT; otherwise, it's None
         text = part.text
         if text:
-            if not self._bot_text_buffer:
+            if not self._bot_is_responding:
+                # Update bot responding state and send service start frame
+                # (AUDIO modality case)
+                await self._set_bot_is_responding(True)
                 await self.push_frame(LLMFullResponseStartFrame())
 
             self._bot_text_buffer += text
@@ -1288,6 +1405,8 @@ class GeminiLiveLLMService(LLMService):
         if msg.server_content and msg.server_content.grounding_metadata:
             self._accumulated_grounding_metadata = msg.server_content.grounding_metadata
 
+        # If we have no audio, stop here.
+        # All logic below this point pertains to the AUDIO modality.
         inline_data = part.inline_data
         if not inline_data:
             return
@@ -1313,8 +1432,10 @@ class GeminiLiveLLMService(LLMService):
         if not audio:
             return
 
-        if not self._bot_is_speaking:
-            await self._set_bot_is_speaking(True)
+        # Update bot responding state and send service start frames
+        # (AUDIO modality case)
+        if not self._bot_is_responding:
+            await self._set_bot_is_responding(True)
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
@@ -1354,7 +1475,6 @@ class GeminiLiveLLMService(LLMService):
     @traced_gemini_live(operation="llm_response")
     async def _handle_msg_turn_complete(self, message: LiveServerMessage):
         """Handle the turn complete message."""
-        await self._set_bot_is_speaking(False)
         text = self._bot_text_buffer
 
         # Trace the complete LLM response (this will be handled by the decorator)
@@ -1373,13 +1493,15 @@ class GeminiLiveLLMService(LLMService):
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
 
-        # Only push the TTSStoppedFrame if the bot is outputting audio
-        # when text is found, modalities is set to TEXT and no audio
-        # is produced.
-        if not text:
-            await self.push_frame(TTSStoppedFrame())
-
-        await self.push_frame(LLMFullResponseEndFrame())
+        if self._bot_is_responding:
+            await self._set_bot_is_responding(False)
+            if not text:
+                # AUDIO modality case
+                await self.push_frame(TTSStoppedFrame())
+                await self.push_frame(LLMFullResponseEndFrame())
+            else:
+                # TEXT modality case
+                await self.push_frame(LLMFullResponseEndFrame())
 
     @traced_stt
     async def _handle_user_transcription(
@@ -1442,8 +1564,8 @@ class GeminiLiveLLMService(LLMService):
             return
 
         # This is the output transcription text when modalities is set to AUDIO.
-        # In this case, we push LLMTextFrame and TTSTextFrame to be handled by the
-        # downstream assistant context aggregator.
+        # In this case, we push TTSTextFrame to be handled by the downstream
+        # assistant context aggregator.
         text = message.server_content.output_transcription.text
 
         if not text:
@@ -1458,7 +1580,17 @@ class GeminiLiveLLMService(LLMService):
         # Collect text for tracing
         self._llm_output_buffer += text
 
-        await self.push_frame(LLMTextFrame(text=text))
+        # NOTE: Shoot. When using Vertex AI, output transcription messages
+        # arrive *before* the model_turn messages with audio, so we need to
+        # handle sending TTSStartedFrame and LLMFullResponseStartFrame here as
+        # well. These messages also contain much *more* text (it looks further
+        # ahead). That means that on an interruption our recorded context will
+        # contain some text that was actually never spoken.
+        if not self._bot_is_responding:
+            await self._set_bot_is_responding(True)
+            await self.push_frame(TTSStartedFrame())
+            await self.push_frame(LLMFullResponseStartFrame())
+
         await self.push_frame(TTSTextFrame(text=text))
 
     async def _handle_msg_grounding_metadata(self, message: LiveServerMessage):
@@ -1557,10 +1689,15 @@ class GeminiLiveLLMService(LLMService):
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> GeminiLiveContextAggregatorPair:
+    ) -> LLMContextAggregatorPair:
         """Create an instance of GeminiLiveContextAggregatorPair from an OpenAILLMContext.
 
         Constructor keyword arguments for both the user and assistant aggregators can be provided.
+
+        NOTE: this method exists only for backward compatibility. New code
+        should instead do:
+            context = LLMContext(...)
+            context_aggregator = LLMContextAggregatorPair(context)
 
         Args:
             context: The LLM context to use.
@@ -1568,15 +1705,10 @@ class GeminiLiveLLMService(LLMService):
             assistant_params: Assistant aggregator parameters. Defaults to LLMAssistantAggregatorParams().
 
         Returns:
-            GeminiLiveContextAggregatorPair: A pair of context
-            aggregators, one for the user and one for the assistant,
-            encapsulated in an GeminiLiveContextAggregatorPair.
+            A pair of user and assistant context aggregators.
         """
-        context.set_llm_adapter(self.get_llm_adapter())
-
-        GeminiLiveContext.upgrade(context)
-        user = GeminiLiveUserContextAggregator(context, params=user_params)
-
+        context = LLMContext.from_openai_context(context)
         assistant_params.expect_stripped_words = False
-        assistant = GeminiLiveAssistantContextAggregator(context, params=assistant_params)
-        return GeminiLiveContextAggregatorPair(_user=user, _assistant=assistant)
+        return LLMContextAggregatorPair(
+            context, user_params=user_params, assistant_params=assistant_params
+        )
