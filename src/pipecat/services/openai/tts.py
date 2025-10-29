@@ -14,6 +14,7 @@ from typing import AsyncGenerator, Dict, Literal, Optional
 
 from loguru import logger
 from openai import AsyncOpenAI, BadRequestError
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -55,6 +56,17 @@ class OpenAITTSService(TTSService):
 
     OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
 
+    class InputParams(BaseModel):
+        """Input parameters for OpenAI TTS configuration.
+
+        Parameters:
+            instructions: Instructions to guide voice synthesis behavior.
+            speed: Voice speed control (0.25 to 4.0, default 1.0).
+        """
+
+        instructions: Optional[str] = None
+        speed: Optional[float] = None
+
     def __init__(
         self,
         *,
@@ -65,6 +77,7 @@ class OpenAITTSService(TTSService):
         sample_rate: Optional[int] = None,
         instructions: Optional[str] = None,
         speed: Optional[float] = None,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initialize OpenAI TTS service.
@@ -77,7 +90,11 @@ class OpenAITTSService(TTSService):
             sample_rate: Output audio sample rate in Hz. If None, uses OpenAI's default 24kHz.
             instructions: Optional instructions to guide voice synthesis behavior.
             speed: Voice speed control (0.25 to 4.0, default 1.0).
+            params: Optional synthesis controls (acting instructions, speed, ...).
             **kwargs: Additional keyword arguments passed to TTSService.
+
+                .. deprecated:: 0.0.91
+                        The `instructions` and `speed` parameters are deprecated, use `InputParams` instead.
         """
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
             logger.warning(
@@ -86,11 +103,25 @@ class OpenAITTSService(TTSService):
             )
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._speed = speed
         self.set_model_name(model)
         self.set_voice(voice)
-        self._instructions = instructions
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+        if instructions or speed:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The `instructions` and `speed` parameters are deprecated, use `InputParams` instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
+        self._settings = {
+            "instructions": params.instructions if params else instructions,
+            "speed": params.speed if params else speed,
+        }
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -144,11 +175,11 @@ class OpenAITTSService(TTSService):
                 "response_format": "pcm",
             }
 
-            if self._instructions:
-                create_params["instructions"] = self._instructions
+            if self._settings["instructions"]:
+                create_params["instructions"] = self._settings["instructions"]
 
-            if self._speed:
-                create_params["speed"] = self._speed
+            if self._settings["speed"]:
+                create_params["speed"] = self._settings["speed"]
 
             async with self._client.audio.speech.with_streaming_response.create(
                 **create_params

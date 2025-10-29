@@ -30,15 +30,15 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
-    InputTransportMessageUrgentFrame,
+    InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     SpriteFrame,
     StartFrame,
     TranscriptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
@@ -74,7 +74,7 @@ VAD_RESET_PERIOD_MS = 2000
 
 
 @dataclass
-class DailyTransportMessageFrame(TransportMessageFrame):
+class DailyOutputTransportMessageFrame(OutputTransportMessageFrame):
     """Frame for transport messages in Daily calls.
 
     Parameters:
@@ -85,7 +85,7 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 
 
 @dataclass
-class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
+class DailyOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
     """Frame for urgent transport messages in Daily calls.
 
     Parameters:
@@ -96,7 +96,59 @@ class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
 
 
 @dataclass
-class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
+class DailyTransportMessageFrame(DailyOutputTransportMessageFrame):
+    """Frame for transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyOutputTransportMessageFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyTransportMessageFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyOutputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
+@dataclass
+class DailyTransportMessageUrgentFrame(DailyOutputTransportMessageUrgentFrame):
+    """Frame for urgent transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyOutputTransportMessageUrgentFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyOutputTransportMessageUrgentFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
+@dataclass
+class DailyInputTransportMessageFrame(InputTransportMessageFrame):
     """Frame for input urgent transport messages in Daily calls.
 
     Parameters:
@@ -106,15 +158,60 @@ class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
     participant_id: Optional[str] = None
 
 
+class DailyInputTransportMessageUrgentFrame(DailyInputTransportMessageFrame):
+    """Frame for input urgent transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyInputTransportMessageFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyInputTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyInputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
 @dataclass
 class DailyUpdateRemoteParticipantsFrame(ControlFrame):
     """Frame to update remote participants in Daily calls.
+
+    .. deprecated:: 0.0.87
+        `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a future version.
+        Create your own custom frame and use a custom processor to handle it or use, for example,
+        `on_after_push_frame` event instead in the output transport.
 
     Parameters:
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
     remote_participants: Mapping[str, Any] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyUpdateRemoteParticipantsFrame is deprecated and will be removed in a future version."
+                "Instead, create your own custom frame and handle it in the "
+                '`@transport.output().event_handler("on_after_push_frame")` event handler or a '
+                "custom processor.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -454,7 +551,9 @@ class DailyTransportClient(EventHandler):
         """
         return self._out_sample_rate
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send an application message to participants.
 
         Args:
@@ -464,7 +563,9 @@ class DailyTransportClient(EventHandler):
             return
 
         participant_id = None
-        if isinstance(frame, (DailyTransportMessageFrame, DailyTransportMessageUrgentFrame)):
+        if isinstance(
+            frame, (DailyOutputTransportMessageFrame, DailyOutputTransportMessageUrgentFrame)
+        ):
             participant_id = frame.participant_id
 
         future = self._get_event_loop().create_future()
@@ -506,11 +607,14 @@ class DailyTransportClient(EventHandler):
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the appropriate audio track.
 
         Args:
             frame: The audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         future = self._get_event_loop().create_future()
 
@@ -526,18 +630,24 @@ class DailyTransportClient(EventHandler):
             audio_source.write_frames(frame.audio, completion=completion_callback(future))
         else:
             logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
-            future.set_result(None)
+            future.set_result(0)
 
-        await future
+        num_frames = await future
+        return num_frames > 0
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the camera device.
 
         Args:
             frame: The image frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
         if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
+            return True
+        return False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client with task manager and event queues.
@@ -634,32 +744,27 @@ class DailyTransportClient(EventHandler):
 
         self._client.set_user_name(self._bot_name)
 
-        try:
-            (data, error) = await self._join()
+        (data, error) = await self._join()
 
-            if not error:
-                self._joined = True
-                self._joining = False
-                # Increment leave counter if we successfully joined.
-                self._leave_counter += 1
-
-                logger.info(f"Joined {self._room_url}")
-
-                if self._params.transcription_enabled:
-                    await self.start_transcription(self._params.transcription_settings)
-
-                await self._callbacks.on_joined(data)
-
-                self._joined_event.set()
-            else:
-                error_msg = f"Error joining {self._room_url}: {error}"
-                logger.error(error_msg)
-                await self._callbacks.on_error(error_msg)
-        except asyncio.TimeoutError:
-            error_msg = f"Time out joining {self._room_url}"
-            logger.error(error_msg)
+        if not error:
+            self._joined = True
             self._joining = False
+            # Increment leave counter if we successfully joined.
+            self._leave_counter += 1
+
+            logger.info(f"Joined {self._room_url}")
+
+            if self._params.transcription_enabled:
+                await self.start_transcription(self._params.transcription_settings)
+
+            await self._callbacks.on_joined(data)
+
+            self._joined_event.set()
+        else:
+            error_msg = f"Error joining {self._room_url}: {error}"
+            logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
+            self._joining = False
 
     async def _join(self):
         """Execute the actual room join operation."""
@@ -718,7 +823,7 @@ class DailyTransportClient(EventHandler):
             },
         )
 
-        return await asyncio.wait_for(future, timeout=10)
+        return await future
 
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
@@ -744,17 +849,12 @@ class DailyTransportClient(EventHandler):
         for track_name, _ in self._custom_audio_tracks.items():
             await self.remove_custom_audio_track(track_name)
 
-        try:
-            error = await self._leave()
-            if not error:
-                logger.info(f"Left {self._room_url}")
-                await self._callbacks.on_left()
-            else:
-                error_msg = f"Error leaving {self._room_url}: {error}"
-                logger.error(error_msg)
-                await self._callbacks.on_error(error_msg)
-        except asyncio.TimeoutError:
-            error_msg = f"Time out leaving {self._room_url}"
+        error = await self._leave()
+        if not error:
+            logger.info(f"Left {self._room_url}")
+            await self._callbacks.on_left()
+        else:
+            error_msg = f"Error leaving {self._room_url}: {error}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
 
@@ -765,7 +865,7 @@ class DailyTransportClient(EventHandler):
 
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
-        return await asyncio.wait_for(future, timeout=10)
+        return await future
 
     def _cleanup(self):
         """Cleanup the Daily client instance."""
@@ -1592,7 +1692,7 @@ class DailyInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = DailyInputTransportMessageUrgentFrame(message=message, participant_id=sender)
+        frame = DailyInputTransportMessageFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     #
@@ -1814,7 +1914,9 @@ class DailyOutputTransport(BaseOutputTransport):
         if isinstance(frame, DailyUpdateRemoteParticipantsFrame):
             await self._client.update_remote_participants(frame.remote_participants)
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message to participants.
 
         Args:
@@ -1835,24 +1937,33 @@ class DailyOutputTransport(BaseOutputTransport):
 
         Args:
             destination: The destination identifier to register.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         await self._client.register_audio_destination(destination)
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the Daily call.
 
         Args:
             frame: The audio frame to write.
-        """
-        await self._client.write_audio_frame(frame)
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
+        """
+        return await self._client.write_audio_frame(frame)
+
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the Daily call.
 
         Args:
             frame: The video frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
-        await self._client.write_video_frame(frame)
+        return await self._client.write_video_frame(frame)
 
     def _supports_native_dtmf(self) -> bool:
         """Daily supports native DTMF via telephone events.
@@ -1974,9 +2085,6 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_recording_stopped")
         self._register_event_handler("on_recording_error")
         self._register_event_handler("on_before_leave", sync=True)
-        # Deprecated
-        self._register_event_handler("on_joined")
-        self._register_event_handler("on_left")
 
     #
     # BaseTransport

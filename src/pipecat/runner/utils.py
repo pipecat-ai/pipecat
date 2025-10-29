@@ -99,29 +99,41 @@ async def parse_telephony_websocket(websocket: WebSocket):
         tuple: (transport_type: str, call_data: dict)
 
         call_data contains provider-specific fields:
-        - Twilio: {
-            "stream_id": str,
-            "call_id": str,
-            "body": dict
-        }
-        - Telnyx: {
-            "stream_id": str,
-            "call_control_id": str,
-            "outbound_encoding": str,
-            "from": str,
-            "to": str,
-        }
-        - Plivo: {
-            "stream_id": str,
-            "call_id": str,
-        }
-        - Exotel: {
-            "stream_id": str,
-            "call_id": str,
-            "account_sid": str,
-            "from": str,
-            "to": str,
-        }
+
+        - Twilio::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+                "body": dict
+            }
+
+        - Telnyx::
+
+            {
+                "stream_id": str,
+                "call_control_id": str,
+                "outbound_encoding": str,
+                "from": str,
+                "to": str,
+            }
+
+        - Plivo::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+            }
+
+        - Exotel::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+                "account_sid": str,
+                "from": str,
+                "to": str,
+            }
 
     Example usage::
 
@@ -301,6 +313,7 @@ def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
     Returns:
         Cleaned SDP text with filtered ICE candidates.
     """
+    logger.debug("Removing unsupported ICE candidates from SDP")
     result = []
     lines = text.splitlines()
     for line in lines:
@@ -309,7 +322,7 @@ def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
                 result.append(line)
         else:
             result.append(line)
-    return "\r\n".join(result)
+    return "\r\n".join(result) + "\r\n"
 
 
 def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
@@ -321,15 +334,16 @@ def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
     Returns:
         SDP text with sha-384 and sha-512 fingerprints removed.
     """
+    logger.debug("Removing unsupported fingerprints from SDP")
     result = []
     lines = text.splitlines()
     for line in lines:
         if not re.search("sha-384", line) and not re.search("sha-512", line):
             result.append(line)
-    return "\r\n".join(result)
+    return "\r\n".join(result) + "\r\n"
 
 
-def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
+def smallwebrtc_sdp_munging(sdp: str, host: Optional[str]) -> str:
     """Apply SDP modifications for SmallWebRTC compatibility.
 
     Args:
@@ -340,7 +354,8 @@ def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
         Modified SDP string with fingerprint and ICE candidate cleanup.
     """
     sdp = _smallwebrtc_sdp_cleanup_fingerprints(sdp)
-    sdp = _smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
+    if host:
+        sdp = _smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
     return sdp
 
 

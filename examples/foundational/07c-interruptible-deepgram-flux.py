@@ -4,25 +4,29 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMMessagesAppendFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContext,
+    LLMContextAggregatorPair,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
+from pipecat.services.deepgram.tts import DeepgramTTSService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
-# Load environment variables
 load_dotenv(override=True)
 
 
@@ -33,23 +37,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        # set stop_secs to something roughly similar to the internal setting
-        # of the Multimodal Live api, just to align events.
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
 }
 
@@ -57,30 +52,34 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    # Create the Gemini Multimodal Live LLM service
-    system_instruction = f"""
-    You are a helpful AI assistant.
-    Your goal is to demonstrate your capabilities in a helpful and engaging way.
-    Your output will be converted to audio so don't include special characters in your answers.
-    Respond to what the user said in a creative and helpful way.
-    """
+    stt = DeepgramFluxSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    llm = GeminiMultimodalLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_instruction,
-        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
-    )
+    tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-2-andromeda-en")
 
-    # Build the pipeline
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
+
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(context)
+
     pipeline = Pipeline(
         [
-            transport.input(),
-            llm,
-            transport.output(),
+            transport.input(),  # Transport user input
+            stt,  # STT
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
-    # Configure the pipeline task
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
@@ -90,32 +89,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
-    # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames(
-            [
-                LLMMessagesAppendFrame(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"Greet the user and introduce yourself.",
-                        }
-                    ]
-                )
-            ]
-        )
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
 
-    # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    # Run the pipeline
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
     await runner.run(task)
 
 

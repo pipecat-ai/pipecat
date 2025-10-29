@@ -61,7 +61,6 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     import aioboto3
-    import httpx
     from botocore.config import Config
     from botocore.exceptions import ReadTimeoutError
 except ModuleNotFoundError as e:
@@ -721,11 +720,11 @@ class AWSBedrockLLMService(LLMService):
             additional_model_request_fields: Additional model-specific parameters.
         """
 
-        max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
-        temperature: Optional[float] = Field(default_factory=lambda: 0.7, ge=0.0, le=1.0)
-        top_p: Optional[float] = Field(default_factory=lambda: 0.999, ge=0.0, le=1.0)
+        max_tokens: Optional[int] = Field(default=None, ge=1)
+        temperature: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+        top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
         stop_sequences: Optional[List[str]] = Field(default_factory=lambda: [])
-        latency: Optional[str] = Field(default_factory=lambda: "standard")
+        latency: Optional[str] = Field(default=None)
         additional_model_request_fields: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -802,6 +801,24 @@ class AWSBedrockLLMService(LLMService):
         """
         return True
 
+    def _build_inference_config(self) -> Dict[str, Any]:
+        """Build inference config with only the parameters that are set.
+
+        This prevents conflicts with models (e.g., Claude Sonnet 4.5) that don't
+        allow certain parameter combinations like temperature and top_p together.
+
+        Returns:
+            Dictionary containing only the inference parameters that are not None.
+        """
+        inference_config = {}
+        if self._settings["max_tokens"] is not None:
+            inference_config["maxTokens"] = self._settings["max_tokens"]
+        if self._settings["temperature"] is not None:
+            inference_config["temperature"] = self._settings["temperature"]
+        if self._settings["top_p"] is not None:
+            inference_config["topP"] = self._settings["top_p"]
+        return inference_config
+
     async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
@@ -827,15 +844,15 @@ class AWSBedrockLLMService(LLMService):
         model_id = self.model_name
 
         # Prepare request parameters
+        inference_config = self._build_inference_config()
+
         request_params = {
             "modelId": model_id,
             "messages": messages,
-            "inferenceConfig": {
-                "maxTokens": 8192,
-                "temperature": 0.7,
-                "topP": 0.9,
-            },
         }
+
+        if inference_config:
+            request_params["inferenceConfig"] = inference_config
 
         if system:
             request_params["system"] = system
@@ -975,20 +992,19 @@ class AWSBedrockLLMService(LLMService):
             tools = params_from_context["tools"]
             tool_choice = params_from_context["tool_choice"]
 
-            # Set up inference config
-            inference_config = {
-                "maxTokens": self._settings["max_tokens"],
-                "temperature": self._settings["temperature"],
-                "topP": self._settings["top_p"],
-            }
+            # Set up inference config - only include parameters that are set
+            inference_config = self._build_inference_config()
 
             # Prepare request parameters
             request_params = {
                 "modelId": self.model_name,
                 "messages": messages,
-                "inferenceConfig": inference_config,
                 "additionalModelRequestFields": self._settings["additional_model_request_fields"],
             }
+
+            # Only add inference config if it has parameters
+            if inference_config:
+                request_params["inferenceConfig"] = inference_config
 
             # Add system message
             if system:
@@ -1117,7 +1133,7 @@ class AWSBedrockLLMService(LLMService):
             # also get cancelled.
             use_completion_tokens_estimate = True
             raise
-        except httpx.TimeoutException:
+        except (ReadTimeoutError, asyncio.TimeoutError):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")

@@ -19,7 +19,8 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.anthropic.llm import AnthropicLLMService
@@ -93,8 +94,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     messages = [{"role": "system", "content": system}]
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
@@ -140,6 +141,14 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    if not os.getenv("MCP_RUN_SSE_URL"):
+        logger.error(
+            f"Please set MCP_RUN_SSE_URL environment variable for this example. See https://mcp.run"
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.runner.run import main
 
     main()

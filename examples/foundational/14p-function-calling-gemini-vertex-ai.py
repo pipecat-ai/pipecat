@@ -20,7 +20,8 @@ from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -75,9 +76,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = GoogleVertexLLMService(
         credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
-        params=GoogleVertexLLMService.InputParams(
-            project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
-        ),
+        project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
+        location=os.getenv("GOOGLE_CLOUD_LOCATION"),
     )
     # You can aslo register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
@@ -112,8 +112,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

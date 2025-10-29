@@ -11,15 +11,60 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterruptionFrame,
+    OutputTransportMessageUrgentFrame,
     TextFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import SleepFrame, run_test
 
 
 class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
+    async def test_before_after_events(self):
+        identity = IdentityFilter()
+
+        before_process_called = False
+        after_process_called = False
+        before_push_called = False
+        after_push_called = False
+
+        @identity.event_handler("on_before_process_frame")
+        async def on_before_process_frame(filter, frame):
+            nonlocal before_process_called
+            before_process_called = True
+
+        @identity.event_handler("on_after_process_frame")
+        async def on_after_process_frame(filter, frame):
+            nonlocal after_process_called
+            after_process_called = True
+
+        @identity.event_handler("on_before_push_frame")
+        async def on_before_push_frame(filter, frame):
+            nonlocal before_push_called
+            before_push_called = True
+
+        @identity.event_handler("on_after_push_frame")
+        async def on_after_push_frame(filter, frame):
+            nonlocal after_push_called
+            after_push_called = True
+
+        pipeline = Pipeline([identity])
+
+        frames_to_send = [TextFrame(text="Hello cat!")]
+
+        expected_down_frames = [TextFrame]
+
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert before_process_called
+        assert after_process_called
+        assert before_push_called
+        assert after_push_called
+
     async def test_interruption_and_wait(self):
         class DelayFrameProcessor(FrameProcessor):
             """This processors just gives time to the event loop to change
@@ -36,7 +81,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
 
                 if isinstance(frame, TextFrame):
                     await self.push_interruption_task_frame_and_wait()
-                    await self.push_frame(TransportMessageUrgentFrame(message=frame.text))
+                    await self.push_frame(OutputTransportMessageUrgentFrame(message=frame.text))
                 else:
                     await self.push_frame(frame, direction)
 
@@ -56,7 +101,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             InterruptionFrame,
             InterruptionFrame,
-            TransportMessageUrgentFrame,
+            OutputTransportMessageUrgentFrame,
             EndFrame,
         ]
         await run_test(

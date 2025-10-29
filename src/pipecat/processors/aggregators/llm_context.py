@@ -15,9 +15,10 @@ service-specific adapter.
 """
 
 import base64
+import copy
 import io
 from dataclasses import dataclass
-from typing import Any, List, Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -30,6 +31,9 @@ from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
+
+if TYPE_CHECKING:
+    from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 
 # "Re-export" types from OpenAI that we're using as universal context types.
 # NOTE: if universal message types need to someday diverge from OpenAI's, we
@@ -65,6 +69,26 @@ class LLMContext:
     and content formatting.
     """
 
+    @staticmethod
+    def from_openai_context(openai_context: "OpenAILLMContext") -> "LLMContext":
+        """Create a universal LLM context from an OpenAI-specific context.
+
+        NOTE: this should only be used internally, for facilitating migration
+        from OpenAILLMContext to LLMContext. New user code should use
+        LLMContext directly.
+
+        Args:
+            openai_context: The OpenAI LLM context to convert.
+
+        Returns:
+            New LLMContext instance with converted messages and settings.
+        """
+        return LLMContext(
+            messages=openai_context.get_messages(),
+            tools=openai_context.tools,
+            tool_choice=openai_context.tool_choice,
+        )
+
     def __init__(
         self,
         messages: Optional[List[LLMContextMessage]] = None,
@@ -82,6 +106,19 @@ class LLMContext:
         self._tools: ToolsSchema | NotGiven = LLMContext._normalize_and_validate_tools(tools)
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
 
+    @property
+    def messages(self) -> List[LLMContextMessage]:
+        """Get the current messages list.
+
+        NOTE: This is equivalent to calling `get_messages()` with no filter. If
+        you want to filter out LLM-specific messages that don't pertain to your
+        LLM, use `get_messages()` directly.
+
+        Returns:
+            List of conversation messages.
+        """
+        return self.get_messages()
+
     def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:
         """Get the current messages list.
 
@@ -89,7 +126,8 @@ class LLMContext:
             llm_specific_filter: Optional filter to return LLM-specific
                 messages for the given LLM, in addition to the standard
                 messages. If messages end up being filtered, an error will be
-                logged.
+                logged; this is intended to catch accidental use of
+                incompatible LLM-specific messages.
 
         Returns:
             List of conversation messages.

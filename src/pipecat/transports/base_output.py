@@ -29,20 +29,19 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    InputTransportMessageUrgentFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     OutputTransportReadyFrame,
     SpeechOutputAudioRawFrame,
     SpriteFrame,
     StartFrame,
     SystemFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -53,10 +52,6 @@ from pipecat.utils.time import nanoseconds_to_seconds
 BOT_VAD_STOP_SECS = 0
 
 
-class TransportClientNotConnectedException(Exception):
-    """Exception raised when a transport client is not connected."""
-
-    pass
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -185,7 +180,9 @@ class BaseOutputTransport(FrameProcessor):
         # Sending a frame indicating that the output transport is ready and able to receive frames.
         await self.push_frame(OutputTransportReadyFrame(), FrameDirection.UPSTREAM)
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message.
 
         Args:
@@ -209,21 +206,27 @@ class BaseOutputTransport(FrameProcessor):
         """
         pass
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the transport.
 
         Args:
             frame: The output video frame to write.
-        """
-        pass
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        Returns:
+            True if the video frame was written successfully, False otherwise.
+        """
+        return False
+
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the transport.
 
         Args:
             frame: The output audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
-        pass
+        return False
 
     async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         """Write a DTMF tone using the transport's preferred method.
@@ -293,44 +296,27 @@ class BaseOutputTransport(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        #
-        # System frames (like InterruptionFrame) are pushed immediately. Other
-        # frames require order so they are put in the sink queue.
-        #
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
             # processed by every processor before any other frame is processed.
             await self.push_frame(frame, direction)
             await self.start(frame)
+        elif isinstance(frame, EndFrame):
+            await self.stop(frame)
+            # Keep pushing EndFrame down so all the pipeline stops nicely.
+            await self.push_frame(frame, direction)
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
-        elif isinstance(frame, TransportMessageUrgentFrame) and not isinstance(
-            frame, InputTransportMessageUrgentFrame
-        ):
+        elif isinstance(frame, OutputTransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, OutputDTMFUrgentFrame):
             await self.write_dtmf(frame)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
-        # Control frames.
-        elif isinstance(frame, EndFrame):
-            await self.stop(frame)
-            # Keep pushing EndFrame down so all the pipeline stops nicely.
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, MixerControlFrame):
-            await self._handle_frame(frame)
-        # Other frames.
-        elif isinstance(frame, OutputAudioRawFrame):
-            await self._handle_frame(frame)
-        elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
-            await self._handle_frame(frame)
-        # TODO(aleix): Images and audio should support presentation timestamps.
-        elif frame.pts:
-            await self._handle_frame(frame)
         elif direction == FrameDirection.UPSTREAM:
             await self.push_frame(frame, direction)
         else:
@@ -412,6 +398,13 @@ class BaseOutputTransport(FrameProcessor):
 
             # Indicates if the bot is currently speaking.
             self._bot_speaking = False
+            # Last time a BotSpeakingFrame was pushed.
+            self._bot_speaking_frame_time = 0
+            # How often a BotSpeakingFrame should be pushed (value should be
+            # lower than the audio chunks).
+            self._bot_speaking_frame_period = 0.2
+            # Last time the bot actually spoke.
+            self._bot_speech_last_time = 0
 
             self._audio_task: Optional[asyncio.Task] = None
             self._video_task: Optional[asyncio.Task] = None
@@ -603,39 +596,71 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _bot_started_speaking(self):
             """Handle bot started speaking event."""
-            if not self._bot_speaking:
-                logger.debug(
-                    f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
-                )
+            if self._bot_speaking:
+                return
 
-                downstream_frame = BotStartedSpeakingFrame()
-                downstream_frame.transport_destination = self._destination
-                upstream_frame = BotStartedSpeakingFrame()
-                upstream_frame.transport_destination = self._destination
-                await self._transport.push_frame(downstream_frame)
-                await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
+            logger.debug(
+                f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
+            )
 
-                self._bot_speaking = True
+            downstream_frame = BotStartedSpeakingFrame()
+            downstream_frame.transport_destination = self._destination
+            upstream_frame = BotStartedSpeakingFrame()
+            upstream_frame.transport_destination = self._destination
+            await self._transport.push_frame(downstream_frame)
+            await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
+
+            self._bot_speaking = True
 
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
-            if self._bot_speaking:
-                logger.debug(
-                    f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
-                )
+            if not self._bot_speaking:
+                return
 
-                downstream_frame = BotStoppedSpeakingFrame()
-                downstream_frame.transport_destination = self._destination
-                upstream_frame = BotStoppedSpeakingFrame()
-                upstream_frame.transport_destination = self._destination
-                await self._transport.push_frame(downstream_frame)
-                await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
+            logger.debug(
+                f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
+            )
 
-                self._bot_speaking = False
+            downstream_frame = BotStoppedSpeakingFrame()
+            downstream_frame.transport_destination = self._destination
+            upstream_frame = BotStoppedSpeakingFrame()
+            upstream_frame.transport_destination = self._destination
+            await self._transport.push_frame(downstream_frame)
+            await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
-                # Clean audio buffer (there could be tiny left overs if not multiple
-                # to our output chunk size).
-                self._audio_buffer = bytearray()
+            self._bot_speaking = False
+
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
+
+        async def _bot_currently_speaking(self):
+            """Handle bot speaking event."""
+            await self._bot_started_speaking()
+
+            diff_time = time.time() - self._bot_speaking_frame_time
+            if diff_time >= self._bot_speaking_frame_period:
+                await self._transport.push_frame(BotSpeakingFrame())
+                await self._transport.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                self._bot_speaking_frame_time = time.time()
+
+            self._bot_speech_last_time = time.time()
+
+        async def _maybe_bot_currently_speaking(self, frame: SpeechOutputAudioRawFrame):
+            if not is_silence(frame.audio):
+                await self._bot_currently_speaking()
+            else:
+                silence_duration = time.time() - self._bot_speech_last_time
+                if silence_duration > BOT_VAD_STOP_SECS:
+                    await self._bot_stopped_speaking()
+
+        async def _handle_bot_speech(self, frame: Frame):
+            # TTS case.
+            if isinstance(frame, TTSAudioRawFrame):
+                await self._bot_currently_speaking()
+            # Speech stream case.
+            elif isinstance(frame, SpeechOutputAudioRawFrame):
+                await self._maybe_bot_currently_speaking(frame)
 
         async def _handle_frame(self, frame: Frame):
             """Handle various frame types with appropriate processing.
@@ -643,11 +668,13 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 frame: The frame to handle.
             """
-            if isinstance(frame, OutputImageRawFrame):
+            if isinstance(frame, OutputAudioRawFrame):
+                await self._handle_bot_speech(frame)
+            elif isinstance(frame, OutputImageRawFrame):
                 await self._set_video_image(frame)
             elif isinstance(frame, SpriteFrame):
                 await self._set_video_images(frame.images)
-            elif isinstance(frame, TransportMessageFrame):
+            elif isinstance(frame, OutputTransportMessageFrame):
                 await self._transport.send_message(frame)
             elif isinstance(frame, OutputDTMFFrame):
                 await self._transport.write_dtmf(frame)
@@ -666,6 +693,7 @@ class BaseOutputTransport(FrameProcessor):
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
                         yield frame
+                        self._audio_queue.task_done()
                     except asyncio.TimeoutError:
                         # Notify the bot stopped speaking upstream if necessary.
                         await self._bot_stopped_speaking()
@@ -692,6 +720,7 @@ class BaseOutputTransport(FrameProcessor):
                                 frame.audio = await self._mixer.mix(frame.audio)
                             last_frame_time = time.time()
                         yield frame
+                        self._audio_queue.task_done()
                     except asyncio.QueueEmpty:
                         # Notify the bot stopped speaking upstream if necessary.
                         diff_time = time.time() - last_frame_time
@@ -717,44 +746,7 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
-            # Push a BotSpeakingFrame every 200ms, we don't really need to push it
-            # at every audio chunk. If the audio chunk is bigger than 200ms, push at
-            # every audio chunk.
-            TOTAL_CHUNK_MS = self._params.audio_out_10ms_chunks * 10
-            BOT_SPEAKING_CHUNK_PERIOD = max(int(200 / TOTAL_CHUNK_MS), 1)
-            bot_speaking_counter = 0
-            speech_last_speaking_time = 0
-
-            # Sometimes, ice gathering takes around 5 seconds, so
-            # lets poll for approximately 10 seconds before giving up
-            MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS = 20
-            client_not_connected_count = 0
-
             async for frame in self._next_frame():
-                # Notify the bot started speaking upstream if necessary and that
-                # it's actually speaking.
-                is_speaking = False
-                if isinstance(frame, TTSAudioRawFrame):
-                    is_speaking = True
-                elif isinstance(frame, SpeechOutputAudioRawFrame):
-                    if not is_silence(frame.audio):
-                        is_speaking = True
-                        speech_last_speaking_time = time.time()
-                    else:
-                        silence_duration = time.time() - speech_last_speaking_time
-                        if silence_duration > BOT_VAD_STOP_SECS:
-                            await self._bot_stopped_speaking()
-
-                if is_speaking:
-                    await self._bot_started_speaking()
-                    if bot_speaking_counter % BOT_SPEAKING_CHUNK_PERIOD == 0:
-                        await self._transport.push_frame(BotSpeakingFrame())
-                        await self._transport.push_frame(
-                            BotSpeakingFrame(), FrameDirection.UPSTREAM
-                        )
-                        bot_speaking_counter = 0
-                    bot_speaking_counter += 1  # +1 every 20 ms, so per 10 counter, its 200ms
-
                 # No need to push EndFrame, it's pushed from process_frame().
                 if isinstance(frame, EndFrame):
                     break
@@ -762,30 +754,21 @@ class BaseOutputTransport(FrameProcessor):
                 # Handle frame.
                 await self._handle_frame(frame)
 
-                # Send audio.
-                if isinstance(frame, OutputAudioRawFrame):
-                    try:
-                        await self._transport.write_audio_frame(frame)
+                # If we are not able to write to the transport we shouldn't
+                # pushb downstream.
+                push_downstream = True
 
-                        # Only push Audio Frame downstream if the write is successful
-                        await self._transport.push_frame(frame)
+                # Try to send audio to the transport.
+                try:
+                    if isinstance(frame, OutputAudioRawFrame):
+                        push_downstream = await self._transport.write_audio_frame(frame)
+                except Exception as e:
+                    logger.error(f"{self} Error writing {frame} to transport: {e}")
+                    push_downstream = False
 
-                        # Reset counter on successful write
-                        client_not_connected_count = 0
-                    except TransportClientNotConnectedException:
-                        client_not_connected_count += 1
-                        logger.warning(
-                            f"Got TransportClientNotConnectedException ({client_not_connected_count}/{MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS})"
-                        )
-                        if client_not_connected_count >= MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS:
-                            logger.error(
-                                f"Maximum TransportClientNotConnectedException attempts reached ({MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS}). Breaking out of _audio_task_handler"
-                            )
-                            return
-                        # Sleep for 1 second before continuing
-                        await asyncio.sleep(0.5)
-                else:
-                    # Push any other frame than AudioRawFrame downstream
+                # If we were able to send to the transport, push the frame
+                # downstream in case anyone else needs it.
+                if push_downstream:
                     await self._transport.push_frame(frame)
 
         #

@@ -29,7 +29,7 @@ class EventHandler:
     This data class stores the event name, a list of handlers to run for this
     event, and whether these handlers will be executed in a task.
 
-    Attributes:
+    Parameters:
         name (str): The name of the event handler.
         handlers (List[Any]): A list of functions to be called when this event is triggered.
         is_sync (bool): Indicates whether the functions are executed in a task.
@@ -139,7 +139,7 @@ class BaseObject(ABC):
                 name=event_name, handlers=[], is_sync=sync
             )
         else:
-            logger.warning(f"Event handler {event_name} not registered")
+            logger.warning(f"Event handler {event_name} already registered")
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
         """Call all registered handlers for the specified event.
