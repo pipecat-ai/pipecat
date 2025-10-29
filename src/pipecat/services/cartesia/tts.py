@@ -10,7 +10,6 @@ import base64
 import json
 import uuid
 import warnings
-from dataclasses import dataclass
 from typing import AsyncGenerator, List, Literal, Optional, Union
 
 from loguru import logger
@@ -49,8 +48,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-@dataclass
-class GenerationConfig:
+class GenerationConfig(BaseModel):
     """Configuration for Cartesia Sonic-3 generation parameters.
 
     Sonic-3 interprets these parameters as guidance to ensure natural speech.
@@ -324,15 +322,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             msg["speed"] = self._settings["speed"]
 
         if self._settings["generation_config"]:
-            gen_config = {}
-            if self._settings["generation_config"].volume is not None:
-                gen_config["volume"] = self._settings["generation_config"].volume
-            if self._settings["generation_config"].speed is not None:
-                gen_config["speed"] = self._settings["generation_config"].speed
-            if self._settings["generation_config"].emotion is not None:
-                gen_config["emotion"] = self._settings["generation_config"].emotion
-            if gen_config:
-                msg["generation_config"] = gen_config
+            msg["generation_config"] = self._settings["generation_config"].model_dump(exclude_none=True)
 
         return json.dumps(msg)
 
@@ -674,15 +664,7 @@ class CartesiaHttpTTSService(TTSService):
                 payload["speed"] = self._settings["speed"]
 
             if self._settings["generation_config"]:
-                gen_config = {}
-                if self._settings["generation_config"].volume is not None:
-                    gen_config["volume"] = self._settings["generation_config"].volume
-                if self._settings["generation_config"].speed is not None:
-                    gen_config["speed"] = self._settings["generation_config"].speed
-                if self._settings["generation_config"].emotion is not None:
-                    gen_config["emotion"] = self._settings["generation_config"].emotion
-                if gen_config:
-                    payload["generation_config"] = gen_config
+                payload["generation_config"] = self._settings["generation_config"].model_dump(exclude_none=True)
 
             yield TTSStartedFrame()
 
