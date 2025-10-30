@@ -1282,13 +1282,13 @@ wheels = [
 
 [[package]]
 name = "daily-python"
-version = "0.20.0"
+version = "0.21.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9b/02/ce81ebf11a04cd133a5539e08f85060574711fff05a1d6ad29705f0755c1/daily_python-0.20.0-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:7da3f1df8cd9ef7f7fcc96ce688348dc903f62d82b6dd155a53bc64b7a74f3a7", size = 13259887, upload-time = "2025-10-16T22:14:12.262Z" },
-    { url = "https://files.pythonhosted.org/packages/4a/1e/51f06f3486c978e1184af2271e800ce6a6e8a8f95d61ee6624bae88ae9cd/daily_python-0.20.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:d02fd7b8c8079ceaa550ef23db052cdf70a8ffaf8ab6a8bc1a1e97bf0b939464", size = 11642453, upload-time = "2025-10-16T22:14:14.477Z" },
-    { url = "https://files.pythonhosted.org/packages/71/c9/f767f0b479abd39330569ad61fb9db4661aae56cd74bb27c6f3483595463/daily_python-0.20.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:a5c8718982c221dc18b41fb0692c9f8435f115f72e74994c94d3b9c6dad7c534", size = 13634216, upload-time = "2025-10-16T22:14:16.235Z" },
-    { url = "https://files.pythonhosted.org/packages/e8/10/5c6d7b000bee36c2a0587a092a34c7486d2de831fc8e44ed42b16a6bd99f/daily_python-0.20.0-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:ca9132aef1bdb5be663d1894b440dab1f998ebb3f45dfc31d44effabded4bc08", size = 14282189, upload-time = "2025-10-16T22:14:18.229Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/11/99590f8b7aad077f3f9b5b59d39b010aee0bd01b14dece8ae1e93d8080e7/daily_python-0.21.0-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:bdec96417825181559769bb2258ae688d1215949a1878336194e36fb452274a8", size = 13277066, upload-time = "2025-10-29T00:20:49.523Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/db/8c57f1a1b713ba3393584ac2be32d8074d3022a2c2c17c28eb4cd2aa3629/daily_python-0.21.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:18677fa1415a0dc48b891cdf2fb8fe9dabc70e1b019d5aaa3d0699ccc8d187c9", size = 11644908, upload-time = "2025-10-29T00:20:52.106Z" },
+    { url = "https://files.pythonhosted.org/packages/64/b6/b03f2f58a367d6ef4bb728715471542fdfa68afa8a177670139c3a2aadb7/daily_python-0.21.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:97eb97352fe74227061b678e330b8befcfa4c694feb6eb2b09fe6eacec00ad6d", size = 13652356, upload-time = "2025-10-29T00:20:54.813Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/76/bde65f6f8d4c1679dc6c185fa37dae9223f6ddb4b7ced728ef46504956f7/daily_python-0.21.0-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:68c3e36f609fc2fce79e4d17ecf1021eadd836506db6c5125f95c682bcf3612a", size = 14304643, upload-time = "2025-10-29T00:20:57.194Z" },
 ]
 
 [[package]]
@@ -4637,7 +4637,7 @@ requires-dist = [
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = "~=1.42.0" },
     { name = "cartesia", marker = "extra == 'cartesia'", specifier = "~=2.0.3" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
-    { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.20.0" },
+    { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.21.0" },
     { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = "~=4.7.0" },
     { name = "docstring-parser", specifier = "~=0.16" },
     { name = "einops", marker = "extra == 'moondream'", specifier = "~=0.8.0" },

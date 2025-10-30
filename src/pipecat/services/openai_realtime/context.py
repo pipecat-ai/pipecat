@@ -4,18 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Realtime LLM context and aggregator implementations."""
+"""OpenAI Realtime LLM context and aggregator implementations.
 
-import warnings
+.. deprecated:: 0.0.91
+    OpenAI Realtime no longer uses types from this module under the hood.
+    It now uses `LLMContext` and `LLMContextAggregatorPair`.
+    Using the new patterns should allow you to not need types from this module.
+
+    See deprecation warning in pipecat.services.openai.realtime.context for
+    more details.
+"""
 
 from pipecat.services.openai.realtime.context import *
-
-with warnings.catch_warnings():
-    warnings.simplefilter("always")
-    warnings.warn(
-        "Types in pipecat.services.openai_realtime.context are deprecated. "
-        "Please use the equivalent types from "
-        "pipecat.services.openai.realtime.context instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )

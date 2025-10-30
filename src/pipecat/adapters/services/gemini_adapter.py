@@ -24,13 +24,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 
 try:
-    from google.genai.types import (
-        Blob,
-        Content,
-        FunctionCall,
-        FunctionResponse,
-        Part,
-    )
+    from google.genai.types import Blob, Content, FileData, FunctionCall, FunctionResponse, Part
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -309,6 +303,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 parts.append(
                     Part(
                         function_call=FunctionCall(
+                            id=id,
                             name=name,
                             args=json.loads(tc["function"]["arguments"]),
                         )
@@ -334,9 +329,12 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 function_name = params.tool_call_id_to_name_mapping[tool_call_id]
 
             parts.append(
-                Part.from_function_response(
-                    name=function_name,
-                    response=response_dict,
+                Part(
+                    function_response=FunctionResponse(
+                        id=tool_call_id,
+                        name=function_name,
+                        response=response_dict,
+                    )
                 )
             )
         elif isinstance(content, str):
@@ -358,6 +356,16 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     input_audio = c["input_audio"]
                     audio_bytes = base64.b64decode(input_audio["data"])
                     parts.append(Part(inline_data=Blob(mime_type="audio/wav", data=audio_bytes)))
+                elif c["type"] == "file_data":
+                    file_data = c["file_data"]
+                    parts.append(
+                        Part(
+                            file_data=FileData(
+                                mime_type=file_data.get("mime_type"),
+                                file_uri=file_data.get("file_uri"),
+                            )
+                        )
+                    )
 
         return self.MessageConversionResult(
             content=Content(role=role, parts=parts),
