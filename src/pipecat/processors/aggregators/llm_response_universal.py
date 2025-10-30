@@ -616,7 +616,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_function_call_result(frame)
         elif isinstance(frame, FunctionCallCancelFrame):
             await self._handle_function_call_cancel(frame)
-        elif isinstance(frame, UserImageRawFrame) and frame.request and frame.request.tool_call_id:
+        elif isinstance(frame, UserImageRawFrame):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_aggregation()
@@ -767,27 +767,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 message["content"] = result
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
-        logger.debug(
-            f"{self} UserImageRawFrame: [{frame.request.function_name}:{frame.request.tool_call_id}]"
-        )
-
-        if frame.request.tool_call_id not in self._function_calls_in_progress:
-            logger.warning(
-                f"UserImageRawFrame tool_call_id [{frame.request.tool_call_id}] is not running"
-            )
+        if not frame.add_to_context:
             return
 
-        del self._function_calls_in_progress[frame.request.tool_call_id]
+        logger.debug(f"{self} Adding UserImageRawFrame to LLM context (size: {frame.size})")
 
-        # Update context with the image frame
-        self._update_function_call_result(
-            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
-        )
         self._context.add_image_frame_message(
             format=frame.format,
             size=frame.size,
             image=frame.image,
-            text=frame.request.context,
+            text=frame.text,
         )
 
         await self.push_aggregation()

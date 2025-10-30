@@ -492,11 +492,19 @@ class LLMService(AIService):
         tool_call_id: Optional[str] = None,
         text_content: Optional[str] = None,
         video_source: Optional[str] = None,
+        timeout: Optional[float] = 10.0,
     ):
         """Request an image from a user.
 
         Pushes a UserImageRequestFrame upstream to request an image from the
-        specified user.
+        specified user. The user image can then be processed by the LLM.
+
+        Use this function from a function call if you want the LLM to process
+        the image. If you expect the image to be processed by a vision service,
+        you might want to push a UserImageRequestFrame upstream directly.
+
+        .. deprecated:: 0.0.92
+            This method is deprecated, push a `UserImageRequestFrame` instead.
 
         Args:
             user_id: The ID of the user to request an image from.
@@ -504,15 +512,19 @@ class LLMService(AIService):
             tool_call_id: Optional tool call ID associated with the request.
             text_content: Optional text content/context for the image request.
             video_source: Optional video source identifier.
+            timeout: Optional timeout for the requested image to be added to the LLM context.
+
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Method `request_image_frame()` is deprecated, push a `UserImageRequestFrame` instead.",
+                DeprecationWarning,
+            )
         await self.push_frame(
-            UserImageRequestFrame(
-                user_id=user_id,
-                function_name=function_name,
-                tool_call_id=tool_call_id,
-                context=text_content,
-                video_source=video_source,
-            ),
+            UserImageRequestFrame(user_id=user_id, text=text_content),
             FrameDirection.UPSTREAM,
         )
 

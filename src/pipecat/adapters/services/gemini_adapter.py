@@ -343,7 +343,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             for c in content:
                 if c["type"] == "text":
                     parts.append(Part(text=c["text"]))
-                elif c["type"] == "image_url":
+                elif c["type"] == "image_url" and c["image_url"]["url"].startswith("data:"):
                     parts.append(
                         Part(
                             inline_data=Blob(
@@ -352,6 +352,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                             )
                         )
                     )
+                elif c["type"] == "image_url":
+                    url = c["image_url"]["url"]
+                    logger.warning(f"Unsupported 'image_url': {url}")
                 elif c["type"] == "input_audio":
                     input_audio = c["input_audio"]
                     audio_bytes = base64.b64decode(input_audio["data"])
