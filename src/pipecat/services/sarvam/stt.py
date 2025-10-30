@@ -225,6 +225,18 @@ class SarvamSTTService(STTService):
             # Enter the async context manager
             self._socket_client = await self._websocket_context.__aenter__()
 
+            # Register event handler for incoming messages
+            def _message_handler(message):
+                """Wrapper to handle async response handler."""
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._handle_response(message))
+                except RuntimeError:
+                    # Fallback if no running loop
+                    asyncio.create_task(self._handle_response(message))
+
+            self._socket_client.on(EventType.MESSAGE, _message_handler)
+
             # Start listening for messages
             self._listening_task = asyncio.create_task(self._socket_client.start_listening())
 
