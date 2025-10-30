@@ -110,7 +110,6 @@ class SarvamSTTService(STTService):
 
         self.set_model_name(model)
         self._api_key = api_key
-        self._model = model
         self._language_code = params.language
         self._language_string = (
             language_to_sarvam_language(params.language) if params.language else None
@@ -141,15 +140,22 @@ class SarvamSTTService(STTService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Set the Sarvam model and reconnect.
+    async def set_language(self, language: Language):
+        """Set the recognition language and reconnect.
 
         Args:
-            model: The Sarvam model name to use.
+            language: The language to use for speech recognition.
         """
-        await super().set_model(model)
-        logger.info(f"Switching STT model to: [{model}]")
-        self._model = model
+        # saaras models do not accept a language parameter
+        if "saaras" in self.model_name.lower():
+            raise ValueError(
+                f"Model '{self.model_name}' (saaras) does not accept language parameter. "
+                "saaras models auto-detect language."
+            )
+
+        logger.info(f"Switching STT language to: [{language}]")
+        self._language_code = language
+        self._language_string = language_to_sarvam_language(language)
         await self._disconnect()
         await self._connect()
 
@@ -199,13 +205,13 @@ class SarvamSTTService(STTService):
             audio_base64 = base64.b64encode(audio).decode("utf-8")
 
             # Use appropriate method based on service type
-            if "saarika" in self._model.lower():
+            if "saarika" in self.model_name.lower():
                 # STT service
                 await self._socket_client.transcribe(
                     audio=audio_base64, encoding="audio/wav", sample_rate=self.sample_rate
                 )
             else:
-                # STT-translate service
+                # STT-translate service - auto-detects input language and returns translated text
                 await self._socket_client.translate(
                     audio=audio_base64, encoding="audio/wav", sample_rate=self.sample_rate
                 )
@@ -222,21 +228,21 @@ class SarvamSTTService(STTService):
 
         try:
             # Choose the appropriate service based on model
-            if "saarika" in self._model.lower():
+            if "saarika" in self.model_name.lower():
                 # STT service - requires language_code
                 self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
                     language_code=self._language_string,
-                    model=self._model,
+                    model=self.model_name,
                     vad_signals=True,
                     high_vad_sensitivity=True,
                     sample_rate=str(self.sample_rate),
                     input_audio_codec="wav",
                 )
             else:
-                # STT-translate service - auto-detects language
+                # STT-translate service - auto-detects input language and returns translated text
                 self._websocket_context = (
                     self._sarvam_client.speech_to_text_translate_streaming.connect(
-                        model=self._model,
+                        model=self.model_name,
                         vad_signals=True,
                         high_vad_sensitivity=True,
                         sample_rate=str(self.sample_rate),
@@ -318,14 +324,20 @@ class SarvamSTTService(STTService):
                 await self.stop_ttfb_metrics()
                 transcript = message.data.transcript
                 language_code = message.data.language_code
-                if language_code is None:
-                    language_code = "hi-IN"
-                language = self._map_language_code_to_enum(language_code)
+                # Prefer language from message (auto-detected for translate models). Fallback to configured.
+                if language_code:
+                    language = self._map_language_code_to_enum(language_code)
+                elif self._language_string:
+                    language = self._map_language_code_to_enum(self._language_string)
+                else:
+                    language = Language.HI_IN
 
                 # Emit utterance end event
                 await self._call_event_handler("on_utterance_end")
 
                 if transcript and transcript.strip():
+                    # Record tracing for this transcription event
+                    await self._handle_transcription(transcript, True, language)
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
