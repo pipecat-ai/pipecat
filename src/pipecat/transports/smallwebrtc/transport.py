@@ -661,6 +661,8 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                     # UserImageRawFrame. Use a shallow copy so we can remove
                     # elements.
                     for request_frame in self._image_requests[:]:
+                        request_text = request_frame.text if request_frame else None
+                        add_to_context = request_frame.append_to_context if request_frame else None
                         if request_frame.video_source == video_source:
                             # Create UserImageRawFrame using the current video frame
                             image_frame = UserImageRawFrame(
@@ -668,10 +670,8 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                                 image=video_frame.image,
                                 size=video_frame.size,
                                 format=video_frame.format,
-                                text=request_frame.text if request_frame else None,
-                                add_to_context=request_frame.add_to_context
-                                if request_frame
-                                else None,
+                                text=request_text,
+                                append_to_context=add_to_context,
                             )
                             image_frame.transport_source = video_source
                             # Push the frame to the pipeline

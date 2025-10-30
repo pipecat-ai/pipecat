@@ -54,7 +54,7 @@ async def fetch_user_image(params: FunctionCallParams):
     # Request a user image frame and indicate that it should be added to the
     # context.
     await params.llm.push_frame(
-        UserImageRequestFrame(user_id=user_id, text=question, add_to_context=True),
+        UserImageRequestFrame(user_id=user_id, text=question, append_to_context=True),
         FrameDirection.UPSTREAM,
     )
 
