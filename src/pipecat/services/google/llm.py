@@ -1034,6 +1034,23 @@ class GoogleLLMService(LLMService):
         if context:
             await self._process_context(context)
 
+    async def stop(self, frame):
+        """Override stop to gracefully close the client."""
+        await super().stop(frame)
+        await self._close_client()
+
+    async def cancel(self, frame):
+        """Override cancel to gracefully close the client."""
+        await super().cancel(frame)
+        await self._close_client()
+
+    async def _close_client(self):
+        try:
+            await self._client.aio.aclose()
+        except Exception:
+            # Do nothing - we're shutting down anyway
+            pass
+
     def create_context_aggregator(
         self,
         context: OpenAILLMContext,

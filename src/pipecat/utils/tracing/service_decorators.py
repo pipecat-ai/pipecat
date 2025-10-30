@@ -905,7 +905,9 @@ def traced_openai_realtime(operation: str) -> Callable:
                             # Capture context messages being sent
                             if hasattr(self, "_context") and self._context:
                                 try:
-                                    messages = self._context.get_messages_for_logging()
+                                    messages = self.get_llm_adapter().get_messages_for_logging(
+                                        self._context
+                                    )
                                     if messages:
                                         operation_attrs["context_messages"] = json.dumps(messages)
                                 except Exception as e:

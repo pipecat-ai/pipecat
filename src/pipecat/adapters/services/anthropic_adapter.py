@@ -110,7 +110,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         system = NOT_GIVEN
         messages = []
 
-        # first, map messages using self._from_universal_context_message(m)
+        # First, map messages using self._from_universal_context_message(m)
         try:
             messages = [self._from_universal_context_message(m) for m in universal_context_messages]
         except Exception as e:

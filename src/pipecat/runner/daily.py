@@ -76,6 +76,7 @@ class DailyRoomConfig(BaseModel):
 async def configure(
     aiohttp_session: aiohttp.ClientSession,
     *,
+    api_key: Optional[str] = None,
     room_exp_duration: Optional[float] = 2.0,
     token_exp_duration: Optional[float] = 2.0,
     sip_caller_phone: Optional[str] = None,
@@ -92,6 +93,7 @@ async def configure(
 
     Args:
         aiohttp_session: HTTP session for making API requests.
+        api_key: Daily API key.
         room_exp_duration: Room expiration time in hours.
         token_exp_duration: Token expiration time in hours.
         sip_caller_phone: Phone number or identifier for SIP display name.
@@ -129,7 +131,7 @@ async def configure(
         config = await configure(session, room_properties=custom_props)
     """
     # Check for required API key
-    api_key = os.getenv("DAILY_API_KEY")
+    api_key = api_key or os.getenv("DAILY_API_KEY")
     if not api_key:
         raise Exception(
             "DAILY_API_KEY environment variable is required. "

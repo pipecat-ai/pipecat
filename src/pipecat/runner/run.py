@@ -82,6 +82,7 @@ from loguru import logger
 
 from pipecat.runner.types import (
     DailyRunnerArguments,
+    RunnerArguments,
     SmallWebRTCRunnerArguments,
     WebSocketRunnerArguments,
 )
@@ -309,7 +310,7 @@ def _setup_webrtc_routes(
     ):
         """Mimic Pipecat Cloud's proxy."""
         active_session = active_sessions.get(session_id)
-        if not active_session:
+        if active_session is None:
             return Response(content="Invalid or not-yet-ready session_id", status_code=404)
 
         if path.endswith("api/offer"):
@@ -529,9 +530,9 @@ def _setup_daily_routes(app: FastAPI):
     """Set up Daily-specific routes."""
 
     @app.get("/")
-    async def start_agent():
+    async def create_room_and_start_agent():
         """Launch a Daily bot and redirect to room."""
-        print("Starting bot with Daily transport")
+        print("Starting bot with Daily transport and redirecting to Daily room")
 
         import aiohttp
 
@@ -546,11 +547,11 @@ def _setup_daily_routes(app: FastAPI):
             asyncio.create_task(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
 
-    async def _handle_rtvi_request(request: Request):
-        """Common handler for both /start and /connect endpoints.
+    @app.post("/start")
+    async def start_agent(request: Request):
+        """Handler for /start endpoints.
 
         Expects POST body like::
-
             {
                 "createDailyRoom": true,
                 "dailyRoomProperties": { "start_video_off": true },
@@ -567,45 +568,38 @@ def _setup_daily_routes(app: FastAPI):
             logger.error(f"Failed to parse request body: {e}")
             request_data = {}
 
-        # Extract the body data that should be passed to the bot
-        # This mimics Pipecat Cloud's behavior
-        bot_body = request_data.get("body", {})
+        create_daily_room = request_data.get("createDailyRoom", False)
+        body = request_data.get("body", {})
 
-        # Log the extracted body data for debugging
-        if bot_body:
-            logger.info(f"Extracted body data for bot: {bot_body}")
+        bot_module = _get_bot_module()
+
+        existing_room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+
+        result = None
+
+        # Configure room if:
+        # 1. Explicitly requested via createDailyRoom in payload
+        # 2. Using pre-configured room from DAILY_SAMPLE_ROOM_URL env var
+        if create_daily_room or existing_room_url:
+            import aiohttp
+
+            from pipecat.runner.daily import configure
+
+            async with aiohttp.ClientSession() as session:
+                room_url, token = await configure(session)
+                runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=body)
+                result = {
+                    "dailyRoom": room_url,
+                    "dailyToken": token,
+                    "sessionId": str(uuid.uuid4()),
+                }
         else:
-            logger.debug("No body data provided in request")
+            runner_args = RunnerArguments(body=body)
 
-        from pipecat.runner.daily import configure
+        # Start the bot in the background
+        asyncio.create_task(bot_module.bot(runner_args))
 
-        async with aiohttp.ClientSession() as session:
-            room_url, token = await configure(session)
-
-            # Start the bot in the background with extracted body data
-            bot_module = _get_bot_module()
-            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=bot_body)
-            asyncio.create_task(bot_module.bot(runner_args))
-            # Match PCC /start endpoint response format:
-            return {"dailyRoom": room_url, "dailyToken": token}
-
-    @app.post("/start")
-    async def rtvi_start(request: Request):
-        """Launch a Daily bot and return connection info for RTVI clients."""
-        return await _handle_rtvi_request(request)
-
-    @app.post("/connect")
-    async def rtvi_connect(request: Request):
-        """Launch a Daily bot and return connection info for RTVI clients.
-
-        .. deprecated:: 0.0.78
-            Use /start instead. This endpoint will be removed in a future version.
-        """
-        logger.warning(
-            "DEPRECATED: /connect endpoint is deprecated. Please use /start instead. "
-            "This endpoint will be removed in a future version."
-        )
-        return await _handle_rtvi_request(request)
+        return result
 
 
 def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
@@ -798,10 +792,6 @@ def main():
     # Validate ESP32 requirements
     if args.esp32 and args.host == "localhost":
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
-        return
-
-    if args.transport in TELEPHONY_TRANSPORTS and not args.proxy:
-        logger.error(f"For telephony transports, you need to specify `--proxy PROXY`.")
         return
 
     # Log level

@@ -8,7 +8,76 @@
 
 This module provides specialized context aggregators and message handling for AWS Nova Sonic,
 including conversation history management and role-specific message processing.
+
+.. deprecated:: 0.0.91
+    AWS Nova Sonic no longer uses types from this module under the hood.
+    It now uses `LLMContext` and `LLMContextAggregatorPair`.
+    Using the new patterns should allow you to not need types from this module.
+
+    BEFORE:
+    ```
+    # Setup
+    context = OpenAILLMContext(messages, tools)
+    context_aggregator = llm.create_context_aggregator(context)
+
+    # Context frame type
+    frame: OpenAILLMContextFrame
+
+    # Context type
+    context: AWSNovaSonicLLMContext
+    # or
+    context: OpenAILLMContext
+    ```
+
+    AFTER:
+    ```
+    # Setup
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
+
+    # Context frame type
+    frame: LLMContextFrame
+
+    # Context type
+    context: LLMContext
+    ```
 """
+
+import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter("always")
+    warnings.warn(
+        "Types in pipecat.services.aws.nova_sonic.context (or "
+        "pipecat.services.aws_nova_sonic.context) are deprecated. \n"
+        "AWS Nova Sonic no longer uses types from this module under the hood. \n"
+        "It now uses `LLMContext` and `LLMContextAggregatorPair`. \n"
+        "Using the new patterns should allow you to not need types from this module.\n\n"
+        "BEFORE:\n"
+        "```\n"
+        "# Setup\n"
+        "context = OpenAILLMContext(messages, tools)\n"
+        "context_aggregator = llm.create_context_aggregator(context)\n\n"
+        "# Context frame type\n"
+        "frame: OpenAILLMContextFrame\n\n"
+        "# Context type\n"
+        "context: AWSNovaSonicLLMContext\n"
+        "# or\n"
+        "context: OpenAILLMContext\n\n"
+        "```\n\n"
+        "AFTER:\n"
+        "```\n"
+        "# Setup\n"
+        "context = LLMContext(messages, tools)\n"
+        "context_aggregator = LLMContextAggregatorPair(context)\n\n"
+        "# Context frame type\n"
+        "frame: LLMContextFrame\n\n"
+        "# Context type\n"
+        "context: LLMContext\n\n"
+        "```",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
 import copy
 from dataclasses import dataclass, field

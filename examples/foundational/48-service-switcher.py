@@ -4,42 +4,36 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, ManuallySwitchServiceFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategyManual
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.aws.llm import AWSBedrockLLMService
-from pipecat.services.aws.stt import AWSTranscribeSTTService
-from pipecat.services.aws.tts import AWSPollyTTSService
-from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.cartesia.stt import CartesiaSTTService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.tts import DeepgramTTSService
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
-
-
-async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.result_callback({"conditions": "nice", "temperature": "75"})
-
-
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
-    await params.result_callback({"name": "The Golden Dragon"})
-
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -69,53 +63,26 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = AWSTranscribeSTTService()
-
-    tts = AWSPollyTTSService(
-        region="us-west-2",  # only specific regions support generative TTS
-        voice_id="Joanna",
-        params=AWSPollyTTSService.InputParams(engine="generative", rate="1.1"),
+    stt_cartesia = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
+    stt_deepgram = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt_switcher = ServiceSwitcher(
+        services=[stt_cartesia, stt_deepgram], strategy_type=ServiceSwitcherStrategyManual
     )
 
-    llm = AWSBedrockLLMService(
-        aws_region="us-west-2",
-        model="us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        params=AWSBedrockLLMService.InputParams(temperature=0.8),
+    tts_cartesia = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",
+    )
+    tts_deepgram = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    tts_switcher = ServiceSwitcher(
+        services=[tts_cartesia, tts_deepgram], strategy_type=ServiceSwitcherStrategyManual
     )
 
-    # You can also register a function_name of None to get all functions
-    # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
+    llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+    llm_switcher = ServiceSwitcher(
+        services=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
     )
-    restaurant_function = FunctionSchema(
-        name="get_restaurant_recommendation",
-        description="Get a restaurant recommendation",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-        },
-        required=["location"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
     messages = [
         {
@@ -124,18 +91,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = LLMContext(messages, tools)
+    context = LLMContext(messages)
     context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
-            transport.input(),
-            stt,
-            context_aggregator.user(),
-            llm,
-            tts,
-            transport.output(),
-            context_aggregator.assistant(),
+            transport.input(),  # Transport user input
+            stt_switcher,
+            context_aggregator.user(),  # User responses
+            llm_switcher,  # LLM
+            tts_switcher,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -152,8 +119,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "user", "content": "Please introduce yourself to the user."})
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
+        await asyncio.sleep(15)
+        print(f"Switching to {stt_deepgram}")
+        await task.queue_frames([ManuallySwitchServiceFrame(service=stt_deepgram)])
+        await asyncio.sleep(15)
+        print(f"Switching to {llm_google}")
+        await task.queue_frames([ManuallySwitchServiceFrame(service=llm_google)])
+        await asyncio.sleep(15)
+        print(f"Switching to {tts_deepgram}")
+        await task.queue_frames([ManuallySwitchServiceFrame(service=tts_deepgram)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

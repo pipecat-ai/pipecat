@@ -14,20 +14,41 @@ from pipecat.services.llm_service import LLMService
 
 
 class LLMSwitcher(ServiceSwitcher[StrategyType]):
-    """A pipeline that switches between different LLMs at runtime."""
+    """A pipeline that switches between different LLMs at runtime.
+
+    Example::
+
+        llm_switcher = LLMSwitcher(
+            llms=[openai_llm, anthropic_llm],
+            strategy_type=ServiceSwitcherStrategyManual
+        )
+    """
 
     def __init__(self, llms: List[LLMService], strategy_type: Type[StrategyType]):
-        """Initialize the service switcher with a list of LLMs and a switching strategy."""
+        """Initialize the service switcher with a list of LLMs and a switching strategy.
+
+        Args:
+            llms: List of LLM services to switch between.
+            strategy_type: The strategy class to use for switching between LLMs.
+        """
         super().__init__(llms, strategy_type)
 
     @property
     def llms(self) -> List[LLMService]:
-        """Get the list of LLMs managed by this switcher."""
+        """Get the list of LLMs managed by this switcher.
+
+        Returns:
+            List of LLM services managed by this switcher.
+        """
         return self.services
 
     @property
     def active_llm(self) -> Optional[LLMService]:
-        """Get the currently active LLM, if any."""
+        """Get the currently active LLM.
+
+        Returns:
+            The currently active LLM service, or None if no LLM is active.
+        """
         return self.strategy.active_service
 
     async def run_inference(self, context: LLMContext) -> Optional[str]:

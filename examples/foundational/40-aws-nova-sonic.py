@@ -18,7 +18,8 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
@@ -119,9 +120,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_current_weather", fetch_weather_from_api)
 
     # Set up context and context management.
-    # AWSNovaSonicService will adapt OpenAI LLM context objects with standard message format to
-    # what's expected by Nova Sonic.
-    context = OpenAILLMContext(
+    context = LLMContext(
         messages=[
             {"role": "system", "content": f"{system_instruction}"},
             {
@@ -131,7 +130,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ],
         tools=tools,
     )
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     pipeline = Pipeline(
