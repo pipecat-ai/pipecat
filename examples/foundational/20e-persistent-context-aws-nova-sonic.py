@@ -20,6 +20,8 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -75,7 +77,7 @@ async def save_conversation(params: FunctionCallParams):
     filename = f"{BASE_FILENAME}{timestamp}.json"
     try:
         with open(filename, "w") as file:
-            messages = params.context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages()
             # remove the last few messages. in reverse order, they are:
             # - the in progress save tool call
             # - the invocation of the save tool call
@@ -223,13 +225,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
     llm.register_function("load_conversation", load_conversation)
 
-    context = OpenAILLMContext(
+    context = LLMContext(
         messages=[
             {"role": "system", "content": f"{system_instruction}"},
         ],
         tools=tools,
     )
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

@@ -20,9 +20,11 @@ from fastapi import WebSocket
 class RunnerArguments:
     """Base class for runner session arguments."""
 
-    handle_sigint: bool = field(init=False)
-    handle_sigterm: bool = field(init=False)
-    pipeline_idle_timeout_secs: int = field(init=False)
+    # Use kw_only so subclasses don't need to worry about ordering.
+    handle_sigint: bool = field(init=False, kw_only=True)
+    handle_sigterm: bool = field(init=False, kw_only=True)
+    pipeline_idle_timeout_secs: int = field(init=False, kw_only=True)
+    body: Optional[Any] = field(default_factory=dict, kw_only=True)
 
     def __post_init__(self):
         self.handle_sigint = False
@@ -42,7 +44,6 @@ class DailyRunnerArguments(RunnerArguments):
 
     room_url: str
     token: Optional[str] = None
-    body: Optional[Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -55,7 +56,6 @@ class WebSocketRunnerArguments(RunnerArguments):
     """
 
     websocket: WebSocket
-    body: Optional[Any] = field(default_factory=dict)
 
 
 @dataclass

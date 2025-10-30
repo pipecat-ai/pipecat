@@ -9,12 +9,261 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added support for `bulbul:v3` model in `SarvamTTSService` and `SarvamHttpTTSService`.
+- Added `generation_config` parameter support to `CartesiaTTSService` and
+  `CartesiaHttpTTSService` for Cartesia Sonic-3 models. Includes a new
+  `GenerationConfig` class with `volume` (0.5-2.0), `speed` (0.6-1.5),
+  and `emotion` (60+ options) parameters for fine-grained speech generation
+  control.
+
+- Expanded support for univeral `LLMContext` to `OpenAIRealtimeLLMService`.
+  As a reminder, the context-setup pattern when using `LLMContext` is:
+
+  ```python
+  context = LLMContext(messages, tools)
+  context_aggregator = LLMContextAggregatorPair(
+    context,
+    # This part is `OpenAIRealtimeLLMService`-specific.
+    # `expect_stripped_words=False` needed when OpenAI Realtime used with
+    # "audio" modality (the default).
+    assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
+  )
+  ```
+
+  (Note that even though `OpenAIRealtimeLLMService` now supports the universal
+  `LLMContext`, it is not meant to be swapped out for another LLM service at
+  runtime with `LLMSwitcher`.)
+
+  Note: `TranscriptionFrame`s and `InterimTranscriptionFrame`s now go upstream
+  from `OpenAIRealtimeLLMService`, so if you're using `TranscriptProcessor`,
+  say, you'll want to adjust accordingly:
+
+  ```python
+  pipeline = Pipeline(
+    [
+      transport.input(),
+      context_aggregator.user(),
+
+      # BEFORE
+      llm,
+      transcript.user(),
+
+      # AFTER
+      transcript.user(),
+      llm,
+
+      transport.output(),
+      transcript.assistant(),
+      context_aggregator.assistant(),
+    ]
+  )
+  ```
+
+  Also worth noting: whether or not you use the new context-setup pattern with
+  `OpenAIRealtimeLLMService`, some types have changed under the hood:
+
+  ```python
+  ## BEFORE:
+
+  # Context aggregator type
+  context_aggregator: OpenAIContextAggregatorPair
+
+  # Context frame type
+  frame: OpenAILLMContextFrame
+
+  # Context type
+  context: OpenAIRealtimeLLMContext
+  # or
+  context: OpenAILLMContext
+
+  ## AFTER:
+
+  # Context aggregator type
+  context_aggregator: LLMContextAggregatorPair
+
+  # Context frame type
+  frame: LLMContextFrame
+
+  # Context type
+  context: LLMContext
+  ```
+
+  Also note that `RealtimeMessagesUpdateFrame` and
+  `RealtimeFunctionCallResultFrame` have been deprecated, since they're no
+  longer used by `OpenAIRealtimeLLMService`. OpenAI Realtime now works more
+  like other LLM services in Pipecat, relying on updates to its context, pushed
+  by context aggregators, to update its internal state. Listen for
+  `LLMContextFrame`s for context updates.
+
+  Finally, `LLMTextFrame`s are no longer pushed from `OpenAIRealtimeLLMService`
+  when it's configured with `output_modalities=['audio']`. If you need
+  to process its output, listen for `TTSTextFrame`s instead.
+
+- Expanded support for universal `LLMContext` to `GeminiLiveLLMService`.
+  As a reminder, the context-setup pattern when using `LLMContext` is:
+
+  ```python
+  context = LLMContext(messages, tools)
+  context_aggregator = LLMContextAggregatorPair(
+    context,
+    # This part is `GeminiLiveLLMService`-specific.
+    # `expect_stripped_words=False` needed when Gemini Live used with AUDIO
+    #  modality (the default).
+    assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
+  )
+  ```
+
+  (Note that even though `GeminiLiveLLMService` now supports the universal
+  `LLMContext`, it is not meant to be swapped out for another LLM service at
+  runtime with `LLMSwitcher`.)
+
+  Worth noting: whether or not you use the new context-setup pattern with
+  `GeminiLiveLLMService`, some types have changed under the hood:
+
+  ```python
+  ## BEFORE:
+
+  # Context aggregator type
+  context_aggregator: GeminiLiveContextAggregatorPair
+
+  # Context frame type
+  frame: OpenAILLMContextFrame
+
+  # Context type
+  context: GeminiLiveLLMContext
+  # or
+  context: OpenAILLMContext
+
+  ## AFTER:
+
+  # Context aggregator type
+  context_aggregator: LLMContextAggregatorPair
+
+  # Context frame type
+  frame: LLMContextFrame
+
+  # Context type
+  context: LLMContext
+  ```
+
+  Also note that `LLMTextFrame`s are no longer pushed from `GeminiLiveLLMService`
+  when it's configured with `modalities=GeminiModalities.AUDIO`. If you need
+  to process its output, listen for `TTSTextFrame`s instead.
+
+### Changed
+
+- `DailyTransport` triggers `on_error` event if transcription can't be started
+  or stopped.
+
+- `DailyTransport` updates: `start_dialout()` now returns two values:
+  `session_id` and `error`. `start_recording()` now returns two values:
+  `stream_id` and `error`.
+
+- Updated `daily-python` to 0.21.0.
+
+- `SimliVideoService` now accepts `api_key` and `face_id` parameters directly,
+  with optional `params` for `max_session_length` and `max_idle_time`
+  configuration, aligning with other Pipecat service patterns.
+
+- Updated the default model to `sonic-3` for `CartesiaTTSService` and
+  `CartesiaHttpTTSService`.
+
+- `FunctionFilter` now has a `filter_system_frames` arg, which controls whether
+  or not SystemFrames are filtered.
+
+- Upgraded `aws_sdk_bedrock_runtime` to v0.1.1 to resolve potential CPU issues
+  when running `AWSNovaSonicLLMService`.
+
+### Deprecated
+
+- The `send_transcription_frames` argument to `OpenAIRealtimeLLMService` is
+  deprecated. Transcription frames are now always sent. They go upstream, to be
+  handled by the user context aggregator. See "Added" section for details.
+
+- Types in `pipecat.services.openai.realtime.context` and
+  `pipecat.services.openai.realtime.frames` are deprecated, as they're no
+  longer used by `OpenAIRealtimeLLMService`. See "Added" section for details.
+
+- `SimliVideoService` `simli_config` parameter is deprecated. Use `api_key` and
+  `face_id` parameters instead.
+
+### Removed
+
+- Removed the `aiohttp_session` arg from `SarvamTTSService` as it's no longer
+  used.
+
+### Fixed
+
+- Fixed an issue where `DailyTransport` would timeout prematurely on join and on
+  leave.
+
+- Fixed an issue in the runner where starting a DailyTransport room via
+  `/start` didn't support using the `DAILY_SAMPLE_ROOM_URL` env var.
+
+- Fixed an issue in `ServiceSwitcher` where the `STTService`s would result in
+  all STT services producing `TranscriptionFrame`s.
+
+- Fixed an issue in `HumeTTSService` that was only using Octave 2, which does not support the `description` field. Now, if a description is provided, it switches to Octave 1.
+
+## [0.0.91] - 2025-10-21
+
+### Added
+
+- It is now possible to start a bot from the `/start` endpoint when using the
+  runner Daily's transport. This follows the Pipecat Cloud format with
+  `createDailyRoom` and `body` fields in the POST request body.
+
+- Added an ellipsis character (`…`) to the end of sentence detection in the
+  string utils.
+
+- Expanded support for universal `LLMContext` to `AWSNovaSonicLLMService`.
+  As a reminder, the context-setup pattern when using `LLMContext` is:
+
+  ```python
+  context = LLMContext(messages, tools)
+  context_aggregator = LLMContextAggregatorPair(context)
+  ```
+
+  (Note that even though `AWSNovaSonicLLMService` now supports the universal
+  `LLMContext`, it is not meant to be swapped out for another LLM service at
+  runtime with `LLMSwitcher`.)
+
+  Worth noting: whether or not you use the new context-setup pattern with
+  `AWSNovaSonicLLMService`, some types have changed under the hood:
+
+  ```python
+  ## BEFORE:
+
+  # Context aggregator type
+  context_aggregator: AWSNovaSonicContextAggregatorPair
+
+  # Context frame type
+  frame: OpenAILLMContextFrame
+
+  # Context type
+  context: AWSNovaSonicLLMContext
+  # or
+  context: OpenAILLMContext
+
+  ## AFTER:
+
+  # Context aggregator type
+  context_aggregator: LLMContextAggregatorPair
+
+  # Context frame type
+  frame: LLMContextFrame
+
+  # Context type
+  context: LLMContext
+  ```
+
+- Added support for `bulbul:v3` model in `SarvamTTSService` and
+  `SarvamHttpTTSService`.
 
 - Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
 
-- Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the multilingual model.
-- 
+- Added `speech_model` parameter to `AssemblyAIConnectionParams` to access the
+  multilingual model.
+
 - Added support for trickle ICE to the `SmallWebRTCTransport`.
 
 - Added support for updating `OpenAITTSService` settings (`instructions` and
@@ -36,19 +285,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `RunnerArguments` now include the `body` field, so there's no need to add it
+  to subclasses. Also, all `RunnerArguments` fields are now keyword-only.
+
 - `CartesiaSTTService` now inherits from `WebsocketSTTService`.
 
 - Package upgrades:
 
+  - `daily-python` upgraded to 0.20.0.
   - `openai` upgraded to support up to 2.x.x.
   - `openpipe` upgraded to support up to 5.x.x.
 
 - `SpeechmaticsSTTService` updated dependencies for `speechmatics-rt>=0.5.0`.
 
+### Deprecated
+
+- The `send_transcription_frames` argument to `AWSNovaSonicLLMService` is
+  deprecated. Transcription frames are now always sent. They go upstream, to be
+  handled by the user context aggregator. See "Added" section for details.
+
+- Types in `pipecat.services.aws.nova_sonic.context` are deprecated, as they're
+  no longer used by `AWSNovaSonicLLMService`. See "Added" section for
+  details.
+
 ### Fixed
 
+- Fixed an issue where the `RTVIProcessor` was sending duplicate
+  `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` messages.
+
+- Fixed an issue in `AWSBedrockLLMService` where both `temperature` and `top_p`
+  were always sent together, causing conflicts with models like Claude Sonnet 4.5
+  that don't allow both parameters simultaneously. The service now only includes
+  inference parameters that are explicitly set, and `InputParams` defaults have
+  been changed to `None` to rely on AWS Bedrock's built-in model defaults.
+
 - Fixed an issue in `RivaSegmentedSTTService` where a runtime error occurred due
-  to a mismatch in the _handle_transcription method's signature.
+  to a mismatch in the `_handle_transcription` method's signature.
 
 - Fixed multiple pipeline task cancellation issues. `asyncio.CancelledError` is
   now handled properly in `PipelineTask` making it possible to cancel an asyncio

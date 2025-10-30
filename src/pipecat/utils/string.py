@@ -47,6 +47,7 @@ SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
         "!",
         "?",
         ";",
+        "…",
         # East Asian punctuation (Chinese (Traditional & Simplified), Japanese, Korean)
         "。",  # Ideographic full stop
         "？",  # Full-width question mark

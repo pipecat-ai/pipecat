@@ -374,7 +374,6 @@ class SarvamTTSService(InterruptibleTTSService):
         model: str = "bulbul:v2",
         voice_id: str = "anushka",
         url: str = "wss://api.sarvam.ai/text-to-speech/ws",
-        aiohttp_session: Optional[aiohttp.ClientSession] = None,
         aggregate_sentences: Optional[bool] = True,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -388,11 +387,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 Supports "bulbul:v2", "bulbul:v3-beta" and "bulbul:v3".
             voice_id: Voice identifier for synthesis (default "anushka").
             url: WebSocket URL for connecting to the TTS backend (default production URL).
-            aiohttp_session: Optional shared aiohttp session. To maintain backward compatibility.
-
-                .. deprecated:: 0.0.81
-                    aiohttp_session is no longer used. This parameter will be removed in a future version.
-
             aggregate_sentences: Whether to merge multiple sentences into one audio chunk (default True).
             sample_rate: Desired sample rate for the output audio in Hz (overrides default if set).
             params: Optional input parameters to override global configuration.
@@ -413,16 +407,7 @@ class SarvamTTSService(InterruptibleTTSService):
             **kwargs,
         )
         params = params or SarvamTTSService.InputParams()
-        if aiohttp_session is not None:
-            import warnings
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'aiohttp_session' parameter is deprecated and will be removed in a future version. ",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
         # WebSocket endpoint URL
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
