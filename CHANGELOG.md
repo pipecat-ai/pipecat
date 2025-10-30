@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New event handlers for the `DeepgramFluxSTTService`: `on_start_of_turn`,
+  `on_turn_resumed`, `on_end_of_turn`, `on_eager_end_of_turn`, `on_update`.
+
 - Added `generation_config` parameter support to `CartesiaTTSService` and
   `CartesiaHttpTTSService` for Cartesia Sonic-3 models. Includes a new
   `GenerationConfig` class with `volume` (0.5-2.0), `speed` (0.6-1.5),
