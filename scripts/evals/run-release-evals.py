@@ -87,6 +87,7 @@ TESTS_07 = [
     ("07b-interruptible-langchain.py", EVAL_SIMPLE_MATH),
     ("07c-interruptible-deepgram.py", EVAL_SIMPLE_MATH),
     ("07c-interruptible-deepgram-flux.py", EVAL_SIMPLE_MATH),
+    ("07c-interruptible-deepgram-http.py", EVAL_SIMPLE_MATH),
     ("07d-interruptible-elevenlabs.py", EVAL_SIMPLE_MATH),
     ("07d-interruptible-elevenlabs-http.py", EVAL_SIMPLE_MATH),
     ("07f-interruptible-azure.py", EVAL_SIMPLE_MATH),
