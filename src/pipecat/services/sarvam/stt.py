@@ -10,6 +10,7 @@ import base64
 from typing import Optional
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -68,13 +69,22 @@ class SarvamSTTService(STTService):
     Provides real-time speech recognition using Sarvam's WebSocket API.
     """
 
+    class InputParams(BaseModel):
+        """Configuration parameters for Sarvam STT service.
+
+        Parameters:
+            language: Target language for transcription. Defaults to HI_IN.
+        """
+
+        language: Optional[Language] = Language.HI_IN
+
     def __init__(
         self,
         *,
         api_key: str,
         model: str = "saarika:v2.5",
-        language_code: Language = Language.HI_IN,
         sample_rate: Optional[int] = None,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initialize the Sarvam STT service.
@@ -82,17 +92,29 @@ class SarvamSTTService(STTService):
         Args:
             api_key: Sarvam API key for authentication.
             model: Sarvam model to use for transcription.
-            language_code: Language enum for transcription (e.g., Language.HI_IN, Language.KN_IN).
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
+            params: Configuration parameters for Sarvam STT service.
             **kwargs: Additional arguments passed to the parent STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        params = params or SarvamSTTService.InputParams()
+
+        # Validate that saaras models don't accept language parameter
+        if "saaras" in model.lower():
+            if params.language is not None:
+                raise ValueError(
+                    f"Model '{model}' (saaras) does not accept language parameter. "
+                    "saaras models auto-detect language."
+                )
+
         self.set_model_name(model)
         self._api_key = api_key
         self._model = model
-        self._language_code = language_code
-        self._language_string = language_to_sarvam_language(language_code)
+        self._language_code = params.language
+        self._language_string = (
+            language_to_sarvam_language(params.language) if params.language else None
+        )
 
         # Initialize Sarvam SDK client
         self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key)
