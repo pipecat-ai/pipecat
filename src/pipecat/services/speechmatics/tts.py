@@ -6,7 +6,6 @@
 
 """Speechmatics TTS service integration."""
 
-import os
 from typing import AsyncGenerator, Optional
 from urllib.parse import urlencode
 
@@ -41,55 +40,56 @@ class SpeechmaticsTTSService(TTSService):
     It converts text to speech and returns raw PCM audio data for real-time playback.
     """
 
+    SPEECHMATICS_SAMPLE_RATE = 16000
+
     class InputParams(BaseModel):
-        """Configuration parameters for Speechmatics TTS service.
+        """Optional input parameters for Speechmatics TTS configuration."""
 
-        Parameters:
-            voice: Voice model to use for synthesis. Defaults to "sarah".
-        """
-
-        voice: str = "sarah"
+        pass
 
     def __init__(
         self,
         *,
-        api_key: str | None = None,
-        base_url: str | None = None,
-        aiohttp_session: aiohttp.ClientSession | None = None,
-        sample_rate: Optional[int] = 16000,
-        params: InputParams | None = None,
+        api_key: str,
+        base_url: str = "https://preview.tts.speechmatics.com",
+        voice_id: str = "sarah",
+        aiohttp_session: aiohttp.ClientSession,
+        sample_rate: Optional[int] = SPEECHMATICS_SAMPLE_RATE,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initialize the Speechmatics TTS service.
 
         Args:
-            api_key: Speechmatics API key for authentication. Uses environment variable
-                `SPEECHMATICS_API_KEY` if not provided.
-            base_url: Base URL for Speechmatics TTS API. Defaults to
-                `https://preview.tts.speechmatics.com`.
+            api_key: Speechmatics API key for authentication.
+            base_url: Base URL for Speechmatics TTS API.
+            voice_id: Voice model to use for synthesis.
             aiohttp_session: Shared aiohttp session for HTTP requests.
-            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            sample_rate: Audio sample rate in Hz.
             params: Optional[InputParams]: Input parameters for the service.
             **kwargs: Additional arguments passed to TTSService.
         """
+        if sample_rate and sample_rate != self.SPEECHMATICS_SAMPLE_RATE:
+            logger.warning(
+                f"Speechmatics TTS only supports {self.SPEECHMATICS_SAMPLE_RATE}Hz sample rate. "
+                f"Current rate of {sample_rate}Hz may cause issues."
+            )
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Service parameters
-        self._api_key: str = api_key or os.getenv("SPEECHMATICS_API_KEY")
-        self._base_url: str = base_url or "https://preview.tts.speechmatics.com"
-        self._session = aiohttp_session or aiohttp.ClientSession()
+        self._api_key: str = api_key
+        self._base_url: str = base_url
+        self._session = aiohttp_session
 
         # Check we have required attributes
         if not self._api_key:
             raise ValueError("Missing Speechmatics API key")
-        if not self._base_url:
-            raise ValueError("Missing Speechmatics base URL")
 
         # Default parameters
         self._params = params or SpeechmaticsTTSService.InputParams()
 
-        # Set voice from parameters
-        self.set_voice(self._params.voice)
+        # Set voice from constructor parameter
+        self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -140,23 +140,6 @@ class SpeechmaticsTTSService(TTSService):
                 first_chunk = True
                 buffer = b""
 
-                # Helper to move all complete 2-byte int16 samples from buffer into a frame
-                def _emit_complete_samples():
-                    nonlocal buffer
-                    if len(buffer) < 2:
-                        return None
-                    complete_samples = len(buffer) // 2
-                    complete_bytes = complete_samples * 2
-
-                    audio_data = buffer[:complete_bytes]
-                    buffer = buffer[complete_bytes:]  # Keep remaining bytes for next iteration
-
-                    return TTSAudioRawFrame(
-                        audio=audio_data,
-                        sample_rate=self.sample_rate,
-                        num_channels=1,
-                    )
-
                 async for chunk in response.content.iter_any():
                     if not chunk:
                         continue
@@ -166,15 +149,19 @@ class SpeechmaticsTTSService(TTSService):
 
                     buffer += chunk
 
-                    # Emit a frame for all complete samples currently in buffer
-                    frame = _emit_complete_samples()
-                    if frame:
-                        yield frame
+                    # Emit all complete 2-byte int16 samples from buffer
+                    if len(buffer) >= 2:
+                        complete_samples = len(buffer) // 2
+                        complete_bytes = complete_samples * 2
 
-                # Process any remaining bytes in buffer after streaming ends
-                frame = _emit_complete_samples()
-                if frame:
-                    yield frame
+                        audio_data = buffer[:complete_bytes]
+                        buffer = buffer[complete_bytes:]  # Keep remaining bytes for next iteration
+
+                        yield TTSAudioRawFrame(
+                            audio=audio_data,
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                        )
 
         except Exception as e:
             logger.exception(f"Error generating TTS: {e}")
