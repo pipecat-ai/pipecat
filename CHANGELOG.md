@@ -240,8 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
-- Updated all vision 12-series foundational examples to load images from a file
-  and push `LLMMessagesAppendFrame` with the loaded image.
+- Updated all vision 12-series foundational examples to load images from a file.
 
 - Added 14-series video examples for different services. These new examples
   request an image from the user camera through a function call.
