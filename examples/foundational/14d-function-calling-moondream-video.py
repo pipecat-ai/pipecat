@@ -61,6 +61,10 @@ async def fetch_user_image(params: FunctionCallParams):
 
     await params.result_callback(None)
 
+    # Instead of None, it's possible to also provide a tool call answer to
+    # tell the LLM that we are grabbing the image to analyze.
+    # await params.result_callback({"result": "Image is being captured."})
+
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
