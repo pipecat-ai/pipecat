@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added supprt for Sarvam Speech-to-Text service (`SarvamSTTService`) with streaming WebSocket
+  support for `saarika` (STT) and `saaras` (STT-translate) models.
+
 - Added `generation_config` parameter support to `CartesiaTTSService` and
   `CartesiaHttpTTSService` for Cartesia Sonic-3 models. Includes a new
   `GenerationConfig` class with `volume` (0.5-2.0), `speed` (0.6-1.5),
