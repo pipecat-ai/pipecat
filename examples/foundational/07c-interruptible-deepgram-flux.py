@@ -101,6 +101,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await task.cancel()
 
+    @stt.event_handler("on_update")
+    async def on_deepgram_flux_update(stt, transcript):
+        logger.debug(f"On deeggram flux update: {transcript}")
+
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
