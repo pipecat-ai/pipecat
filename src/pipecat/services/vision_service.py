@@ -14,7 +14,7 @@ visual content.
 from abc import abstractmethod
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import Frame, VisionImageRawFrame
+from pipecat.frames.frames import Frame, UserImageRawFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 
@@ -37,7 +37,7 @@ class VisionService(AIService):
         self._describe_text = None
 
     @abstractmethod
-    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+    async def run_vision(self, frame: UserImageRawFrame) -> AsyncGenerator[Frame, None]:
         """Process the given vision image and generate results.
 
         This method must be implemented by subclasses to provide actual computer
@@ -45,7 +45,7 @@ class VisionService(AIService):
         visual question answering.
 
         Args:
-            frame: The vision image frame to process.
+            frame: The image frame to process.
 
         Yields:
             Frame: Frames containing the vision analysis results, typically TextFrame
@@ -56,7 +56,7 @@ class VisionService(AIService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, handling vision image frames for analysis.
 
-        Automatically processes VisionImageRawFrame objects by calling run_vision
+        Automatically processes UserImageRawFrame objects by calling run_vision
         and handles metrics tracking. Other frames are passed through unchanged.
 
         Args:
@@ -65,7 +65,7 @@ class VisionService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VisionImageRawFrame):
+        if isinstance(frame, UserImageRawFrame) and frame.text:
             await self.start_processing_metrics()
             await self.process_generator(self.run_vision(frame))
             await self.stop_processing_metrics()

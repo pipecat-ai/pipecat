@@ -9,10 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `VisionImageRawFrame`. This is an input image frame with an associated
-  text. It is usually processed by vision services (e.g. Moondream). The text
-  guides the vision service on how to analyze the image.
-
 - Added support for including images or audio to LLM context messages using
   `LLMContext.create_image_message()` or `LLMContext.create_image_url_message()`
   (not all LLMs support URLs) and `LLMContext.create_audio_message()`. For
@@ -168,9 +164,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `MoondreamService` to process `VisionImageRawFrame`.
+- `UserImageRawFrame` new fields `add_to_context` and `text`. The
+  `add_to_context` field indicates if this image and text should be added to the
+  LLM context (by the LLM assistant aggregator). The `text` field, if set, might
+  also guide the LLM or the vision service on how to analyze the image.
 
-- `VisionService` expects `VisionImageRawFrame` in order to analyze images.
+- `UserImageRequestFrame` new fiels `add_to_context` and `text`. Both fields
+  will be used to set the same fields on the captured `UserImageRawFrame`.
+
+- `UserImageRequestFrame` don't require function call name and ID anymore.
+
+- Updated `MoondreamService` to process `UserImageRawFrame`.
+
+- `VisionService` expects `UserImageRawFrame` in order to analyze images.
 
 - `DailyTransport` triggers `on_error` event if transcription can't be started
   or stopped.
@@ -195,6 +201,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when running `AWSNovaSonicLLMService`.
 
 ### Deprecated
+
+- `LLMService.request_image_frame()` is deprecated, push a
+  `UserImageRequestFrame` instead.
 
 - `UserResponseAggregator` is deprecated and will be removed in a future version.
 

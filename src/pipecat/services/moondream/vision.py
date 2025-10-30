@@ -16,7 +16,12 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 from PIL import Image
 
-from pipecat.frames.frames import ErrorFrame, Frame, TextFrame, VisionImageRawFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    TextFrame,
+    UserImageRawFrame,
+)
 from pipecat.services.vision_service import VisionService
 
 try:
@@ -94,11 +99,11 @@ class MoondreamService(VisionService):
 
         logger.debug("Loaded Moondream model")
 
-    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+    async def run_vision(self, frame: UserImageRawFrame) -> AsyncGenerator[Frame, None]:
         """Analyze an image and generate a description.
 
         Args:
-            frame: The vision image frame to process.
+            frame: The image frame to process.
 
         Yields:
             Frame: TextFrame containing the generated image description, or ErrorFrame

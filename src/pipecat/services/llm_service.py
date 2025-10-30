@@ -503,6 +503,9 @@ class LLMService(AIService):
         the image. If you expect the image to be processed by a vision service,
         you might want to push a UserImageRequestFrame upstream directly.
 
+        .. deprecated:: 0.0.92
+            This method is deprecated, push a `UserImageRequestFrame` instead.
+
         Args:
             user_id: The ID of the user to request an image from.
             function_name: Optional function name associated with the request.
@@ -512,23 +515,18 @@ class LLMService(AIService):
             timeout: Optional timeout for the requested image to be added to the LLM context.
 
         """
-        request_event = asyncio.Event() if timeout else None
+        import warnings
 
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Method `request_image_frame()` is deprecated, push a `UserImageRequestFrame` instead.",
+                DeprecationWarning,
+            )
         await self.push_frame(
-            UserImageRequestFrame(
-                user_id=user_id,
-                function_name=function_name,
-                tool_call_id=tool_call_id,
-                context=text_content,
-                video_source=video_source,
-                request_event=request_event,
-            ),
+            UserImageRequestFrame(user_id=user_id, text=text_content),
             FrameDirection.UPSTREAM,
         )
-
-        # Wait for the requested image to be added to the context.
-        if request_event:
-            await asyncio.wait_for(request_event.wait(), timeout=timeout)
 
     async def _create_sequential_runner_task(self):
         if not self._sequential_runner_task:
