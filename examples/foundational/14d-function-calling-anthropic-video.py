@@ -15,12 +15,13 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -42,21 +43,18 @@ async def fetch_user_image(params: FunctionCallParams):
 
     When called, this function pushes a UserImageRequestFrame upstream to the
     transport. As a result, the transport will request the user image and push a
-    UserImageRawFrame downstream associated to this request. When the
-    UserImageRawFrame reaches the LLM assistant aggregator, the image will be
-    added to the context.
+    UserImageRawFrame downstream which will be added to the context by the LLM
+    assistant aggregator.
     """
     user_id = params.arguments["user_id"]
     question = params.arguments["question"]
     logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
-    # Request the user image frame. Note that this image is associated to a
-    # function call and will be handled by the LLM assistant aggregators.
-    await params.llm.request_image_frame(
-        user_id=user_id,
-        function_name=params.function_name,
-        tool_call_id=params.tool_call_id,
-        text_content=question,
+    # Request a user image frame and indicate that it should be added to the
+    # context.
+    await params.llm.push_frame(
+        UserImageRequestFrame(user_id=user_id, text=question, add_to_context=True),
+        FrameDirection.UPSTREAM,
     )
 
     await params.result_callback(None)

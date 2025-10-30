@@ -15,20 +15,14 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import (
-    Frame,
-    LLMRunFrame,
-    UserImageRawFrame,
-    UserImageRequestFrame,
-    VisionImageRawFrame,
-)
+from pipecat.frames.frames import LLMRunFrame, UserImageRequestFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -57,38 +51,15 @@ async def fetch_user_image(params: FunctionCallParams):
     question = params.arguments["question"]
     logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
-    # Request the user image frame frame. In this case we don't use
-    # `llm.request_image_frame()` because we don't want the LLM to analyze it.
+    # Request a user image frame. In this case, we don't want the requested
+    # image to be added to the context because we will process it with
+    # Moondream.
     await params.llm.push_frame(
-        UserImageRequestFrame(user_id=user_id, context=question), FrameDirection.UPSTREAM
+        UserImageRequestFrame(user_id=user_id, text=question, add_to_context=False),
+        FrameDirection.UPSTREAM,
     )
 
     await params.result_callback(None)
-
-
-class UserImageProcessor(FrameProcessor):
-    """Converts incoming user images into vision frames.
-
-    This processor handles the UserImageRawFrame from the transport, converts it
-    to a VisionImageRawFrame and pushes it downstream so it can be handled by a
-    vision service.
-
-    """
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, UserImageRawFrame):
-            if frame.request and frame.request.context:
-                frame = VisionImageRawFrame(
-                    image=frame.image,
-                    text=frame.request.context,
-                    size=frame.size,
-                    format=frame.format,
-                )
-                await self.push_frame(frame)
-        else:
-            await self.push_frame(frame, direction)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -152,9 +123,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages, tools)
     context_aggregator = LLMContextAggregatorPair(context)
 
-    # This will get the get the user image frame and push it to the LLM.
-    image_processor = UserImageProcessor()
-
     # If you run into weird description, try with use_cpu=True
     moondream = MoondreamService()
 
@@ -165,7 +133,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             context_aggregator.user(),  # User responses
             ParallelPipeline(
                 [llm],  # LLM
-                [image_processor, moondream],
+                [moondream],
             ),
             tts,  # TTS
             transport.output(),  # Transport bot output
