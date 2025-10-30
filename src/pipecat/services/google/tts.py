@@ -365,6 +365,7 @@ class GoogleHttpTTSService(TTSService):
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Override to handle speaking_rate updates for Chirp/Journey voices.
+
         Args:
             settings: Dictionary of settings to update. Can include 'speaking_rate' (float)
         """
