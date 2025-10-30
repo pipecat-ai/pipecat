@@ -1843,7 +1843,7 @@ class DailyInputTransport(BaseInputTransport):
                 size=(video_frame.width, video_frame.height),
                 format=video_frame.color_format,
                 text=request_frame.text if request_frame else None,
-                add_to_context=request_frame.add_to_context if request_frame else None,
+                append_to_context=request_frame.append_to_context if request_frame else None,
             )
             frame.transport_source = video_source
             await self.push_video_frame(frame)
