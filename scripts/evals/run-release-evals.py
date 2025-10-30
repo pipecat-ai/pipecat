@@ -49,15 +49,18 @@ EVAL_VISION_CAMERA = EvalConfig(
     eval="The user provides a cat description.",
 )
 
-EVAL_VISION_IMAGE = EvalConfig(
-    prompt="Briefly describe this image.",
-    eval="The user provides a cat description.",
-    eval_speaks_first=True,
-    runner_args_body={
-        "image_path": ASSETS_DIR / "cat.jpg",
-        "question": "Briefly describe this image.",
-    },
-)
+
+def EVAL_VISION_IMAGE(*, eval_speaks_first: bool = False):
+    return EvalConfig(
+        prompt="Briefly describe this image.",
+        eval="The user provides a cat description.",
+        eval_speaks_first=eval_speaks_first,
+        runner_args_body={
+            "image_path": ASSETS_DIR / "cat.jpg",
+            "question": "Briefly describe this image.",
+        },
+    )
+
 
 EVAL_VOICEMAIL = EvalConfig(
     prompt="Please leave a message.",
@@ -117,10 +120,11 @@ TESTS_07 = [
 ]
 
 TESTS_12 = [
-    ("12-describe-image-openai.py", EVAL_VISION_IMAGE),
-    ("12a-describe-image-anthropic.py", EVAL_VISION_IMAGE),
-    ("12b-describe-image-aws.py", EVAL_VISION_IMAGE),
-    ("12c-describe-image-gemini-flash.py", EVAL_VISION_IMAGE),
+    ("12-describe-image-openai.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("12a-describe-image-anthropic.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("12b-describe-image-aws.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("12c-describe-image-gemini-flash.py", EVAL_VISION_IMAGE(eval_speaks_first=True)),
+    ("12d-describe-image-moondream.py", EVAL_VISION_IMAGE()),
 ]
 
 TESTS_14 = [
