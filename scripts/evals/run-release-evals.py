@@ -26,32 +26,32 @@ FOUNDATIONAL_DIR = SCRIPT_DIR.parent.parent / "examples" / "foundational"
 
 EVAL_SIMPLE_MATH = EvalConfig(
     prompt="A simple math addition.",
-    eval="Correct math addition.",
+    eval="The user answers the math addition correctly.",
 )
 
 EVAL_WEATHER = EvalConfig(
     prompt="What's the weather in San Francisco?",
-    eval="Something specific about the current weather in San Francisco, including the degrees.",
+    eval="The user says something specific about the current weather in San Francisco, including the degrees.",
 )
 
 EVAL_ONLINE_SEARCH = EvalConfig(
     prompt="What's the date right now in London?",
-    eval=f"Today is {datetime.now(timezone.utc).strftime('%B %d, %Y')}.",
+    eval=f"The user says today is {datetime.now(timezone.utc).strftime('%B %d, %Y')} in London.",
 )
 
 EVAL_SWITCH_LANGUAGE = EvalConfig(
     prompt="Say something in Spanish.",
-    eval="The user is now talking in Spanish.",
+    eval="The user talks in Spanish.",
 )
 
 EVAL_VISION_CAMERA = EvalConfig(
     prompt=("Briefly describe what you see.", Image.open(ASSETS_DIR / "cat.jpg")),
-    eval="A cat description.",
+    eval="The user provides a cat description.",
 )
 
 EVAL_VISION_IMAGE = EvalConfig(
     prompt="Briefly describe this image.",
-    eval="A cat description.",
+    eval="The user provides a cat description.",
     eval_speaks_first=True,
     runner_args_body={
         "image_path": ASSETS_DIR / "cat.jpg",
@@ -60,14 +60,14 @@ EVAL_VISION_IMAGE = EvalConfig(
 )
 
 EVAL_VOICEMAIL = EvalConfig(
-    prompt="Please leave a message after the beep.",
-    eval="Assess the conversation and determine if it is a voicemail.",
+    prompt="Please leave a message.",
+    eval="The user leaves a voicemail message.",
     eval_speaks_first=True,
 )
 
 EVAL_CONVERSATION = EvalConfig(
     prompt="Hello, this is Mark.",
-    eval="A start of a conversation, not a voicemail.",
+    eval="The user replies with a greeting.",
     eval_speaks_first=True,
 )
 
@@ -172,11 +172,11 @@ TESTS_21 = [
 ]
 
 TESTS_26 = [
-    ("26-gemini-multimodal-live.py", EVAL_SIMPLE_MATH),
+    ("26-gemini-live.py", EVAL_SIMPLE_MATH),
     ("26a-gemini-live-transcription.py", EVAL_SIMPLE_MATH),
     ("26b-gemini-live-function-calling.py", EVAL_WEATHER),
     ("26c-gemini-live-video.py", EVAL_SIMPLE_MATH),
-    ("26e-gemini-multimodal-google-search.py", EVAL_ONLINE_SEARCH),
+    ("26e-gemini-live-google-search.py", EVAL_ONLINE_SEARCH),
     ("26h-gemini-live-vertex-function-calling.py", EVAL_WEATHER),
     # Currently not working.
     # ("26d-gemini-live-text.py", EVAL_SIMPLE_MATH),

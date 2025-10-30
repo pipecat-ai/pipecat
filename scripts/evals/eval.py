@@ -271,10 +271,9 @@ async def run_eval_pipeline(
     elif isinstance(eval_config.prompt, tuple):
         example_prompt, example_image = eval_config.prompt
 
-    eval_prompt = f"The answer is correct if it matches: {eval}."
     common_system_prompt = (
         "The user might say things other than the answer and that's allowed. "
-        f"You should only call the eval function with your assessment when the user actually answers the question. {eval_prompt}"
+        f"You should only call the eval function when the user: {eval_config.eval}"
     )
     if eval_config.eval_speaks_first:
         system_prompt = f"You are an LLM eval, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
