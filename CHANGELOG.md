@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `DeepgramHttpTTSService`, which delivers a meaningful reduction
+  in latency when compared to the `DeepgramTTSService`.
+
 - Add support for `speaking_rate` input parameter in `GoogleHttpTTSService`.
 
 - Added `enable_speaker_diarization` and `enable_language_identification` to
