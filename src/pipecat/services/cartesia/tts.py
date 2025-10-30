@@ -126,6 +126,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
                 .. deprecated:: 0.0.68
                         The `emotion` parameter is deprecated and will be removed in a future version.
+
             generation_config: Generation configuration for Sonic-3 models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
         """
@@ -322,7 +323,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
             msg["speed"] = self._settings["speed"]
 
         if self._settings["generation_config"]:
-            msg["generation_config"] = self._settings["generation_config"].model_dump(exclude_none=True)
+            msg["generation_config"] = self._settings["generation_config"].model_dump(
+                exclude_none=True
+            )
 
         return json.dumps(msg)
 
@@ -514,6 +517,7 @@ class CartesiaHttpTTSService(TTSService):
 
                 .. deprecated:: 0.0.68
                         The `emotion` parameter is deprecated and will be removed in a future version.
+
             generation_config: Generation configuration for Sonic-3 models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
         """
@@ -664,7 +668,9 @@ class CartesiaHttpTTSService(TTSService):
                 payload["speed"] = self._settings["speed"]
 
             if self._settings["generation_config"]:
-                payload["generation_config"] = self._settings["generation_config"].model_dump(exclude_none=True)
+                payload["generation_config"] = self._settings["generation_config"].model_dump(
+                    exclude_none=True
+                )
 
             yield TTSStartedFrame()
 

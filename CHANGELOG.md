@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `generation_config` parameter support to `CartesiaTTSService` and
   `CartesiaHttpTTSService` for Cartesia Sonic-3 models. Includes a new
-  `GenerationConfig` dataclass with `volume` (0.5-2.0), `speed` (0.6-1.5),
+  `GenerationConfig` class with `volume` (0.5-2.0), `speed` (0.6-1.5),
   and `emotion` (60+ options) parameters for fine-grained speech generation
   control.
 
