@@ -523,7 +523,9 @@ class TTSService(AIService):
                     # is being spoken. Here, we assume this flag is used when the TTS
                     # provider supports word timestamps and the TTSTextFrames will be
                     # generated in the word_task_handler.
-                    await self.push_frame(AggregatedLLMTextFrame(text, aggregated_by=aggregated_by))
+                    frame = AggregatedLLMTextFrame(text, aggregated_by=aggregated_by)
+                    frame.append_to_context = False
+                    await self.push_frame(frame)
                 await self.process_generator(self.run_tts(text))
 
             await self.stop_processing_metrics()
