@@ -4,7 +4,85 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Realtime LLM context and aggregator implementations."""
+"""OpenAI Realtime LLM context and aggregator implementations.
+
+.. deprecated:: 0.0.92
+    OpenAI Realtime no longer uses types from this module under the hood.
+    It now uses `LLMContext` and `LLMContextAggregatorPair`.
+    Using the new patterns should allow you to not need types from this module.
+
+    BEFORE:
+    ```
+    # Setup
+    context = OpenAILLMContext(messages, tools)
+    context_aggregator = llm.create_context_aggregator(context)
+
+    # Context aggregator type
+    context_aggregator: OpenAIContextAggregatorPair
+
+    # Context frame type
+    frame: OpenAILLMContextFrame
+
+    # Context type
+    context: OpenAIRealtimeLLMContext
+    # or
+    context: OpenAILLMContext
+    ```
+
+    AFTER:
+    ```
+    # Setup
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
+
+    # Context aggregator type
+    context_aggregator: LLMContextAggregatorPair
+
+    # Context frame type
+    frame: LLMContextFrame
+
+    # Context type
+    context: LLMContext
+    ```
+"""
+
+import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter("always")
+    warnings.warn(
+        "Types in pipecat.services.openai.realtime.llm (or "
+        "pipecat.services.openai_realtime.llm) are deprecated. \n"
+        "OpenAI Realtime no longer uses types from this module under the hood. \n"
+        "It now uses `LLMContext` and `LLMContextAggregatorPair`. \n"
+        "Using the new patterns should allow you to not need types from this module.\n\n"
+        "BEFORE:\n"
+        "```\n"
+        "# Setup\n"
+        "context = OpenAILLMContext(messages, tools)\n"
+        "context_aggregator = llm.create_context_aggregator(context)\n\n"
+        "# Context aggregator type\n"
+        "context_aggregator: OpenAIContextAggregatorPair\n\n"
+        "# Context frame type\n"
+        "frame: OpenAILLMContextFrame\n\n"
+        "# Context type\n"
+        "context: OpenAIRealtimeLLMContext\n"
+        "# or\n"
+        "context: OpenAILLMContext\n\n"
+        "```\n\n"
+        "AFTER:\n"
+        "```\n"
+        "# Setup\n"
+        "context = LLMContext(messages, tools)\n"
+        "context_aggregator = LLMContextAggregatorPair(context)\n\n"
+        "# Context aggregator type\n"
+        "context_aggregator: LLMContextAggregatorPair\n\n"
+        "# Context frame type\n"
+        "frame: LLMContextFrame\n\n"
+        "# Context type\n"
+        "context: LLMContext\n\n"
+        "```\n",
+    )
 
 import copy
 import json

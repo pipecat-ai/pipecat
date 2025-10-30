@@ -9,7 +9,6 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from simli import SimliConfig
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
@@ -66,11 +65,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",
     )
 
     simli_ai = SimliVideoService(
-        SimliConfig(os.getenv("SIMLI_API_KEY"), os.getenv("SIMLI_FACE_ID")),
+        api_key=os.getenv("SIMLI_API_KEY"),
+        face_id="cace3ef7-a4c4-425d-a8cf-a5358eb0c427",
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
