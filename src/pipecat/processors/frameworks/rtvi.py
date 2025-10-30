@@ -984,8 +984,6 @@ class RTVIObserver(BaseObserver):
         self._last_user_audio_level = 0
         self._last_bot_audio_level = 0
 
-        self._skip_tts = None
-
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
 
@@ -1023,16 +1021,6 @@ class RTVIObserver(BaseObserver):
         """
         if self._rtvi:
             await self._rtvi.push_transport_message(model, exclude_none)
-
-    async def send_aggregated_llm_text(self, text: str, aggregated_by: Optional[str] = None):
-        """Send aggregated LLM text as a bot output message.
-
-        Args:
-            text: The aggregated text to send.
-            aggregated_by: The method of aggregation (e.g., "word", "sentence").
-        """
-        if self._rtvi:
-            await self._rtvi.push_aggregated_llm_text(text, aggregated_by)
 
     async def on_push_frame(self, data: FramePushed):
         """Process a frame being pushed through the pipeline.
@@ -1171,30 +1159,14 @@ class RTVIObserver(BaseObserver):
         message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
         await self.send_rtvi_message(message)
 
-        # initialize skip_tts on first LLMTextFrame
-        if self._skip_tts is None:
-            self._skip_tts = frame.skip_tts
-
-        orig_text = self._bot_transcription
+        # TODO: Remove all this logic when we fully deprecate bot-transcription messages.
         self._bot_transcription += frame.text
 
         if match_endofsentence(self._bot_transcription) and len(self._bot_transcription) > 0:
-            # TODO: Remove this message when we fully deprecate bot-transcription messages.
             await self.send_rtvi_message(
                 RTVIBotTranscriptionMessage(data=RTVITextMessageData(text=self._bot_transcription))
             )
-            if frame.skip_tts:
-                await self.send_aggregated_llm_text(
-                    text=self._bot_transcription, aggregated_by="sentence"
-                )
             self._bot_transcription = ""
-        elif not frame.skip_tts and self._skip_tts:
-            # We just switched from skipping TTS to not skipping TTS.
-            # Send any dangling transcription.
-            if len(orig_text) > 0:
-                await self.send_aggregated_llm_text(text=orig_text, aggregated_by="sentence")
-                self._bot_transcription = frame.text
-        self._skip_tts = frame.skip_tts
 
     async def _handle_user_transcriptions(self, frame: Frame):
         """Handle user transcription frames."""
@@ -1426,12 +1398,6 @@ class RTVIProcessor(FrameProcessor):
         frame = OutputTransportMessageUrgentFrame(
             message=model.model_dump(exclude_none=exclude_none)
         )
-        await self.push_frame(frame)
-
-    async def push_aggregated_llm_text(self, text: str, aggregated_by: Optional[str] = None):
-        """Push an aggregated LLM text frame."""
-        frame = AggregatedLLMTextFrame(text=text, aggregated_by=aggregated_by)
-        frame.skip_tts = True
         await self.push_frame(frame)
 
     async def handle_message(self, message: RTVIMessage):
