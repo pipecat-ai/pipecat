@@ -68,7 +68,9 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.string import concatenate_aggregated_text, match_endofsentence
+from pipecat.utils.string import concatenate_aggregated_text
+from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
+from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -597,7 +599,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
-        self._llm_aggregation: str = ""
+        self._llm_text_aggregator: BaseTextAggregator = (
+            self._params.llm_text_aggregator or SimpleTextAggregator()
+        )
         self._skip_tts: Optional[bool] = None
 
     @property
@@ -821,8 +825,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_llm_text(self, frame: LLMTextFrame):
         await self._handle_text(frame)
-        if self._skip_tts or frame.skip_tts:
-            self._llm_aggregation += frame.text
         await self._maybe_push_llm_aggregation(frame)
 
     async def _handle_llm_end(self, frame: LLMFullResponseEndFrame):
@@ -833,30 +835,28 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _maybe_push_llm_aggregation(
         self, frame: LLMFullResponseStartFrame | LLMTextFrame | LLMFullResponseEndFrame
     ):
-        should_push = False
+        aggregate = None
+        should_reset_aggregator = False
         if self._skip_tts and not frame.skip_tts:
             # if the skip_tts flag switches, to false, push the current aggregation
-            should_push = True
+            aggregate = self._llm_text_aggregator.text
+            should_reset_aggregator = True
         self._skip_tts = frame.skip_tts
         if self._skip_tts:
             if self._skip_tts and isinstance(frame, LLMFullResponseEndFrame):
                 # on end frame, always push the aggregation
-                should_push = True
-            elif len(self._llm_aggregation) > 0 and match_endofsentence(self._llm_aggregation):
-                # push aggregation on end of sentence
-                should_push = True
+                aggregate = self._llm_text_aggregator.text
+                should_reset_aggregator = True
+            elif isinstance(frame, LLMTextFrame):
+                aggregate = await self._llm_text_aggregator.aggregate(frame.text)
 
-        if not should_push:
+        if not aggregate:
             return
 
-        text = self._llm_aggregation.lstrip("\n")
-        if not text.strip():
-            # don't push empty text
-            return
-
-        llm_frame = AggregatedLLMTextFrame(text=text, aggregated_by="sentence")
+        llm_frame = AggregatedLLMTextFrame(text=aggregate.text, aggregated_by=aggregate.type)
         await self.push_frame(llm_frame)
-        self._llm_aggregation = ""
+        if should_reset_aggregator:
+            await self._llm_text_aggregator.reset()
 
     async def _handle_text(self, frame: TextFrame):
         if not self._started or not frame.append_to_context:
