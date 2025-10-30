@@ -330,10 +330,12 @@ class TextFrame(DataFrame):
 
     text: str
     skip_tts: bool = field(init=False)
+    append_to_context: bool = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = False
+        self.append_to_context = True
 
     def __str__(self):
         pts = format_pts(self.pts)
