@@ -82,25 +82,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def handle_user_idle(user_idle: UserIdleProcessor, retry_count: int) -> bool:
         if retry_count == 1:
             # First attempt: Add a gentle prompt to the conversation
-            message = {
-                "role": "system",
-                "content": "The user has been quiet. Politely and briefly ask if they're still there.",
-            }
-            await user_idle.push_frame(LLMMessagesAppendFrame([message], run_llm=True))
+            await user_idle.push_frame(TTSSpeakFrame("First check."))
             return True
         elif retry_count == 2:
             # Second attempt: More direct prompt
-            message = {
-                "role": "system",
-                "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
-            }
-            await user_idle.push_frame(LLMMessagesAppendFrame([message], run_llm=True))
+            await user_idle.push_frame(TTSSpeakFrame("Second check."))
             return True
         else:
             # Third attempt: End the conversation
-            await user_idle.push_frame(
-                TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
-            )
+            await user_idle.push_frame(TTSSpeakFrame("Third check."))
             await task.queue_frame(EndFrame())
             return False
 
@@ -127,6 +117,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
+
+    turn_observer = task.turn_tracking_observer
+    if turn_observer:
+
+        @turn_observer.event_handler("on_turn_ended")
+        async def on_turn_ended(observer, turn_number, duration, was_interrupted):
+            # Log the context after every turn
+            logger.info(f"📝 Context after turn {turn_number}: {context.get_messages()}")
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
