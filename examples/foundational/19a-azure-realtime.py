@@ -175,12 +175,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         tools,
     )
 
-    context_aggregator = LLMContextAggregatorPair(
-        context,
-        # `expect_stripped_words=False` needed when OpenAI Realtime used with
-        # "audio" modality (the default)
-        assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
-    )
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

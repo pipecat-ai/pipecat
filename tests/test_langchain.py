@@ -65,9 +65,7 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         self.mock_proc = self.MockProcessor("token_collector")
 
         context = LLMContext()
-        context_aggregator = LLMContextAggregatorPair(
-            context, assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False)
-        )
+        context_aggregator = LLMContextAggregatorPair(context)
 
         pipeline = Pipeline(
             [context_aggregator.user(), proc, self.mock_proc, context_aggregator.assistant()]
