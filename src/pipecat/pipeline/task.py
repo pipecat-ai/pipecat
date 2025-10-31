@@ -12,7 +12,6 @@ including heartbeats, idle detection, and observer integration.
 """
 
 import asyncio
-import time
 from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
 
 from loguru import logger
@@ -39,7 +38,7 @@ from pipecat.frames.frames import (
     UserSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
@@ -55,6 +54,43 @@ HEARTBEAT_MONITOR_SECS = HEARTBEAT_SECS * 10
 IDLE_TIMEOUT_SECS = 300
 
 CANCEL_TIMEOUT_SECS = 20.0
+
+
+class IdleFrameObserver(BaseObserver):
+    """Idle timeout observer.
+
+    This observer waits for specific frames being generated in the pipeline. If
+    the frames are generated the given asyncio event is set. If the event is not
+    set it means the pipeline is probably idle.
+
+    """
+
+    def __init__(self, *, idle_event: asyncio.Event, idle_timeout_frames: Tuple[Type[Frame], ...]):
+        """Initialize the observer.
+
+        Args:
+            idle_event: The event to set if the idle timeout frames are being pushed.
+            idle_timeout_frames: A tuple with the frames that should set the event when received
+        """
+        super().__init__()
+        self._idle_event = idle_event
+        self._idle_timeout_frames = idle_timeout_frames
+        self._processed_frames = set()
+
+    async def on_push_frame(self, data: FramePushed):
+        """Callback executed when a frame is pushed in the pipeline.
+
+        Args:
+            data: The frame push event data.
+        """
+        # Skip already processed frames
+        if data.frame.id in self._processed_frames:
+            return
+
+        self._processed_frames.add(data.frame.id)
+
+        if isinstance(data.frame, StartFrame) or isinstance(data.frame, self._idle_timeout_frames):
+            self._idle_event.set()
 
 
 class PipelineParams(BaseModel):
@@ -215,7 +251,6 @@ class PipelineTask(BasePipelineTask):
         self._conversation_id = conversation_id
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._enable_turn_tracking = enable_turn_tracking
-        self._idle_timeout_frames = idle_timeout_frames
         self._idle_timeout_secs = idle_timeout_secs
         if self._params.observers:
             import warnings
@@ -250,16 +285,24 @@ class PipelineTask(BasePipelineTask):
         # This queue is the queue used to push frames to the pipeline.
         self._push_queue = asyncio.Queue()
         self._process_push_task: Optional[asyncio.Task] = None
+
         # This is the heartbeat queue. When a heartbeat frame is received in the
         # down queue we add it to the heartbeat queue for processing.
         self._heartbeat_queue = asyncio.Queue()
         self._heartbeat_push_task: Optional[asyncio.Task] = None
         self._heartbeat_monitor_task: Optional[asyncio.Task] = None
-        # This is the idle queue. When frames are received downstream they are
-        # put in the queue. If no frame is received the pipeline is considered
-        # idle.
-        self._idle_queue = asyncio.Queue()
+
+        # This is the idle event. When selected frames are pushed from any
+        # processor we consider the pipeline is not idle. We use an observer
+        # which will be listening any part of the pipeline.
+        self._idle_event = asyncio.Event()
         self._idle_monitor_task: Optional[asyncio.Task] = None
+        if self._idle_timeout_secs:
+            idle_frame_observer = IdleFrameObserver(
+                idle_event=self._idle_event,
+                idle_timeout_frames=idle_timeout_frames,
+            )
+            observers.append(idle_frame_observer)
 
         # This event is used to indicate the StartFrame has been received at the
         # end of the pipeline.
@@ -530,7 +573,7 @@ class PipelineTask(BasePipelineTask):
 
     async def _maybe_cancel_idle_task(self):
         """Cancel idle monitoring task if it is running."""
-        if self._idle_timeout_secs and self._idle_monitor_task:
+        if self._idle_monitor_task:
             await self._task_manager.cancel_task(self._idle_monitor_task)
             self._idle_monitor_task = None
 
@@ -706,10 +749,6 @@ class PipelineTask(BasePipelineTask):
         processors have handled the EndFrame and therefore we can exit the task
         cleanly.
         """
-        # Queue received frame to the idle queue so we can monitor idle
-        # pipelines.
-        await self._idle_queue.put(frame)
-
         if isinstance(frame, self._reached_downstream_types):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
@@ -772,33 +811,10 @@ class PipelineTask(BasePipelineTask):
         Note: Heartbeats are excluded from idle detection.
         """
         running = True
-        last_frame_time = 0
-
         while running:
             try:
-                frame = await asyncio.wait_for(
-                    self._idle_queue.get(), timeout=self._idle_timeout_secs
-                )
-
-                if isinstance(frame, StartFrame) or isinstance(frame, self._idle_timeout_frames):
-                    # If we find a StartFrame or one of the frames that prevents a
-                    # time out we update the time.
-                    last_frame_time = time.time()
-                else:
-                    # If we find any other frame we check if the pipeline is
-                    # idle by checking the last time we received one of the
-                    # valid frames.
-                    diff_time = time.time() - last_frame_time
-                    if diff_time >= self._idle_timeout_secs:
-                        running = await self._idle_timeout_detected()
-                        # Reset `last_frame_time` so we don't trigger another
-                        # immediate idle timeout if we are not cancelling. For
-                        # example, we might want to force the bot to say goodbye
-                        # and then clean nicely with an `EndFrame`.
-                        last_frame_time = time.time()
-
-                self._idle_queue.task_done()
-
+                await asyncio.wait_for(self._idle_event.wait(), timeout=self._idle_timeout_secs)
+                self._idle_event.clear()
             except asyncio.TimeoutError:
                 running = await self._idle_timeout_detected()
 
@@ -810,7 +826,7 @@ class PipelineTask(BasePipelineTask):
         """
         # If we are cancelling, just exit the task.
         if self._cancelled:
-            return True
+            return False
 
         logger.warning("Idle timeout detected.")
         await self._call_event_handler("on_idle_timeout")
