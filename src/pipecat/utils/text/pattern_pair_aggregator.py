@@ -8,7 +8,7 @@
 
 This module provides an aggregator that identifies and processes content between
 pattern pairs (like XML tags or custom delimiters) in streaming text, with
-support for custom handlers and configurable pattern removal.
+support for custom handlers and configurable actions for when a pattern is found.
 """
 
 import re
@@ -72,13 +72,18 @@ class PatternPairAggregator(BaseTextAggregator):
 
     This aggregator buffers text until it can identify complete pattern pairs
     (defined by start and end patterns), processes the content between these
-    patterns using registered handlers, and returns text at sentence boundaries.
-    It's particularly useful for processing structured content in streaming text,
-    such as XML tags, markdown formatting, or custom delimiters.
+    patterns using registered handlers. By default, its aggregation method
+    returns text at sentence boundaries, and remove the content found between
+    any matched patterns. However, matched patterns can also be configured to
+    returned as a separate aggregation object containing the content between
+    their start and end patterns or left in, so that only the delimiters are
+    removed and a callback can be triggered.
+
+    This aggregator is particularly useful for processing structured content in
+    streaming text, such as XML tags, markdown formatting, or custom delimiters.
 
     The aggregator ensures that patterns spanning multiple text chunks are
-    correctly identified and handles cases where patterns contain sentence
-    boundaries.
+    correctly identified.
     """
 
     def __init__(self, **kwargs):
