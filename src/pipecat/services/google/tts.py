@@ -249,7 +249,7 @@ class GoogleHttpTTSService(TTSService):
         Parameters:
             pitch: Voice pitch adjustment (e.g., "+2st", "-50%").
             rate: Speaking rate adjustment (e.g., "slow", "fast", "125%"). Used for SSML prosody tags (non-Chirp voices).
-            speaking_rate: Speaking rate for AudioConfig (Chirp/Journey voices). Range [0.25, 4.0].
+            speaking_rate: Speaking rate for AudioConfig (Chirp/Journey voices). Range [0.25, 2.0].
             volume: Volume adjustment (e.g., "loud", "soft", "+6dB").
             emphasis: Emphasis level for the text.
             language: Language for synthesis. Defaults to English.
@@ -371,11 +371,11 @@ class GoogleHttpTTSService(TTSService):
         """
         if "speaking_rate" in settings:
             rate_value = float(settings["speaking_rate"])
-            if 0.25 <= rate_value <= 4.0:
+            if 0.25 <= rate_value <= 2.0:
                 self._settings["speaking_rate"] = rate_value
             else:
                 logger.warning(
-                    f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 4.0"
+                    f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 2.0"
                 )
         await super()._update_settings(settings)
 
@@ -455,18 +455,17 @@ class GoogleHttpTTSService(TTSService):
             voice = texttospeech_v1.VoiceSelectionParams(
                 language_code=self._settings["language"], name=self._voice_id
             )
+            # Build audio config with conditional speaking_rate
+            audio_config_params = {
+                "audio_encoding": texttospeech_v1.AudioEncoding.LINEAR16,
+                "sample_rate_hertz": self.sample_rate,
+            }
+
             # For Chirp and Journey voices, include speaking_rate in AudioConfig
             if (is_chirp_voice or is_journey_voice) and self._settings["speaking_rate"] is not None:
-                audio_config = texttospeech_v1.AudioConfig(
-                    audio_encoding=texttospeech_v1.AudioEncoding.LINEAR16,
-                    sample_rate_hertz=self.sample_rate,
-                    speaking_rate=self._settings["speaking_rate"],
-                )
-            else:
-                audio_config = texttospeech_v1.AudioConfig(
-                    audio_encoding=texttospeech_v1.AudioEncoding.LINEAR16,
-                    sample_rate_hertz=self.sample_rate,
-                )
+                audio_config_params["speaking_rate"] = self._settings["speaking_rate"]
+
+            audio_config = texttospeech_v1.AudioConfig(**audio_config_params)
 
             request = texttospeech_v1.SynthesizeSpeechRequest(
                 input=synthesis_input, voice=voice, audio_config=audio_config
@@ -527,7 +526,7 @@ class GoogleTTSService(TTSService):
 
         Parameters:
             language: Language for synthesis. Defaults to English.
-            speaking_rate: The speaking rate, in the range [0.25, 4.0].
+            speaking_rate: The speaking rate, in the range [0.25, 2.0].
         """
 
         language: Optional[Language] = Language.EN
@@ -617,6 +616,22 @@ class GoogleTTSService(TTSService):
             The Google TTS-specific language code, or None if not supported.
         """
         return language_to_google_tts_language(language)
+
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Override to handle speaking_rate updates for streaming API.
+
+        Args:
+            settings: Dictionary of settings to update. Can include 'speaking_rate' (float)
+        """
+        if "speaking_rate" in settings:
+            rate_value = float(settings["speaking_rate"])
+            if 0.25 <= rate_value <= 2.0:
+                self._settings["speaking_rate"] = rate_value
+            else:
+                logger.warning(
+                    f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 2.0"
+                )
+        await super()._update_settings(settings)
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
