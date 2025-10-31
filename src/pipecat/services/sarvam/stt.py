@@ -107,8 +107,6 @@ class SarvamSTTService(STTService):
             params: Configuration parameters for Sarvam STT service.
             **kwargs: Additional arguments passed to the parent STTService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or SarvamSTTService.InputParams()
 
         # Validate that saaras models don't accept language parameter
@@ -127,6 +125,10 @@ class SarvamSTTService(STTService):
                     "Prompts are only supported for STT-Translate models"
                 )
 
+        # Use sample_rate from params if provided, otherwise use the parameter
+        sample_rate = params.sample_rate if params.sample_rate is not None else sample_rate
+        super().__init__(sample_rate=sample_rate, **kwargs)
+
         self.set_model_name(model)
         self._api_key = api_key
         self._language_code = params.language
@@ -140,7 +142,6 @@ class SarvamSTTService(STTService):
         self._prompt = params.prompt
 
         # Store connection parameters
-        self._sample_rate = params.sample_rate
         self._vad_signals = params.vad_signals
         self._high_vad_sensitivity = params.high_vad_sensitivity
         self._input_audio_codec = params.input_audio_codec
@@ -268,10 +269,8 @@ class SarvamSTTService(STTService):
             method_kwargs = {
                 "audio": audio_base64,
                 "encoding": encoding,
+                "sample_rate": self.sample_rate,
             }
-            # Only include sample_rate if provided in params
-            if self._sample_rate is not None:
-                method_kwargs["sample_rate"] = self._sample_rate
 
             # Use appropriate method based on service type
             if "saarika" in self.model_name.lower():
@@ -302,10 +301,8 @@ class SarvamSTTService(STTService):
                 "vad_signals": vad_signals_str,
                 "high_vad_sensitivity": high_vad_sensitivity_str,
                 "input_audio_codec": self._input_audio_codec,
+                "sample_rate": str(self.sample_rate),
             }
-            # Only include sample_rate if provided in params
-            if self._sample_rate is not None:
-                connect_kwargs["sample_rate"] = str(self._sample_rate)
 
             # Choose the appropriate service based on model
             if "saarika" in self.model_name.lower():
