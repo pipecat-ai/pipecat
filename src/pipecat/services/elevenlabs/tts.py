@@ -332,7 +332,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             "auto_mode": str(params.auto_mode).lower(),
             "enable_ssml_parsing": params.enable_ssml_parsing,
             "enable_logging": params.enable_logging,
-            "apply_text_normalization": params.apply_text_normalization,
+            "pronunciation_dictionary": params.pronunciation_dictionary,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -522,8 +522,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             if self._settings["enable_logging"]:
                 url += f"&enable_logging={self._settings['enable_logging']}"
 
-            if self._settings["apply_text_normalization"] is not None:
-                url += f"&apply_text_normalization={self._settings['apply_text_normalization']}"
+            if self._settings["pronunciation_dictionary"] is not None:
+                url += f"&pronunciation_dictionary={self._settings['pronunciation_dictionary']}"
 
             # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]

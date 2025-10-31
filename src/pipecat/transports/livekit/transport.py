@@ -607,6 +607,18 @@ class LiveKitTransportClient:
         """String representation of the LiveKit transport client."""
         return f"{self._transport_name}::LiveKitTransportClient"
 
+    # Netic Extension: Clear audio buffer
+    def clear_audio_buffer(self):
+        """Clear the audio buffer."""
+        if self._audio_source:
+            logger.info(
+                f"Clearing audio buffer (queued_duration before: {self._audio_source.queued_duration})"
+            )
+            self._audio_source.clear_queue()
+            logger.info(
+                f"Audio buffer cleared (queued_duration after: {self._audio_source.queued_duration})"
+            )
+
 
 class LiveKitInputTransport(BaseInputTransport):
     """Handles incoming media streams and events from LiveKit rooms.
@@ -799,6 +811,13 @@ class LiveKitInputTransport(BaseInputTransport):
         )
         return image_frame
 
+    # Netic Extension: Clear audio buffer
+    def clear_audio_buffer(self):
+        """Clear the audio buffer."""
+        if self._client:
+            logger.info("Clearing audio buffer with client")
+            self._client.clear_audio_buffer()
+
 
 class LiveKitOutputTransport(BaseOutputTransport):
     """Handles outgoing media streams and events to LiveKit rooms.
@@ -939,6 +958,13 @@ class LiveKitOutputTransport(BaseOutputTransport):
             num_channels=self._params.audio_out_channels,
             samples_per_channel=samples_per_channel,
         )
+
+    # Netic Extension: Clear audio buffer
+    def clear_audio_buffer(self):
+        """Clear the audio buffer."""
+        if self._client:
+            logger.info("Clearing audio buffer with client")
+            self._client.clear_audio_buffer()
 
 
 class LiveKitTransport(BaseTransport):
