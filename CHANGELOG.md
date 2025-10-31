@@ -41,13 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   ```python
   context = LLMContext(messages, tools)
-  context_aggregator = LLMContextAggregatorPair(
-    context,
-    # This part is `OpenAIRealtimeLLMService`-specific.
-    # `expect_stripped_words=False` needed when OpenAI Realtime used with
-    # "audio" modality (the default).
-    assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
-  )
+  context_aggregator = LLMContextAggregatorPair(context)
   ```
 
   (Note that even though `OpenAIRealtimeLLMService` now supports the universal
@@ -124,13 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   ```python
   context = LLMContext(messages, tools)
-  context_aggregator = LLMContextAggregatorPair(
-    context,
-    # This part is `GeminiLiveLLMService`-specific.
-    # `expect_stripped_words=False` needed when Gemini Live used with AUDIO
-    #  modality (the default).
-    assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
-  )
+  context_aggregator = LLMContextAggregatorPair(context)
   ```
 
   (Note that even though `GeminiLiveLLMService` now supports the universal
@@ -209,6 +197,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when running `AWSNovaSonicLLMService`.
 
 ### Deprecated
+
+- The `expect_stripped_words` parameter of `LLMAssistantAggregatorParams` is
+  ignored when used with the newer `LLMAssistantAggregator`, which now handles
+  word spacing automatically.
 
 - `LLMService.request_image_frame()` is deprecated, push a
   `UserImageRequestFrame` instead.
