@@ -783,10 +783,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 message["content"] = result
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
-        if not frame.add_to_context:
+        if not frame.append_to_context:
             return
 
-        logger.debug(f"{self} Adding UserImageRawFrame to LLM context (size: {frame.size})")
+        logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
 
         self._context.add_image_frame_message(
             format=frame.format,

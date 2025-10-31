@@ -160,12 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `UserImageRawFrame` new fields `add_to_context` and `text`. The
-  `add_to_context` field indicates if this image and text should be added to the
-  LLM context (by the LLM assistant aggregator). The `text` field, if set, might
-  also guide the LLM or the vision service on how to analyze the image.
+- `UserImageRawFrame` new fields `append_to_context` and `text`. The
+  `append_to_context` field indicates if this image and text should be added to
+  the LLM context (by the LLM assistant aggregator). The `text` field, if set,
+  might also guide the LLM or the vision service on how to analyze the image.
 
-- `UserImageRequestFrame` new fiels `add_to_context` and `text`. Both fields
+- `UserImageRequestFrame` new fiels `append_to_context` and `text`. Both fields
   will be used to set the same fields on the captured `UserImageRawFrame`.
 
 - `UserImageRequestFrame` don't require function call name and ID anymore.
