@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added supprt for Sarvam Speech-to-Text service (`SarvamSTTService`) with streaming WebSocket
   support for `saarika` (STT) and `saaras` (STT-translate) models.
 
+- Added support for including images or audio to LLM context messages using
+  `LLMContext.create_image_message()` or `LLMContext.create_image_url_message()`
+  (not all LLMs support URLs) and `LLMContext.create_audio_message()`. For
+  example, when creating `LLMMessagesAppendFrame`:
+
+  ```python
+  message = LLMContext.create_image_message(image=..., size= ...)
+  await self.push_frame(LLMMessagesAppendFrame(messages=[message], run_llm=True))
+  ```
+
+- New event handlers for the `DeepgramFluxSTTService`: `on_start_of_turn`,
+  `on_turn_resumed`, `on_end_of_turn`, `on_eager_end_of_turn`, `on_update`.
+
 - Added `generation_config` parameter support to `CartesiaTTSService` and
   `CartesiaHttpTTSService` for Cartesia Sonic-3 models. Includes a new
   `GenerationConfig` class with `volume` (0.5-2.0), `speed` (0.6-1.5),
@@ -154,6 +167,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `UserImageRawFrame` new fields `add_to_context` and `text`. The
+  `add_to_context` field indicates if this image and text should be added to the
+  LLM context (by the LLM assistant aggregator). The `text` field, if set, might
+  also guide the LLM or the vision service on how to analyze the image.
+
+- `UserImageRequestFrame` new fiels `add_to_context` and `text`. Both fields
+  will be used to set the same fields on the captured `UserImageRawFrame`.
+
+- `UserImageRequestFrame` don't require function call name and ID anymore.
+
+- Updated `MoondreamService` to process `UserImageRawFrame`.
+
+- `VisionService` expects `UserImageRawFrame` in order to analyze images.
+
 - `DailyTransport` triggers `on_error` event if transcription can't be started
   or stopped.
 
@@ -178,6 +205,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `LLMService.request_image_frame()` is deprecated, push a
+  `UserImageRequestFrame` instead.
+
+- `UserResponseAggregator` is deprecated and will be removed in a future version.
+
 - The `send_transcription_frames` argument to `OpenAIRealtimeLLMService` is
   deprecated. Transcription frames are now always sent. They go upstream, to be
   handled by the user context aggregator. See "Added" section for details.
@@ -196,6 +228,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `HumeTTSService` that was only using Octave 2, which does
+  not support the `description` field. Now, if a description is provided, it
+  switches to Octave 1.
+
 - Fixed an issue where `DailyTransport` would timeout prematurely on join and on
   leave.
 
@@ -205,7 +241,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `ServiceSwitcher` where the `STTService`s would result in
   all STT services producing `TranscriptionFrame`s.
 
-- Fixed an issue in `HumeTTSService` that was only using Octave 2, which does not support the `description` field. Now, if a description is provided, it switches to Octave 1.
+### Other
+
+- Updated all vision 12-series foundational examples to load images from a file.
+
+- Added 14-series video examples for different services. These new examples
+  request an image from the user camera through a function call.
 
 ## [0.0.91] - 2025-10-21
 

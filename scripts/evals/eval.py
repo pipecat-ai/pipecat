@@ -10,9 +10,10 @@ import os
 import re
 import time
 import wave
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import aiofiles
 from deepgram import LiveOptions
@@ -51,6 +52,14 @@ PIPELINE_IDLE_TIMEOUT_SECS = 60
 EVAL_TIMEOUT_SECS = 120
 
 EvalPrompt = str | Tuple[str, ImageFile]
+
+
+@dataclass
+class EvalConfig:
+    prompt: EvalPrompt
+    eval: str
+    eval_speaks_first: bool = False
+    runner_args_body: Optional[Any] = None
 
 
 class EvalRunner:
@@ -93,9 +102,7 @@ class EvalRunner:
     async def run_eval(
         self,
         example_file: str,
-        prompt: EvalPrompt,
-        eval: str,
-        user_speaks_first: bool = False,
+        eval_config: EvalConfig,
     ):
         if not re.match(self._pattern, example_file):
             return
@@ -112,10 +119,8 @@ class EvalRunner:
 
         try:
             tasks = [
-                asyncio.create_task(run_example_pipeline(script_path)),
-                asyncio.create_task(
-                    run_eval_pipeline(self, example_file, prompt, eval, user_speaks_first)
-                ),
+                asyncio.create_task(run_example_pipeline(script_path, eval_config)),
+                asyncio.create_task(run_eval_pipeline(self, example_file, eval_config)),
             ]
             _, pending = await asyncio.wait(tasks, timeout=EVAL_TIMEOUT_SECS)
             if pending:
@@ -177,7 +182,7 @@ class EvalRunner:
         return os.path.join(self._recordings_dir, f"{base_name}.wav")
 
 
-async def run_example_pipeline(script_path: Path):
+async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
 
     module = load_module_from_path(script_path)
@@ -196,6 +201,7 @@ async def run_example_pipeline(script_path: Path):
 
     runner_args = RunnerArguments()
     runner_args.pipeline_idle_timeout_secs = PIPELINE_IDLE_TIMEOUT_SECS
+    runner_args.body = eval_config.runner_args_body
 
     await module.run_bot(transport, runner_args)
 
@@ -203,9 +209,7 @@ async def run_example_pipeline(script_path: Path):
 async def run_eval_pipeline(
     eval_runner: EvalRunner,
     example_file: str,
-    prompt: EvalPrompt,
-    eval: str,
-    user_speaks_first: bool = False,
+    eval_config: EvalConfig,
 ):
     logger.info(f"Starting eval bot")
 
@@ -262,17 +266,16 @@ async def run_eval_pipeline(
     # Load example prompt depending on image.
     example_prompt = ""
     example_image: Optional[ImageFile] = None
-    if isinstance(prompt, str):
-        example_prompt = prompt
-    elif isinstance(prompt, tuple):
-        example_prompt, example_image = prompt
+    if isinstance(eval_config.prompt, str):
+        example_prompt = eval_config.prompt
+    elif isinstance(eval_config.prompt, tuple):
+        example_prompt, example_image = eval_config.prompt
 
-    eval_prompt = f"The answer is correct if it matches: {eval}."
     common_system_prompt = (
         "The user might say things other than the answer and that's allowed. "
-        f"You should only call the eval function with your assessment when the user actually answers the question. {eval_prompt}"
+        f"You should only call the eval function when the user: {eval_config.eval}"
     )
-    if user_speaks_first:
+    if eval_config.eval_speaks_first:
         system_prompt = f"You are an LLM eval, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
     else:
         system_prompt = f"You are an LLM eval, be extremly brief. Your goal is to first ask one question: {example_prompt}. {common_system_prompt}"
@@ -330,9 +333,9 @@ async def run_eval_pipeline(
 
         # Default behavior is for the bot to speak first
         # If the eval bot speaks first, we append the prompt to the messages
-        if user_speaks_first:
+        if eval_config.eval_speaks_first:
             messages.append(
-                {"role": "user", "content": f"Start by saying this exactly: '{prompt}'"}
+                {"role": "user", "content": f"Start by saying this exactly: '{eval_config.prompt}'"}
             )
             await task.queue_frames([LLMRunFrame()])
 

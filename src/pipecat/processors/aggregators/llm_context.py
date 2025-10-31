@@ -16,6 +16,7 @@ service-specific adapter.
 
 import base64
 import io
+import wave
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
 
@@ -112,6 +113,89 @@ class LLMContext:
         self._messages: List[LLMContextMessage] = messages if messages else []
         self._tools: ToolsSchema | NotGiven = LLMContext._normalize_and_validate_tools(tools)
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
+
+    @staticmethod
+    def create_image_url_message(
+        *,
+        role: str = "user",
+        url: str,
+        text: Optional[str] = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing an image URL.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            url: The URL of the image.
+            text: Optional text to include with the image.
+        """
+        content = []
+        if text:
+            content.append({"type": "text", "text": text})
+
+        content.append({"type": "image_url", "image_url": {"url": url}})
+
+        return {"role": role, "content": content}
+
+    @staticmethod
+    def create_image_message(
+        *,
+        role: str = "user",
+        format: str,
+        size: tuple[int, int],
+        image: bytes,
+        text: Optional[str] = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing an image.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            format: Image format (e.g., 'RGB', 'RGBA').
+            size: Image dimensions as (width, height) tuple.
+            image: Raw image bytes.
+            text: Optional text to include with the image.
+        """
+        buffer = io.BytesIO()
+        Image.frombytes(format, size, image).save(buffer, format="JPEG")
+        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        url = f"data:image/jpeg;base64,{encoded_image}"
+
+        return LLMContext.create_image_url_message(role=role, url=url, text=text)
+
+    @staticmethod
+    def create_audio_message(
+        *, role: str = "user", audio_frames: list[AudioRawFrame], text: str = "Audio follows"
+    ) -> LLMContextMessage:
+        """Create a context message containing audio.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            audio_frames: List of audio frame objects to include.
+            text: Optional text to include with the audio.
+        """
+        sample_rate = audio_frames[0].sample_rate
+        num_channels = audio_frames[0].num_channels
+
+        content = []
+        content.append({"type": "text", "text": text})
+        data = b"".join(frame.audio for frame in audio_frames)
+
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wf:
+                wf.setsampwidth(2)
+                wf.setnchannels(num_channels)
+                wf.setframerate(sample_rate)
+                wf.writeframes(data)
+
+        encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        content.append(
+            {
+                "type": "input_audio",
+                "input_audio": {"data": encoded_audio, "format": "wav"},
+            }
+        )
+
+        return {"role": role, "content": content}
 
     @property
     def messages(self) -> List[LLMContextMessage]:
@@ -238,7 +322,7 @@ class LLMContext:
         self._tool_choice = tool_choice
 
     def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+        self, *, format: str, size: tuple[int, int], image: bytes, text: Optional[str] = None
     ):
         """Add a message containing an image frame.
 
@@ -248,17 +332,8 @@ class LLMContext:
             image: Raw image bytes.
             text: Optional text to include with the image.
         """
-        buffer = io.BytesIO()
-        Image.frombytes(format, size, image).save(buffer, format="JPEG")
-        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-        content = []
-        if text:
-            content.append({"type": "text", "text": text})
-        content.append(
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
-        )
-        self.add_message({"role": "user", "content": content})
+        message = LLMContext.create_image_message(format=format, size=size, image=image, text=text)
+        self.add_message(message)
 
     def add_audio_frames_message(
         self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
@@ -269,66 +344,8 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
-        if not audio_frames:
-            return
-
-        sample_rate = audio_frames[0].sample_rate
-        num_channels = audio_frames[0].num_channels
-
-        content = []
-        content.append({"type": "text", "text": text})
-        data = b"".join(frame.audio for frame in audio_frames)
-        data = bytes(
-            self._create_wav_header(
-                sample_rate,
-                num_channels,
-                16,
-                len(data),
-            )
-            + data
-        )
-        encoded_audio = base64.b64encode(data).decode("utf-8")
-        content.append(
-            {
-                "type": "input_audio",
-                "input_audio": {"data": encoded_audio, "format": "wav"},
-            }
-        )
-        self.add_message({"role": "user", "content": content})
-
-    def _create_wav_header(self, sample_rate, num_channels, bits_per_sample, data_size):
-        """Create a WAV file header for audio data.
-
-        Args:
-            sample_rate: Audio sample rate in Hz.
-            num_channels: Number of audio channels.
-            bits_per_sample: Bits per audio sample.
-            data_size: Size of audio data in bytes.
-
-        Returns:
-            WAV header as a bytearray.
-        """
-        # RIFF chunk descriptor
-        header = bytearray()
-        header.extend(b"RIFF")  # ChunkID
-        header.extend((data_size + 36).to_bytes(4, "little"))  # ChunkSize: total size - 8
-        header.extend(b"WAVE")  # Format
-        # "fmt " sub-chunk
-        header.extend(b"fmt ")  # Subchunk1ID
-        header.extend((16).to_bytes(4, "little"))  # Subchunk1Size (16 for PCM)
-        header.extend((1).to_bytes(2, "little"))  # AudioFormat (1 for PCM)
-        header.extend(num_channels.to_bytes(2, "little"))  # NumChannels
-        header.extend(sample_rate.to_bytes(4, "little"))  # SampleRate
-        # Calculate byte rate and block align
-        byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
-        block_align = num_channels * (bits_per_sample // 8)
-        header.extend(byte_rate.to_bytes(4, "little"))  # ByteRate
-        header.extend(block_align.to_bytes(2, "little"))  # BlockAlign
-        header.extend(bits_per_sample.to_bytes(2, "little"))  # BitsPerSample
-        # "data" sub-chunk
-        header.extend(b"data")  # Subchunk2ID
-        header.extend(data_size.to_bytes(4, "little"))  # Subchunk2Size
-        return header
+        message = LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
+        self.add_message(message)
 
     @staticmethod
     def _normalize_and_validate_tools(tools: ToolsSchema | NotGiven) -> ToolsSchema | NotGiven:

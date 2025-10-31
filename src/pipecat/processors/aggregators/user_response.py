@@ -27,10 +27,23 @@ class UserResponseAggregator(LLMUserAggregator):
     def __init__(self, **kwargs):
         """Initialize the user response aggregator.
 
+        .. deprecated:: 0.0.92
+            `UserResponseAggregator` is deprecated and will be removed in a future version.
+
         Args:
             **kwargs: Additional arguments passed to parent LLMUserAggregator.
         """
         super().__init__(context=LLMContext(), **kwargs)
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`UserResponseAggregator` is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     async def push_aggregation(self):
         """Push the aggregated user response as a TextFrame.
