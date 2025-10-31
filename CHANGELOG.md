@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   you cancel a task with `PipelineTask.cancel(reason="cancellation your
   reason")`.
 
+### Fixed
+
+- `GeminiLiveLLMService` now properly supports context-provided system
+  instruction and tools
+
 ## [0.0.92] - 2025-10-31 🎃 "The Haunted Edition" 👻
 
 ### Added
