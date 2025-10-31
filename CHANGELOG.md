@@ -228,6 +228,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `PipelineTask` issue that was causing an idle timeout for frames that
+  were being generated but not reaching the end of the pipeline. Since the exact
+  point when frames are discarded is unknown, we now monitor pipeline frames
+  using an observer. If the observer detects frames are being generated, it will
+  prevent the pipeline from being considered idle.
+
 - Fixed an issue in `HumeTTSService` that was only using Octave 2, which does
   not support the `description` field. Now, if a description is provided, it
   switches to Octave 1.
