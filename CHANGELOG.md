@@ -164,9 +164,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The development runner's `/start` endpoint now supports passing
-  `dailyRoomProperties` in the request body when `createDailyRoom` is true.
-  Properties are validated against the `DailyRoomProperties` type and passed to
-  Daily's room creation API.
+  `dailyRoomProperties` and `dailyMeetingTokenProperties` in the request body
+  when `createDailyRoom` is true. Properties are validated against the
+  `DailyRoomProperties` and `DailyMeetingTokenProperties` types respectively
+  and passed to Daily's room and token creation APIs.
 
 - `UserImageRawFrame` new fields `append_to_context` and `text`. The
   `append_to_context` field indicates if this image and text should be added to
