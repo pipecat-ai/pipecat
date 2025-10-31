@@ -22,7 +22,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
-from typing import AsyncGenerator, List, Literal, Optional
+from typing import Any, AsyncGenerator, List, Literal, Mapping, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -248,7 +248,8 @@ class GoogleHttpTTSService(TTSService):
 
         Parameters:
             pitch: Voice pitch adjustment (e.g., "+2st", "-50%").
-            rate: Speaking rate adjustment (e.g., "slow", "fast", "125%").
+            rate: Speaking rate adjustment (e.g., "slow", "fast", "125%"). Used for SSML prosody tags (non-Chirp voices).
+            speaking_rate: Speaking rate for AudioConfig (Chirp/Journey voices). Range [0.25, 2.0].
             volume: Volume adjustment (e.g., "loud", "soft", "+6dB").
             emphasis: Emphasis level for the text.
             language: Language for synthesis. Defaults to English.
@@ -258,6 +259,7 @@ class GoogleHttpTTSService(TTSService):
 
         pitch: Optional[str] = None
         rate: Optional[str] = None
+        speaking_rate: Optional[float] = None
         volume: Optional[str] = None
         emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
         language: Optional[Language] = Language.EN
@@ -291,6 +293,7 @@ class GoogleHttpTTSService(TTSService):
         self._settings = {
             "pitch": params.pitch,
             "rate": params.rate,
+            "speaking_rate": params.speaking_rate,
             "volume": params.volume,
             "emphasis": params.emphasis,
             "language": self.language_to_service_language(params.language)
@@ -359,6 +362,22 @@ class GoogleHttpTTSService(TTSService):
             The Google TTS-specific language code, or None if not supported.
         """
         return language_to_google_tts_language(language)
+
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Override to handle speaking_rate updates for Chirp/Journey voices.
+
+        Args:
+            settings: Dictionary of settings to update. Can include 'speaking_rate' (float)
+        """
+        if "speaking_rate" in settings:
+            rate_value = float(settings["speaking_rate"])
+            if 0.25 <= rate_value <= 2.0:
+                self._settings["speaking_rate"] = rate_value
+            else:
+                logger.warning(
+                    f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 2.0"
+                )
+        await super()._update_settings(settings)
 
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
@@ -436,10 +455,17 @@ class GoogleHttpTTSService(TTSService):
             voice = texttospeech_v1.VoiceSelectionParams(
                 language_code=self._settings["language"], name=self._voice_id
             )
-            audio_config = texttospeech_v1.AudioConfig(
-                audio_encoding=texttospeech_v1.AudioEncoding.LINEAR16,
-                sample_rate_hertz=self.sample_rate,
-            )
+            # Build audio config with conditional speaking_rate
+            audio_config_params = {
+                "audio_encoding": texttospeech_v1.AudioEncoding.LINEAR16,
+                "sample_rate_hertz": self.sample_rate,
+            }
+
+            # For Chirp and Journey voices, include speaking_rate in AudioConfig
+            if (is_chirp_voice or is_journey_voice) and self._settings["speaking_rate"] is not None:
+                audio_config_params["speaking_rate"] = self._settings["speaking_rate"]
+
+            audio_config = texttospeech_v1.AudioConfig(**audio_config_params)
 
             request = texttospeech_v1.SynthesizeSpeechRequest(
                 input=synthesis_input, voice=voice, audio_config=audio_config
@@ -500,7 +526,7 @@ class GoogleTTSService(TTSService):
 
         Parameters:
             language: Language for synthesis. Defaults to English.
-            speaking_rate: The speaking rate, in the range [0.25, 4.0].
+            speaking_rate: The speaking rate, in the range [0.25, 2.0].
         """
 
         language: Optional[Language] = Language.EN
@@ -590,6 +616,22 @@ class GoogleTTSService(TTSService):
             The Google TTS-specific language code, or None if not supported.
         """
         return language_to_google_tts_language(language)
+
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Override to handle speaking_rate updates for streaming API.
+
+        Args:
+            settings: Dictionary of settings to update. Can include 'speaking_rate' (float)
+        """
+        if "speaking_rate" in settings:
+            rate_value = float(settings["speaking_rate"])
+            if 0.25 <= rate_value <= 2.0:
+                self._settings["speaking_rate"] = rate_value
+            else:
+                logger.warning(
+                    f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 2.0"
+                )
+        await super()._update_settings(settings)
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
