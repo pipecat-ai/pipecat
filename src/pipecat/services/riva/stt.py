@@ -659,8 +659,8 @@ class RivaSegmentedSTTService(SegmentedSTTService):
                 yield ErrorFrame(f"Unexpected Riva response format: {str(ae)}")
 
         except Exception as e:
-            logger.exception(f"Riva Canary ASR error: {e}")
-            yield ErrorFrame(f"Riva Canary ASR error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class ParakeetSTTService(RivaSTTService):

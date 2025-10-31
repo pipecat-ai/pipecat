@@ -224,7 +224,8 @@ class LmntTTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -240,7 +241,8 @@ class LmntTTSService(InterruptibleTTSService):
                 # await self._websocket.send(json.dumps({"eof": True}))
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._started = False
             self._websocket = None
@@ -277,7 +279,7 @@ class LmntTTSService(InterruptibleTTSService):
                         logger.error(f"{self} error: {msg['error']}")
                         await self.push_frame(TTSStoppedFrame())
                         await self.stop_all_metrics()
-                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
+                        await self.push_error(ErrorFrame(error=f"{self} error: {msg['error']}"))
                         return
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
@@ -310,7 +312,8 @@ class LmntTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(json.dumps({"flush": True}))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -318,3 +321,4 @@ class LmntTTSService(InterruptibleTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
