@@ -13,6 +13,7 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 
 import asyncio
 import json
+import warnings
 from abc import abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Set
 
@@ -65,6 +66,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -88,7 +90,7 @@ class LLMContextAggregator(FrameProcessor):
         self._context = context
         self._role = role
 
-        self._aggregation: str = ""
+        self._aggregation: List[str] = []
 
     @property
     def messages(self) -> List[LLMContextMessage]:
@@ -168,12 +170,20 @@ class LLMContextAggregator(FrameProcessor):
 
     async def reset(self):
         """Reset the aggregation state."""
-        self._aggregation = ""
+        self._aggregation = []
 
     @abstractmethod
     async def push_aggregation(self):
         """Push the current aggregation downstream."""
         pass
+
+    def aggregation_string(self) -> str:
+        """Get the current aggregation as a string.
+
+        Returns:
+            The concatenated aggregation string.
+        """
+        return concatenate_aggregated_text(self._aggregation)
 
 
 class LLMUserAggregator(LLMContextAggregator):
@@ -212,8 +222,6 @@ class LLMUserAggregator(LLMContextAggregator):
         self._turn_params: Optional[SmartTurnParams] = None
 
         if "aggregation_timeout" in kwargs:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -307,7 +315,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _process_aggregation(self):
         """Process the current aggregation and push it downstream."""
-        aggregation = self._aggregation
+        aggregation = self.aggregation_string()
         await self.reset()
         self._context.add_message({"role": self.role, "content": aggregation})
         frame = LLMContextFrame(self._context)
@@ -355,7 +363,7 @@ class LLMUserAggregator(LLMContextAggregator):
         """
 
         async def should_interrupt(strategy: BaseInterruptionStrategy):
-            await strategy.append_text(self._aggregation)
+            await strategy.append_text(self.aggregation_string())
             return await strategy.should_interrupt()
 
         return any([await should_interrupt(s) for s in self._interruption_strategies])
@@ -425,7 +433,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if not text.strip():
             return
 
-        self._aggregation += f" {text}" if self._aggregation else text
+        self._aggregation.append(text)
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
         # Reset aggregation timer.
@@ -550,22 +558,30 @@ class LLMAssistantAggregator(LLMContextAggregator):
         Args:
             context: The OpenAI LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
-            **kwargs: Additional arguments. Supports deprecated 'expect_stripped_words'.
+            **kwargs: Additional arguments.
         """
         super().__init__(context=context, role="assistant", **kwargs)
         self._params = params or LLMAssistantAggregatorParams()
 
         if "expect_stripped_words" in kwargs:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "Parameter 'expect_stripped_words' is deprecated, use 'params' instead.",
+                    "Parameter 'expect_stripped_words' is deprecated. "
+                    "LLMAssistantAggregator now handles word spacing automatically.",
                     DeprecationWarning,
                 )
 
             self._params.expect_stripped_words = kwargs["expect_stripped_words"]
+
+        if params and not params.expect_stripped_words:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "params.expect_stripped_words is deprecated. "
+                    "LLMAssistantAggregator now handles word spacing automatically.",
+                    DeprecationWarning,
+                )
 
         self._started = 0
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
@@ -629,7 +645,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if not self._aggregation:
             return
 
-        aggregation = self._aggregation.strip()
+        aggregation = self.aggregation_string()
         await self.reset()
 
         if aggregation:
@@ -767,10 +783,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 message["content"] = result
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
-        if not frame.add_to_context:
+        if not frame.append_to_context:
             return
 
-        logger.debug(f"{self} Adding UserImageRawFrame to LLM context (size: {frame.size})")
+        logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
 
         self._context.add_image_frame_message(
             format=frame.format,
@@ -793,10 +809,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if not self._started:
             return
 
-        if self._params.expect_stripped_words:
-            self._aggregation += f" {frame.text}" if self._aggregation else frame.text
-        else:
-            self._aggregation += frame.text
+        # Make sure we really have text (spaces count, too!)
+        if len(frame.text) == 0:
+            return
+
+        self._aggregation.append(frame.text)
 
     def _context_updated_task_finished(self, task: asyncio.Task):
         self._context_updated_tasks.discard(task)

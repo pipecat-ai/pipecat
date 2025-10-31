@@ -164,12 +164,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
     # Create context aggregator
-    context_aggregator = LLMContextAggregatorPair(
-        context,
-        # `expect_stripped_words=False` needed when Gemini Live used with AUDIO
-        #  modality (the default)
-        assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
-    )
+    context_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     pipeline = Pipeline(
