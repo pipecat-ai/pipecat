@@ -5,6 +5,59 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- New bot-output RTVI message to represent what the bot actually "says".
+  - RTVIBotOutputMessage / RTVIBotOutputMessageData — includes:
+    - spoken: bool — whether the text was spoken by TTS
+    - aggregated_by: Optional[str|\"word\"|\"sentence\"] — how the text was aggregated
+  - RTVIObserver now emits bot-output messages (bot-tts-text and bot-llm-text are still
+    supported and generated. bot-transcript is now deprecated in lieu of this new, more
+    thorough, message).
+- Introduced new `AggregatedLLMTextFrame` type to support representing effective llm
+  output whether or not it is processed by the TTS. This new frame type includes the
+  field `aggregated_by` to represent the conceptual formaty by which the given text
+  is aggregated. `TTSTextFrame`s now inherit from `AggregatedLLMTextFrame`.
+- Updated the base aggregator type:
+  - Introduced a new `Aggregation` dataclass to represent both the aggregated `text` and
+    a string identifying the `type` of aggregation (ex. "sentence", "word", "my custom aggregation")
+  - `BaseTextAggregator.text` now returns an `Aggregation` (instead of `str`).
+  - `BaseTextAggregator.aggregate()` now returns `Optional[Aggregation]`
+    (instead of `Optional[str]`)
+  - `SimpleTextAggregator`, `SkipTagsAggregator`, `PatternPairAggregator` updated to
+    produce/consume `Aggregation` objects.
+- Augmented the `PatterPairAggregator`:
+  - `PatternPairAggregator` now supports `type` and `action` per pattern.
+  - New `MatchAction` enum: `REMOVE`, `KEEP`, `AGGREGATE`, allowing customization for how
+    a match should be handled.
+    - `REMOVE`: The text along with its delimiters will be removed from the streaming text.
+                Sentence aggregation will continue on as if this text did not exist.
+    - `KEEP`: The delimiters will be removed, but the content between them will be kept.
+              Sentence aggregation will continue on with the internal text included.
+    - `AGGREGATE`: The delimiters will be removed and the content between will be treated
+              as a separate aggregation. Any text before the start of the pattern will be
+              returned early, whether or not a complete sentence was found. Then the pattern
+              will be returned. Then the aggregation will continue on sentence matching after
+              the closing delimeter is found. The content between the delimeters is not
+              aggregated by sentence. It is aggregated as one single block of text.
+    - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
+
+### Changed
+
+- TTS flow respects aggregation metadata
+  - `TTSService` accepts a new `skip_aggregator_types` to avoid speaking certain aggregation types (as
+    now determined/returned by the aggregator)
+  - TTS services push `AggregatedLLMTextFrame` in addition to `TTSTextFrame`s when either an aggregation
+    occurs that should not be spoken or when the TTS service supports word-by-word timestamping. In the
+    latter case, the `TTSService` preliminarily generates an `AggregatedLLMTextFrame`, aggregated by sentence
+    to generate the full sentence content as early as possible.
+
+### Deprecated
+
+- The RTVI `bot-transcription` event is deprecated in favor of the new `bot-output` message which is the canonical representation of bot output (spoken or not). The code still emits a transcription message for backwards compatibility while transition occurs.
+
 ## [0.0.92] - 2025-10-31 🎃 "The Haunted Edition" 👻
 
 ### Added
