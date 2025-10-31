@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added supprt for Sarvam Speech-to-Text service (`SarvamSTTService`) with streaming WebSocket
+  support for `saarika` (STT) and `saaras` (STT-translate) models.
+
 - Added a new `DeepgramHttpTTSService`, which delivers a meaningful reduction
   in latency when compared to the `DeepgramTTSService`.
 

@@ -22,8 +22,8 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamHttpTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -63,7 +63,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = SarvamSTTService(
+            api_key=os.getenv("SARVAM_API_KEY"),
+            model="saarika:v2.5",
+        )
 
         tts = SarvamHttpTTSService(
             api_key=os.getenv("SARVAM_API_KEY"),
