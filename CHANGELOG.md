@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added supprt for Sarvam Speech-to-Text service (`SarvamSTTService`) with streaming WebSocket
   support for `saarika` (STT) and `saaras` (STT-translate) models.
 
+- Add support for `speaking_rate` input parameter in `GoogleHttpTTSService`.
+
+- Added `enable_speaker_diarization` and `enable_language_identification` to
+  `SonioxSTTService`.
+
+- Added `SpeechmaticsTTSService`, which uses Speechmatic's TTS API. Updated
+  examples 07a\* to use the new TTS service.
+
 - Added support for including images or audio to LLM context messages using
   `LLMContext.create_image_message()` or `LLMContext.create_image_url_message()`
   (not all LLMs support URLs) and `LLMContext.create_audio_message()`. For
@@ -222,6 +230,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `face_id` parameters instead.
 
 ### Removed
+
+- Removed `enable_non_final_tokens` and `max_non_final_tokens_duration_ms` from
+  `SonioxSTTService`.
 
 - Removed the `aiohttp_session` arg from `SarvamTTSService` as it's no longer
   used.
@@ -1387,6 +1398,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.78] - 2025-08-07
 
 ### Added
+
+- Added `SonioxSTTService` using Soniox's STT websocket API.
 
 - Added `enable_emulated_vad_interruptions` to `LLMUserAggregatorParams`.
   When user speech is emulated (e.g. when a transcription is received but
