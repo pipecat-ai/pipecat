@@ -78,14 +78,12 @@ class SarvamSTTService(STTService):
                    Only applicable to saaras (STT-Translate) models. Defaults to None.
             vad_signals: Enable VAD signals in response. Defaults to True.
             high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to False.
-            input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
         """
 
         language: Optional[Language] = None
         prompt: Optional[str] = None
         vad_signals: bool = True
         high_vad_sensitivity: bool = False
-        input_audio_codec: str = "wav"
 
     def __init__(
         self,
@@ -93,6 +91,7 @@ class SarvamSTTService(STTService):
         api_key: str,
         model: str = "saarika:v2.5",
         sample_rate: Optional[int] = None,
+        input_audio_codec: str = "wav",
         params: Optional[InputParams] = None,
         **kwargs,
     ):
@@ -102,6 +101,7 @@ class SarvamSTTService(STTService):
             api_key: Sarvam API key for authentication.
             model: Sarvam model to use for transcription.
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
+            input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
             **kwargs: Additional arguments passed to the parent STTService.
         """
@@ -140,7 +140,7 @@ class SarvamSTTService(STTService):
         # Store connection parameters
         self._vad_signals = params.vad_signals
         self._high_vad_sensitivity = params.high_vad_sensitivity
-        self._input_audio_codec = params.input_audio_codec
+        self._input_audio_codec = input_audio_codec
 
         # Initialize Sarvam SDK client
         self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key)
