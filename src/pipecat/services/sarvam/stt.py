@@ -76,7 +76,6 @@ class SarvamSTTService(STTService):
             language: Target language for transcription. Defaults to None (required for saarika models).
             prompt: Optional prompt to guide translation style/context for STT-Translate models.
                    Only applicable to saaras (STT-Translate) models. Defaults to None.
-            sample_rate: Audio sample rate in Hz. Overrides the parent sample_rate if provided.
             vad_signals: Enable VAD signals in response. Defaults to True.
             high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to False.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
@@ -84,7 +83,6 @@ class SarvamSTTService(STTService):
 
         language: Optional[Language] = None
         prompt: Optional[str] = None
-        sample_rate: Optional[int] = None
         vad_signals: bool = True
         high_vad_sensitivity: bool = False
         input_audio_codec: str = "wav"
@@ -125,8 +123,6 @@ class SarvamSTTService(STTService):
                     "Prompts are only supported for STT-Translate models"
                 )
 
-        # Use sample_rate from params if provided, otherwise use the parameter
-        sample_rate = params.sample_rate if params.sample_rate is not None else sample_rate
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self.set_model_name(model)
