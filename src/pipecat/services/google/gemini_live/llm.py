@@ -672,8 +672,8 @@ class GeminiLiveLLMService(LLMService):
         self._voice_id = voice_id
         self._language_code = params.language
 
-        self._system_instruction = system_instruction
-        self._tools = tools
+        self._system_instruction_from_init = system_instruction
+        self._tools_from_init = tools
         self._inference_on_context_initialization = inference_on_context_initialization
         self._needs_turn_complete_message = False
 
@@ -964,16 +964,51 @@ class GeminiLiveLLMService(LLMService):
         if not self._context:
             # We got our initial context
             self._context = context
-            if context.tools:
-                self._tools = context.tools
+
+            # If context contains system instruction or tools, reconnect in
+            # order to apply them.
+            # (Context-provided system instruction and tools take precedence
+            # over the ones provided at initialization time. Note that we could
+            # do more sophisticated comparisons here, but for now this is
+            # sufficient: we'll assume folks won't mean to provide these
+            # settings both in the context and at initialization time. In a
+            # future change, we could/should implement the ability to swap
+            # these settings at any point).
+            adapter: GeminiLLMAdapter = self.get_llm_adapter()
+            params = adapter.get_llm_invocation_params(self._context)
+            system_instruction = params["system_instruction"]
+            tools = params["tools"]
+            if system_instruction and self._system_instruction_from_init:
+                logger.warning(
+                    "System instruction provided both at init time and in context; using context-provided value."
+                )
+            if tools and self._tools_from_init:
+                logger.warning(
+                    "Tools provided both at init time and in context; using context-provided value."
+                )
+            if system_instruction or tools:
+                await self._reconnect()
+
             # Initialize our bookkeeping of already-completed tool calls in
             # the context
             await self._process_completed_function_calls(send_new_results=False)
+
+            # Create initial response if needed, based on conversation history
+            # in context
             await self._create_initial_response()
         else:
             # We got an updated context.
-            # This may contain a new user message or tool call result.
             self._context = context
+
+            # Here we assume that the updated context will contain either:
+            # - new messages (that the Gemini Live service, with its own
+            #   context management, is already aware of), or
+            # - tool call results (that we need to tell the remote service
+            #   about).
+            # (In the future, we could do more sophisticated diffing here,
+            # which would enable the user to programmatically manipulate the
+            # context).
+
             # Send results for newly-completed function calls, if any.
             await self._process_completed_function_calls(send_new_results=True)
 
@@ -1103,18 +1138,25 @@ class GeminiLiveLLMService(LLMService):
                         automatic_activity_detection=vad_config
                     )
 
-            # Add system instruction to configuration, if provided
-            system_instruction = self._system_instruction or ""
-            if self._context and hasattr(self._context, "extract_system_instructions"):
-                system_instruction += "\n" + self._context.extract_system_instructions()
+            # Add system instruction and tools to configuration, if provided.
+            # These settings from the context take precedence over the ones
+            # provided at initialization time.
+            adapter: GeminiLLMAdapter = self.get_llm_adapter()
+            system_instruction = None
+            tools = None
+            if self._context:
+                params = adapter.get_llm_invocation_params(self._context)
+                system_instruction = params["system_instruction"]
+                tools = params["tools"]
+            else:
+                system_instruction = self._system_instruction_from_init
+                tools = adapter.from_standard_tools(self._tools_from_init)
             if system_instruction:
                 logger.debug(f"Setting system instruction: {system_instruction}")
                 config.system_instruction = system_instruction
-
-            # Add tools to configuration, if provided
-            if self._tools:
-                logger.debug(f"Setting tools: {self._tools}")
-                config.tools = self.get_llm_adapter().from_standard_tools(self._tools)
+            if tools:
+                logger.debug(f"Setting tools: {tools}")
+                config.tools = tools
 
             # Start the connection
             self._connection_task = self.create_task(self._connection_task_handler(config=config))
