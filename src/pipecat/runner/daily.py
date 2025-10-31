@@ -44,6 +44,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.transports.daily.utils import (
+    DailyMeetingTokenParams,
+    DailyMeetingTokenProperties,
     DailyRESTHelper,
     DailyRoomParams,
     DailyRoomProperties,
@@ -84,6 +86,7 @@ async def configure(
     sip_num_endpoints: Optional[int] = 1,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
     room_properties: Optional[DailyRoomProperties] = None,
+    token_properties: Optional["DailyMeetingTokenProperties"] = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
 
@@ -106,6 +109,9 @@ async def configure(
             individual parameters. When provided, this overrides room_exp_duration and
             SIP-related parameters. If not provided, properties are built from the
             individual parameters as before.
+        token_properties: Optional DailyMeetingTokenProperties to customize the meeting
+            token. When provided, these properties are passed to the token creation API.
+            Note that room_name, exp, and is_owner will be set automatically.
 
     Returns:
         DailyRoomConfig: Object with room_url, token, and optional sip_endpoint.
@@ -179,7 +185,10 @@ async def configure(
 
         # Create token and return standard format
         expiry_time: float = token_exp_duration * 60 * 60
-        token = await daily_rest_helper.get_token(room_url, expiry_time)
+        token_params = None
+        if token_properties:
+            token_params = DailyMeetingTokenParams(properties=token_properties)
+        token = await daily_rest_helper.get_token(room_url, expiry_time, params=token_params)
         return DailyRoomConfig(room_url=room_url, token=token)
 
     # Create a new room
@@ -221,7 +230,12 @@ async def configure(
 
         # Create meeting token
         token_expiry_seconds = token_exp_duration * 60 * 60
-        token = await daily_rest_helper.get_token(room_url, token_expiry_seconds)
+        token_params = None
+        if token_properties:
+            token_params = DailyMeetingTokenParams(properties=token_properties)
+        token = await daily_rest_helper.get_token(
+            room_url, token_expiry_seconds, params=token_params
+        )
 
         if sip_enabled:
             # Return SIP configuration object
