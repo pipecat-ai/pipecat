@@ -37,7 +37,7 @@ jobs:
       - name: Build project
         run: |
           release=$(cat RELEASE)
-          hash=$(git rev-parse --short HEAD)
+          hash=$(echo "${{ github.event.pull_request.head.sha || github.sha }}" | cut -c1-7)
           sed -i 's/^dynamic = \["version"\]/version = "'"${release}+${hash}"'"/' pyproject.toml
           uv build
       
