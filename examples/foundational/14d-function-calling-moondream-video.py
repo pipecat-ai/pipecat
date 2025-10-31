@@ -55,7 +55,7 @@ async def fetch_user_image(params: FunctionCallParams):
     # image to be added to the context because we will process it with
     # Moondream.
     await params.llm.push_frame(
-        UserImageRequestFrame(user_id=user_id, text=question, add_to_context=False),
+        UserImageRequestFrame(user_id=user_id, text=question, append_to_context=False),
         FrameDirection.UPSTREAM,
     )
 
