@@ -6,6 +6,7 @@
 
 import os
 
+import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -24,10 +25,10 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
+from pipecat.services.speechmatics.tts import SpeechmaticsTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -61,100 +62,106 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Run example using Speechmatics STT.
+    """Run example using Speechmatics STT and TTS.
 
-    This example will use diarization within our STT service and output the words spoken by
-    each individual speaker and wrap them with XML tags for the LLM to process. Note the
-    instructions in the system context for the LLM. This greatly improves the conversation
-    experience by allowing the LLM to understand who is speaking in a multi-party call.
+    This example demonstrates a complete Speechmatics integration with both Speech-to-Text
+    and Text-to-Speech services:
 
-    By default, this example will use our ENHANCED operating point, which is optimized for
-    high accuracy. You can change this by setting the `operating_point` parameter to a different
-    value.
+    STT Features:
+    - Diarization to identify and distinguish between different speakers
+    - Words spoken by each speaker are wrapped with XML tags for LLM processing
+    - System context instructions help the LLM understand multi-party conversations
+    - ENHANCED operating point by default for optimal accuracy
 
-    For more information on operating points, see the Speechmatics documentation:
-    https://docs.speechmatics.com/rt-api-ref
+    TTS Features:
+    - Low latency streaming audio synthesis
+    - Multiple voice options available including `sarah`, `theo`, and `megan`
+
+    For more information:
+    - STT: https://docs.speechmatics.com/rt-api-ref
+    - TTS: https://docs.speechmatics.com/text-to-speech/quickstart
     """
     logger.info(f"Starting bot")
 
-    stt = SpeechmaticsSTTService(
-        api_key=os.getenv("SPEECHMATICS_API_KEY"),
-        params=SpeechmaticsSTTService.InputParams(
-            language=Language.EN,
-            enable_diarization=True,
-            end_of_utterance_silence_trigger=0.5,
-            speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
-        ),
-    )
-
-    tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY"),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
-        model="eleven_turbo_v2_5",
-    )
-
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        params=BaseOpenAILLMService.InputParams(temperature=0.75),
-    )
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful British assistant called Alfred. "
-                "Your goal is to demonstrate your capabilities in a succinct way. "
-                "Your output will be converted to audio so don't include special characters in your answers. "
-                "Always include punctuation in your responses. "
-                "Give very short replies - do not give longer replies unless strictly necessary. "
-                "Respond to what the user said in a concise, funny, creative and helpful way. "
-                "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
+    async with aiohttp.ClientSession() as session:
+        stt = SpeechmaticsSTTService(
+            api_key=os.getenv("SPEECHMATICS_API_KEY"),
+            params=SpeechmaticsSTTService.InputParams(
+                language=Language.EN,
+                enable_diarization=True,
+                end_of_utterance_silence_trigger=0.5,
+                speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
             ),
-        },
-    ]
+        )
 
-    context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(aggregation_timeout=0.005),
-    )
+        tts = SpeechmaticsTTSService(
+            api_key=os.getenv("SPEECHMATICS_API_KEY"),
+            voice_id="sarah",
+            aiohttp_session=session,
+        )
 
-    pipeline = Pipeline(
-        [
-            transport.input(),  # Transport user input
-            stt,  # STT
-            context_aggregator.user(),  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            params=BaseOpenAILLMService.InputParams(temperature=0.75),
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a helpful British assistant called Sarah. "
+                    "Your goal is to demonstrate your capabilities in a succinct way. "
+                    "Your output will be converted to audio so don't include special characters in your answers. "
+                    "Always include punctuation in your responses. "
+                    "Give very short replies - do not give longer replies unless strictly necessary. "
+                    "Respond to what the user said in a concise, funny, creative and helpful way. "
+                    "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
+                ),
+            },
         ]
-    )
 
-    task = PipelineTask(
-        pipeline,
-        params=PipelineParams(
-            enable_metrics=True,
-            enable_usage_metrics=True,
-        ),
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-    )
+        context = LLMContext(messages)
+        context_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(aggregation_timeout=0.005),
+        )
 
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
-        # Kick off the conversation.
-        messages.append({"role": "system", "content": "Say a short hello to the user."})
-        await task.queue_frames([LLMRunFrame()])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                stt,  # STT
+                context_aggregator.user(),  # User responses
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                context_aggregator.assistant(),  # Assistant spoken responses
+            ]
+        )
 
-    @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
-        await task.cancel()
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        )
 
-    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            logger.info(f"Client connected")
+            # Kick off the conversation.
+            messages.append({"role": "system", "content": "Say a short hello to the user."})
+            await task.queue_frames([LLMRunFrame()])
 
-    await runner.run(task)
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, client):
+            logger.info(f"Client disconnected")
+            await task.cancel()
+
+        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
+        await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):

@@ -245,13 +245,25 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     item["text"] = "(empty)"
                 # handle image_url -> image conversion
                 if item["type"] == "image_url":
-                    item["type"] = "image"
-                    item["source"] = {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": item["image_url"]["url"].split(",")[1],
-                    }
-                    del item["image_url"]
+                    if item["image_url"]["url"].startswith("data:"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": item["image_url"]["url"].split(",")[1],
+                        }
+                        del item["image_url"]
+                    elif item["image_url"]["url"].startswith("http"):
+                        item["type"] = "image"
+                        item["source"] = {
+                            "type": "url",
+                            "url": item["image_url"]["url"],
+                        }
+                        del item["image_url"]
+                    else:
+                        url = item["image_url"]["url"]
+                        logger.warning(f"Unsupported 'image_url': {url}")
+
             # In the case where there's a single image in the list (like what
             # would result from a UserImageRawFrame), ensure that the image
             # comes before text, as recommended by Anthropic docs
