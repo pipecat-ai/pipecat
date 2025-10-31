@@ -591,6 +591,37 @@ class GladiaSTTService(STTService):
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
                     if is_final:
+                        # Get audio duration from utterance if available
+                        audio_duration = None
+                        if "time_begin" in utterance and "time_end" in utterance:
+                            audio_duration = (
+                                utterance["time_end"] - utterance["time_begin"]
+                            ) / 1000.0
+
+                        # Get performance metrics
+                        ttft = self._metrics.ttfb if hasattr(self, "_metrics") else None
+                        processing_time = (
+                            self._metrics.processing_time if hasattr(self, "_metrics") else None
+                        )
+
+                        # Get confidence if available from utterance
+                        confidence = utterance.get("confidence")
+
+                        # Calculate STT usage metrics
+                        if audio_duration:
+                            await self.start_stt_usage_metrics(
+                                audio_duration=audio_duration,
+                                transcript=transcript,
+                                processing_time=processing_time,
+                                ttft=ttft,
+                                confidence=confidence,
+                                sample_rate=self.sample_rate,
+                                channels=1,
+                                encoding="LINEAR16",
+                                cost_per_minute=self._cost_per_minute,
+                                ground_truth=self._ground_truth,
+                            )
+
                         await self.push_frame(
                             TranscriptionFrame(
                                 transcript,
