@@ -164,6 +164,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when it's configured with `modalities=GeminiModalities.AUDIO`. If you need
   to process its output, listen for `TTSTextFrame`s instead.
 
+### Added
+
+- Added `ResembleAITTSService` for Resemble AI Text-to-Speech Websocket integration.
+
 ### Changed
 
 - The development runner's `/start` endpoint now supports passing
