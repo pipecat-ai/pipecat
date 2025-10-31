@@ -24,6 +24,7 @@ from pipecat.pipeline.base_task import PipelineTaskParams
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import HeartbeatsObserver, run_test
@@ -383,6 +384,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         idle_timeout_secs = 0.2
         sleep_time_secs = idle_timeout_secs / 2
 
+        # Use the identify filter so the frames just reach the end of the pipeline.
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(
@@ -392,6 +394,12 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         )
 
         async def delayed_frames():
+            """Sending multiple text frames.
+
+            The total amount of elapsed time in this function should be greater
+            than the task idle timeout. If an idle timeout event is triggered it
+            means we haven't detected that the TextFrames have been pushed.
+            """
             await asyncio.sleep(sleep_time_secs)
             await task.queue_frame(TextFrame("Hello Pipecat!"))
             await asyncio.sleep(sleep_time_secs)
@@ -400,6 +408,51 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await task.queue_frame(TextFrame("Hello Pipecat!"))
 
         start_time = time.time()
+
+        tasks = [
+            asyncio.create_task(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+            asyncio.create_task(delayed_frames()),
+        ]
+
+        _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+        diff_time = time.time() - start_time
+
+        self.assertGreater(diff_time, sleep_time_secs * 3)
+
+        # Wait for the pending tasks to complete.
+        await asyncio.gather(*pending)
+
+    async def test_idle_task_swallowed_frames(self):
+        idle_timeout_secs = 0.2
+        sleep_time_secs = idle_timeout_secs / 2
+
+        # Block all frames (except system frames). Here, we are testing that
+        # generated frames don't trigger an idle timeout (they don't need to
+        # reach the end of the pipeline).
+        filter = FrameFilter(types=())
+        pipeline = Pipeline([filter])
+        task = PipelineTask(
+            pipeline,
+            idle_timeout_secs=idle_timeout_secs,
+            idle_timeout_frames=(TextFrame,),
+        )
+
+        start_time = time.time()
+
+        async def delayed_frames():
+            """Sending multiple text frames.
+
+            The total amount of elapsed time in this function should be greater
+            than the task idle timeout. If an idle timeout event is triggered it
+            means we haven't detected that the TextFrames have been pushed.
+            """
+            await asyncio.sleep(sleep_time_secs)
+            await task.queue_frame(TextFrame("Hello Pipecat!"))
+            await asyncio.sleep(sleep_time_secs)
+            await task.queue_frame(TextFrame("Hello Pipecat!"))
+            await asyncio.sleep(sleep_time_secs)
+            await task.queue_frame(TextFrame("Hello Pipecat!"))
 
         tasks = [
             asyncio.create_task(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),

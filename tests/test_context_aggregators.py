@@ -6,7 +6,7 @@
 
 import json
 import unittest
-from typing import Any
+from typing import Any, Optional
 
 from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
@@ -22,6 +22,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
+    LLMContextAssistantTimestampFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OpenAILLMContextAssistantTimestampFrame,
@@ -38,6 +40,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
     LLMUserContextAggregator,
 )
+from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -586,10 +589,15 @@ class BaseTestUserContextAggregator:
         assert context_processor.context_received
 
 
-class BaseTestAssistantContextAggreagator:
+class BaseTestAssistantContextAggregator:
     CONTEXT_CLASS = None  # To be set in subclasses
     AGGREGATOR_CLASS = None  # To be set in subclasses
     EXPECTED_CONTEXT_FRAMES = None  # To be set in subclasses
+
+    def create_assistant_aggregator_params(
+        self, **kwargs
+    ) -> Optional[LLMAssistantAggregatorParams]:
+        return LLMAssistantAggregatorParams(**kwargs)
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
         assert context.messages[index]["content"] == content
@@ -641,7 +649,7 @@ class BaseTestAssistantContextAggreagator:
 
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(
-            context, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+            context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
         frames_to_send = [
             LLMFullResponseStartFrame(),
@@ -687,7 +695,7 @@ class BaseTestAssistantContextAggreagator:
 
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(
-            context, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+            context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
         frames_to_send = [
             LLMFullResponseStartFrame(),
@@ -714,7 +722,7 @@ class BaseTestAssistantContextAggreagator:
 
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(
-            context, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+            context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
         frames_to_send = [
             LLMFullResponseStartFrame(),
@@ -838,7 +846,7 @@ class TestAnthropicUserContextAggregator(
 
 
 class TestAnthropicAssistantContextAggregator(
-    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
+    BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = AnthropicLLMContext
     AGGREGATOR_CLASS = AnthropicAssistantContextAggregator
@@ -873,7 +881,7 @@ class TestAWSBedrockUserContextAggregator(
 
 
 class TestAWSBedrockAssistantContextAggregator(
-    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
+    BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = AWSBedrockLLMContext
     AGGREGATOR_CLASS = AWSBedrockAssistantContextAggregator
@@ -914,7 +922,7 @@ class TestGoogleUserContextAggregator(
 
 
 class TestGoogleAssistantContextAggregator(
-    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
+    BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = GoogleLLMContext
     AGGREGATOR_CLASS = GoogleAssistantContextAggregator
@@ -948,8 +956,27 @@ class TestOpenAIUserContextAggregator(
 
 
 class TestOpenAIAssistantContextAggregator(
-    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
+    BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = OpenAILLMContext
     AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
     EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+
+
+#
+# Universal
+#
+class TestLLMAssistantAggregator(
+    BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = OpenAILLMContext
+    AGGREGATOR_CLASS = LLMAssistantAggregator
+    EXPECTED_CONTEXT_FRAMES = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+
+    # Override to remove 'expect_stripped_words' parameter, which is deprecated
+    # for LLMAssistantAggregator
+    def create_assistant_aggregator_params(
+        self, **kwargs
+    ) -> Optional[LLMAssistantAggregatorParams]:
+        kwargs.pop("expect_stripped_words", None)
+        return LLMAssistantAggregatorParams(**kwargs) if kwargs else None

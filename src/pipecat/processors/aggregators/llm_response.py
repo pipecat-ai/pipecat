@@ -89,7 +89,9 @@ class LLMAssistantAggregatorParams:
 
     Parameters:
         expect_stripped_words: Whether to expect and handle stripped words
-            in text frames by adding spaces between tokens.
+            in text frames by adding spaces between tokens. This parameter is
+            ignored when used with the newer LLMAssistantAggregator, which
+            handles word spacing automatically.
     """
 
     expect_stripped_words: bool = True

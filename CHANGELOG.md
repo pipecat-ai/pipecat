@@ -5,12 +5,15 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.92] - 2025-10-31 🎃 "The Haunted Edition" 👻
 
 ### Added
 
 - Added supprt for Sarvam Speech-to-Text service (`SarvamSTTService`) with streaming WebSocket
   support for `saarika` (STT) and `saaras` (STT-translate) models.
+
+- Added a new `DeepgramHttpTTSService`, which delivers a meaningful reduction
+  in latency when compared to the `DeepgramTTSService`.
 
 - Add support for `speaking_rate` input parameter in `GoogleHttpTTSService`.
 
@@ -44,13 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   ```python
   context = LLMContext(messages, tools)
-  context_aggregator = LLMContextAggregatorPair(
-    context,
-    # This part is `OpenAIRealtimeLLMService`-specific.
-    # `expect_stripped_words=False` needed when OpenAI Realtime used with
-    # "audio" modality (the default).
-    assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
-  )
+  context_aggregator = LLMContextAggregatorPair(context)
   ```
 
   (Note that even though `OpenAIRealtimeLLMService` now supports the universal
@@ -127,13 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   ```python
   context = LLMContext(messages, tools)
-  context_aggregator = LLMContextAggregatorPair(
-    context,
-    # This part is `GeminiLiveLLMService`-specific.
-    # `expect_stripped_words=False` needed when Gemini Live used with AUDIO
-    #  modality (the default).
-    assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
-  )
+  context_aggregator = LLMContextAggregatorPair(context)
   ```
 
   (Note that even though `GeminiLiveLLMService` now supports the universal
@@ -175,12 +166,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `UserImageRawFrame` new fields `add_to_context` and `text`. The
-  `add_to_context` field indicates if this image and text should be added to the
-  LLM context (by the LLM assistant aggregator). The `text` field, if set, might
-  also guide the LLM or the vision service on how to analyze the image.
+- The development runner's `/start` endpoint now supports passing
+  `dailyRoomProperties` and `dailyMeetingTokenProperties` in the request body
+  when `createDailyRoom` is true. Properties are validated against the
+  `DailyRoomProperties` and `DailyMeetingTokenProperties` types respectively
+  and passed to Daily's room and token creation APIs.
 
-- `UserImageRequestFrame` new fiels `add_to_context` and `text`. Both fields
+- `UserImageRawFrame` new fields `append_to_context` and `text`. The
+  `append_to_context` field indicates if this image and text should be added to
+  the LLM context (by the LLM assistant aggregator). The `text` field, if set,
+  might also guide the LLM or the vision service on how to analyze the image.
+
+- `UserImageRequestFrame` new fiels `append_to_context` and `text`. Both fields
   will be used to set the same fields on the captured `UserImageRawFrame`.
 
 - `UserImageRequestFrame` don't require function call name and ID anymore.
@@ -213,6 +210,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- The `expect_stripped_words` parameter of `LLMAssistantAggregatorParams` is
+  ignored when used with the newer `LLMAssistantAggregator`, which now handles
+  word spacing automatically.
+
 - `LLMService.request_image_frame()` is deprecated, push a
   `UserImageRequestFrame` instead.
 
@@ -238,6 +239,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   used.
 
 ### Fixed
+
+- Fixed a `PipelineTask` issue that was causing an idle timeout for frames that
+  were being generated but not reaching the end of the pipeline. Since the exact
+  point when frames are discarded is unknown, we now monitor pipeline frames
+  using an observer. If the observer detects frames are being generated, it will
+  prevent the pipeline from being considered idle.
 
 - Fixed an issue in `HumeTTSService` that was only using Octave 2, which does
   not support the `description` field. Now, if a description is provided, it
