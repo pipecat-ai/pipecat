@@ -27,6 +27,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -65,8 +66,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = SarvamSTTService(
         api_key=os.getenv("SARVAM_API_KEY"),
         model="saarika:v2.5",
-        # Example: set Hindi; omit or change via set_language at runtime
-        params=SarvamSTTService.InputParams(language=None),
     )
 
     tts = SarvamTTSService(
