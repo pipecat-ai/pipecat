@@ -5,7 +5,6 @@ API. It supports real-time transcription with Voice Activity Detection (VAD) and
 can handle multiple audio formats for Indian language speech recognition.
 """
 
-import asyncio
 import base64
 from typing import Optional
 
@@ -55,7 +54,6 @@ def language_to_sarvam_language(language: Language) -> str:
         Language.TE_IN: "te-IN",
         Language.PA_IN: "pa-IN",
         Language.OR_IN: "od-IN",
-        Language.EN_US: "en-US",
         Language.EN_IN: "en-IN",
         Language.AS_IN: "as-IN",
     }
@@ -119,7 +117,7 @@ class SarvamSTTService(STTService):
         self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key)
         self._websocket_context = None
         self._socket_client = None
-        self._listening_task = None
+        self._receive_task = None
 
     def language_to_service_language(self, language: Language) -> str:
         """Convert pipecat Language enum to Sarvam's language code.
@@ -256,17 +254,13 @@ class SarvamSTTService(STTService):
             # Register event handler for incoming messages
             def _message_handler(message):
                 """Wrapper to handle async response handler."""
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self._handle_response(message))
-                except RuntimeError:
-                    # Fallback if no running loop
-                    asyncio.create_task(self._handle_response(message))
+                # Use Pipecat's built-in task management
+                self.create_task(self._handle_message(message))
 
             self._socket_client.on(EventType.MESSAGE, _message_handler)
 
-            # Start listening for messages
-            self._listening_task = asyncio.create_task(self._socket_client.start_listening())
+            # Start receive task using Pipecat's task management
+            self._receive_task = self.create_task(self._receive_task_handler())
 
             logger.info("Connected to Sarvam successfully")
 
@@ -281,13 +275,9 @@ class SarvamSTTService(STTService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
-        if self._listening_task:
-            self._listening_task.cancel()
-            try:
-                await self._listening_task
-            except asyncio.CancelledError:
-                pass
-            self._listening_task = None
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
 
         if self._websocket_context and self._socket_client:
             try:
@@ -300,8 +290,27 @@ class SarvamSTTService(STTService):
                 self._socket_client = None
                 self._websocket_context = None
 
-    async def _handle_response(self, message):
-        """Handle transcription response from Sarvam SDK.
+    async def _receive_task_handler(self):
+        """Handle incoming messages from Sarvam WebSocket.
+
+        This task wraps the SDK's start_listening() method which processes
+        messages via the registered event handler callback.
+        """
+        if not self._socket_client:
+            return
+
+        try:
+            # Start listening for messages from the Sarvam SDK
+            # Messages will be handled via the _message_handler callback
+            await self._socket_client.start_listening()
+        except Exception as e:
+            logger.error(f"Error in Sarvam receive task: {e}")
+            await self.push_error(ErrorFrame(f"Sarvam receive task error: {e}"))
+
+    async def _handle_message(self, message):
+        """Handle incoming WebSocket message from Sarvam SDK.
+
+        Processes transcription data and VAD events from the Sarvam service.
 
         Args:
             message: The parsed response object from Sarvam WebSocket.
@@ -351,9 +360,19 @@ class SarvamSTTService(STTService):
                 await self.stop_processing_metrics()
 
         except Exception as e:
-            logger.error(f"Error handling Sarvam response: {e}")
-            await self.push_error(ErrorFrame(f"Failed to handle response: {e}"))
+            logger.error(f"Error handling Sarvam message: {e}")
+            await self.push_error(ErrorFrame(f"Failed to handle message: {e}"))
             await self.stop_all_metrics()
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing.
+
+        This method is decorated with @traced_stt for observability.
+        """
+        pass
 
     def _map_language_code_to_enum(self, language_code: str) -> Language:
         """Map Sarvam language code to pipecat Language enum."""
@@ -378,10 +397,3 @@ class SarvamSTTService(STTService):
         """Start TTFB and processing metrics collection."""
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-
-    @traced_stt
-    async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass

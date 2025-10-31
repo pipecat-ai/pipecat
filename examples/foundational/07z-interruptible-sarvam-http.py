@@ -66,7 +66,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         stt = SarvamSTTService(
             api_key=os.getenv("SARVAM_API_KEY"),
             model="saarika:v2.5",
-            params=SarvamSTTService.InputParams(language=None),
         )
 
         tts = SarvamHttpTTSService(
