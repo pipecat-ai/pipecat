@@ -62,7 +62,11 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
+from pipecat.utils.text.pattern_pair_aggregator import (
+    MatchAction,
+    PatternMatch,
+    PatternPairAggregator,
+)
 
 load_dotenv(override=True)
 
@@ -110,7 +114,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         pattern_id="voice_tag",
         start_pattern="<voice>",
         end_pattern="</voice>",
-        remove_match=True,
+        type="voice",
+        action=MatchAction.REMOVE,  # Remove tags from final text
     )
 
     # Register handler for voice switching

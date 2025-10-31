@@ -59,6 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -95,6 +96,7 @@ class LLMAssistantAggregatorParams:
     """
 
     expect_stripped_words: bool = True
+    llm_text_aggregator: Optional[BaseTextAggregator] = None
 
 
 class LLMFullResponseAggregator(FrameProcessor):
@@ -1001,7 +1003,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started:
+        if not self._started or not frame.append_to_context:
             return
 
         if self._params.expect_stripped_words:

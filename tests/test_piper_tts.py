@@ -13,6 +13,7 @@ import pytest
 from aiohttp import web
 
 from pipecat.frames.frames import (
+    AggregatedLLMTextFrame,
     ErrorFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
