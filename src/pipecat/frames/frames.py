@@ -773,9 +773,12 @@ class CancelFrame(SystemFrame):
 
     Indicates that a pipeline needs to stop right away without
     processing remaining queued frames.
+
+    Parameters:
+        reason: Optional reason for pushing a cancellation frame.
     """
 
-    pass
+    reason: Optional[str] = None
 
 
 @dataclass
