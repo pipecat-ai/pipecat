@@ -773,9 +773,15 @@ class CancelFrame(SystemFrame):
 
     Indicates that a pipeline needs to stop right away without
     processing remaining queued frames.
+
+    Parameters:
+        reason: Optional reason for pushing a cancel frame.
     """
 
-    pass
+    reason: Optional[str] = None
+
+    def __str__(self):
+        return f"{self.name}(reason: {self.reason})"
 
 
 @dataclass
@@ -1378,9 +1384,15 @@ class CancelTaskFrame(TaskFrame):
     This is used to notify the pipeline task that the pipeline should be
     stopped immediately by pushing a CancelFrame downstream. This frame
     should be pushed upstream.
+
+    Parameters:
+        reason: Optional reason for pushing a cancel frame.
     """
 
-    pass
+    reason: Optional[str] = None
+
+    def __str__(self):
+        return f"{self.name}(reason: {self.reason})"
 
 
 @dataclass
