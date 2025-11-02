@@ -446,10 +446,14 @@ class PipelineTask(BasePipelineTask):
         logger.debug(f"Task {self} scheduled to stop when done")
         await self.queue_frame(EndFrame())
 
-    async def cancel(self):
-        """Request the running pipeline to cancel."""
+    async def cancel(self, *, reason: Optional[str] = None):
+        """Request the running pipeline to cancel.
+
+        Args:
+            reason: Optional reason to indicate why the pipeline is being cancelled.
+        """
         if not self._finished:
-            await self._cancel()
+            await self._cancel(reason=reason)
 
     async def run(self, params: PipelineTaskParams):
         """Start and manage the pipeline execution until completion or cancellation.
@@ -513,12 +517,16 @@ class PipelineTask(BasePipelineTask):
             for frame in frames:
                 await self.queue_frame(frame)
 
-    async def _cancel(self):
-        """Internal cancellation logic for the pipeline task."""
+    async def _cancel(self, *, reason: Optional[str] = None):
+        """Internal cancellation logic for the pipeline task.
+
+        Args:
+            reason: Optional reason to indicate why the pipeline is being cancelled.
+        """
         if not self._cancelled:
             logger.debug(f"Cancelling pipeline task {self}")
             self._cancelled = True
-            await self.queue_frame(CancelFrame())
+            await self.queue_frame(CancelFrame(reason=reason))
 
     async def _create_tasks(self):
         """Create and start all pipeline processing tasks."""
@@ -716,11 +724,11 @@ class PipelineTask(BasePipelineTask):
         if isinstance(frame, EndTaskFrame):
             # Tell the task we should end nicely.
             logger.debug(f"{self}: received end task frame {frame}")
-            await self.queue_frame(EndFrame())
+            await self.queue_frame(EndFrame(reason=frame.reason))
         elif isinstance(frame, CancelTaskFrame):
             # Tell the task we should end right away.
             logger.debug(f"{self}: received cancel task frame {frame}")
-            await self.queue_frame(CancelFrame())
+            await self.queue_frame(CancelFrame(reason=frame.reason))
         elif isinstance(frame, StopTaskFrame):
             # Tell the task we should stop nicely.
             logger.debug(f"{self}: received stop task frame {frame}")
