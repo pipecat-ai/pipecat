@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `EndFrame` and `EndTaskFrame` have an optional `reason` field to indicate why
+  the pipeline is being ended.
+
 - `CancelFrame` and `CancelTaskFrame` have an optional `reason` field to
   indicate why the pipeline is being canceled. This can be also specified when
   you cancel a task with `PipelineTask.cancel(reason="cancellation your

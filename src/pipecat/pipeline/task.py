@@ -724,7 +724,7 @@ class PipelineTask(BasePipelineTask):
         if isinstance(frame, EndTaskFrame):
             # Tell the task we should end nicely.
             logger.debug(f"{self}: received end task frame {frame}")
-            await self.queue_frame(EndFrame())
+            await self.queue_frame(EndFrame(reason=frame.reason))
         elif isinstance(frame, CancelTaskFrame):
             # Tell the task we should end right away.
             logger.debug(f"{self}: received cancel task frame {frame}")
