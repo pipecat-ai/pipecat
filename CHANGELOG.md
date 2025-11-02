@@ -5,6 +5,18 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `EndFrame` and `EndTaskFrame` have an optional `reason` field to indicate why
+  the pipeline is being ended.
+
+- `CancelFrame` and `CancelTaskFrame` have an optional `reason` field to
+  indicate why the pipeline is being canceled. This can be also specified when
+  you cancel a task with `PipelineTask.cancel(reason="cancellation your
+  reason")`.
+
 ## [0.0.92] - 2025-10-31 🎃 "The Haunted Edition" 👻
 
 ### Added

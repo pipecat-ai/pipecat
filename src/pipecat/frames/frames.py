@@ -773,9 +773,15 @@ class CancelFrame(SystemFrame):
 
     Indicates that a pipeline needs to stop right away without
     processing remaining queued frames.
+
+    Parameters:
+        reason: Optional reason for pushing a cancel frame.
     """
 
-    pass
+    reason: Optional[str] = None
+
+    def __str__(self):
+        return f"{self.name}(reason: {self.reason})"
 
 
 @dataclass
@@ -1366,9 +1372,15 @@ class EndTaskFrame(TaskFrame):
     This is used to notify the pipeline task that the pipeline should be
     closed nicely (flushing all the queued frames) by pushing an EndFrame
     downstream. This frame should be pushed upstream.
+
+    Parameters:
+        reason: Optional reason for pushing an end frame.
     """
 
-    pass
+    reason: Optional[str] = None
+
+    def __str__(self):
+        return f"{self.name}(reason: {self.reason})"
 
 
 @dataclass
@@ -1378,9 +1390,15 @@ class CancelTaskFrame(TaskFrame):
     This is used to notify the pipeline task that the pipeline should be
     stopped immediately by pushing a CancelFrame downstream. This frame
     should be pushed upstream.
+
+    Parameters:
+        reason: Optional reason for pushing a cancel frame.
     """
 
-    pass
+    reason: Optional[str] = None
+
+    def __str__(self):
+        return f"{self.name}(reason: {self.reason})"
 
 
 @dataclass
@@ -1451,9 +1469,15 @@ class EndFrame(ControlFrame):
     sending frames to its output channel(s) and close all its threads. Note,
     that this is a control frame, which means it will be received in the order it
     was sent.
+
+    Parameters:
+        reason: Optional reason for pushing an end frame.
     """
 
-    pass
+    reason: Optional[str] = None
+
+    def __str__(self):
+        return f"{self.name}(reason: {self.reason})"
 
 
 @dataclass
