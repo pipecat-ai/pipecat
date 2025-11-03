@@ -1717,13 +1717,17 @@ class GeminiLiveLLMService(LLMService):
             self._session_resumption_handle = update.new_handle
 
     async def _handle_send_error(self, error: Exception):
+        # Ignore "expected" errors that may have occurred for messages that
+        # were in-flight when a disconnection occurred.
+        if self._disconnecting or not self._session:
+            return
+
         # In server-to-server contexts, a WebSocket error should be quite rare.
         # Given how hard it is to recover from a send-side error with proper
         # state management, and that exponential backoff for retries can have
         # cost/stability implications for a service cluster, let's just treat a
         # send-side error as fatal.
-        if not self._disconnecting:
-            await self.push_error(ErrorFrame(error=f"{self} Send error: {error}", fatal=True))
+        await self.push_error(ErrorFrame(error=f"{self} Send error: {error}", fatal=True))
 
     def create_context_aggregator(
         self,
