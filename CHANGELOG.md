@@ -68,6 +68,11 @@ reason")`.
 - `GeminiLiveLLMService` now properly supports context-provided system
   instruction and tools.
 
+### Removed
+
+- Removed `needs_mcp_alternate_schema()` from `LLMService`. The mechanism that
+  relied on it went away.
+
 ## [0.0.92] - 2025-10-31 🎃 "The Haunted Edition" 👻
 
 ### Added

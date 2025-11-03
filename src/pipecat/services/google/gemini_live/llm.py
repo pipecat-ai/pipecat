@@ -772,17 +772,6 @@ class GeminiLiveLLMService(LLMService):
         """
         return True
 
-    def needs_mcp_alternate_schema(self) -> bool:
-        """Check if this LLM service requires alternate MCP schema.
-
-        Google/Gemini has stricter JSON schema validation and requires
-        certain properties to be removed or modified for compatibility.
-
-        Returns:
-            True for Google/Gemini services.
-        """
-        return True
-
     def set_audio_input_paused(self, paused: bool):
         """Set the audio input pause state.
 
