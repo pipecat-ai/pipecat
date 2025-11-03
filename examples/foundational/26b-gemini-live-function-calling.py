@@ -141,8 +141,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
+    # You can provide the system instructions and tools in the context rather
+    # than as arguments to GeminiLiveLLMService, but note that doing so will
+    # trigger a (fast) reconnection when the GeminiLiveLLMService first
+    # receives the context (i.e. when we send the LLMRunFrame below).
     context = LLMContext(
-        [{"role": "user", "content": "Say hello."}],
+        [
+            # {"role": "system", "content": system_instruction},
+            {"role": "user", "content": "Say hello."},
+        ],
+        # tools,
     )
     context_aggregator = LLMContextAggregatorPair(context)
 
