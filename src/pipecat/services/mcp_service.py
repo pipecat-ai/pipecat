@@ -56,7 +56,6 @@ class MCPClient(BaseObject):
         super().__init__(**kwargs)
         self._server_params = server_params
         self._session = ClientSession
-        self._needs_alternate_schema = False
 
         if isinstance(server_params, StdioServerParameters):
             self._client = stdio_client
@@ -84,47 +83,8 @@ class MCPClient(BaseObject):
         Returns:
             A ToolsSchema containing all successfully registered tools.
         """
-        # Check once if the LLM needs alternate strict schema
-        self._needs_alternate_schema = llm and llm.needs_mcp_alternate_schema()
         tools_schema = await self._register_tools(llm)
         return tools_schema
-
-    def _get_alternate_schema_for_strict_validation(self, schema: Dict[str, Any]) -> Dict[str, Any]:
-        """Get an alternate JSON schema to be compatible with LLMs that have strict validation.
-
-        Some LLMs have stricter validation and don't allow certain schema properties
-        that are valid in standard JSON Schema.
-
-        Args:
-            schema: The JSON schema to get an alternate schema for
-
-        Returns:
-            An alternate schema compatible with strict validation
-        """
-        if not isinstance(schema, dict):
-            return schema
-
-        alternate_schema = {}
-
-        for key, value in schema.items():
-            # Skip additionalProperties as some LLMs don't like additionalProperties: false
-            if key == "additionalProperties":
-                continue
-
-            # Recursively get alternate schema for nested objects
-            if isinstance(value, dict):
-                alternate_schema[key] = self._get_alternate_schema_for_strict_validation(value)
-            elif isinstance(value, list):
-                alternate_schema[key] = [
-                    self._get_alternate_schema_for_strict_validation(item)
-                    if isinstance(item, dict)
-                    else item
-                    for item in value
-                ]
-            else:
-                alternate_schema[key] = value
-
-        return alternate_schema
 
     def _convert_mcp_schema_to_pipecat(
         self, tool_name: str, tool_schema: Dict[str, Any]
@@ -142,11 +102,6 @@ class MCPClient(BaseObject):
 
         properties = tool_schema["input_schema"].get("properties", {})
         required = tool_schema["input_schema"].get("required", [])
-
-        # Only get alternate schema for LLMs that need strict schema validation
-        if self._needs_alternate_schema:
-            logger.debug("Getting alternate schema for strict validation")
-            properties = self._get_alternate_schema_for_strict_validation(properties)
 
         schema = FunctionSchema(
             name=tool_name,
