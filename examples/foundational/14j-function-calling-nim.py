@@ -75,7 +75,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # text_filters=[MarkdownTextFilter()],
     )
 
-    llm = NimLLMService(api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.3-70b-instruct")
+    llm = NimLLMService(
+        api_key=os.getenv("NVIDIA_API_KEY"),
+        model="nvidia/llama-3.3-nemotron-super-49b-v1.5",
+        # Recommended when turning thinking off
+        params=NimLLMService.InputParams(temperature=0.0),
+    )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
@@ -102,6 +107,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     tools = ToolsSchema(standard_tools=[weather_function])
     messages = [
+        # Disable thinking by sending this message first
+        # Check the model for the corresponding "no thinking" message
+        {"role": "system", "content": "/no_think"},
         {
             "role": "system",
             "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
