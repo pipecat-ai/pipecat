@@ -39,6 +39,10 @@ reason")`.
   extract probability metrics from `TranscriptionFrame` objects for Whisper-based,
   OpenAI GPT-4o-transcribe, and Deepgram STT services respectively.
 
+- Added `LLMSwitcher.register_direct_function()`. It works much like
+  `LLMSwitcher.register_function()` in that it's a shorthand for registering
+  functions on all LLMs in the switcher, but for direct functions.
+
 ### Changed
 
 - Bumped the `fastapi` dependency's upperbound to `<0.122.0`.

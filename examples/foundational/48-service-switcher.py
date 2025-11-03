@@ -40,8 +40,20 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 load_dotenv(override=True)
 
 
+# "Classic" function
 async def fetch_weather_from_api(params: FunctionCallParams):
     await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+# "Direct" function
+async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
+    """
+    Get a restaurant recommendation.
+
+    Args:
+        location (str): The city and state, e.g. "San Francisco, CA".
+    """
+    await params.result_callback({"name": "The Golden Dragon"})
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -109,7 +121,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm_switcher = LLMSwitcher(
         llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
     )
+    # Register a "classic" function
     llm_switcher.register_function("get_current_weather", fetch_weather_from_api)
+    # Register a "direct" function
+    llm_switcher.register_direct_function(get_restaurant_recommendation)
 
     messages = [
         {
@@ -117,7 +132,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
         },
     ]
-    tools = ToolsSchema(standard_tools=[weather_function])
+    tools = ToolsSchema(standard_tools=[weather_function, get_restaurant_recommendation])
 
     context = LLMContext(messages, tools)
     context_aggregator = LLMContextAggregatorPair(context)
