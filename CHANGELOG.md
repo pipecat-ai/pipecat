@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Refactored pipeline architecture by introducing a new `PipelineNode`
+  abstraction.  Frame processors are now standalone async iterators, and
+  `PipelineNode` is responsible for routing frames upstream or downstream. This
+  decouples frame processors from direct linking, simplifies processor reuse,
+  and provides a clearer separation between processing logic and pipeline
+  wiring. This is an internal, transparent improvement and does not require any
+  changes to existing frame processor code.
+
 - `EndFrame` and `EndTaskFrame` have an optional `reason` field to indicate why
   the pipeline is being ended.
 
@@ -26,8 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added supprt for Sarvam Speech-to-Text service (`SarvamSTTService`) with streaming WebSocket
-  support for `saarika` (STT) and `saaras` (STT-translate) models.
+- Added supprt for Sarvam Speech-to-Text service (`SarvamSTTService`) with
+  streaming WebSocket support for `saarika` (STT) and `saaras` (STT-translate)
+  models.
 
 - Added a new `DeepgramHttpTTSService`, which delivers a meaningful reduction
   in latency when compared to the `DeepgramTTSService`.

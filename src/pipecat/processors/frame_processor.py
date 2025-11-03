@@ -132,14 +132,17 @@ INPUT_TASK_CANCEL_TIMEOUT_SECS = 3
 
 
 class FrameProcessor(BaseObject):
-    """Base class for all frame processors in the pipeline.
+    """Base class for all frame processors in Pipecat.
 
-    Frame processors are the building blocks of Pipecat pipelines, they can be
-    linked to form complex processing pipelines. They receive frames, process
-    them, and pass them to the next or previous processor in the chain.  Each
-    frame processor guarantees frame ordering and processes frames in its own
-    task. System frames are also processed in a separate task which guarantees
-    frame priority.
+    A FrameProcessor is an independent, asynchronous component that consumes
+    input frames and produces zero or more output frames. Frames are delivered
+    to the processor via the `queue_frame(frame, direction)` method. The
+    processor internally manages queues and background tasks to handle incoming
+    frames and generate output frames.
+
+    Output frames are made available through the processor's asynchronous
+    iterator interface, allowing consumers to iterate over processed frames
+    using `async for frame in processor`. Frame ordering is guaranteed.
 
     Event handlers available:
 
@@ -147,6 +150,7 @@ class FrameProcessor(BaseObject):
     - on_after_process_frame: Called after a frame is processed
     - on_before_push_frame: Called before a frame is pushed
     - on_after_push_frame: Called after a frame is pushed
+
     """
 
     def __init__(
@@ -166,8 +170,6 @@ class FrameProcessor(BaseObject):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(name=name, **kwargs)
-        self._prev: Optional["FrameProcessor"] = None
-        self._next: Optional["FrameProcessor"] = None
 
         # Enable direct mode to skip queues and process frames right away.
         self._enable_direct_mode = enable_direct_mode
@@ -234,6 +236,9 @@ class FrameProcessor(BaseObject):
         self._wait_for_interruption = False
         self._wait_interruption_event = asyncio.Event()
 
+        # Push queue
+        self.__push_queue = asyncio.Queue()
+
         # Frame processor events.
         self._register_event_handler("on_before_process_frame", sync=True)
         self._register_event_handler("on_after_process_frame", sync=True)
@@ -283,24 +288,6 @@ class FrameProcessor(BaseObject):
             The list of entry processors.
         """
         return []
-
-    @property
-    def next(self) -> Optional["FrameProcessor"]:
-        """Get the next processor.
-
-        Returns:
-            The next processor, or None if there's no next processor.
-        """
-        return self._next
-
-    @property
-    def previous(self) -> Optional["FrameProcessor"]:
-        """Get the previous processor.
-
-        Returns:
-            The previous processor, or None if there's no previous processor.
-        """
-        return self._prev
 
     @property
     def interruptions_allowed(self):
@@ -518,16 +505,7 @@ class FrameProcessor(BaseObject):
         await self.__cancel_process_task()
         if self._metrics is not None:
             await self._metrics.cleanup()
-
-    def link(self, processor: "FrameProcessor"):
-        """Link this processor to the next processor in the pipeline.
-
-        Args:
-            processor: The processor to link to.
-        """
-        self._next = processor
-        processor._prev = self
-        logger.debug(f"Linking {self} -> {self._next}")
+        await self.__push_queue.put(None)
 
     def get_clock(self) -> BaseClock:
         """Get the clock used by this processor.
@@ -761,36 +739,7 @@ class FrameProcessor(BaseObject):
             frame: The frame to push.
             direction: The direction to push the frame.
         """
-        try:
-            timestamp = self._clock.get_time() if self._clock else 0
-            if direction == FrameDirection.DOWNSTREAM and self._next:
-                logger.trace(f"Pushing {frame} from {self} to {self._next}")
-
-                if self._observer:
-                    data = FramePushed(
-                        source=self,
-                        destination=self._next,
-                        frame=frame,
-                        direction=direction,
-                        timestamp=timestamp,
-                    )
-                    await self._observer.on_push_frame(data)
-                await self._next.queue_frame(frame, direction)
-            elif direction == FrameDirection.UPSTREAM and self._prev:
-                logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
-                if self._observer:
-                    data = FramePushed(
-                        source=self,
-                        destination=self._prev,
-                        frame=frame,
-                        direction=direction,
-                        timestamp=timestamp,
-                    )
-                    await self._observer.on_push_frame(data)
-                await self._prev.queue_frame(frame, direction)
-        except Exception as e:
-            logger.exception(f"Uncaught exception in {self}: {e}")
-            await self.push_error(ErrorFrame(str(e)))
+        await self.__push_queue.put((frame, direction))
 
     def _check_started(self, frame: Frame):
         """Check if the processor has been started.
@@ -912,3 +861,18 @@ class FrameProcessor(BaseObject):
             await self.__process_frame(frame, direction, callback)
 
             self.__process_queue.task_done()
+
+    def __aiter__(self):
+        """A frame processor is an asynchronous iterator itself."""
+        return self
+
+    async def __anext__(self):
+        """Retrieve the next frame to push from this processor.
+
+        Returns:
+            The next (frame, direction) item to push form this processor.
+        """
+        data = await self.__push_queue.get()
+        if data is None:
+            raise StopAsyncIteration
+        return data

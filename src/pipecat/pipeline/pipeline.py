@@ -15,6 +15,7 @@ from typing import Callable, Coroutine, List, Optional
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
+from pipecat.pipeline.pipeline_node import PipelineNode
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 
@@ -117,8 +118,7 @@ class Pipeline(BasePipeline):
         self._source = source or PipelineSource(self.push_frame, name=f"{self}::Source")
         self._sink = sink or PipelineSink(self.push_frame, name=f"{self}::Sink")
         self._processors: List[FrameProcessor] = [self._source] + processors + [self._sink]
-
-        self._link_processors()
+        self._nodes = self._link_processors()
 
     #
     # Frame processor
@@ -196,17 +196,22 @@ class Pipeline(BasePipeline):
 
     async def _setup_processors(self, setup: FrameProcessorSetup):
         """Set up all processors in the pipeline."""
-        for p in self._processors:
-            await p.setup(setup)
+        for n in self._nodes:
+            await n.setup(setup)
 
     async def _cleanup_processors(self):
         """Clean up all processors in the pipeline."""
-        for p in self._processors:
-            await p.cleanup()
+        for n in self._nodes:
+            await n.cleanup()
 
-    def _link_processors(self):
-        """Link all processors in sequence and set their parent."""
-        prev = self._processors[0]
+    def _link_processors(self) -> List[PipelineNode]:
+        """Link all processors in sequence."""
+        nodes = []
+        prev_node = PipelineNode(self._processors[0])
+        nodes.append(prev_node)
         for curr in self._processors[1:]:
-            prev.link(curr)
-            prev = curr
+            curr_node = PipelineNode(curr)
+            nodes.append(curr_node)
+            prev_node.link(curr_node)
+            prev_node = curr_node
+        return nodes
