@@ -226,6 +226,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `needs_mcp_alternate_schema()` from `LLMService`. The mechanism that
   relied on it went away.
 
+- In `MiniMaxHttpTTSService`:
+-- Added support for speech-2.6-hd and speech-2.6-turbo models
+-- Added languages: Afrikaans, Bulgarian, Catalan, Danish, Persian, Filipino, Hebrew,
+Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and Tamil
+-- Added new emotions: calm and fluent
+
 ### Fixed
 
 - Restore backwards compatibility for vision/image features (broken in 0.0.92)
