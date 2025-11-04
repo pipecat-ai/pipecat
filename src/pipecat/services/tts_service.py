@@ -378,7 +378,6 @@ class TTSService(AIService):
             self._processing_text = False
             await self._push_tts_frames(
                 text=aggregate.text,
-                should_speak=aggregate.type not in self._skip_aggregator_types,
                 aggregated_by=aggregate.type,
             )
             if isinstance(frame, LLMFullResponseEndFrame):
@@ -389,7 +388,7 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
-            await self._push_tts_frames(frame.text, should_speak=True, aggregated_by="word")
+            await self._push_tts_frames(frame.text, aggregated_by="sentence")
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
@@ -481,60 +480,66 @@ class TTSService(AIService):
         text: Optional[str] = None
         if not self._aggregate_sentences:
             text = frame.text
-            should_speak = True
             aggregated_by = "token"
         else:
             aggregate = await self._text_aggregator.aggregate(frame.text)
             if aggregate:
                 text = aggregate.text
-                should_speak = aggregate.type not in self._skip_aggregator_types
                 aggregated_by = aggregate.type
 
         if text:
-            logger.trace(f"Pushing TTS frames for text: {text}, {should_speak}, {aggregated_by}")
-            await self._push_tts_frames(text, should_speak, aggregated_by)
+            logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
+            await self._push_tts_frames(text, aggregated_by)
 
-    async def _push_tts_frames(self, text: str, should_speak: bool, aggregated_by: str):
-        if should_speak:
-            # Remove leading newlines only
-            text = text.lstrip("\n")
-
-            # Don't send only whitespace. This causes problems for some TTS models. But also don't
-            # strip all whitespace, as whitespace can influence prosody.
-            if not text.strip():
-                return
-
-            # This is just a flag that indicates if we sent something to the TTS
-            # service. It will be cleared if we sent text because of a TTSSpeakFrame
-            # or when we received an LLMFullResponseEndFrame
-            self._processing_text = True
-
-            await self.start_processing_metrics()
-
-            # Process all filter.
-            for filter in self._text_filters:
-                await filter.reset_interruption()
-                text = await filter.filter(text)
-
-            if text:
-                if not self._push_text_frames:
-                    # If we are not pushing text frames, we send a TTSTextFrame
-                    # before the audio so downstream processors know what text
-                    # is being spoken. Here, we assume this flag is used when the TTS
-                    # provider supports word timestamps and the TTSTextFrames will be
-                    # generated in the word_task_handler.
-                    frame = AggregatedLLMTextFrame(text, aggregated_by=aggregated_by)
-                    frame.append_to_context = False
-                    await self.push_frame(frame)
-                await self.process_generator(self.run_tts(text))
-
-            await self.stop_processing_metrics()
-
-        if not should_speak:
+    async def _push_tts_frames(self, text: str, aggregated_by: str):
+        if aggregated_by in self._skip_aggregator_types:
+            # If this type of aggregation should be skipped, we just push the text as
+            # a basic AggregatedLLMTextFrame without sending it to TTS to speak.
             await self.push_frame(AggregatedLLMTextFrame(text, aggregated_by=aggregated_by))
-        elif self._push_text_frames:
+            return
+
+        # Remove leading newlines only
+        text = text.lstrip("\n")
+
+        # Don't send only whitespace. This causes problems for some TTS models. But also don't
+        # strip all whitespace, as whitespace can influence prosody.
+        if not text.strip():
+            return
+
+        # This is just a flag that indicates if we sent something to the TTS
+        # service. It will be cleared if we sent text because of a TTSSpeakFrame
+        # or when we received an LLMFullResponseEndFrame
+        self._processing_text = True
+
+        await self.start_processing_metrics()
+
+        # Process all filter.
+        for filter in self._text_filters:
+            await filter.reset_interruption()
+            text = await filter.filter(text)
+
+        if text:
+            if not self._push_text_frames:
+                # In a typical pipeline, there is an assistant context aggregator
+                # that listens for TTSTextFrames to add spoken text to the context.
+                # If the TTS service supports word timestamps, then _push_text_frames
+                # is set to False and these are sent word by word as part of the
+                # _words_task_handler in the WordTTSService subclass. However, to
+                # support use cases where an observer may want the full text before
+                # the audio is generated, we send an AggregatedLLMTextFrame here, but
+                # we set append_to_context to False so it does not cause duplication
+                # in the context. This is primarily used by the RTVIObserver to
+                # generate a complete bot-output.
+                frame = AggregatedLLMTextFrame(text, aggregated_by=aggregated_by)
+                frame.append_to_context = False
+                await self.push_frame(frame)
+            await self.process_generator(self.run_tts(text))
+
+        await self.stop_processing_metrics()
+
+        if self._push_text_frames:
             # In the case where the TTS service does not support word timestamps,
-            # we send the original text after the audio. This way, if we are
+            # we send the full aggregated text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
             frame = TTSTextFrame(text, aggregated_by=aggregated_by)
             frame.includes_inter_frame_spaces = self.includes_inter_frame_spaces

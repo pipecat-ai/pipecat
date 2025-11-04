@@ -602,7 +602,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._llm_text_aggregator: BaseTextAggregator = (
             self._params.llm_text_aggregator or SimpleTextAggregator()
         )
-        self._skip_tts: Optional[bool] = None
+        self._skip_tts = None
 
     @property
     def has_function_calls_in_progress(self) -> bool:
@@ -820,8 +820,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_llm_start(self, frame: LLMFullResponseStartFrame):
         self._started += 1
         if self._skip_tts is None:
+            # initialize skip_tts on first start frame
             self._skip_tts = frame.skip_tts
-        await self._maybe_push_llm_aggregation(frame)
 
     async def _handle_llm_text(self, frame: LLMTextFrame):
         await self._handle_text(frame)
@@ -832,22 +832,23 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self.push_aggregation()
         await self._maybe_push_llm_aggregation(frame)
 
-    async def _maybe_push_llm_aggregation(
-        self, frame: LLMFullResponseStartFrame | LLMTextFrame | LLMFullResponseEndFrame
-    ):
+    async def _maybe_push_llm_aggregation(self, frame: LLMTextFrame | LLMFullResponseEndFrame):
         aggregate = None
         should_reset_aggregator = False
         if self._skip_tts and not frame.skip_tts:
-            # if the skip_tts flag switches, to false, push the current aggregation
+            # When skip_tts transitions to False, we need to push any accumulated text.
+            # This ensures that any remaining text accumulated while TTS was skipped is
+            # sent out when TTS resumes, preventing loss of data and maintaining a smooth
+            # transition.
             aggregate = self._llm_text_aggregator.text
             should_reset_aggregator = True
         self._skip_tts = frame.skip_tts
         if self._skip_tts:
-            if self._skip_tts and isinstance(frame, LLMFullResponseEndFrame):
+            if isinstance(frame, LLMFullResponseEndFrame):
                 # on end frame, always push the aggregation
                 aggregate = self._llm_text_aggregator.text
                 should_reset_aggregator = True
-            elif isinstance(frame, LLMTextFrame):
+            else:  # This is an LLMTextFrame
                 aggregate = await self._llm_text_aggregator.aggregate(frame.text)
 
         if not aggregate:

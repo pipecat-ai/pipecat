@@ -920,6 +920,7 @@ class RTVIObserverParams:
         Parameter `errors_enabled` is deprecated. Error messages are always enabled.
 
     Parameters:
+        bot_output_enabled: Indicates if bot output messages should be sent.
         bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
         bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
         bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
@@ -934,6 +935,7 @@ class RTVIObserverParams:
         audio_level_period_secs: How often audio levels should be sent if enabled.
     """
 
+    bot_output_enabled: bool = True
     bot_llm_enabled: bool = True
     bot_tts_enabled: bool = True
     bot_speaking_enabled: bool = True
@@ -1072,7 +1074,9 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVIBotTTSStoppedMessage())
-        elif isinstance(frame, AggregatedLLMTextFrame):
+        elif isinstance(frame, AggregatedLLMTextFrame) and (
+            self._params.bot_output_enabled or self._params.bot_tts_enabled
+        ):
             if isinstance(frame, TTSTextFrame) and not isinstance(src, BaseOutputTransport):
                 # This check is to make sure we handle the frame when it has gone
                 # through the transport and has correct timing.
@@ -1109,15 +1113,6 @@ class RTVIObserver(BaseObserver):
         if mark_as_seen:
             self._frames_seen.add(frame.id)
 
-    async def _push_bot_transcription(self):
-        """Push accumulated bot transcription as a message."""
-        if len(self._bot_transcription) > 0:
-            message = RTVIBotTranscriptionMessage(
-                data=RTVITextMessageData(text=self._bot_transcription)
-            )
-            await self.send_rtvi_message(message)
-            self._bot_transcription = ""
-
     async def _handle_interruptions(self, frame: Frame):
         """Handle user speaking interruption frames."""
         message = None
@@ -1143,12 +1138,13 @@ class RTVIObserver(BaseObserver):
     async def _handle_aggregated_llm_text(self, frame: AggregatedLLMTextFrame):
         """Handle aggregated LLM text output frames."""
         isTTS = isinstance(frame, TTSTextFrame)
-        message = RTVIBotOutputMessage(
-            data=RTVIBotOutputMessageData(
-                text=frame.text, spoken=isTTS, aggregated_by=frame.aggregated_by
+        if self._params.bot_output_enabled:
+            message = RTVIBotOutputMessage(
+                data=RTVIBotOutputMessageData(
+                    text=frame.text, spoken=isTTS, aggregated_by=frame.aggregated_by
+                )
             )
-        )
-        await self.send_rtvi_message(message)
+            await self.send_rtvi_message(message)
 
         if isTTS and self._params.bot_tts_enabled:
             tts_message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
