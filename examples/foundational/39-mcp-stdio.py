@@ -144,7 +144,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         mcp_image = UrlToImageProcessor(aiohttp_session=session)
 
-        tools = await mcp.register_tools(llm)
+        tools = {}
+        try:
+            tools = await mcp.register_tools(llm)
+        except Exception as e:
+            logger.error(f"error registering tools")
+            logger.exception("error trace:")
 
         system = f"""
         You are a helpful LLM in a WebRTC call.

@@ -132,9 +132,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         system = f"""
         You are a helpful LLM in a WebRTC call.
         Your goal is to demonstrate your capabilities in a succinct way.
-        You have access to a number of tools provided by NASA MCP. Use any and all tools to help users.
-        When asked for today's date, use 'https://www.datetoday.net/'.
-        When asked for the astronomy picture of the day, use 'https://www.datetoday.net/', to get today's date.
+        You have access to tools to search the Rijksmuseum collection.
+        Offer, for example, to show the earliest Rembrandt work from the museum. Use the `search_artwork` tool.
+        The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
+        Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
         Your output will be converted to audio so don't include special characters in your answers.
         Respond to what the user said in a creative and helpful way.
         Don't overexplain what you are doing.
@@ -147,13 +148,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             mcp = MCPClient(
                 server_params=StdioServerParameters(
                     command=shutil.which("npx"),
-                    args=["-y", "@programcomputer/nasa-mcp-server@latest"],
-                    # https://api.nasa.gov
-                    env={"NASA_API_KEY": os.getenv("NASA_API_KEY")},
+                    # https://github.com/r-huijts/rijksmuseum-mcp
+                    args=["-y", "mcp-server-error setting up mcp"],
+                    env={"RIJKSMUSEUM_API_KEY": os.getenv("RIJKSMUSEUM_API_KEY")},
                 )
             )
         except Exception as e:
-            logger.error(f"error setting up nasa mcp")
+            logger.error(f"error setting up rijksmuseum mcp")
             logger.exception("error trace:")
         try:
             # https://docs.mcp.run/integrating/tutorials/mcp-run-sse-openai-agents/
@@ -164,8 +165,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             logger.error(f"error setting up mcp.run")
             logger.exception("error trace:")
 
-        tools = await mcp.register_tools(llm)
-        run_tools = await mcp_run.register_tools(llm)
+        tools = {}
+        run_tools = {}
+        try:
+            tools = await mcp.register_tools(llm)
+            run_tools = await mcp_run.register_tools(llm)
+        except Exception as e:
+            logger.error(f"error registering tools")
+            logger.exception("error trace:")
 
         all_standard_tools = run_tools.standard_tools + tools.standard_tools
         all_tools = ToolsSchema(standard_tools=all_standard_tools)
@@ -219,9 +226,9 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
-    if not os.getenv("NASA_API_KEY") or not os.getenv("MCP_RUN_SSE_URL"):
+    if not os.getenv("RIJKSMUSEUM_API_KEY") or not os.getenv("MCP_RUN_SSE_URL"):
         logger.error(
-            f"Please set NASA_API_KEY and MCP_RUN_SSE_URL environment variables. See https://api.nasa.gov and https://mcp.run"
+            f"Please set RIJKSMUSEUM_API_KEY and MCP_RUN_SSE_URL environment variables. See https://github.com/r-huijts/rijksmuseum-mcp and https://mcp.run"
         )
         import sys
 
