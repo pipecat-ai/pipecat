@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -61,7 +61,7 @@ def language_to_rime_language(language: Language) -> str:
         Language.EN: "eng",
         Language.ES: "spa",
     }
-    return LANGUAGE_MAP.get(language, "eng")
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class RimeTTSService(AudioContextWordTTSService):

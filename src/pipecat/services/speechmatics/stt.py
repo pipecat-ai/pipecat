@@ -990,7 +990,7 @@ def _language_to_speechmatics_language(language: Language) -> str:
         str: The Speechmatics language code, if found.
     """
     # List of supported input languages
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AR: "ar",
         Language.BA: "ba",
         Language.EU: "eu",
@@ -1048,7 +1048,7 @@ def _language_to_speechmatics_language(language: Language) -> str:
     }
 
     # Get the language code
-    result = BASE_LANGUAGES.get(language)
+    result = LANGUAGE_MAP.get(language)
 
     # Fail if language is not supported
     if not result:

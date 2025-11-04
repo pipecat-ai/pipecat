@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -50,7 +50,7 @@ def language_to_async_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding Async language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.EN: "en",
         Language.FR: "fr",
         Language.ES: "es",
@@ -58,17 +58,7 @@ def language_to_async_language(language: Language) -> Optional[str]:
         Language.IT: "it",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. en-En -> en)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class AsyncAITTSService(InterruptibleTTSService):

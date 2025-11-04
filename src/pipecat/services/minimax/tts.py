@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -39,7 +39,7 @@ def language_to_minimax_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding MiniMax language name, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AR: "Arabic",
         Language.CS: "Czech",
         Language.DE: "German",
@@ -66,20 +66,7 @@ def language_to_minimax_language(language: Language) -> Optional[str]:
         Language.ZH: "Chinese",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Find matching language
-        for code, name in BASE_LANGUAGES.items():
-            if str(code.value).lower().startswith(base_code):
-                result = name
-                break
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class MiniMaxHttpTTSService(TTSService):

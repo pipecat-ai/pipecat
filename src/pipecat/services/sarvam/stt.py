@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.stt_service import STTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -43,7 +43,7 @@ def language_to_sarvam_language(language: Language) -> str:
         The Sarvam language code string.
     """
     # Mapping of pipecat Language enum to Sarvam language codes
-    SARVAM_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.BN_IN: "bn-IN",
         Language.GU_IN: "gu-IN",
         Language.HI_IN: "hi-IN",
@@ -58,9 +58,7 @@ def language_to_sarvam_language(language: Language) -> str:
         Language.AS_IN: "as-IN",
     }
 
-    return SARVAM_LANGUAGES.get(
-        language, "unknown"
-    )  # Default to unknown (Sarvam models auto-detect the language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class SarvamSTTService(STTService):
