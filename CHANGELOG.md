@@ -57,6 +57,12 @@ reason")`.
   supported languages before Pipecat's service classes are updated, while still
   providing guidance on verified languages.
 
+- Added the two-step `MCPClient.get_tools_schema()` and
+  `MCPClient.register_tools_schema()` as two-step alternative to
+  `MCPClient.register_tools()`, to allow users to use `MCPClient` alongside
+  the pattern of passing in tools to the LLM service constructor (a pattern
+  supported by speech-to-speech services such as `GeminiLiveLLMService`).
+
 ### Fixed
 
 - Fixed an issue where the `SmallWebRTCRequest` dataclass in runner would scrub
