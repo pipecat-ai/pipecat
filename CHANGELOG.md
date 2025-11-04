@@ -48,14 +48,13 @@ reason")`.
 
 - Added `LLMSwitcher.register_direct_function()`. It works much like
   `LLMSwitcher.register_function()` in that it's a shorthand for registering
-  a function on all LLMs in the switcher, except it takes a direct function (a
-  `FunctionSchema`-less function).
+  a function on all LLMs in the switcher, except this new method takes a direct
+  function (a `FunctionSchema`-less function).
 
-- Added the two-step `MCPClient.get_tools_schema()` and
-  `MCPClient.register_tools_schema()` as two-step alternative to
-  `MCPClient.register_tools()`, to allow users to use `MCPClient` alongside
-  the pattern of passing in tools to the LLM service constructor (a pattern
-  supported by speech-to-speech services such as `GeminiLiveLLMService`).
+- Added `MCPClient.get_tools_schema()` and `MCPClient.register_tools_schema()`
+  as a two-step alternative to `MCPClient.register_tools()`, to allow users to
+  pass MCP tools to, say, `GeminiLiveLLMService` (as well as other
+  speech-to-speech services) in the constructor.
 
 ### Changed
 
