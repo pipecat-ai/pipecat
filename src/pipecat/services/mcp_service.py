@@ -13,6 +13,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.utils.base_object import BaseObject
 
@@ -74,7 +75,7 @@ class MCPClient(BaseObject):
                 f"{self} invalid argument type: `server_params` must be either StdioServerParameters, SseServerParameters, or StreamableHttpParameters."
             )
 
-    async def register_tools(self, llm) -> ToolsSchema:
+    async def register_tools(self, llm: LLMService | LLMSwitcher) -> ToolsSchema:
         """Register all available MCP tools with an LLM service.
 
         Connects to the MCP server, discovers available tools, converts their
@@ -106,7 +107,9 @@ class MCPClient(BaseObject):
         tools_schema = await self._list_tools()
         return tools_schema
 
-    async def register_tools_schema(self, tools_schema: ToolsSchema, llm: LLMService) -> None:
+    async def register_tools_schema(
+        self, tools_schema: ToolsSchema, llm: LLMService | LLMSwitcher
+    ) -> None:
         """Register the MCP tools (previously obtained from get_tools_schema()) with the LLM service.
 
         Args:
