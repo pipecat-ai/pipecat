@@ -13,8 +13,6 @@ voice transcription, streaming responses, and tool usage.
 
 import base64
 import io
-import json
-import random
 import time
 import uuid
 import warnings
@@ -1012,7 +1010,13 @@ class GeminiLiveLLMService(LLMService):
                     if part.function_response:
                         tool_call_id = part.function_response.id
                         tool_name = part.function_response.name
-                        if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                        response = part.function_response.response
+                        if (
+                            tool_call_id
+                            and tool_call_id not in self._completed_tool_calls
+                            and response
+                            and response.get("value") != "IN_PROGRESS"
+                        ):
                             # Found a newly-completed function call - send the result to the service
                             if send_new_results:
                                 await self._tool_result(
