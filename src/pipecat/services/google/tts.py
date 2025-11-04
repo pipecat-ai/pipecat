@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 
 try:
     from google.auth import default
@@ -70,7 +70,7 @@ def language_to_google_tts_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding Google TTS language code, or None if not supported.
     """
-    language_map = {
+    LANGUAGE_MAP = {
         # Afrikaans
         Language.AF: "af-ZA",
         Language.AF_ZA: "af-ZA",
@@ -226,7 +226,7 @@ def language_to_google_tts_language(language: Language) -> Optional[str]:
         Language.VI_VN: "vi-VN",
     }
 
-    return language_map.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class GoogleHttpTTSService(TTSService):

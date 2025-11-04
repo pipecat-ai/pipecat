@@ -38,6 +38,11 @@ reason")`.
 - Updated the `GoogleVertexLLMService` to use the `GoogleLLMService` as a base
   class instead of the `OpenAILLMService`.
 
+- Updated STT and TTS services to pass through unverified language codes with a
+  warning instead of returning None. This allows developers to use newly
+  supported languages before Pipecat's service classes are updated, while still
+  providing guidance on verified languages.
+
 ### Fixed
 
 - Fixed an issue where the `SmallWebRTCRequest` dataclass in runner would scrub

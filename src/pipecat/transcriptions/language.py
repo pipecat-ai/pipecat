@@ -14,6 +14,8 @@ combinations for various speech and text processing services.
 import sys
 from enum import Enum
 
+from loguru import logger
+
 if sys.version_info < (3, 11):
 
     class StrEnum(str, Enum):
@@ -569,3 +571,53 @@ class Language(StrEnum):
     # Zulu
     ZU = "zu"
     ZU_ZA = "zu-ZA"
+
+
+def resolve_language(
+    language: Language, language_map: dict[Language, str], use_base_code: bool = True
+) -> str:
+    """Resolve a Language enum to a service-specific language code.
+
+    Checks the language map first, then falls back to extracting the appropriate
+    code format with a warning if not found in the verified list.
+
+    Args:
+        language: The Language enum value to convert.
+        language_map: Dictionary mapping Language enums to service language codes.
+        use_base_code: If True, extracts base code (e.g., 'en' from 'en-US').
+                      If False, uses full language code as-is.
+
+    Returns:
+        The resolved language code for the service.
+
+    Examples::
+
+        # Service expecting base codes (e.g., Cartesia)
+        >>> LANGUAGE_MAP = {Language.EN: "en", Language.ES: "es"}
+        >>> resolve_language(Language.EN_US, LANGUAGE_MAP, use_base_code=True)
+        # Logs: "Language en-US not verified. Using base code 'en'."
+        "en"
+
+        # Service expecting full codes (e.g., AWS)
+        >>> LANGUAGE_MAP = {Language.EN_US: "en-US", Language.ES_ES: "es-ES"}
+        >>> resolve_language(Language.EN_GB, LANGUAGE_MAP, use_base_code=False)
+        # Logs: "Language en-GB not verified. Using 'en-GB'."
+        "en-GB"
+    """
+    # Check if language is in the verified map
+    result = language_map.get(language)
+
+    if result is not None:
+        return result
+
+    # Not in map - fall back with warning
+    lang_str = str(language.value)
+
+    if use_base_code:
+        # Extract base code (e.g., "en" from "en-US")
+        base_code = lang_str.split("-")[0].lower()
+        logger.warning(f"Language {language.value} not verified. Using base code '{base_code}'.")
+        return base_code
+    else:
+        logger.warning(f"Language {language.value} not verified. Using '{lang_str}'.")
+        return lang_str

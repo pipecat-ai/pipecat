@@ -20,7 +20,7 @@ from typing_extensions import TYPE_CHECKING, override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -106,159 +106,70 @@ def language_to_whisper_language(language: Language) -> Optional[str]:
     Note:
         Only includes languages officially supported by Whisper.
     """
-    language_map = {
+    LANGUAGE_MAP = {
         # Arabic
         Language.AR: "ar",
-        Language.AR_AE: "ar",
-        Language.AR_BH: "ar",
-        Language.AR_DZ: "ar",
-        Language.AR_EG: "ar",
-        Language.AR_IQ: "ar",
-        Language.AR_JO: "ar",
-        Language.AR_KW: "ar",
-        Language.AR_LB: "ar",
-        Language.AR_LY: "ar",
-        Language.AR_MA: "ar",
-        Language.AR_OM: "ar",
-        Language.AR_QA: "ar",
-        Language.AR_SA: "ar",
-        Language.AR_SY: "ar",
-        Language.AR_TN: "ar",
-        Language.AR_YE: "ar",
         # Bengali
         Language.BN: "bn",
-        Language.BN_BD: "bn",
-        Language.BN_IN: "bn",
         # Czech
         Language.CS: "cs",
-        Language.CS_CZ: "cs",
         # Danish
         Language.DA: "da",
-        Language.DA_DK: "da",
         # German
         Language.DE: "de",
-        Language.DE_AT: "de",
-        Language.DE_CH: "de",
-        Language.DE_DE: "de",
         # Greek
         Language.EL: "el",
-        Language.EL_GR: "el",
         # English
         Language.EN: "en",
-        Language.EN_AU: "en",
-        Language.EN_CA: "en",
-        Language.EN_GB: "en",
-        Language.EN_HK: "en",
-        Language.EN_IE: "en",
-        Language.EN_IN: "en",
-        Language.EN_KE: "en",
-        Language.EN_NG: "en",
-        Language.EN_NZ: "en",
-        Language.EN_PH: "en",
-        Language.EN_SG: "en",
-        Language.EN_TZ: "en",
-        Language.EN_US: "en",
-        Language.EN_ZA: "en",
         # Spanish
         Language.ES: "es",
-        Language.ES_AR: "es",
-        Language.ES_BO: "es",
-        Language.ES_CL: "es",
-        Language.ES_CO: "es",
-        Language.ES_CR: "es",
-        Language.ES_CU: "es",
-        Language.ES_DO: "es",
-        Language.ES_EC: "es",
-        Language.ES_ES: "es",
-        Language.ES_GQ: "es",
-        Language.ES_GT: "es",
-        Language.ES_HN: "es",
-        Language.ES_MX: "es",
-        Language.ES_NI: "es",
-        Language.ES_PA: "es",
-        Language.ES_PE: "es",
-        Language.ES_PR: "es",
-        Language.ES_PY: "es",
-        Language.ES_SV: "es",
-        Language.ES_US: "es",
-        Language.ES_UY: "es",
-        Language.ES_VE: "es",
         # Persian
         Language.FA: "fa",
-        Language.FA_IR: "fa",
         # Finnish
         Language.FI: "fi",
-        Language.FI_FI: "fi",
         # French
         Language.FR: "fr",
-        Language.FR_BE: "fr",
-        Language.FR_CA: "fr",
-        Language.FR_CH: "fr",
-        Language.FR_FR: "fr",
         # Hindi
         Language.HI: "hi",
-        Language.HI_IN: "hi",
         # Hungarian
         Language.HU: "hu",
-        Language.HU_HU: "hu",
         # Indonesian
         Language.ID: "id",
-        Language.ID_ID: "id",
         # Italian
         Language.IT: "it",
-        Language.IT_IT: "it",
         # Japanese
         Language.JA: "ja",
-        Language.JA_JP: "ja",
         # Korean
         Language.KO: "ko",
-        Language.KO_KR: "ko",
         # Dutch
         Language.NL: "nl",
-        Language.NL_BE: "nl",
-        Language.NL_NL: "nl",
         # Polish
         Language.PL: "pl",
-        Language.PL_PL: "pl",
         # Portuguese
         Language.PT: "pt",
-        Language.PT_BR: "pt",
-        Language.PT_PT: "pt",
         # Romanian
         Language.RO: "ro",
-        Language.RO_RO: "ro",
         # Russian
         Language.RU: "ru",
-        Language.RU_RU: "ru",
         # Slovak
         Language.SK: "sk",
-        Language.SK_SK: "sk",
         # Swedish
         Language.SV: "sv",
-        Language.SV_SE: "sv",
         # Thai
         Language.TH: "th",
-        Language.TH_TH: "th",
         # Turkish
         Language.TR: "tr",
-        Language.TR_TR: "tr",
         # Ukrainian
         Language.UK: "uk",
-        Language.UK_UA: "uk",
         # Urdu
         Language.UR: "ur",
-        Language.UR_IN: "ur",
-        Language.UR_PK: "ur",
         # Vietnamese
         Language.VI: "vi",
-        Language.VI_VN: "vi",
         # Chinese
         Language.ZH: "zh",
-        Language.ZH_CN: "zh",
-        Language.ZH_HK: "zh",
-        Language.ZH_TW: "zh",
     }
-    return language_map.get(language)
+
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class WhisperSTTService(SegmentedSTTService):
