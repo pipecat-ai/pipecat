@@ -81,7 +81,7 @@ def language_to_minimax_language(language: Language) -> Optional[str]:
         Language.YUE: "Chinese,Yue",
         Language.ZH: "Chinese",
     }
-    
+
     # Languages that require speech-2.6-* models
     V26_ONLY_LANGUAGES = {Language.FA, Language.FIL, Language.TA}
 
@@ -110,6 +110,7 @@ class MiniMaxHttpTTSService(TTSService):
             pitch: Pitch adjustment (range: -12 to 12).
             emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
                 "disgusted", "surprised", "calm", "fluent").
+            english_normalization: Deprecated; use `text_normalization` instead
             text_normalization: Enable text normalization (Chinese/English).
             latex_read: Enable LaTeX formula reading.
             force_cbr: Enable Constant Bitrate (CBR) for audio encoding (MP3 only).
@@ -124,6 +125,7 @@ class MiniMaxHttpTTSService(TTSService):
         volume: Optional[float] = 1.0
         pitch: Optional[int] = 0
         emotion: Optional[str] = None
+        english_normalization: Optional[bool] = None  # Deprecated
         text_normalization: Optional[bool] = None
         latex_read: Optional[bool] = None
         force_cbr: Optional[bool] = None
@@ -135,9 +137,7 @@ class MiniMaxHttpTTSService(TTSService):
         self,
         *,
         api_key: str,
-        base_url: str = "https://api.minimax.io/v1/t2a_v2", 
-        # https://api-uw.minimax.io/v1/t2a_v2
-        # support west of unite state 
+        base_url: str = "https://api.minimax.io/v1/t2a_v2",
         group_id: str,
         model: str = "speech-02-turbo",
         voice_id: str = "Calm_Woman",
@@ -153,6 +153,7 @@ class MiniMaxHttpTTSService(TTSService):
             base_url: API base URL, defaults to MiniMax's T2A endpoint.
                 Global: https://api.minimax.io/v1/t2a_v2
                 Mainland China: https://api.minimaxi.chat/v1/t2a_v2
+                Western United States: https://api-uw.minimax.io/v1/t2a_v2
             group_id: MiniMax Group ID to identify project.
             model: TTS model name. Defaults to "speech-02-turbo". Options include:
                 "speech-2.6-hd", "speech-2.6-turbo" (latest, supports Filipino/Tamil/Persian),
@@ -174,7 +175,6 @@ class MiniMaxHttpTTSService(TTSService):
         self._session = aiohttp_session
         self._model_name = model
         self._voice_id = voice_id
-        self._current_trace_id: Optional[str] = None
 
         # Create voice settings
         self._settings = {
@@ -206,7 +206,7 @@ class MiniMaxHttpTTSService(TTSService):
             service_lang = self.language_to_service_language(params.language)
             if service_lang:
                 self._settings["language_boost"] = service_lang
-                
+
                 # Validate language-model compatibility
                 # Filipino, Tamil, Persian only supported by speech-2.6-* models
                 if params.language in {Language.FA, Language.FIL, Language.TA}:
@@ -238,6 +238,13 @@ class MiniMaxHttpTTSService(TTSService):
                     f"Unsupported emotion: {params.emotion}. Supported emotions: {supported_emotions}"
                 )
 
+        # If `english_normalization`, add `text_normalization` and print warning
+        if params.english_normalization is not None:
+            logger.warning(
+                "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead."
+            )
+            self._settings["voice_setting"]["text_normalization"] = params.english_normalization
+
         # Add text_normalization if provided (corrected parameter name)
         if params.text_normalization is not None:
             self._settings["voice_setting"]["text_normalization"] = params.text_normalization
@@ -261,9 +268,9 @@ class MiniMaxHttpTTSService(TTSService):
                     "Subtitles may not be generated. "
                     "For subtitle support, consider implementing a non-streaming TTS service."
                 )
-            
+
             self._settings["subtitle_enable"] = params.subtitle_enable
-            
+
             # Add subtitle_type only when subtitle_enable is True
             if params.subtitle_enable and params.subtitle_type:
                 # Validate subtitle_type
@@ -341,9 +348,6 @@ class MiniMaxHttpTTSService(TTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
-        # Reset trace_id for new request
-        self._current_trace_id = None
-
         headers = {
             "accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
@@ -361,14 +365,10 @@ class MiniMaxHttpTTSService(TTSService):
             async with self._session.post(
                 self._base_url, headers=headers, json=payload
             ) as response:
-                # Extract trace_id from response header (available in all responses)
-                trace_id = response.headers.get("Trace-Id") or response.headers.get("trace-id") or response.headers.get("X-Trace-Id") or "unknown"
-                self._current_trace_id = trace_id
-                
-                # Log trace_id for all requests
-                logger.info(f"MiniMax TTS request trace_id={trace_id}, status={response.status}")
-                
+                logger.trace(f"MiniMax TTS request status={response.status}")
+
                 if response.status != 200:
+                    error_message = "MiniMax TTS error"
                     # Try to read error response body
                     try:
                         error_body = await response.text()
@@ -381,25 +381,13 @@ class MiniMaxHttpTTSService(TTSService):
 
                         error_message = (
                             f"MiniMax TTS error: HTTP {response.status}, "
-                            f"status_code={status_code}, status_msg={status_msg}, "
-                            f"trace_id={trace_id}"
+                            f"status_code={status_code}, status_msg={status_msg}"
                         )
-                        logger.error(
-                            error_message,
-                            extra={
-                                "trace_id": trace_id,
-                                "http_status": response.status,
-                                "status_code": status_code,
-                                "text_length": len(text),
-                            },
-                        )
+                        logger.error(error_message)
                     except Exception as parse_error:
                         # If parsing fails, use basic error message
-                        error_message = f"MiniMax TTS error: HTTP {response.status}, trace_id={trace_id}"
-                        logger.error(
-                            error_message,
-                            extra={"http_status": response.status, "trace_id": trace_id, "parse_error": str(parse_error)},
-                        )
+                        error_message = f"MiniMax TTS error: HTTP {response.status}"
+                        logger.error(error_message)
 
                     yield ErrorFrame(error=error_message)
                     return
@@ -408,7 +396,7 @@ class MiniMaxHttpTTSService(TTSService):
                 yield TTSStartedFrame()
 
                 # Process the streaming response
-                logger.debug(f"Starting to read streaming response, status={response.status}, trace_id={trace_id}")
+                logger.trace(f"Starting to read streaming response, status={response.status}")
                 buffer = bytearray()
 
                 CHUNK_SIZE = self.chunk_size
@@ -416,36 +404,32 @@ class MiniMaxHttpTTSService(TTSService):
 
                 async for chunk in response.content.iter_chunked(CHUNK_SIZE):
                     chunk_count += 1
-                    logger.debug(f"Received chunk #{chunk_count}, size={len(chunk)} bytes")
+                    logger.trace(f"Received chunk #{chunk_count}, size={len(chunk)} bytes")
                     if not chunk:
                         continue
 
                     buffer.extend(chunk)
-                    
+
                     # Log raw buffer content for debugging
                     if chunk_count == 1:
-                        logger.debug(f"Raw buffer content: {buffer[:200]}")  # First 200 bytes
-                        
+                        logger.trace(f"Raw buffer content: {buffer[:200]}")  # First 200 bytes
+
                         # Check if first chunk is a direct JSON error (not streaming format)
                         if not buffer.startswith(b"data:"):
                             try:
                                 error_data = json.loads(buffer.decode("utf-8"))
                                 base_resp = error_data.get("base_resp", {})
                                 status_code = base_resp.get("status_code", 0)
-                                
+
                                 if status_code != 0:
                                     # This is a non-streaming error response
-                                    # Use trace_id from header (already extracted above)
                                     status_msg = base_resp.get("status_msg", "Unknown error")
-                                    
+
                                     error_message = (
-                                        f"MiniMax TTS API error: status_code={status_code}, "
-                                        f"status_msg={status_msg}, trace_id={self._current_trace_id}"
+                                        f"MiniMax TTS API error: status_code={status_code}"
+                                        f"status_msg={status_msg}"
                                     )
-                                    logger.error(
-                                        error_message,
-                                        extra={"trace_id": self._current_trace_id, "status_code": status_code},
-                                    )
+                                    logger.error(error_message)
                                     yield ErrorFrame(error=error_message)
                                     return
                             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -469,7 +453,9 @@ class MiniMaxHttpTTSService(TTSService):
 
                         try:
                             data_str = data_block[5:].decode("utf-8")
-                            logger.debug(f"Parsing data block: {data_str[:200]}...")  # Log first 200 chars
+                            logger.trace(
+                                f"Parsing data block: {data_str[:200]}..."
+                            )  # Log first 200 chars
                             data = json.loads(data_str)
 
                             # Check for business errors in base_resp
@@ -481,28 +467,16 @@ class MiniMaxHttpTTSService(TTSService):
                                 status_msg = base_resp.get("status_msg", "Unknown error")
                                 error_message = (
                                     f"MiniMax TTS API error: status_code={status_code}, "
-                                    f"status_msg={status_msg}, trace_id={self._current_trace_id}"
+                                    f"status_msg={status_msg}"
                                 )
-                                logger.error(
-                                    error_message,
-                                    extra={"trace_id": self._current_trace_id, "status_code": status_code},
-                                )
+                                logger.error(error_message)
                                 yield ErrorFrame(error=error_message)
                                 return
 
                             # Handle final chunk with extra_info
                             if "extra_info" in data:
                                 extra_info = data.get("extra_info", {})
-                                logger.info(
-                                    f"MiniMax TTS completed successfully, trace_id={self._current_trace_id}",
-                                    extra={
-                                        "trace_id": self._current_trace_id,
-                                        "audio_length": extra_info.get("audio_length"),
-                                        "audio_size": extra_info.get("audio_size"),
-                                        "usage_characters": extra_info.get("usage_characters"),
-                                        "word_count": extra_info.get("word_count"),
-                                    },
-                                )
+                                logger.debug(f"Received final chunk with extra info: {extra_info}")
                                 continue  # No audio data in this block
 
                             # Extract audio data
@@ -513,10 +487,7 @@ class MiniMaxHttpTTSService(TTSService):
                             # Check for subtitle file (if subtitle generation is enabled)
                             subtitle_file = chunk_data.get("subtitle_file")
                             if subtitle_file:
-                                logger.info(
-                                    f"Subtitle file available: {subtitle_file}",
-                                    extra={"trace_id": self._current_trace_id, "subtitle_url": subtitle_file},
-                                )
+                                logger.info(f"Subtitle file available: {subtitle_file}")
 
                             audio_data = chunk_data.get("audio")
                             if not audio_data:
@@ -542,31 +513,22 @@ class MiniMaxHttpTTSService(TTSService):
                                 except ValueError as e:
                                     logger.error(
                                         f"Error converting hex to binary: {e}",
-                                        extra={"trace_id": self._current_trace_id},
                                     )
                                     continue
 
                         except json.JSONDecodeError as e:
                             logger.error(
                                 f"Error decoding JSON: {e}, data: {data_block[:100]}",
-                                extra={"trace_id": self._current_trace_id or "unknown"},
                             )
                             continue
 
         except aiohttp.ClientError as e:
             error_msg = f"MiniMax TTS network error: {str(e)}"
-            logger.exception(error_msg, extra={"trace_id": self._current_trace_id or "unknown"})
+            logger.exception(error_msg)
             yield ErrorFrame(error=error_msg)
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"{self} error: {e}")
         finally:
-            if self._current_trace_id:
-                logger.debug(
-                    f"MiniMax TTS request finished, trace_id={self._current_trace_id}, "
-                    f"received {chunk_count if 'chunk_count' in locals() else 0} chunks"
-                )
-            else:
-                logger.debug(f"MiniMax TTS request finished with no trace_id (no data received)")
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

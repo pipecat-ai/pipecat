@@ -5,14 +5,11 @@
 #
 
 import sys
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import version
 
 from loguru import logger
 
-try:
-    __version__ = version("pipecat-ai")
-except PackageNotFoundError:
-    __version__ = "0.0.0.dev"  # Development version
+__version__ = version("pipecat-ai")
 
 logger.info(f"ᓚᘏᗢ Pipecat {__version__} (Python {sys.version}) ᓚᘏᗢ")
 
