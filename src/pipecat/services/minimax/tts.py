@@ -135,7 +135,9 @@ class MiniMaxHttpTTSService(TTSService):
         self,
         *,
         api_key: str,
-        base_url: str = "https://api.minimax.io/v1/t2a_v2",
+        base_url: str = "https://api.minimax.io/v1/t2a_v2", 
+        # https://api-uw.minimax.io/v1/t2a_v2
+        # support west of unite state 
         group_id: str,
         model: str = "speech-02-turbo",
         voice_id: str = "Calm_Woman",
