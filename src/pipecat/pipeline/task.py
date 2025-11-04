@@ -12,6 +12,9 @@ including heartbeats, idle detection, and observer integration.
 """
 
 import asyncio
+import importlib.util
+import os
+from pathlib import Path
 from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
 
 from loguru import logger
@@ -641,6 +644,9 @@ class PipelineTask(BasePipelineTask):
 
     async def _setup(self, params: PipelineTaskParams):
         """Set up the pipeline task and all processors."""
+        # Load additional observers.
+        await self._load_observer_files()
+
         mgr_params = TaskManagerParams(loop=params.loop)
         self._task_manager.setup(mgr_params)
 
@@ -843,6 +849,27 @@ class PipelineTask(BasePipelineTask):
             await self.cancel()
             return False
         return True
+
+    async def _load_observer_files(self):
+        observer_files = os.environ.get("PIPECAT_OBSERVER_FILES", "").split(":")
+        for f in observer_files:
+            try:
+                path = Path(f).resolve()
+                module_name = path.stem
+                spec = importlib.util.spec_from_file_location(module_name, str(path))
+                if spec:
+                    logger.debug(f"{self} loading observers from {path}")
+
+                    # Load module.
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+
+                    # Create observers.
+                    observers = await module.create_observers(self)
+                    for observer in observers:
+                        self.add_observer(observer)
+            except Exception as e:
+                logger.error(f"{self} error loading external observers from {f}: {e}")
 
     def _print_dangling_tasks(self):
         """Log any dangling tasks that haven't been properly cleaned up."""
