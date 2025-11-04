@@ -76,6 +76,9 @@ reason")`.
   arbitrary request data from client due to camelCase typing. This fixes data
   passthrough for JS clients where `APIRequest` is used.
 
+- Fixed a bug in `GeminiLiveLLMService` where in some circumstances it wouldn't
+  respond after a tool call.
+
 - Fixed `GeminiLiveLLMService` session resumption after a connection timeout.
 
 - `GeminiLiveLLMService` now properly supports context-provided system
