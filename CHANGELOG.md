@@ -43,6 +43,20 @@ reason")`.
   `LLMSwitcher.register_function()` in that it's a shorthand for registering
   functions on all LLMs in the switcher, but for direct functions.
 
+- Added support for passing in an `LLMSwicher` to `MCPClient.register_tools()`
+  (as well as the new `MCPClient.register_tools_schema()`).
+
+- Added `LLMSwitcher.register_direct_function()`. It works much like
+  `LLMSwitcher.register_function()` in that it's a shorthand for registering
+  a function on all LLMs in the switcher, except it takes a direct function (a
+  `FunctionSchema`-less function).
+
+- Added the two-step `MCPClient.get_tools_schema()` and
+  `MCPClient.register_tools_schema()` as two-step alternative to
+  `MCPClient.register_tools()`, to allow users to use `MCPClient` alongside
+  the pattern of passing in tools to the LLM service constructor (a pattern
+  supported by speech-to-speech services such as `GeminiLiveLLMService`).
+
 ### Changed
 
 - Bumped the `fastapi` dependency's upperbound to `<0.122.0`.
@@ -56,12 +70,6 @@ reason")`.
   warning instead of returning None. This allows developers to use newly
   supported languages before Pipecat's service classes are updated, while still
   providing guidance on verified languages.
-
-- Added the two-step `MCPClient.get_tools_schema()` and
-  `MCPClient.register_tools_schema()` as two-step alternative to
-  `MCPClient.register_tools()`, to allow users to use `MCPClient` alongside
-  the pattern of passing in tools to the LLM service constructor (a pattern
-  supported by speech-to-speech services such as `GeminiLiveLLMService`).
 
 ### Fixed
 
