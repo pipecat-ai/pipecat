@@ -33,6 +33,10 @@ reason")`.
 
 ### Fixed
 
+- Fixed an issue where the `SmallWebRTCRequest` dataclass in runner would scrub
+  arbitrary request data from client due to camelCase typing. This fixes data
+  passthrough for JS clients where `APIRequest` is used.
+
 - Fixed `GeminiLiveLLMService` session resumption after a connection timeout.
 
 - `GeminiLiveLLMService` now properly supports context-provided system
