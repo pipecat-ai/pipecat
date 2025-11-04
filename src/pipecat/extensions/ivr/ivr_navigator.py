@@ -118,21 +118,15 @@ class IVRProcessor(FrameProcessor):
     def _setup_xml_patterns(self):
         """Set up XML pattern detection and handlers."""
         # Register DTMF pattern
-        self._aggregator.add_pattern_pair(
-            "dtmf", "<dtmf>", "</dtmf>", type="dtmf", action=MatchAction.REMOVE
-        )
+        self._aggregator.add_pattern_pair("dtmf", "<dtmf>", "</dtmf>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("dtmf", self._handle_dtmf_action)
 
         # Register mode pattern
-        self._aggregator.add_pattern_pair(
-            "mode", "<mode>", "</mode>", type="mode", action=MatchAction.REMOVE
-        )
+        self._aggregator.add_pattern_pair("mode", "<mode>", "</mode>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("mode", self._handle_mode_action)
 
         # Register IVR pattern
-        self._aggregator.add_pattern_pair(
-            "ivr", "<ivr>", "</ivr>", type="ivr", action=MatchAction.REMOVE
-        )
+        self._aggregator.add_pattern_pair("ivr", "<ivr>", "</ivr>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("ivr", self._handle_ivr_action)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

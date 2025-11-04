@@ -22,17 +22,15 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
         # Add a test pattern
         self.aggregator.add_pattern_pair(
-            pattern_id="test_pattern",
+            type="test_pattern",
             start_pattern="<test>",
             end_pattern="</test>",
-            type="test",
             action=MatchAction.REMOVE,
         )
         self.aggregator.add_pattern_pair(
-            pattern_id="code_pattern",
+            type="code_pattern",
             start_pattern="<code>",
             end_pattern="</code>",
-            type="code",
             action=MatchAction.AGGREGATE,
         )
 
@@ -45,7 +43,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         result = await self.aggregator.aggregate("Hello <test>pattern")
         self.assertIsNone(result)
         self.assertEqual(self.aggregator.text.text, "Hello <test>pattern")
-        self.assertEqual(self.aggregator.text.type, "test")
+        self.assertEqual(self.aggregator.text.type, "test_pattern")
 
         # Second part completes the pattern and includes an exclamation point
         result = await self.aggregator.aggregate(" content</test>!")
@@ -54,7 +52,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.test_handler.assert_called_once()
         call_args = self.test_handler.call_args[0][0]
         self.assertIsInstance(call_args, PatternMatch)
-        self.assertEqual(call_args.pattern_id, "test_pattern")
+        self.assertEqual(call_args.type, "test_pattern")
         self.assertEqual(call_args.full_match, "<test>pattern content</test>")
         self.assertEqual(call_args.text, "pattern content")
 
@@ -75,7 +73,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         result = await self.aggregator.aggregate("Here is code <code>pattern")
         self.assertEqual(result.text, "Here is code ")
         self.assertEqual(self.aggregator.text.text, "<code>pattern")
-        self.assertEqual(self.aggregator.text.type, "code")
+        self.assertEqual(self.aggregator.text.type, "code_pattern")
 
         # Second part completes the pattern and includes an exclamation point
         result = await self.aggregator.aggregate(" content</code>")
@@ -84,11 +82,11 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.code_handler.assert_called_once()
         call_args = self.code_handler.call_args[0][0]
         self.assertIsInstance(call_args, PatternMatch)
-        self.assertEqual(call_args.pattern_id, "code_pattern")
+        self.assertEqual(call_args.type, "code_pattern")
         self.assertEqual(call_args.full_match, "<code>pattern content</code>")
         self.assertEqual(call_args.text, "pattern content")
         self.assertEqual(result.text, "pattern content")
-        self.assertEqual(result.type, "code")
+        self.assertEqual(result.type, "code_pattern")
 
         # Next sentence should be processed separately
         result = await self.aggregator.aggregate(" This is another sentence.")
@@ -110,7 +108,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
         # Buffer should contain the incomplete text
         self.assertEqual(self.aggregator.text.text, "Hello <test>pattern content")
-        self.assertEqual(self.aggregator.text.type, "test")
+        self.assertEqual(self.aggregator.text.type, "test_pattern")
 
         # Reset and confirm buffer is cleared
         await self.aggregator.reset()
@@ -122,18 +120,16 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         emphasis_handler = AsyncMock()
 
         self.aggregator.add_pattern_pair(
-            pattern_id="voice",
+            type="voice",
             start_pattern="<voice>",
             end_pattern="</voice>",
-            type="voice",
             action=MatchAction.REMOVE,
         )
 
         self.aggregator.add_pattern_pair(
-            pattern_id="emphasis",
+            type="emphasis",
             start_pattern="<em>",
             end_pattern="</em>",
-            type="emphasis",
             action=MatchAction.KEEP,  # Keep emphasis tags
         )
 
@@ -147,12 +143,12 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         # Both handlers should be called with correct data
         voice_handler.assert_called_once()
         voice_match = voice_handler.call_args[0][0]
-        self.assertEqual(voice_match.pattern_id, "voice")
+        self.assertEqual(voice_match.type, "voice")
         self.assertEqual(voice_match.text, "female")
 
         emphasis_handler.assert_called_once()
         emphasis_match = emphasis_handler.call_args[0][0]
-        self.assertEqual(emphasis_match.pattern_id, "emphasis")
+        self.assertEqual(emphasis_match.type, "emphasis")
         self.assertEqual(emphasis_match.text, "very")
 
         # Voice pattern should be removed, emphasis pattern should remain

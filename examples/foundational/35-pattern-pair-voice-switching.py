@@ -111,10 +111,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Add pattern for voice switching
     pattern_aggregator.add_pattern_pair(
-        pattern_id="voice_tag",
+        type="voice",
         start_pattern="<voice>",
         end_pattern="</voice>",
-        type="voice",
         action=MatchAction.REMOVE,  # Remove tags from final text
     )
 
@@ -130,7 +129,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         else:
             logger.warning(f"Unknown voice: {voice_name}")
 
-    pattern_aggregator.on_pattern_match("voice_tag", on_voice_tag)
+    pattern_aggregator.on_pattern_match("voice", on_voice_tag)
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
