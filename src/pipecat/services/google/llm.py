@@ -715,7 +715,6 @@ class GoogleLLMService(LLMService):
         self._system_instruction = system_instruction
         self._http_options = http_options
 
-        self._create_client(api_key, http_options)
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
@@ -726,6 +725,9 @@ class GoogleLLMService(LLMService):
         self._tools = tools
         self._tool_config = tool_config
 
+        # Initialize the API client. Subclasses can override this if needed.
+        self.create_client()
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
 
@@ -734,8 +736,9 @@ class GoogleLLMService(LLMService):
         """
         return True
 
-    def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
-        self._client = genai.Client(api_key=api_key, http_options=http_options)
+    def create_client(self):
+        """Create the Gemini client instance. Subclasses can override this."""
+        self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
 
     async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
