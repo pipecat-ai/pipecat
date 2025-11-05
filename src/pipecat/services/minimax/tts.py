@@ -111,9 +111,13 @@ class MiniMaxHttpTTSService(TTSService):
             emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
                 "disgusted", "surprised", "calm", "fluent").
             english_normalization: Deprecated; use `text_normalization` instead
+
+                .. deprecated:: 0.0.93
+                    The `english_normalization` parameter is deprecated and will be removed in a future version.
+                    Use the `text_normalization` parameter instead.
+
             text_normalization: Enable text normalization (Chinese/English).
             latex_read: Enable LaTeX formula reading.
-            force_cbr: Enable Constant Bitrate (CBR) for audio encoding (MP3 only).
             exclude_aggregated_audio: Whether to exclude aggregated audio in final chunk.
             subtitle_enable: Enable subtitle generation (non-streaming only).
             subtitle_type: Subtitle timestamp granularity (options: "word", "sentence").
@@ -128,7 +132,6 @@ class MiniMaxHttpTTSService(TTSService):
         english_normalization: Optional[bool] = None  # Deprecated
         text_normalization: Optional[bool] = None
         latex_read: Optional[bool] = None
-        force_cbr: Optional[bool] = None
         exclude_aggregated_audio: Optional[bool] = None
         subtitle_enable: Optional[bool] = None
         subtitle_type: Optional[str] = "sentence"
@@ -207,20 +210,9 @@ class MiniMaxHttpTTSService(TTSService):
             if service_lang:
                 self._settings["language_boost"] = service_lang
 
-                # Validate language-model compatibility
-                # Filipino, Tamil, Persian only supported by speech-2.6-* models
-                if params.language in {Language.FA, Language.FIL, Language.TA}:
-                    if not model.startswith("speech-2.6"):
-                        logger.warning(
-                            f"Language {params.language.value} ({service_lang}) is only supported by "
-                            f"speech-2.6-hd and speech-2.6-turbo models. "
-                            f"Current model '{model}' may not support this language. "
-                            f"Consider using 'speech-2.6-turbo' or 'speech-2.6-hd'."
-                        )
-
         # Add optional emotion if provided
         if params.emotion:
-            # Validate emotion is in the supported list (updated per official docs)
+            # Validate emotion is in the supported list
             supported_emotions = [
                 "happy",
                 "sad",
@@ -240,9 +232,14 @@ class MiniMaxHttpTTSService(TTSService):
 
         # If `english_normalization`, add `text_normalization` and print warning
         if params.english_normalization is not None:
-            logger.warning(
-                "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead."
-            )
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead.",
+                    DeprecationWarning,
+                )
             self._settings["voice_setting"]["text_normalization"] = params.english_normalization
 
         # Add text_normalization if provided (corrected parameter name)
@@ -252,10 +249,6 @@ class MiniMaxHttpTTSService(TTSService):
         # Add latex_read if provided
         if params.latex_read is not None:
             self._settings["voice_setting"]["latex_read"] = params.latex_read
-
-        # Add force_cbr if provided (for MP3 format only)
-        if params.force_cbr is not None:
-            self._settings["audio_setting"]["force_cbr"] = params.force_cbr
 
         # Add subtitle settings if provided
         if params.subtitle_enable is not None:
@@ -334,7 +327,7 @@ class MiniMaxHttpTTSService(TTSService):
         """
         await super().start(frame)
         self._settings["audio_setting"]["sample_rate"] = self.sample_rate
-        logger.debug(f"MiniMax TTS initialized with sample_rate={self.sample_rate}")
+        logger.debug(f"MiniMax TTS initialized with sample_rate: {self.sample_rate}")
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -413,28 +406,6 @@ class MiniMaxHttpTTSService(TTSService):
                     # Log raw buffer content for debugging
                     if chunk_count == 1:
                         logger.trace(f"Raw buffer content: {buffer[:200]}")  # First 200 bytes
-
-                        # Check if first chunk is a direct JSON error (not streaming format)
-                        if not buffer.startswith(b"data:"):
-                            try:
-                                error_data = json.loads(buffer.decode("utf-8"))
-                                base_resp = error_data.get("base_resp", {})
-                                status_code = base_resp.get("status_code", 0)
-
-                                if status_code != 0:
-                                    # This is a non-streaming error response
-                                    status_msg = base_resp.get("status_msg", "Unknown error")
-
-                                    error_message = (
-                                        f"MiniMax TTS API error: status_code={status_code}"
-                                        f"status_msg={status_msg}"
-                                    )
-                                    logger.error(error_message)
-                                    yield ErrorFrame(error=error_message)
-                                    return
-                            except (json.JSONDecodeError, UnicodeDecodeError):
-                                # Not a valid JSON, continue with streaming processing
-                                pass
 
                     # Find complete data blocks
                     while b"data:" in buffer:
