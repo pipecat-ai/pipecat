@@ -74,7 +74,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
@@ -133,7 +133,7 @@ def language_to_gemini_language(language: Language) -> Optional[str]:
     Returns:
         The Gemini language code string, or None if the language is not supported.
     """
-    language_map = {
+    LANGUAGE_MAP = {
         # Arabic
         Language.AR: "ar-XA",
         # Bengali
@@ -214,7 +214,8 @@ def language_to_gemini_language(language: Language) -> Optional[str]:
         Language.VI: "vi-VN",
         Language.VI_VN: "vi-VN",
     }
-    return language_map.get(language)
+
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class GeminiLiveContext(OpenAILLMContext):

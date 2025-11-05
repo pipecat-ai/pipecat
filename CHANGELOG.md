@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the `GoogleVertexLLMService` to use the `GoogleLLMService` as a base
   class instead of the `OpenAILLMService`.
 
+- Updated STT and TTS services to pass through unverified language codes with a
+  warning instead of returning None. This allows developers to use newly
+  supported languages before Pipecat's service classes are updated, while still
+  providing guidance on verified languages.
+
 ### Fixed
 
 - Fixed an issue that would cause wrong user/assistant context ordering when

@@ -18,7 +18,7 @@ from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -35,7 +35,7 @@ def language_to_whisper_language(language: Language) -> Optional[str]:
     Returns:
         str or None: The corresponding Whisper language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AF: "af",
         Language.AR: "ar",
         Language.HY: "hy",
@@ -95,15 +95,7 @@ def language_to_whisper_language(language: Language) -> Optional[str]:
         Language.CY: "cy",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class BaseWhisperSTTService(SegmentedSTTService):
