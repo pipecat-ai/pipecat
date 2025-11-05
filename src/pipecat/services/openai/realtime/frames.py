@@ -12,7 +12,7 @@
     It now works more like most LLM services in Pipecat, relying on updates to
     its context, pushed by context aggregators, to update its internal state.
 
-    Listen for `LLMContextFrame`s for context updates.
+    Listen for ``LLMContextFrame`` s for context updates.
 """
 
 import warnings

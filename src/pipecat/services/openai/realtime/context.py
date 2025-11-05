@@ -8,42 +8,40 @@
 
 .. deprecated:: 0.0.92
     OpenAI Realtime no longer uses types from this module under the hood.
-    It now uses `LLMContext` and `LLMContextAggregatorPair`.
+    It now uses ``LLMContext`` and ``LLMContextAggregatorPair``.
     Using the new patterns should allow you to not need types from this module.
 
-    BEFORE:
-    ```
-    # Setup
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    BEFORE::
 
-    # Context aggregator type
-    context_aggregator: OpenAIContextAggregatorPair
+        # Setup
+        context = OpenAILLMContext(messages, tools)
+        context_aggregator = llm.create_context_aggregator(context)
 
-    # Context frame type
-    frame: OpenAILLMContextFrame
+        # Context aggregator type
+        context_aggregator: OpenAIContextAggregatorPair
 
-    # Context type
-    context: OpenAIRealtimeLLMContext
-    # or
-    context: OpenAILLMContext
-    ```
+        # Context frame type
+        frame: OpenAILLMContextFrame
 
-    AFTER:
-    ```
-    # Setup
-    context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(context)
+        # Context type
+        context: OpenAIRealtimeLLMContext
+        # or
+        context: OpenAILLMContext
 
-    # Context aggregator type
-    context_aggregator: LLMContextAggregatorPair
+    AFTER::
 
-    # Context frame type
-    frame: LLMContextFrame
+        # Setup
+        context = LLMContext(messages, tools)
+        context_aggregator = LLMContextAggregatorPair(context)
 
-    # Context type
-    context: LLMContext
-    ```
+        # Context aggregator type
+        context_aggregator: LLMContextAggregatorPair
+
+        # Context frame type
+        frame: LLMContextFrame
+
+        # Context type
+        context: LLMContext
 """
 
 import warnings

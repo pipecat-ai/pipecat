@@ -1742,7 +1742,8 @@ class GeminiLiveLLMService(LLMService):
         Constructor keyword arguments for both the user and assistant aggregators can be provided.
 
         NOTE: this method exists only for backward compatibility. New code
-        should instead do:
+        should instead do::
+
             context = LLMContext(...)
             context_aggregator = LLMContextAggregatorPair(context)
 
