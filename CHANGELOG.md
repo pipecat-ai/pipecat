@@ -43,9 +43,6 @@ reason")`.
   `LLMSwitcher.register_function()` in that it's a shorthand for registering
   functions on all LLMs in the switcher, but for direct functions.
 
-- Added support for passing in an `LLMSwicher` to `MCPClient.register_tools()`
-  (as well as the new `MCPClient.register_tools_schema()`).
-
 - Added `LLMSwitcher.register_direct_function()`. It works much like
   `LLMSwitcher.register_function()` in that it's a shorthand for registering
   a function on all LLMs in the switcher, except this new method takes a direct
@@ -55,6 +52,9 @@ reason")`.
   as a two-step alternative to `MCPClient.register_tools()`, to allow users to
   pass MCP tools to, say, `GeminiLiveLLMService` (as well as other
   speech-to-speech services) in the constructor.
+
+- Added support for passing in an `LLMSwicher` to `MCPClient.register_tools()`
+  (as well as the new `MCPClient.register_tools_schema()`).
 
 ### Changed
 
