@@ -8,6 +8,7 @@
 
 from typing import Any, List, Optional, Type
 
+from pipecat.adapters.schemas.direct_function import DirectFunction
 from pipecat.pipeline.service_switcher import ServiceSwitcher, StrategyType
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import LLMService
@@ -93,5 +94,24 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
                 function_name=function_name,
                 handler=handler,
                 start_callback=start_callback,
+                cancel_on_interruption=cancel_on_interruption,
+            )
+
+    def register_direct_function(
+        self,
+        handler: DirectFunction,
+        *,
+        cancel_on_interruption: bool = True,
+    ):
+        """Register a direct function handler for LLM function calls, on all LLMs, active or not.
+
+        Args:
+            handler: The direct function to register. Must follow DirectFunction protocol.
+            cancel_on_interruption: Whether to cancel this function call when an
+                interruption occurs. Defaults to True.
+        """
+        for llm in self.llms:
+            llm.register_direct_function(
+                handler=handler,
                 cancel_on_interruption=cancel_on_interruption,
             )
