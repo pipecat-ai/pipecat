@@ -93,7 +93,7 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
         self.__high_counter = 0
         self.__low_counter = 0
 
-    async def put(self, item: Tuple[Frame, FrameDirection, Optional[FrameCallback]]):
+    async def put(self, item: Tuple[Frame, FrameDirection, FrameCallback]):
         """Put an item into the priority queue.
 
         System frames (`SystemFrame`) have higher priority than any other
@@ -228,9 +228,11 @@ class FrameProcessor(BaseObject):
 
         # To interrupt a pipeline, we push an `InterruptionTaskFrame` upstream.
         # Then we wait for the corresponding `InterruptionFrame` to travel from
-        # start to end of the pipeline. When it reaches the end we will be
-        # notified through the assigned event.
+        # the start of the pipeline back to the processor that sent the
+        # `InterruptionTaskFrame`. This wait is handled using the following
+        # event.
         self._wait_for_interruption = False
+        self._wait_interruption_event = asyncio.Event()
 
         # Frame processor events.
         self._register_event_handler("on_before_process_frame", sync=True)
@@ -565,6 +567,10 @@ class FrameProcessor(BaseObject):
         if self._cancelling:
             return
 
+        # If we are waiting for an interruption we will bypass all queued system
+        # frames and we will process the frame right away. This is because a
+        # previous system frame might be waiting for the interruption frame and
+        # it's blocking the input task.
         if self._wait_for_interruption and isinstance(frame, InterruptionFrame):
             await self.__process_frame(frame, direction, callback)
             return
@@ -655,27 +661,31 @@ class FrameProcessor(BaseObject):
 
         await self._call_event_handler("on_after_push_frame", frame)
 
+        # If we are waiting for an interruption and we get an interruption, then
+        # we can unblock `push_interruption_task_frame_and_wait()`.
+        if self._wait_for_interruption and isinstance(frame, InterruptionFrame):
+            self._wait_interruption_event.set()
+
     async def push_interruption_task_frame_and_wait(self):
-        """Interrupt the pipeline and wait for the interruption to complete.
+        """Push an interruption task frame upstream and wait for the interruption.
 
-        This function sends an `InterruptionTaskFrame` upstream with an
-        associated asyncio event. It then waits for the generated
-        `InterruptionFrame` to reach the end of the pipeline where the event
-        will be set.
-
+        This function sends an `InterruptionTaskFrame` upstream to the pipeline
+        task and waits to receive the corresponding `InterruptionFrame`. When
+        the function finishes it is guaranteed that the `InterruptionFrame` has
+        been pushed downstream.
         """
         self._wait_for_interruption = True
 
-        finished_event = asyncio.Event()
+        await self.push_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
 
-        await self.push_frame(
-            InterruptionTaskFrame(finished_event=finished_event), FrameDirection.UPSTREAM
-        )
+        # Wait for an `InterruptionFrame` to come to this processor and be
+        # pushed. Take a look at `push_frame()` to see how we first push the
+        # `InterruptionFrame` and then we set the event in order to maintain
+        # frame ordering.
+        await self._wait_interruption_event.wait()
 
-        # Wait for the event to be set. This event is set when the
-        # `InterruptionFrame` pushed by the pipeline task reaches the end of the
-        # pipeline.
-        await finished_event.wait()
+        # Clean the event.
+        self._wait_interruption_event.clear()
 
         self._wait_for_interruption = False
 
