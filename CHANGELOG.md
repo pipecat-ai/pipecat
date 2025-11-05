@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   you cancel a task with `PipelineTask.cancel(reason="cancellation your
 reason")`.
 
+### Changed
+
+- Updated the `GoogleVertexLLMService` to use the `GoogleLLMService` as a base
+  class instead of the `OpenAILLMService`.
+
 ### Fixed
 
 - Fixed an issue where the `SmallWebRTCRequest` dataclass in runner would scrub
