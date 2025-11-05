@@ -107,7 +107,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     await mcp.register_tools_schema(tools, llm)
 
-    context = LLMContext([{"role": "user", "content": "Please introduce yourself."}], NOT_GIVEN)
+    context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
     context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
