@@ -11,6 +11,7 @@ including data frames, system frames, and control frames for audio, video, text,
 and LLM processing.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
@@ -859,9 +860,13 @@ class InterruptionFrame(SystemFrame):
     speaking (i.e. is interrupting). This is similar to
     UserStartedSpeakingFrame except that it should be pushed concurrently
     with other frames (so the order is not guaranteed).
+
+    Parameters:
+        finished_event: If not None, the event will be set when the frame
+        reaches the end of the pipeline.
     """
 
-    pass
+    finished_event: Optional[asyncio.Event] = None
 
 
 @dataclass
@@ -1422,9 +1427,13 @@ class InterruptionTaskFrame(TaskFrame):
     same actions as if the user interrupted except that the
     UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
     This frame should be pushed upstream.
+
+    Parameters:
+        finished_event: If not None, the event will be set when the generated
+        InterruptionFrame reaches the end of the pipeline.
     """
 
-    pass
+    finished_event: Optional[asyncio.Event] = None
 
 
 @dataclass
