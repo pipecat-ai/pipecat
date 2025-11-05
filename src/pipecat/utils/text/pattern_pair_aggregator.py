@@ -62,7 +62,7 @@ class PatternMatch(Aggregation):
         Returns:
             A descriptive string showing the pattern type and content.
         """
-        return f"PatternMatch(type={self.type}, content={self.text}, full_match={self.full_match})"
+        return f"PatternMatch(type={self.type}, text={self.text}, full_match={self.full_match})"
 
 
 class PatternPairAggregator(BaseTextAggregator):
