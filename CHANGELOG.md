@@ -33,6 +33,8 @@ reason")`.
 
 ### Changed
 
+- Updated the default model for `GoogleVertexLLMService` to `gemini-2.5-flash`.
+
 - Updated the `GoogleVertexLLMService` to use the `GoogleLLMService` as a base
   class instead of the `OpenAILLMService`.
 
