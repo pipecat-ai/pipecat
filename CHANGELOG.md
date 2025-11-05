@@ -46,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Bumped the `fastapi` dependency's upperbound to `<0.122.0`.
+
 - Updated the default model for `GoogleVertexLLMService` to `gemini-2.5-flash`.
 
 - Updated the `GoogleVertexLLMService` to use the `GoogleLLMService` as a base
