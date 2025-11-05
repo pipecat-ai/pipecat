@@ -70,6 +70,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         so = ort.SessionOptions()
         so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         so.inter_op_num_threads = 1
+        so.intra_op_num_threads = 1
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
         self._feature_extractor = WhisperFeatureExtractor(chunk_length=8)
