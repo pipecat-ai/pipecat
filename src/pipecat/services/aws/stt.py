@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
 from pipecat.services.stt_service import STTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -326,7 +326,7 @@ class AWSTranscribeSTTService(STTService):
         Returns:
             AWS Transcribe compatible language code, or None if unsupported.
         """
-        language_map = {
+        LANGUAGE_MAP = {
             # Afrikaans
             Language.AF: "af-ZA",
             Language.AF_ZA: "af-ZA",
@@ -466,7 +466,7 @@ class AWSTranscribeSTTService(STTService):
             Language.ZU_ZA: "zu-ZA",
         }
 
-        return language_map.get(language)
+        return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
     @traced_stt
     async def _handle_transcription(
