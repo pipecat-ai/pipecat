@@ -6,8 +6,8 @@
 
 """Google Vertex AI LLM service implementation.
 
-This module provides integration with Google's AI models via Vertex AI while
-maintaining OpenAI API compatibility through Google's OpenAI-compatible endpoint.
+This module provides integration with Google's AI models via Vertex AI,
+extending the GoogleLLMService with Vertex AI authentication.
 """
 
 import json
@@ -20,12 +20,14 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.google.llm import GoogleLLMService
 
 try:
     from google.auth import default
     from google.auth.exceptions import GoogleAuthError
     from google.auth.transport.requests import Request
+    from google.genai import Client
+    from google.genai.types import HttpOptions
     from google.oauth2 import service_account
 
 except ModuleNotFoundError as e:
@@ -36,19 +38,19 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class GoogleVertexLLMService(OpenAILLMService):
-    """Google Vertex AI LLM service with OpenAI API compatibility.
+class GoogleVertexLLMService(GoogleLLMService):
+    """Google Vertex AI LLM service extending GoogleLLMService.
 
-    Provides access to Google's AI models via Vertex AI while maintaining
-    OpenAI API compatibility. Handles authentication using Google service
-    account credentials and constructs appropriate endpoint URLs for
-    different GCP regions and projects.
+    Provides access to Google's AI models via Vertex AI while using the same
+    Google AI client and message format as GoogleLLMService. Handles authentication
+    using Google service account credentials and configures the client for
+    Vertex AI endpoints.
 
     Reference:
-        https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library
+        https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference
     """
 
-    class InputParams(OpenAILLMService.InputParams):
+    class InputParams(GoogleLLMService.InputParams):
         """Input parameters specific to Vertex AI.
 
         Parameters:
@@ -97,9 +99,14 @@ class GoogleVertexLLMService(OpenAILLMService):
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        model: str = "google/gemini-2.0-flash-001",
+        model: str = "gemini-2.5-flash",
         location: Optional[str] = None,
         project_id: Optional[str] = None,
+        params: Optional[GoogleLLMService.InputParams] = None,
+        system_instruction: Optional[str] = None,
+        tools: Optional[list] = None,
+        tool_config: Optional[dict] = None,
+        http_options: Optional[HttpOptions] = None,
         **kwargs,
     ):
         """Initializes the VertexLLMService.
@@ -107,14 +114,29 @@ class GoogleVertexLLMService(OpenAILLMService):
         Args:
             credentials: JSON string of service account credentials.
             credentials_path: Path to the service account JSON file.
-            model: Model identifier (e.g., "google/gemini-2.0-flash-001").
+            model: Model identifier (e.g., "gemini-2.5-flash").
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
-            **kwargs: Additional arguments passed to OpenAILLMService.
+            params: Input parameters for the model.
+            system_instruction: System instruction/prompt for the model.
+            tools: List of available tools/functions.
+            tool_config: Configuration for tool usage.
+            http_options: HTTP options for the client.
+            **kwargs: Additional arguments passed to GoogleLLMService.
         """
+        # Check if user incorrectly passed api_key, which is used by parent
+        # class but not here.
+        if "api_key" in kwargs:
+            logger.error(
+                "GoogleVertexLLMService does not accept 'api_key' parameter. "
+                "Use 'credentials' or 'credentials_path' instead for Vertex AI authentication."
+            )
+            raise ValueError(
+                "Invalid parameter 'api_key'. Use 'credentials' or 'credentials_path' for Vertex AI authentication."
+            )
+
         # Handle deprecated InputParams fields
-        if "params" in kwargs and isinstance(kwargs["params"], GoogleVertexLLMService.InputParams):
-            params = kwargs["params"]
+        if params and isinstance(params, GoogleVertexLLMService.InputParams):
             # Extract location and project_id from params if not provided
             # directly, for backward compatibility
             if project_id is None:
@@ -122,13 +144,12 @@ class GoogleVertexLLMService(OpenAILLMService):
             if location is None:
                 location = params.location
             # Convert to base InputParams
-            params = OpenAILLMService.InputParams(
+            params = GoogleLLMService.InputParams(
                 **params.model_dump(exclude={"location", "project_id"}, exclude_unset=True)
             )
-            kwargs["params"] = params
 
         # Validate project_id and location parameters
-        # NOTE: once we remove Vertex-spcific InputParams class, we can update
+        # NOTE: once we remove Vertex-specific InputParams class, we can update
         #       __init__() signature as follows:
         #       - location: str = "us-east4",
         #       - project_id: str,
@@ -143,29 +164,38 @@ class GoogleVertexLLMService(OpenAILLMService):
             logger.warning("location is not provided. Defaulting to 'us-east4'.")
             location = "us-east4"  # Default location if not provided
 
-        base_url = self._get_base_url(location, project_id)
-        self._api_key = self._get_api_token(credentials, credentials_path)
+        # These need to be set before calling super().__init__() because
+        # super().__init__() invokes _create_client(), which needs these.
+        self._credentials = self._get_credentials(credentials, credentials_path)
+        self._project_id = project_id
+        self._location = location
 
+        # Call parent constructor with dummy api_key
+        # (api_key is required by parent class, but not actually used with Vertex)
         super().__init__(
-            api_key=self._api_key,
-            base_url=base_url,
+            api_key="dummy",
             model=model,
+            params=params,
+            system_instruction=system_instruction,
+            tools=tools,
+            tool_config=tool_config,
+            http_options=http_options,
             **kwargs,
         )
 
-    @staticmethod
-    def _get_base_url(location: str, project_id: str) -> str:
-        """Construct the base URL for Vertex AI API."""
-        # Determine the correct API host based on location
-        if location == "global":
-            api_host = "aiplatform.googleapis.com"
-        else:
-            api_host = f"{location}-aiplatform.googleapis.com"
-        return f"https://{api_host}/v1/projects/{project_id}/locations/{location}/endpoints/openapi"
+    def create_client(self):
+        """Create the Gemini client instance configured for Vertex AI."""
+        self._client = Client(
+            vertexai=True,
+            credentials=self._credentials,
+            project=self._project_id,
+            location=self._location,
+            http_options=self._http_options,
+        )
 
     @staticmethod
-    def _get_api_token(credentials: Optional[str], credentials_path: Optional[str]) -> str:
-        """Retrieve an authentication token using Google service account credentials.
+    def _get_credentials(credentials: Optional[str], credentials_path: Optional[str]):
+        """Retrieve Credentials using Google service account credentials.
 
         Supports multiple authentication methods:
         1. Direct JSON credentials string
@@ -177,7 +207,7 @@ class GoogleVertexLLMService(OpenAILLMService):
             credentials_path: Path to the service account JSON file.
 
         Returns:
-            OAuth token for API authentication.
+            Google credentials object for API authentication.
 
         Raises:
             ValueError: If no valid credentials are provided or found.
@@ -209,4 +239,4 @@ class GoogleVertexLLMService(OpenAILLMService):
 
         creds.refresh(Request())  # Ensure token is up-to-date, lifetime is 1 hour.
 
-        return creds.token
+        return creds
