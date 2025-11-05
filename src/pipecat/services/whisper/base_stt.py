@@ -122,6 +122,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         language: Optional[Language] = Language.EN,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
+        include_prob_metrics: bool = False,
         **kwargs,
     ):
         """Initialize the Whisper STT service.
@@ -133,6 +134,9 @@ class BaseWhisperSTTService(SegmentedSTTService):
             language: Language of the audio input. Defaults to English.
             prompt: Optional text to guide the model's style or continue a previous segment.
             temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
+            include_prob_metrics: If True, enables probability metrics in API response.
+                Each service implements this differently (see child classes).
+                Defaults to False.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         super().__init__(**kwargs)
@@ -141,6 +145,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         self._language = self.language_to_service_language(language or Language.EN)
         self._prompt = prompt
         self._temperature = temperature
+        self._include_prob_metrics = include_prob_metrics
 
         self._settings = {
             "base_url": base_url,
@@ -223,6 +228,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
                     text,
                     self._user_id,
                     time_now_iso8601(),
+                    result=response,
                 )
             else:
                 logger.warning("Received empty transcription from API")
