@@ -33,12 +33,18 @@ jobs:
       
       - name: Install development dependencies
         run: uv sync --group dev
-      
-      - name: Build project
+
+      - name: Get package version
+        id: get_version
         run: |
           release=$(cat RELEASE)
           hash=$(echo "${{ github.event.pull_request.head.sha || github.sha }}" | cut -c1-7)
-          sed -i 's/^dynamic = \["version"\]/version = "'"${release}+${hash}"'"/' pyproject.toml
+          echo "Package version: ${release}+${hash}"
+          echo "package-version=${release}+${hash}" >> $GITHUB_OUTPUT
+
+      - name: Build project
+        run: |
+          sed -i 's/^dynamic = \["version"\]/version = "'"${{ steps.get_version.outputs.package-version }}"'"/' pyproject.toml
           uv build
       
       - name: Install project in editable mode
@@ -47,6 +53,6 @@ jobs:
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: pipecat_ai_dist_files
+          name: pipecat_ai_dist_files_${{ steps.get_version.outputs.package-version }}
           path: dist/*
           retention-days: 30%
