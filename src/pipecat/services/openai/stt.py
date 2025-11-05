@@ -61,6 +61,15 @@ class OpenAISTTService(BaseWhisperSTTService):
             "language": self._language,
         }
 
+        if self._include_prob_metrics:
+            # GPT-4o-transcribe models only support logprobs (not verbose_json)
+            if self.model_name in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
+                kwargs["response_format"] = "json"
+                kwargs["include"] = ["logprobs"]
+            else:
+                # Whisper models support verbose_json
+                kwargs["response_format"] = "verbose_json"
+
         if self._prompt is not None:
             kwargs["prompt"] = self._prompt
 
