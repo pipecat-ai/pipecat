@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   you cancel a task with `PipelineTask.cancel(reason="cancellation your
 reason")`.
 
+- Added `include_prob_metrics` parameter to Whisper STT services to enable access
+  to probability metrics from transcription results.
+
+- Added utility functions `extract_whisper_probability()`,
+  `extract_openai_gpt4o_probability()`, and `extract_deepgram_probability()` to
+  extract probability metrics from `TranscriptionFrame` objects for Whisper-based,
+  OpenAI GPT-4o-transcribe, and Deepgram STT services respectively.
+
 ### Fixed
 
 - Fixed `GeminiLiveLLMService` session resumption after a connection timeout.
