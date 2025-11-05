@@ -1142,8 +1142,9 @@ class GeminiLiveLLMService(LLMService):
                 params = adapter.get_llm_invocation_params(self._context)
                 system_instruction = params["system_instruction"]
                 tools = params["tools"]
-            else:
+            if not system_instruction:
                 system_instruction = self._system_instruction_from_init
+            if not tools:
                 tools = adapter.from_standard_tools(self._tools_from_init)
             if system_instruction:
                 logger.debug(f"Setting system instruction: {system_instruction}")
