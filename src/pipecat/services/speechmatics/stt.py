@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
@@ -604,11 +604,21 @@ class SpeechmaticsSTTService(STTService):
         Creates a transcription config object based on the service parameters. Aligns
         with the Speechmatics RT API transcription config.
         """
+        # Convert language if it's a Language enum
+        language = self._params.language
+        if isinstance(language, Language):
+            language = _language_to_speechmatics_language(language)
+
+        # Convert output locale if it's a Language enum
+        output_locale = self._params.output_locale
+        if isinstance(output_locale, Language):
+            output_locale = _locale_to_speechmatics_locale(language, output_locale)
+
         # Transcription config
         transcription_config = TranscriptionConfig(
-            language=self._params.language,
+            language=language,
             domain=self._params.domain,
-            output_locale=self._params.output_locale,
+            output_locale=output_locale,
             operating_point=self._params.operating_point,
             diarization="speaker" if self._params.enable_diarization else None,
             enable_partials=self._params.enable_partials,
@@ -987,7 +997,7 @@ def _language_to_speechmatics_language(language: Language) -> str:
         language: The Language enum to convert.
 
     Returns:
-        str: The Speechmatics language code, if found.
+        str: The Speechmatics language code.
     """
     # List of supported input languages
     LANGUAGE_MAP = {
@@ -1047,15 +1057,7 @@ def _language_to_speechmatics_language(language: Language) -> str:
         Language.CY: "cy",
     }
 
-    # Get the language code
-    result = LANGUAGE_MAP.get(language)
-
-    # Fail if language is not supported
-    if not result:
-        raise ValueError(f"Unsupported language: {language}")
-
-    # Return the language code
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 def _locale_to_speechmatics_locale(language_code: str, locale: Language) -> str | None:
