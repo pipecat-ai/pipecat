@@ -13,8 +13,6 @@ voice transcription, streaming responses, and tool usage.
 
 import base64
 import io
-import json
-import random
 import time
 import uuid
 import warnings
@@ -772,17 +770,6 @@ class GeminiLiveLLMService(LLMService):
         """
         return True
 
-    def needs_mcp_alternate_schema(self) -> bool:
-        """Check if this LLM service requires alternate MCP schema.
-
-        Google/Gemini has stricter JSON schema validation and requires
-        certain properties to be removed or modified for compatibility.
-
-        Returns:
-            True for Google/Gemini services.
-        """
-        return True
-
     def set_audio_input_paused(self, paused: bool):
         """Set the audio input pause state.
 
@@ -995,7 +982,24 @@ class GeminiLiveLLMService(LLMService):
             await self._process_completed_function_calls(send_new_results=False)
 
             # Create initial response if needed, based on conversation history
-            # in context
+            # in context.
+            # (If the context has no messages but we do have a system
+            # instruction — meaning it was provided at init time — doctor our
+            # context now so that we'll have something to send to the service
+            # to trigger a response).
+            messages = params["messages"]
+            if not messages and self._inference_on_context_initialization:
+                if self._system_instruction_from_init:
+                    logger.debug(
+                        "No messages found in initial context; seeding with system instruction to trigger bot response."
+                    )
+                    self._context.add_message(
+                        {"role": "system", "content": self._system_instruction_from_init}
+                    )
+                else:
+                    logger.warning(
+                        "No messages found in initial context; cannot trigger initial bot response without messages or system instruction."
+                    )
             await self._create_initial_response()
         else:
             # We got an updated context.
@@ -1023,7 +1027,13 @@ class GeminiLiveLLMService(LLMService):
                     if part.function_response:
                         tool_call_id = part.function_response.id
                         tool_name = part.function_response.name
-                        if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                        response = part.function_response.response
+                        if (
+                            tool_call_id
+                            and tool_call_id not in self._completed_tool_calls
+                            and response
+                            and response.get("value") != "IN_PROGRESS"
+                        ):
                             # Found a newly-completed function call - send the result to the service
                             if send_new_results:
                                 await self._tool_result(
@@ -1149,8 +1159,9 @@ class GeminiLiveLLMService(LLMService):
                 params = adapter.get_llm_invocation_params(self._context)
                 system_instruction = params["system_instruction"]
                 tools = params["tools"]
-            else:
+            if not system_instruction:
                 system_instruction = self._system_instruction_from_init
+            if not tools:
                 tools = adapter.from_standard_tools(self._tools_from_init)
             if system_instruction:
                 logger.debug(f"Setting system instruction: {system_instruction}")

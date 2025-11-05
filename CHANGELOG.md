@@ -39,6 +39,23 @@ reason")`.
   extract probability metrics from `TranscriptionFrame` objects for Whisper-based,
   OpenAI GPT-4o-transcribe, and Deepgram STT services respectively.
 
+- Added `LLMSwitcher.register_direct_function()`. It works much like
+  `LLMSwitcher.register_function()` in that it's a shorthand for registering
+  functions on all LLMs in the switcher, but for direct functions.
+
+- Added `LLMSwitcher.register_direct_function()`. It works much like
+  `LLMSwitcher.register_function()` in that it's a shorthand for registering
+  a function on all LLMs in the switcher, except this new method takes a direct
+  function (a `FunctionSchema`-less function).
+
+- Added `MCPClient.get_tools_schema()` and `MCPClient.register_tools_schema()`
+  as a two-step alternative to `MCPClient.register_tools()`, to allow users to
+  pass MCP tools to, say, `GeminiLiveLLMService` (as well as other
+  speech-to-speech services) in the constructor.
+
+- Added support for passing in an `LLMSwicher` to `MCPClient.register_tools()`
+  (as well as the new `MCPClient.register_tools_schema()`).
+
 ### Changed
 
 - Bumped the `fastapi` dependency's upperbound to `<0.122.0`.
@@ -59,10 +76,18 @@ reason")`.
   arbitrary request data from client due to camelCase typing. This fixes data
   passthrough for JS clients where `APIRequest` is used.
 
+- Fixed a bug in `GeminiLiveLLMService` where in some circumstances it wouldn't
+  respond after a tool call.
+
 - Fixed `GeminiLiveLLMService` session resumption after a connection timeout.
 
 - `GeminiLiveLLMService` now properly supports context-provided system
   instruction and tools.
+
+### Removed
+
+- Removed `needs_mcp_alternate_schema()` from `LLMService`. The mechanism that
+  relied on it went away.
 
 ## [0.0.92] - 2025-10-31 🎃 "The Haunted Edition" 👻
 

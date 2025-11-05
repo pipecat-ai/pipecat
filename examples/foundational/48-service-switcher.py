@@ -10,11 +10,14 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame, ManuallySwitchServiceFrame
+from pipecat.pipeline.llm_switcher import LLMSwitcher
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategyManual
@@ -28,12 +31,30 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.deepgram.tts import DeepgramTTSService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
+
+
+# "Classic" function
+async def fetch_weather_from_api(params: FunctionCallParams):
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+# "Direct" function
+async def get_restaurant_recommendation(params: FunctionCallParams, location: str):
+    """
+    Get a restaurant recommendation.
+
+    Args:
+        location (str): The city and state, e.g. "San Francisco, CA".
+    """
+    await params.result_callback({"name": "The Golden Dragon"})
+
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -63,6 +84,23 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
+    weather_function = FunctionSchema(
+        name="get_current_weather",
+        description="Get the current weather",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "format": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location.",
+            },
+        },
+        required=["location", "format"],
+    )
+
     stt_cartesia = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
     stt_deepgram = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
     stt_switcher = ServiceSwitcher(
@@ -80,9 +118,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
-    llm_switcher = ServiceSwitcher(
-        services=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
+    llm_switcher = LLMSwitcher(
+        llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
     )
+    # Register a "classic" function
+    llm_switcher.register_function("get_current_weather", fetch_weather_from_api)
+    # Register a "direct" function
+    llm_switcher.register_direct_function(get_restaurant_recommendation)
 
     messages = [
         {
@@ -90,8 +132,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
         },
     ]
+    tools = ToolsSchema(standard_tools=[weather_function, get_restaurant_recommendation])
 
-    context = LLMContext(messages)
+    context = LLMContext(messages, tools)
     context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(

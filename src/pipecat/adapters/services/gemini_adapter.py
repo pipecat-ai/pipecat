@@ -80,12 +80,48 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             List of tool definitions formatted for Gemini's function-calling API.
             Includes both converted standard tools and any custom Gemini-specific tools.
         """
+
+        def _strip_additional_properties(schema: Dict[str, Any]) -> Dict[str, Any]:
+            """Recursively remove "additionalProperties" fields from JSON schema, as they're not supported by Gemini.
+
+            Args:
+                schema: The JSON schema dict to process.
+
+            Returns:
+                JSON schema dict with "additionalProperties" stripped out.
+            """
+            if not isinstance(schema, dict):
+                return schema
+
+            result = {}
+
+            for key, value in schema.items():
+                if key == "additionalProperties":
+                    continue
+                elif isinstance(value, dict):
+                    result[key] = _strip_additional_properties(value)
+                elif isinstance(value, list):
+                    result[key] = [
+                        _strip_additional_properties(item) if isinstance(item, dict) else item
+                        for item in value
+                    ]
+                else:
+                    result[key] = value
+
+            return result
+
         functions_schema = tools_schema.standard_tools
-        formatted_standard_tools = (
-            [{"function_declarations": [func.to_default_dict() for func in functions_schema]}]
-            if functions_schema
-            else []
-        )
+        if functions_schema:
+            formatted_functions = []
+            for func in functions_schema:
+                func_dict = func.to_default_dict()
+                func_dict["parameters"]["properties"] = _strip_additional_properties(
+                    func_dict["parameters"]["properties"]
+                )
+                formatted_functions.append(func_dict)
+            formatted_standard_tools = [{"function_declarations": formatted_functions}]
+        else:
+            formatted_standard_tools = []
         custom_gemini_tools = []
         if tools_schema.custom_tools:
             custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
