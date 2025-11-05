@@ -23,22 +23,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - RTVIObserver now emits bot-output messages (bot-tts-text and bot-llm-text are still
     supported and generated. bot-transcript is now deprecated in lieu of this new, more
     thorough, message).
+
 - Introduced new `AggregatedLLMTextFrame` type to support representing effective llm
   output whether or not it is processed by the TTS. This new frame type includes the
-  field `aggregated_by` to represent the conceptual formaty by which the given text
+  field `aggregated_by` to represent the conceptual format by which the given text
   is aggregated. `TTSTextFrame`s now inherit from `AggregatedLLMTextFrame`.
+
+- New `bot-output` RTVI message to represent what the bot actually "says".
+  - The `RTVIObserver` now emits `bot-output` messages based off the new `AggregatedLLMTextFrame`s
+    (`bot-tts-text` and `bot-llm-text` are still supported and generated, but `bot-transcript` is
+    now deprecated in lieu of this new, more thorough, message).
+  - The new `RTVIBotOutputMessage` includes the fields:
+    - `spoken`: A boolean indicating whether the text was spoken by TTS
+    - `aggregated_by`: A string representing how the text was aggregated ("sentence", "word",
+      "custom")
 
 - Updated the base aggregator type:
   - Introduced a new `Aggregation` dataclass to represent both the aggregated `text` and
     a string identifying the `type` of aggregation (ex. "sentence", "word", "my custom
     aggregation")
-  - `BaseTextAggregator.text` now returns an `Aggregation` (instead of `str`).
-  - `BaseTextAggregator.aggregate()` now returns `Optional[Aggregation]`
-    (instead of `Optional[str]`)
+  - **BREAKING**: `BaseTextAggregator.text` now returns an `Aggregation` (instead of `str`).
+    To update: `aggregated_text = myAggregator.text` -> `aggregated_text = myAggregator.text.text`
+  - **BREAKING**: `BaseTextAggregator.aggregate()` now returns `Optional[Aggregation]`
+    (instead of `Optional[str]`). To update:
+      ```
+      aggregation = myAggregator.aggregate(text)
+      if (aggregation):
+        print(f"successfully aggregated text: {aggregation.text}") // instead of {aggregation}
+      ```
   - `SimpleTextAggregator`, `SkipTagsAggregator`, `PatternPairAggregator` updated to
     produce/consume `Aggregation` objects.
 
 - Augmented the `PatterPairAggregator`:
+  - **BREAKING CHANGES**: Support for the items below resulted in two breaking changes to the
+    `PatternPairAggregator` methods
+    1. The `add_pattern_pair` method arguments have changed:
+        - The `pattern_id` argument is now `type`
+        - The `remove_match` argument has been replaced with the `action` argument. To update,
+          change `remove_match: True` to `action: MatchAction.REMOVE` or `remove_match: False` to
+          `action: MatchAction.KEEP`
+    2. The `PatternMatch` type returned to handlers registered via `on_pattern_match` has been
+       updated to subclass from the new `Aggregation` type, which means that `content` has been
+       replaced with `text` and `pattern_id` has been replaced with `type`:
+         ```
+         async dev on_match_tag(match: PatternMatch):
+            pattern = match.type # instead of match.pattern_id
+            text = match.text # instead of match.content
+         ```
   - `PatternPairAggregator` now supports `type` and `action` per pattern.
   - New `MatchAction` enum: `REMOVE`, `KEEP`, `AGGREGATE`, allowing customization for how
     a match should be handled.
@@ -54,6 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
               aggregated by sentence. It is aggregated as one single block of text.
     - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
 
+- Added support for aggregating `LLMTextFrame`s from within the assistant `LLMAssistantAggregator`
+  when `skip_tts` is set to `True`, generating `AggregatedLLMTextFrame`s, therefore supporting
+  `bot-output` even when TTS is turned off. You can customize the aggregator used using the new
+  `llm_text_aggregator` field in the `LLMAssistantAggregatorParams`. NOTE: This feature is only
+  supported when using the new universal context.
+
 ### Changed
 
 - Updated all STT and TTS services to use consistent error handling pattern with
@@ -61,6 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added Hindi support for Rime TTS services.
 
+<<<<<<< HEAD
 - Updated `GeminiTTSService` to use Google Cloud Text-to-Speech streaming API
   instead of the deprecated Gemini API. Now uses `credentials` /
   `credentials_path` for authentication. The `api_key` parameter is deprecated.
@@ -70,14 +108,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated language mappings for the Google and Gemini TTS services to match
   official documentation.
+=======
+- `TextFrame` new field `append_to_context` used to indicate if the encompassing
+  text should be added to the LLM context (by the LLM assistant aggregator). It
+  defaults to `True`.
+>>>>>>> 3e3b946a (CHANGELOG improvements)
 
 - TTS flow respects aggregation metadata
-  - `TTSService` accepts a new `skip_aggregator_types` to avoid speaking certain aggregation types (as
-    now determined/returned by the aggregator)
-  - TTS services push `AggregatedLLMTextFrame` in addition to `TTSTextFrame`s when either an aggregation
-    occurs that should not be spoken or when the TTS service supports word-by-word timestamping. In the
-    latter case, the `TTSService` preliminarily generates an `AggregatedLLMTextFrame`, aggregated by sentence
-    to generate the full sentence content as early as possible.
+  - `TTSService` accepts a new `skip_aggregator_types` to avoid speaking certain aggregation types
+    (asnow determined/returned by the aggregator)
+  - TTS services push `AggregatedLLMTextFrame` in addition to `TTSTextFrame`s when either an
+    aggregation occurs that should not be spoken or when the TTS service supports word-by-word
+    timestamping. In the latter case, the `TTSService` preliminarily generates an
+    `AggregatedLLMTextFrame`, aggregated by sentence to generate the full sentence content as early
+    as possible.
 
 ### Deprecated
 

@@ -119,7 +119,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Register handler for voice switching
     async def on_voice_tag(match: PatternMatch):
-        voice_name = match.content.strip().lower()
+        voice_name = match.text.strip().lower()
         if voice_name in VOICE_IDS:
             # First flush any existing audio to finish the current context
             await tts.flush_audio()
