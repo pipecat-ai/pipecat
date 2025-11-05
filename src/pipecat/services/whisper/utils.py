@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Utility functions for extracting probability metrics from Whisper-based STT services."""
+
 import math
 from typing import Optional
 
