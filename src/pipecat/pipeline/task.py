@@ -745,7 +745,7 @@ class PipelineTask(BasePipelineTask):
             # pipeline. This is in case the push task is blocked waiting for a
             # pipeline-ending frame to finish traversing the pipeline.
             logger.debug(f"{self}: received interruption task frame {frame}")
-            await self._pipeline.queue_frame(InterruptionFrame(finished_event=frame.finished_event))
+            await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
             await self._call_event_handler("on_pipeline_error", frame)
             if frame.fatal:
@@ -786,10 +786,6 @@ class PipelineTask(BasePipelineTask):
             self._pipeline_end_event.set()
         elif isinstance(frame, HeartbeatFrame):
             await self._heartbeat_queue.put(frame)
-        elif isinstance(frame, InterruptionFrame) and frame.finished_event:
-            # This should unblock any code waiting for the interruption to
-            # complete.
-            frame.finished_event.set()
 
     async def _heartbeat_push_handler(self):
         """Push heartbeat frames at regular intervals."""
