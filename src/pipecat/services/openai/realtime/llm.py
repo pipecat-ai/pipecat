@@ -845,7 +845,8 @@ class OpenAIRealtimeLLMService(LLMService):
         """Create an instance of OpenAIContextAggregatorPair from an OpenAILLMContext.
 
         NOTE: this method exists only for backward compatibility. New code
-        should instead do:
+        should instead do::
+
             context = LLMContext(...)
             context_aggregator = LLMContextAggregatorPair(context)
 
