@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import json
 import unittest
 from typing import Any, Optional
@@ -31,23 +30,17 @@ from pipecat.frames.frames import (
     SpeechControlParamsFrame,
     TextFrame,
     TranscriptionFrame,
-    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams
-from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
-    LLMAssistantContextAggregator,
     LLMUserAggregatorParams,
     LLMUserContextAggregator,
 )
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMAssistantAggregator,
-    LLMUserAggregator,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMAssistantAggregator
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -80,11 +73,8 @@ AGGREGATION_SLEEP = 0.15
 
 class BaseTestUserContextAggregator:
     CONTEXT_CLASS = None  # To be set in subclasses
-    CONTEXT_FRAME_CLASS = None  # To be set in subclasses
-    USER_AGGREGATOR_CLASS = None  # To be set in subclasses
-    USER_EXPECTED_CONTEXT_FRAMES = None
-    ASSISTANT_AGGREGATOR_CLASS = None  # To be set in subclasses
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = None  # To be set in subclasses
+    AGGREGATOR_CLASS = None  # To be set in subclasses
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
         assert context.messages[index]["content"] == content
@@ -96,12 +86,10 @@ class BaseTestUserContextAggregator:
 
     async def test_se(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [UserStartedSpeakingFrame(), UserStoppedSpeakingFrame()]
         expected_down_frames = [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
         await run_test(
@@ -112,12 +100,10 @@ class BaseTestUserContextAggregator:
 
     async def test_ste(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
             UserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""),
@@ -126,7 +112,7 @@ class BaseTestUserContextAggregator:
         ]
         expected_down_frames = [
             UserStartedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
             UserStoppedSpeakingFrame,
         ]
         await run_test(
@@ -138,12 +124,10 @@ class BaseTestUserContextAggregator:
 
     async def test_site(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
             UserStartedSpeakingFrame(),
             InterimTranscriptionFrame(text="Hello", user_id="cat", timestamp=""),
@@ -153,7 +137,7 @@ class BaseTestUserContextAggregator:
         ]
         expected_down_frames = [
             UserStartedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
             UserStoppedSpeakingFrame,
         ]
         await run_test(
@@ -165,12 +149,10 @@ class BaseTestUserContextAggregator:
 
     async def test_st1iest2e(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
             UserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
@@ -186,7 +168,7 @@ class BaseTestUserContextAggregator:
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
             UserStartedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
             UserStoppedSpeakingFrame,
         ]
         await run_test(
@@ -198,12 +180,10 @@ class BaseTestUserContextAggregator:
 
     async def test_siet(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
@@ -217,7 +197,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -228,12 +208,10 @@ class BaseTestUserContextAggregator:
 
     async def test_sieit(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
@@ -248,7 +226,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -259,12 +237,10 @@ class BaseTestUserContextAggregator:
 
     async def test_set(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
@@ -276,7 +252,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -287,12 +263,10 @@ class BaseTestUserContextAggregator:
 
     async def test_seit(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
@@ -305,7 +279,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -316,12 +290,10 @@ class BaseTestUserContextAggregator:
 
     async def test_st1et2(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
@@ -336,9 +308,9 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             SpeechControlParamsFrame,
             UserStartedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -350,12 +322,10 @@ class BaseTestUserContextAggregator:
 
     async def test_set1t2(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
@@ -368,7 +338,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -379,12 +349,10 @@ class BaseTestUserContextAggregator:
 
     async def test_siet1it2(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
@@ -400,7 +368,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -411,12 +379,10 @@ class BaseTestUserContextAggregator:
 
     async def test_t(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context
         )  # No aggregation timeout; this tests VAD emulation
 
@@ -427,7 +393,7 @@ class BaseTestUserContextAggregator:
         ]
         expected_down_frames = [
             SpeechControlParamsFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
 
@@ -441,12 +407,10 @@ class BaseTestUserContextAggregator:
 
     async def test_t_with_turn_analyzer(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(turn_emulated_vad_timeout=AGGREGATION_TIMEOUT)
         )
 
@@ -460,7 +424,7 @@ class BaseTestUserContextAggregator:
         ]
         expected_down_frames = [
             SpeechControlParamsFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
 
@@ -474,12 +438,10 @@ class BaseTestUserContextAggregator:
 
     async def test_it(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context
         )  # No aggregation timeout; this tests VAD emulation
         frames_to_send = [
@@ -489,7 +451,7 @@ class BaseTestUserContextAggregator:
             TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
-        expected_down_frames = [SpeechControlParamsFrame, *self.USER_EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [SpeechControlParamsFrame, *self.EXPECTED_CONTEXT_FRAMES]
         expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
         await run_test(
             aggregator,
@@ -501,12 +463,10 @@ class BaseTestUserContextAggregator:
 
     async def test_sie_delay_it(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
@@ -522,7 +482,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -533,12 +493,7 @@ class BaseTestUserContextAggregator:
 
     async def test_min_words_interruption_strategy_one_word(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.CONTEXT_FRAME_CLASS is not None, "CONTEXT_FRAME_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
-
-        CONTEXT_FRAME_CLASS = self.CONTEXT_FRAME_CLASS
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         class ContextProcessor(FrameProcessor):
             def __init__(self):
@@ -548,13 +503,13 @@ class BaseTestUserContextAggregator:
             async def process_frame(self, frame: Frame, direction: FrameDirection):
                 await super().process_frame(frame, direction)
 
-                if isinstance(frame, CONTEXT_FRAME_CLASS):
+                if isinstance(frame, OpenAILLMContextFrame):
                     self.context_received = True
 
                 await self.push_frame(frame, direction)
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         context_processor = ContextProcessor()
         pipeline = Pipeline([aggregator, context_processor])
 
@@ -582,12 +537,7 @@ class BaseTestUserContextAggregator:
 
     async def test_min_words_interruption_strategy_two_words(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.CONTEXT_FRAME_CLASS is not None, "CONTEXT_FRAME_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
-
-        CONTEXT_FRAME_CLASS = self.CONTEXT_FRAME_CLASS
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         class ContextProcessor(FrameProcessor):
             def __init__(self):
@@ -597,7 +547,7 @@ class BaseTestUserContextAggregator:
             async def process_frame(self, frame: Frame, direction: FrameDirection):
                 await super().process_frame(frame, direction)
 
-                if isinstance(frame, CONTEXT_FRAME_CLASS):
+                if isinstance(frame, OpenAILLMContextFrame):
                     self.context_received = True
                 elif isinstance(frame, InterruptionFrame):
                     self.context_received = False
@@ -605,7 +555,7 @@ class BaseTestUserContextAggregator:
                 await self.push_frame(frame, direction)
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.USER_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         context_processor = ContextProcessor()
         pipeline = Pipeline([aggregator, context_processor])
 
@@ -622,7 +572,7 @@ class BaseTestUserContextAggregator:
             UserStartedSpeakingFrame,
             InterruptionFrame,
             UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             pipeline,
@@ -638,77 +588,11 @@ class BaseTestUserContextAggregator:
         # interruption then we have an issue.
         assert context_processor.context_received
 
-    async def test_interruption_strategy_context_order(self):
-        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.USER_AGGREGATOR_CLASS is not None, (
-            "USER_AGGREGATOR_CLASS must be set in a subclass"
-        )
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
-
-        class DelayedProcessor(FrameProcessor):
-            """Force a delay in interruption frames.
-
-            This might give time to the assistant aggregator to update the
-            context before the user aggregator (which shouldn't really happen)
-            and reveal any issues in context ordering.
-            """
-
-            def __init__(self):
-                super().__init__()
-
-            async def process_frame(self, frame: Frame, direction: FrameDirection):
-                await super().process_frame(frame, direction)
-                if isinstance(frame, InterruptionFrame):
-                    await asyncio.sleep(0.3)
-                await self.push_frame(frame, direction)
-
-        context = self.CONTEXT_CLASS()
-        user_aggregator = self.USER_AGGREGATOR_CLASS(
-            context, params=LLMUserAggregatorParams(aggregation_timeout=1.0)
-        )
-        assistant_aggregator = self.ASSISTANT_AGGREGATOR_CLASS(context)
-        pipeline = Pipeline([user_aggregator, DelayedProcessor(), assistant_aggregator])
-
-        frames_to_send = [
-            # Aggregate assistant content.
-            BotStartedSpeakingFrame(),
-            LLMFullResponseStartFrame(),
-            TTSTextFrame(text="Hello, I'm your assistant"),
-            SleepFrame(),
-            # Interrupt the bot. Assistant content should be added first to the
-            # context, followed by user content.
-            UserStartedSpeakingFrame(),
-            TranscriptionFrame(text="Can you tell me", user_id="cat", timestamp=""),
-            SleepFrame(),
-            UserStoppedSpeakingFrame(),
-        ]
-        expected_down_frames = [
-            BotStartedSpeakingFrame,
-            UserStartedSpeakingFrame,
-            *self.ASSISTANT_EXPECTED_CONTEXT_FRAMES,
-            InterruptionFrame,
-            UserStoppedSpeakingFrame,
-            *self.USER_EXPECTED_CONTEXT_FRAMES,
-        ]
-        await run_test(
-            pipeline,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
-            pipeline_params=PipelineParams(
-                interruption_strategies=[MinWordsInterruptionStrategy(min_words=2)]
-            ),
-        )
-        self.check_message_content(context, -1, "Can you tell me")
-        self.check_message_content(context, -2, "Hello, I'm your assistant")
-
 
 class BaseTestAssistantContextAggregator:
     CONTEXT_CLASS = None  # To be set in subclasses
-    USER_AGGREGATOR_CLASS = None  # To be set in subclasses
-    ASSISTANT_AGGREGATOR_CLASS = None  # To be set in subclasses
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = []  # To be set in subclasses
+    AGGREGATOR_CLASS = None  # To be set in subclasses
+    EXPECTED_CONTEXT_FRAMES = None  # To be set in subclasses
 
     def create_assistant_aggregator_params(
         self, **kwargs
@@ -728,12 +612,10 @@ class BaseTestAssistantContextAggregator:
 
     async def test_empty(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.ASSISTANT_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [LLMFullResponseStartFrame(), LLMFullResponseEndFrame()]
         expected_down_frames = []
         await run_test(
@@ -744,18 +626,16 @@ class BaseTestAssistantContextAggregator:
 
     async def test_single_text(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.ASSISTANT_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
             LLMFullResponseStartFrame(),
             TextFrame(text="Hello Pipecat!"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [*self.ASSISTANT_EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -765,12 +645,10 @@ class BaseTestAssistantContextAggregator:
 
     async def test_multiple_text(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.ASSISTANT_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
         frames_to_send = [
@@ -781,7 +659,7 @@ class BaseTestAssistantContextAggregator:
             TextFrame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [*self.ASSISTANT_EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -791,12 +669,10 @@ class BaseTestAssistantContextAggregator:
 
     async def test_multiple_text_stripped(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.ASSISTANT_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
             LLMFullResponseStartFrame(),
             TextFrame(text="Hello"),
@@ -805,7 +681,7 @@ class BaseTestAssistantContextAggregator:
             TextFrame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [*self.ASSISTANT_EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -815,12 +691,10 @@ class BaseTestAssistantContextAggregator:
 
     async def test_multiple_llm_responses(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.ASSISTANT_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
         frames_to_send = [
@@ -833,10 +707,7 @@ class BaseTestAssistantContextAggregator:
             TextFrame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [
-            *self.ASSISTANT_EXPECTED_CONTEXT_FRAMES,
-            *self.ASSISTANT_EXPECTED_CONTEXT_FRAMES,
-        ]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES, *self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -847,12 +718,10 @@ class BaseTestAssistantContextAggregator:
 
     async def test_multiple_llm_responses_interruption(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.ASSISTANT_AGGREGATOR_CLASS(
+        aggregator = self.AGGREGATOR_CLASS(
             context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
         frames_to_send = [
@@ -868,9 +737,9 @@ class BaseTestAssistantContextAggregator:
             LLMFullResponseEndFrame(),
         ]
         expected_down_frames = [
-            *self.ASSISTANT_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
             InterruptionFrame,
-            *self.ASSISTANT_EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -882,12 +751,10 @@ class BaseTestAssistantContextAggregator:
 
     async def test_function_call(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.ASSISTANT_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
             FunctionCallInProgressFrame(
                 function_name="get_weather",
@@ -913,9 +780,7 @@ class BaseTestAssistantContextAggregator:
 
     async def test_function_call_on_context_updated(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.ASSISTANT_AGGREGATOR_CLASS is not None, (
-            "ASSISTANT_AGGREGATOR_CLASS must be set in a subclass"
-        )
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context_updated = False
 
@@ -924,7 +789,7 @@ class BaseTestAssistantContextAggregator:
             context_updated = True
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.ASSISTANT_AGGREGATOR_CLASS(context)
+        aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
             FunctionCallInProgressFrame(
                 function_name="get_weather",
@@ -959,14 +824,7 @@ class BaseTestAssistantContextAggregator:
 
 class TestLLMUserContextAggregator(BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase):
     CONTEXT_CLASS = OpenAILLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = LLMUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = LLMAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = LLMUserContextAggregator
 
 
 #
@@ -978,14 +836,7 @@ class TestAnthropicUserContextAggregator(
     BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = AnthropicLLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = AnthropicUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = AnthropicAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = AnthropicUserContextAggregator
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
@@ -998,14 +849,8 @@ class TestAnthropicAssistantContextAggregator(
     BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = AnthropicLLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = AnthropicUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = AnthropicAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = AnthropicAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
@@ -1026,14 +871,7 @@ class TestAWSBedrockUserContextAggregator(
     BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = AWSBedrockLLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = AWSBedrockUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = AWSBedrockAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = AWSBedrockUserContextAggregator
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
@@ -1046,14 +884,8 @@ class TestAWSBedrockAssistantContextAggregator(
     BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = AWSBedrockLLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = AWSBedrockUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = AWSBedrockAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = AWSBedrockAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
@@ -1076,14 +908,7 @@ class TestGoogleUserContextAggregator(
     BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = GoogleLLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = GoogleUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = GoogleAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = GoogleUserContextAggregator
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
         obj = context.messages[index].to_json_dict()
@@ -1100,14 +925,8 @@ class TestGoogleAssistantContextAggregator(
     BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = GoogleLLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = GoogleUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = GoogleAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = GoogleAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
         obj = context.messages[index].to_json_dict()
@@ -1133,53 +952,26 @@ class TestOpenAIUserContextAggregator(
     BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = OpenAILLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = OpenAIUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = OpenAIUserContextAggregator
 
 
 class TestOpenAIAssistantContextAggregator(
     BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = OpenAILLMContext
-    CONTEXT_FRAME_CLASS = OpenAILLMContextFrame
-    USER_AGGREGATOR_CLASS = OpenAIUserContextAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [
-        OpenAILLMContextFrame,
-        OpenAILLMContextAssistantTimestampFrame,
-    ]
+    AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
 
 
 #
 # Universal
 #
-
-
-class TestLLMUserAggregator(BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase):
-    CONTEXT_CLASS = LLMContext
-    CONTEXT_FRAME_CLASS = LLMContextFrame
-    USER_AGGREGATOR_CLASS = LLMUserAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [LLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = LLMAssistantAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [LLMContextFrame, LLMContextAssistantTimestampFrame]
-
-
 class TestLLMAssistantAggregator(
     BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
-    CONTEXT_CLASS = LLMContext
-    CONTEXT_FRAME_CLASS = LLMContextFrame
-    USER_AGGREGATOR_CLASS = LLMUserAggregator
-    USER_EXPECTED_CONTEXT_FRAMES = [LLMContextFrame]
-    ASSISTANT_AGGREGATOR_CLASS = LLMAssistantAggregator
-    ASSISTANT_EXPECTED_CONTEXT_FRAMES = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+    CONTEXT_CLASS = OpenAILLMContext
+    AGGREGATOR_CLASS = LLMAssistantAggregator
+    EXPECTED_CONTEXT_FRAMES = [LLMContextFrame, LLMContextAssistantTimestampFrame]
 
     # Override to remove 'expect_stripped_words' parameter, which is deprecated
     # for LLMAssistantAggregator
