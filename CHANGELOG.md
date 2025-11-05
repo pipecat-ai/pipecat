@@ -39,7 +39,18 @@ reason")`.
   extract probability metrics from `TranscriptionFrame` objects for Whisper-based,
   OpenAI GPT-4o-transcribe, and Deepgram STT services respectively.
 
+### Changed
+
+- Updated the default model for `GoogleVertexLLMService` to `gemini-2.5-flash`.
+
+- Updated the `GoogleVertexLLMService` to use the `GoogleLLMService` as a base
+  class instead of the `OpenAILLMService`.
+
 ### Fixed
+
+- Fixed an issue where the `SmallWebRTCRequest` dataclass in runner would scrub
+  arbitrary request data from client due to camelCase typing. This fixes data
+  passthrough for JS clients where `APIRequest` is used.
 
 - Fixed `GeminiLiveLLMService` session resumption after a connection timeout.
 
