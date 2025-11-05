@@ -982,7 +982,24 @@ class GeminiLiveLLMService(LLMService):
             await self._process_completed_function_calls(send_new_results=False)
 
             # Create initial response if needed, based on conversation history
-            # in context
+            # in context.
+            # (If the context has no messages but we do have a system
+            # instruction — meaning it was provided at init time — doctor our
+            # context now so that we'll have something to send to the service
+            # to trigger a response).
+            messages = params["messages"]
+            if not messages and self._inference_on_context_initialization:
+                if self._system_instruction_from_init:
+                    logger.debug(
+                        "No messages found in initial context; seeding with system instruction to trigger bot response."
+                    )
+                    self._context.add_message(
+                        {"role": "system", "content": self._system_instruction_from_init}
+                    )
+                else:
+                    logger.warning(
+                        "No messages found in initial context; cannot trigger initial bot response without messages or system instruction."
+                    )
             await self._create_initial_response()
         else:
             # We got an updated context.
