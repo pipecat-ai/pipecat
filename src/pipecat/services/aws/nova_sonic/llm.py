@@ -1163,7 +1163,8 @@ class AWSNovaSonicLLMService(LLMService):
         """Create context aggregator pair for managing conversation context.
 
         NOTE: this method exists only for backward compatibility. New code
-        should instead do:
+        should instead do::
+
             context = LLMContext(...)
             context_aggregator = LLMContextAggregatorPair(context)
 
