@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+openai-whisper
+gtts
+torch
