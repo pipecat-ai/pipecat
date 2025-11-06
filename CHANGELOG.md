@@ -73,6 +73,13 @@ reason")`.
   level. Important: The STTMuteFilter should be placed _after_ the STT service
   itself.
 
+- Improved `GoogleSTTService` error handling to properly catch gRPC `Aborted`
+  exceptions (corresponding to 409 errors) caused by stream inactivity. These
+  exceptions are now logged at DEBUG level instead of ERROR level, since they
+  indicate expected behavior when no audio is sent for 10+ seconds (e.g., during
+  long silences or when audio input is blocked). The service automatically
+  reconnects when this occurs.
+
 - Bumped the `fastapi` dependency's upperbound to `<0.122.0`.
 
 - Updated the default model for `GoogleVertexLLMService` to `gemini-2.5-flash`.

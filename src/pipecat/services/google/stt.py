@@ -41,6 +41,7 @@ from pipecat.utils.time import time_now_iso8601
 
 try:
     from google.api_core.client_options import ClientOptions
+    from google.api_core.exceptions import Aborted
     from google.auth import default
     from google.auth.exceptions import GoogleAuthError
     from google.cloud import speech_v2
@@ -886,6 +887,18 @@ class GoogleSTTService(STTService):
                                 result=result,
                             )
                         )
+        except Aborted as e:
+            # Handle stream abort due to inactivity (409 error).
+            # This occurs when no audio is sent to the stream for 10+ seconds,
+            # which can happen when InputAudioRawFrames are blocked (e.g., by STTMuteFilter).
+            # Google's STT service automatically closes the stream in this case.
+            # We log at DEBUG level (not ERROR) since this is recoverable, then re-raise
+            # to trigger automatic reconnection in _stream_audio.
+            logger.debug(
+                f"{self} Stream aborted due to inactivity (no audio input). "
+                f"Reconnecting automatically..."
+            )
+            raise
         except Exception as e:
             logger.error(f"Error processing Google STT responses: {e}")
             # Re-raise the exception to let it propagate (e.g. in the case of a
