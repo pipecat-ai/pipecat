@@ -66,7 +66,7 @@ class RivaTTSService(TTSService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str = "Magpie-Multilingual.EN-US.Ray",
+        voice_id: str = "Magpie-Multilingual.EN-US.Aria",
         sample_rate: Optional[int] = None,
         model_function_map: Mapping[str, str] = {
             "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
