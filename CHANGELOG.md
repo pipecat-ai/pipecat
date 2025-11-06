@@ -66,6 +66,13 @@ reason")`.
 
 ### Changed
 
+- `STTMuteFilter` no longer sends `STTMuteFrame` to the STT service. The filter
+  now blocks frames locally without instructing the STT service to stop
+  processing audio. This prevents inactivity-related errors (such as 409 errors
+  from Google STT) while maintaining the same muting behavior at the application
+  level. Important: The STTMuteFilter should be placed _after_ the STT service
+  itself.
+
 - Bumped the `fastapi` dependency's upperbound to `<0.122.0`.
 
 - Updated the default model for `GoogleVertexLLMService` to `gemini-2.5-flash`.

@@ -13,7 +13,6 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
-    STTMuteFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -49,9 +48,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
 
         expected_returned_frames = [
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
             BotStartedSpeakingFrame,
             VADUserStartedSpeakingFrame,  # Now passes through
             UserStartedSpeakingFrame,  # Now passes through
@@ -98,18 +95,14 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
 
         expected_returned_frames = [
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
             VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
             InputAudioRawFrame,
             VADUserStoppedSpeakingFrame,
             UserStoppedSpeakingFrame,
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
         ]
 
         await run_test(
@@ -144,9 +137,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
 
         expected_returned_frames = [
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
             InterimTranscriptionFrame,  # Only passes through after bot stops speaking
             TranscriptionFrame,  # Only passes through after bot stops speaking
         ]
@@ -193,9 +184,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
     #         VADUserStoppedSpeakingFrame,
     #         UserStoppedSpeakingFrame,
     #         FunctionCallInProgressFrame,
-    #         STTMuteFrame,  # mute=True
     #         FunctionCallResultFrame,
-    #         STTMuteFrame,  # mute=False
     #         VADUserStartedSpeakingFrame,
     #         UserStartedSpeakingFrame,
     #         VADUserStoppedSpeakingFrame,
@@ -245,10 +234,8 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
         ]
 
         expected_returned_frames = [
-            STTMuteFrame,  # mute=True after first speech
             BotStartedSpeakingFrame,
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False after first speech
             VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
             InputAudioRawFrame,
@@ -320,9 +307,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             VADUserStoppedSpeakingFrame,
             UserStoppedSpeakingFrame,
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
             VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
             InputAudioRawFrame,
