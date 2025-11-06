@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `FrameProcessor.broadcast_frame()` method. This will push two
+  instances of a given frame class, one upstream and the other downstream.
+
+  ```python
+  await self.broadcast_frame(UserSpeakingFrame)
+  ```
+
 - Added `MetricsLogObserver` for logging performance metrics from `MetricsFrame`
   instances. Supports filtering via `include_metrics` parameter to control which
   metrics types are logged (TTFB, processing time, LLM token usage, TTS usage,
@@ -36,8 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `CancelFrame` and `CancelTaskFrame` have an optional `reason` field to
   indicate why the pipeline is being canceled. This can be also specified when
-  you cancel a task with `PipelineTask.cancel(reason="cancellation your
-reason")`.
+  you cancel a task with `PipelineTask.cancel(reason="cancellation reason")`.
 
 - Added `include_prob_metrics` parameter to Whisper STT services to enable access
   to probability metrics from transcription results.

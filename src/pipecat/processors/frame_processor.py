@@ -14,7 +14,7 @@ management, and frame flow control mechanisms.
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Sequence, Tuple, Type
 
 from loguru import logger
 
@@ -688,6 +688,19 @@ class FrameProcessor(BaseObject):
         self._wait_interruption_event.clear()
 
         self._wait_for_interruption = False
+
+    async def broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
+        """Broadcasts a frame of the specified class upstream and downstream.
+
+        This method creates two instances of the given frame class using the
+        provided keyword arguments and pushes them upstream and downstream.
+
+        Args:
+            frame_cls: The class of the frame to be broadcasted.
+            **kwargs: Keyword arguments to be passed to the frame's constructor.
+        """
+        await self.push_frame(frame_cls(**kwargs))
+        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
 
     async def __start(self, frame: StartFrame):
         """Handle the start frame to initialize processor state.

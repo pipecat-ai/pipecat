@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     InterruptionFrame,
     StartFrame,
-    STTMuteFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
