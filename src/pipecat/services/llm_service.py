@@ -433,11 +433,7 @@ class LLMService(AIService):
 
         await self._call_event_handler("on_function_calls_started", function_calls)
 
-        # Push frame both downstream and upstream
-        started_frame_downstream = FunctionCallsStartedFrame(function_calls=function_calls)
-        started_frame_upstream = FunctionCallsStartedFrame(function_calls=function_calls)
-        await self.push_frame(started_frame_downstream, FrameDirection.DOWNSTREAM)
-        await self.push_frame(started_frame_upstream, FrameDirection.UPSTREAM)
+        await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=function_calls)
 
         for function_call in function_calls:
             if function_call.function_name in self._functions.keys():
@@ -552,33 +548,24 @@ class LLMService(AIService):
         # NOTE(aleix): This needs to be removed after we remove the deprecation.
         await self._call_start_function(runner_item.context, runner_item.function_name)
 
-        # Push a function call in-progress downstream. This frame will let our
-        # assistant context aggregator know that we are in the middle of a
-        # function call. Some contexts/aggregators may not need this. But some
-        # definitely do (Anthropic, for example).  Also push it upstream for use
-        # by other processors, like STTMuteFilter.
-        progress_frame_downstream = FunctionCallInProgressFrame(
+        # Broadcast function call in-progress. This frame will let our assistant
+        # context aggregator know that we are in the middle of a function
+        # call. Some contexts/aggregators may not need this. But some definitely
+        # do (Anthropic, for example).
+        await self.broadcast_frame(
+            FunctionCallInProgressFrame,
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
             arguments=runner_item.arguments,
             cancel_on_interruption=item.cancel_on_interruption,
         )
-        progress_frame_upstream = FunctionCallInProgressFrame(
-            function_name=runner_item.function_name,
-            tool_call_id=runner_item.tool_call_id,
-            arguments=runner_item.arguments,
-            cancel_on_interruption=item.cancel_on_interruption,
-        )
-
-        # Push frame both downstream and upstream
-        await self.push_frame(progress_frame_downstream, FrameDirection.DOWNSTREAM)
-        await self.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
         async def function_call_result_callback(
             result: Any, *, properties: Optional[FunctionCallResultProperties] = None
         ):
-            result_frame_downstream = FunctionCallResultFrame(
+            await self.broadcast_frame(
+                FunctionCallResultFrame,
                 function_name=runner_item.function_name,
                 tool_call_id=runner_item.tool_call_id,
                 arguments=runner_item.arguments,
@@ -586,17 +573,6 @@ class LLMService(AIService):
                 run_llm=runner_item.run_llm,
                 properties=properties,
             )
-            result_frame_upstream = FunctionCallResultFrame(
-                function_name=runner_item.function_name,
-                tool_call_id=runner_item.tool_call_id,
-                arguments=runner_item.arguments,
-                result=result,
-                run_llm=runner_item.run_llm,
-                properties=properties,
-            )
-
-            await self.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
-            await self.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 
         if isinstance(item.handler, DirectFunctionWrapper):
             # Handler is a DirectFunctionWrapper
