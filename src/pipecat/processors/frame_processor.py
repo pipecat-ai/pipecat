@@ -84,10 +84,10 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
 
     def __init__(self):
         """Initialize the FrameProcessorQueue.
-
-        Args:
-            manager (BaseTaskManager): The task manager used by the internal watchdog queues.
-
+    
+        Creates a priority queue with separate counters for high and low priority
+        items to maintain insertion order within each priority level.
+        
         """
         super().__init__()
         self.__high_counter = 0
