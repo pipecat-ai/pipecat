@@ -74,7 +74,7 @@ import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict, Union
 
 import aiohttp
 from fastapi.responses import FileResponse, Response
@@ -205,7 +205,7 @@ def _setup_webrtc_routes(
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-        from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
         from pipecat.transports.smallwebrtc.request_handler import (
             IceCandidate,
             SmallWebRTCPatchRequest,
@@ -215,6 +215,9 @@ def _setup_webrtc_routes(
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
+
+    class IceServer(TypedDict, total=False):
+        urls: Union[str, List[str]]
 
     class IceConfig(TypedDict):
         iceServers: List[IceServer]
