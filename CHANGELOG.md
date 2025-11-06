@@ -87,6 +87,9 @@ reason")`.
 - `GeminiLiveLLMService` now properly supports context-provided system
   instruction and tools.
 
+- Fixed `GoogleLLMService` token counting to avoid double-counting tokens when
+  Gemini sends usage metadata across multiple streaming chunks.
+
 ### Removed
 
 - Removed `needs_mcp_alternate_schema()` from `LLMService`. The mechanism that
