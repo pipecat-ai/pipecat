@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `MetricsLogObserver` for logging performance metrics from `MetricsFrame`
+  instances. Supports filtering via `include_metrics` parameter to control which
+  metrics types are logged (TTFB, processing time, LLM token usage, TTS usage,
+  smart turn metrics).
+
 - Added support for loading external observers. You can now register custom
   pipeline observers by setting the `PIPECAT_OBSERVER_FILES` environment
   variable. This variable should contain a colon-separated list of Python files
