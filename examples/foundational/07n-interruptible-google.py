@@ -61,8 +61,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     stt = GoogleSTTService(
-        params=GoogleSTTService.InputParams(languages=Language.EN_US),
+        params=GoogleSTTService.InputParams(languages=Language.EN_US, model="chirp_3"),
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        location="us",
     )
 
     tts = GoogleTTSService(
