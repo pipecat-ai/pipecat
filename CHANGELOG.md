@@ -72,6 +72,9 @@ reason")`.
 
 ### Fixed
 
+- Fixed `DeepgramSTTService._disconnect()` to properly await `is_connected()`
+  method call, which is an async coroutine in the Deepgram SDK.
+
 - Fixed an issue where the `SmallWebRTCRequest` dataclass in runner would scrub
   arbitrary request data from client due to camelCase typing. This fixes data
   passthrough for JS clients where `APIRequest` is used.
