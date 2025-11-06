@@ -729,11 +729,24 @@ class BaseOutputTransport(FrameProcessor):
             else:
                 return without_mixer(BOT_VAD_STOP_SECS)
 
+        async def _send_silence(self, secs: int):
+            if secs <= 0:
+                return
+
+            sample_width = 2
+            silence = b"\x00" * self.sample_rate * sample_width * secs
+            silence_frame = OutputAudioRawFrame(
+                audio=silence, sample_rate=self.sample_rate, num_channels=1
+            )
+            await self._transport.write_audio_frame(silence_frame)
+
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
             async for frame in self._next_frame():
                 # No need to push EndFrame, it's pushed from process_frame().
                 if isinstance(frame, EndFrame):
+                    # Send some final silence so words don't cut out.
+                    await self._send_silence(self._params.audio_out_end_silence_secs)
                     break
 
                 # Handle frame.
