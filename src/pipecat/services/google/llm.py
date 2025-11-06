@@ -899,12 +899,18 @@ class GoogleLLMService(LLMService):
             async for chunk in response:
                 # Stop TTFB metrics after the first chunk
                 await self.stop_ttfb_metrics()
+                # Gemini may send usage_metadata in multiple chunks with varying behavior:
+                # - Sometimes a single chunk, sometimes multiple chunks
+                # - Token counts may be cumulative (growing) or may change between chunks
+                # - Early chunks may include estimates/overhead that gets refined
+                # We use assignment (not accumulation) because the final chunk always contains
+                # the authoritative, billable token usage for the entire response.
                 if chunk.usage_metadata:
-                    prompt_tokens += chunk.usage_metadata.prompt_token_count or 0
-                    completion_tokens += chunk.usage_metadata.candidates_token_count or 0
-                    total_tokens += chunk.usage_metadata.total_token_count or 0
-                    cache_read_input_tokens += chunk.usage_metadata.cached_content_token_count or 0
-                    reasoning_tokens += chunk.usage_metadata.thoughts_token_count or 0
+                    prompt_tokens = chunk.usage_metadata.prompt_token_count or 0
+                    completion_tokens = chunk.usage_metadata.candidates_token_count or 0
+                    total_tokens = chunk.usage_metadata.total_token_count or 0
+                    cache_read_input_tokens = chunk.usage_metadata.cached_content_token_count or 0
+                    reasoning_tokens = chunk.usage_metadata.thoughts_token_count or 0
 
                 if not chunk.candidates:
                     continue
