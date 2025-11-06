@@ -56,6 +56,9 @@ reason")`.
 - Added support for passing in an `LLMSwicher` to `MCPClient.register_tools()`
   (as well as the new `MCPClient.register_tools_schema()`).
 
+- Added `cpu_count` parameter to `LocalSmartTurnAnalyzerV3`. This is set to `1`
+  by default for more predictable performance on low-CPU systems.
+
 ### Changed
 
 - Bumped the `fastapi` dependency's upperbound to `<0.122.0`.
