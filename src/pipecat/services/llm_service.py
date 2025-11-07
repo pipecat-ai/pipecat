@@ -509,7 +509,14 @@ class LLMService(AIService):
                 DeprecationWarning,
             )
         await self.push_frame(
-            UserImageRequestFrame(user_id=user_id, text=text_content),
+            UserImageRequestFrame(
+                user_id=user_id,
+                text=text_content,
+                # Deprecated fields below.
+                function_name=function_name,
+                tool_call_id=tool_call_id,
+                context=text_content,
+            ),
             FrameDirection.UPSTREAM,
         )
 
