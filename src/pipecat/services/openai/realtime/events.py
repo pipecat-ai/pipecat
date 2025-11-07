@@ -198,9 +198,9 @@ class SessionProperties(BaseModel):
     output_modalities: Optional[List[Literal["text", "audio"]]] = None
     instructions: Optional[str] = None
     audio: Optional[AudioConfiguration] = None
-    # Tools can only be ToolsSchema when provided by user in
-    # OpenAIRealtimeLLMService constructor. We'll never serialize/deserialize
-    # ToolsSchema.
+    # Tools can only be ToolsSchema when provided by the user, in either the
+    # OpenAIRealtimeLLMService constructor or through LLMUpdateSettingsFrame.
+    # We'll never serialize/deserialize ToolsSchema when talking to the server.
     tools: Optional[ToolsSchema | List[Dict]] = None
     tool_choice: Optional[Literal["auto", "none", "required"]] = None
     max_output_tokens: Optional[Union[int, Literal["inf"]]] = None
