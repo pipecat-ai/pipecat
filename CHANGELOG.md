@@ -84,6 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `simli-ai` to 0.1.25.
+
 - Improved `concatenate_aggregated_text()` to one word outputs from OpenAI
   Realtime and Gemini Live. Text fragments are now correctly concatenated
   without spaces when these patterns are detected.
