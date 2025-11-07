@@ -83,12 +83,7 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
     LOW_PRIORITY = 2
 
     def __init__(self):
-        """Initialize the FrameProcessorQueue.
-    
-        Creates a priority queue with separate counters for high and low priority
-        items to maintain insertion order within each priority level.
-        
-        """
+        """Initialize the FrameProcessorQueue."""
         super().__init__()
         self.__high_counter = 0
         self.__low_counter = 0
