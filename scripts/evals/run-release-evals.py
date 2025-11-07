@@ -180,7 +180,7 @@ TESTS_26 = [
     ("26-gemini-live.py", EVAL_SIMPLE_MATH),
     ("26a-gemini-live-transcription.py", EVAL_SIMPLE_MATH),
     ("26b-gemini-live-function-calling.py", EVAL_WEATHER),
-    ("26c-gemini-live-video.py", EVAL_SIMPLE_MATH),
+    ("26c-gemini-live-video.py", EVAL_VISION_CAMERA),
     ("26e-gemini-live-google-search.py", EVAL_ONLINE_SEARCH),
     ("26h-gemini-live-vertex-function-calling.py", EVAL_WEATHER),
     # Currently not working.
