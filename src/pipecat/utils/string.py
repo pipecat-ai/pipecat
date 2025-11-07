@@ -202,7 +202,8 @@ def concatenate_aggregated_text(text_parts: List[str]) -> str:
     """Concatenate a list of text parts into a single string.
 
     This function joins the provided list of text parts into a single string,
-    taking into account whether or not the parts already contain spacing.
+    taking into account whether or not the parts already likely contain
+    necessary spaces between parts.
 
     This function is useful for aggregating text segments received from LLMs or
     transcription services.
@@ -213,49 +214,59 @@ def concatenate_aggregated_text(text_parts: List[str]) -> str:
     Returns:
         A single concatenated string.
     """
-    # Check specifically for space characters, previously isspace() was used
-    # but that includes all whitespace characters (e.g. \n), not just spaces.
+    # Our best guess as to whether the text parts already contain necessary
+    # spacing between parts, i.e. whether the source of the text spaces the
+    # parts it gives us.
+    text_source_spaces_parts = False
+
+    # Check for leading or trailing spaces.
+    # This is DIRECT EVIDENCE that the text source includes necessary spaces
+    # between parts.
     has_leading_spaces = any(part and part[0] == " " for part in text_parts[1:])
     has_trailing_spaces = any(part and part[-1] == " " for part in text_parts[:-1])
+    if has_leading_spaces or has_trailing_spaces:
+        text_source_spaces_parts = True
 
-    # Check for trailing non-space whitespace (e.g., \n, \r, \t) which indicates
-    # syllable-by-syllable output with line breaks.
-    # Example: Gemini Live: ["Met", "amo", "rph", "osi", "s.\n"]
-    has_trailing_whitespace = any(
+    ##
+    # At this point we haven't seen any direct evidence that the text source
+    # includes necessary spaces between parts. That might mean it doesn't, *or*
+    # the text parts represent text that *shouldn't* have spaces, like single-
+    # word responses. Let's look for indirect evidence.
+    ##
+
+    # Check for Gemini Live-like output, characterized by trailing non-space
+    # whitespace (i.e. '\n').
+    # If it is Gemini Live, we know the text source includes necessary spaces
+    # between parts.
+    # This is an EDUCATED GUESS based on INDIRECT EVIDENCE.
+    looks_like_gemini_live = any(
         part and part[-1] != " " and part[-1].isspace() for part in text_parts
     )
+    if looks_like_gemini_live:
+        text_source_spaces_parts = True
 
-    # Check if we have punctuation-only fragments, which indicates syllable-by-syllable
-    # output where punctuation arrives as a separate fragment.
-    # Example: OpenAI Realtime single word: ["Met", "am", "orph", "osis", "."]
+    # Check for OpenAI Realtime-like output, characterized by punctuation-only
+    # fragments.
+    # If it is OpenAI Realtime, we know the text source includes necessary
+    # spaces between parts.
+    # This is an EDUCATED GUESS based on INDIRECT EVIDENCE.
     punctuation_chars = ".,!?;:—-'\"…"
-    has_punctuation_only = any(
+    looks_like_openai_realtime = any(
         part and len(part.strip()) == 0 or all(c in punctuation_chars for c in part)
         for part in text_parts
     )
+    if looks_like_openai_realtime:
+        text_source_spaces_parts = True
 
-    # If there are embedded spaces or other whitespace in the fragments, use direct concatenation
-    contains_spacing_between_fragments = (
-        has_leading_spaces or has_trailing_spaces or has_trailing_whitespace
-    )
+    ##
+    # At this point, we haven't seen any evidence, direct or indirect, that the
+    # text source includes necessary spaces between parts, so let's assume it
+    # does not.
+    ##
 
-    # Apply corresponding joining method based on detected spacing patterns:
-
-    if has_punctuation_only and not contains_spacing_between_fragments:
-        # Syllable-by-syllable output with standalone punctuation fragment. Examples:
-        # - OpenAI Realtime: ["Met", "am", "orph", "osis", "."] → "Metamorphosis."
-        result = "".join(text_parts)
-    elif contains_spacing_between_fragments:
-        # Fragments already have embedded spacing or trailing whitespace - concatenate directly. Examples:
-        # - OpenAI Realtime: ['Hey', ' there', '!', ' Great', ' to', ' meet', ' you', '!']
-        # - Gemini Live (spaces): ['Hel', 'lo.', ' Wo', 'u', 'ld ', 'you', ' li', 'ke ', 'to ', 'he', 'ar a joke?\n']
-        # - Gemini Live (newline): ["Met", "amo", "rph", "osi", "s.\n"] → "Metamorphosis."
-        # - Sentence level TTS services: ['Hello!', ' How can I assist you today?']
-        result = "".join(text_parts)
-    else:
-        # Word-by-word fragments without spacing - join with spaces. Examples:
-        # - Word level TTS services: ["Hello", "there.", "How", "are", "you?"] → "Hello there. How are you?"
-        result = " ".join(text_parts)
+    # Concatenate, based on our analysis above.
+    separator = "" if text_source_spaces_parts else " "
+    result = separator.join(text_parts)
 
     # Clean up any excessive whitespace
     result = result.strip()
