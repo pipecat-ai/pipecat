@@ -4727,8 +4727,8 @@ requires-dist = [
     { name = "resampy", specifier = "~=0.4.3" },
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.21" },
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.28.0,<3" },
-    { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=0.1.10" },
-    { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.0" },
+    { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=0.1.25" },
+    { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.1" },
     { name = "soxr", specifier = "~=0.5.0" },
     { name = "speechmatics-rt", marker = "extra == 'speechmatics'", specifier = ">=0.5.0" },
     { name = "strands-agents", marker = "extra == 'strands'", specifier = ">=1.9.1,<2" },
@@ -6496,7 +6496,7 @@ wheels = [
 
 [[package]]
 name = "simli-ai"
-version = "0.1.19"
+version = "0.1.25"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiortc" },
@@ -6505,9 +6505,9 @@ dependencies = [
     { name = "numpy" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/14/cf/bd31b76e00d2770a65081701108a39df2267cb585b0c2a000f71de790ee9/simli_ai-0.1.19.tar.gz", hash = "sha256:2ab8c6ec1e232dbf38c77d3920fe88b01acc7ba8d76b865fb5a3f4af968e3172", size = 12682, upload-time = "2025-09-23T14:14:30.263Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/6a/b28f90baf76f6a60865985f6233ff44abc72d45b66b76658bff3961e20a7/simli_ai-0.1.25.tar.gz", hash = "sha256:7a00b3426dc26a6a421641072c3e49014b7950c621cf4544152f35c58d13fcff", size = 13182, upload-time = "2025-11-06T16:27:08.862Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/86/fe2ed1b9d067634c4e0178c33080655c5c1f5b503fec20ac2af699238afb/simli_ai-0.1.19-py3-none-any.whl", hash = "sha256:35bcff89945dcb5f6171996d16d627e64981888c3134bdec7ce925680a17e058", size = 13233, upload-time = "2025-09-23T14:14:27.756Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/57/ae1032fd88214ea4ee6d3028c817c12a999eb90a67766bbab31e9819385a/simli_ai-0.1.25-py3-none-any.whl", hash = "sha256:7d01f65321dc9052f25e15d0463af6a20a86c6d37d9a7b3a2c4b01cbec0a54ed", size = 13651, upload-time = "2025-11-06T16:27:07.765Z" },
 ]
 
 [[package]]
