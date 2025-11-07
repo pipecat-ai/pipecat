@@ -14,6 +14,7 @@ from typing import Optional
 
 from loguru import logger
 
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_realtime_adapter import (
     OpenAIRealtimeLLMAdapter,
 )
@@ -481,9 +482,9 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _update_settings(self):
         settings = self._session_properties
+        adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:
-            adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
             llm_invocation_params = adapter.get_llm_invocation_params(self._context)
 
             # tools given in the context override the tools in the session properties
@@ -494,6 +495,12 @@ class OpenAIRealtimeLLMService(LLMService):
             # messages list, and override instructions in the session properties
             if llm_invocation_params["system_instruction"]:
                 settings.instructions = llm_invocation_params["system_instruction"]
+
+        # If needed, map settings.tools from ToolsSchema to list of dicts,
+        # which remote server expects. It would only be a ToolsSchema if that's
+        # how it was provided in the constructor or via LLMUpdateSettingsFrame.
+        if settings.tools and isinstance(settings.tools, ToolsSchema):
+            settings.tools = adapter.from_standard_tools(settings.tools)
 
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 

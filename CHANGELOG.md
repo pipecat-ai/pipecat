@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for passing in a `ToolsSchem` in lieu of a list of provider-
+  specific dicts when initializing `OpenAIRealtimeLLMService` or when updating
+  it using `LLMUpdateSettingsFrame`.
+
 - Added `TransportParams.audio_out_silence_secs`, which specifies how many
   seconds of silence to output when an `EndFrame` reaches the output
   transport. This can help ensure that all audio data is fully delivered to
