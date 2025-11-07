@@ -493,6 +493,8 @@ class AnthropicLLMService(LLMService):
         elif isinstance(frame, LLMContextFrame):
             context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
+            # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
+            # LLMContext with it
             context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
