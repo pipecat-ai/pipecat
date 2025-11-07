@@ -574,16 +574,60 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _process_aggregation(self):
         """Process the current aggregation and push it downstream."""
+        print("before processing aggregation", self._context.messages)
         msgs = []
         for message in self._context.messages:
             msg = copy.deepcopy(message)
-            if "content" in msg:
-                if isinstance(msg["content"], list):
-                    continue
-            if "mime_type" in msg and msg["mime_type"].startswith("image/"):
-                continue
-            msgs.append(msg)
+            has_image = False
+            
+            # Check for Google LLM format - Content objects with 'parts' attribute
+            if hasattr(msg, 'parts') and isinstance(msg.parts, list):
+                # Check if this message contains any images - if so, skip the entire message
+                for part in msg.parts:
+                    if hasattr(part, 'inline_data') and part.inline_data:
+                        mime_type = getattr(part.inline_data, 'mime_type', '')
+                        if mime_type and mime_type.startswith("image/"):
+                            has_image = True
+                            break
+                    elif isinstance(part, dict) and "inline_data" in part:
+                        if isinstance(part["inline_data"], dict):
+                            mime_type = part["inline_data"].get("mime_type", "")
+                            if mime_type and mime_type.startswith("image/"):
+                                has_image = True
+                                break
+            # Check for Google LLM format with 'parts' array (dict format)
+            elif "parts" in msg and isinstance(msg["parts"], list):
+                # Check if this message contains any images - if so, skip the entire message
+                has_image = any(
+                    isinstance(part, dict) and 
+                    "inline_data" in part and 
+                    isinstance(part["inline_data"], dict) and
+                    part["inline_data"].get("mime_type", "").startswith("image/")
+                    for part in msg["parts"]
+                )
+            # Check for OpenAI format with content as list
+            elif "content" in msg and isinstance(msg["content"], list):
+                # Check if this message contains any images - if so, skip the entire message
+                # OpenAI format: {"type": "image_url", "image_url": {"url": "..."}}
+                has_image = any(
+                    isinstance(item, dict) and (
+                        item.get("type") == "image_url" or 
+                        ("mime_type" in item and item["mime_type"].startswith("image/"))
+                    )
+                    for item in msg["content"]
+                )
+            # Check for simple mime_type at message level
+            elif "mime_type" in msg and msg["mime_type"].startswith("image/"):
+                has_image = True
+            
+            # Only add messages that don't have image content
+            if not has_image:
+                msgs.append(msg)
+        
         self._context.set_messages(msgs)
+
+        print("after processing aggregation", self._context.messages)
+
 
     
         image_prompt = "[SYSTEM] if the user wants information about what the drone sees or whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks"
