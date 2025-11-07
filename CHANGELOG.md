@@ -108,6 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Restore backwards compatibility for vision/image features (broken in 0.0.92)
+  when using non-universal context and assistant aggregators.
+
 - Fixed `DeepgramSTTService._disconnect()` to properly await `is_connected()`
   method call, which is an async coroutine in the Deepgram SDK.
 
