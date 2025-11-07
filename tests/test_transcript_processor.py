@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import List, Tuple, cast
 
 from pipecat.frames.frames import (
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -130,11 +131,11 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),  # Wait for StartedSpeaking to process
-            TTSTextFrame(text="Hello", aggregated_by="word"),
-            TTSTextFrame(text="world!", aggregated_by="word"),
-            TTSTextFrame(text="How", aggregated_by="word"),
-            TTSTextFrame(text="are", aggregated_by="word"),
-            TTSTextFrame(text="you?", aggregated_by="word"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="world!", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="How", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="are", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="you?", aggregated_by=AggregationType.WORD),
             SleepFrame(),  # Wait for text frames to queue
             BotStoppedSpeakingFrame(),
         ]
@@ -195,9 +196,9 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="", aggregated_by="word"),  # Empty text
-            TTSTextFrame(text="   ", aggregated_by="word"),  # Just whitespace
-            TTSTextFrame(text="\n", aggregated_by="word"),  # Just newline
+            TTSTextFrame(text="", aggregated_by=AggregationType.WORD),  # Empty text
+            TTSTextFrame(text="   ", aggregated_by=AggregationType.WORD),  # Just whitespace
+            TTSTextFrame(text="\n", aggregated_by=AggregationType.WORD),  # Just newline
             BotStoppedSpeakingFrame(),
             # Pipeline ends here; run_test will automatically send EndFrame
         ]
@@ -235,14 +236,14 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello", aggregated_by="word"),
-            TTSTextFrame(text="world!", aggregated_by="word"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="world!", aggregated_by=AggregationType.WORD),
             SleepFrame(),
             InterruptionFrame(),  # User interrupts here
             SleepFrame(),
             BotStartedSpeakingFrame(),
-            TTSTextFrame(text="New", aggregated_by="word"),
-            TTSTextFrame(text="response", aggregated_by="word"),
+            TTSTextFrame(text="New", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="response", aggregated_by=AggregationType.WORD),
             SleepFrame(),
             BotStoppedSpeakingFrame(),
         ]
@@ -299,8 +300,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello", aggregated_by="word"),
-            TTSTextFrame(text="world", aggregated_by="word"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="world", aggregated_by=AggregationType.WORD),
             # Pipeline ends here; run_test will automatically send EndFrame
         ]
 
@@ -338,8 +339,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello", aggregated_by="word"),
-            TTSTextFrame(text="world", aggregated_by="word"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="world", aggregated_by=AggregationType.WORD),
             SleepFrame(),  # Ensure messages are processed
             CancelFrame(),
         ]
@@ -401,8 +402,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Assistant", aggregated_by="word"),
-            TTSTextFrame(text="message", aggregated_by="word"),
+            TTSTextFrame(text="Assistant", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="message", aggregated_by=AggregationType.WORD),
             BotStoppedSpeakingFrame(),
         ]
 
@@ -439,7 +440,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
 
         # Test the specific pattern shared
         def make_tts_text_frame(text: str) -> TTSTextFrame:
-            frame = TTSTextFrame(text=text, aggregated_by="word")
+            frame = TTSTextFrame(text=text, aggregated_by=AggregationType.WORD)
             frame.includes_inter_frame_spaces = True
             return frame
 

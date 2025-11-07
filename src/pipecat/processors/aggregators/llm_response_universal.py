@@ -24,7 +24,7 @@ from pipecat.audio.interruptions.base_interruption_strategy import BaseInterrupt
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    AggregatedLLMTextFrame,
+    AggregatedTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -627,6 +627,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
             await self._handle_llm_start(frame)
+        # as a subclass of TextFrame, LLMTextFrame must be checked first
         elif isinstance(frame, LLMTextFrame):
             await self._handle_llm_text(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -854,7 +855,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if not aggregate:
             return
 
-        llm_frame = AggregatedLLMTextFrame(text=aggregate.text, aggregated_by=aggregate.type)
+        llm_frame = AggregatedTextFrame(text=aggregate.text, aggregated_by=aggregate.type)
         await self.push_frame(llm_frame)
         if should_reset_aggregator:
             await self._llm_text_aggregator.reset()

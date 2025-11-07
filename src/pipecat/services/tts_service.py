@@ -23,7 +23,8 @@ from typing import (
 from loguru import logger
 
 from pipecat.frames.frames import (
-    AggregatedLLMTextFrame,
+    AggregatedTextFrame,
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -388,7 +389,7 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
-            await self._push_tts_frames(frame.text, aggregated_by="sentence")
+            await self._push_tts_frames(frame.text, aggregated_by=AggregationType.SENTENCE)
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
@@ -494,8 +495,8 @@ class TTSService(AIService):
     async def _push_tts_frames(self, text: str, aggregated_by: str):
         if aggregated_by in self._skip_aggregator_types:
             # If this type of aggregation should be skipped, we just push the text as
-            # a basic AggregatedLLMTextFrame without sending it to TTS to speak.
-            await self.push_frame(AggregatedLLMTextFrame(text, aggregated_by=aggregated_by))
+            # a basic AggregatedTextFrame without sending it to TTS to speak.
+            await self.push_frame(AggregatedTextFrame(text, aggregated_by=aggregated_by))
             return
 
         # Remove leading newlines only
@@ -526,11 +527,11 @@ class TTSService(AIService):
                 # is set to False and these are sent word by word as part of the
                 # _words_task_handler in the WordTTSService subclass. However, to
                 # support use cases where an observer may want the full text before
-                # the audio is generated, we send an AggregatedLLMTextFrame here, but
+                # the audio is generated, we send an AggregatedTextFrame here, but
                 # we set append_to_context to False so it does not cause duplication
                 # in the context. This is primarily used by the RTVIObserver to
                 # generate a complete bot-output.
-                frame = AggregatedLLMTextFrame(text, aggregated_by=aggregated_by)
+                frame = AggregatedTextFrame(text, aggregated_by=aggregated_by)
                 frame.append_to_context = False
                 await self.push_frame(frame)
             await self.process_generator(self.run_tts(text))
@@ -669,7 +670,7 @@ class WordTTSService(TTSService):
                 frame = TTSStoppedFrame()
                 frame.pts = last_pts
             else:
-                frame = TTSTextFrame(word, aggregated_by="word")
+                frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
                 frame.pts = self._initial_word_timestamp + timestamp
             if frame:
                 last_pts = frame.pts

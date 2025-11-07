@@ -32,7 +32,8 @@ from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.frames.frames import (
-    AggregatedLLMTextFrame,
+    AggregatedTextFrame,
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -712,7 +713,7 @@ class RTVIBotOutputMessageData(RTVITextMessageData):
     """
 
     spoken: bool = True  # Indicates if the text has been spoken by TTS
-    aggregated_by: Optional[Literal["word", "sentence"] | str] = None
+    aggregated_by: Optional[AggregationType | str] = None
     # Indicates what form the text is in (e.g., by word, sentence, etc.)
 
 
@@ -1074,7 +1075,7 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVIBotTTSStoppedMessage())
-        elif isinstance(frame, AggregatedLLMTextFrame) and (
+        elif isinstance(frame, AggregatedTextFrame) and (
             self._params.bot_output_enabled or self._params.bot_tts_enabled
         ):
             if isinstance(frame, TTSTextFrame) and not isinstance(src, BaseOutputTransport):
@@ -1135,7 +1136,7 @@ class RTVIObserver(BaseObserver):
         if message:
             await self.send_rtvi_message(message)
 
-    async def _handle_aggregated_llm_text(self, frame: AggregatedLLMTextFrame):
+    async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Handle aggregated LLM text output frames."""
         isTTS = isinstance(frame, TTSTextFrame)
         if self._params.bot_output_enabled:

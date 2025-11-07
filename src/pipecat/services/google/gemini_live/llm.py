@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -1646,7 +1647,7 @@ class GeminiLiveLLMService(LLMService):
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
-        frame = TTSTextFrame(text=text, aggregated_by="sentence")
+        frame = TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
         # Gemini Live text already includes any necessary inter-chunk spaces
         frame.includes_inter_frame_spaces = True
 

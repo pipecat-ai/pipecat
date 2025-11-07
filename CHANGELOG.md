@@ -16,27 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   services that subclass `TTSService` can indicate whether the text in the
   `TTSTextFrame`s they push already contain any necessary inter-frame spaces.
 
-- New bot-output RTVI message to represent what the bot actually "says".
-  - RTVIBotOutputMessage / RTVIBotOutputMessageData — includes:
-    - spoken: bool — whether the text was spoken by TTS
-    - aggregated_by: Optional[str|\"word\"|\"sentence\"] — how the text was aggregated
-  - RTVIObserver now emits bot-output messages (bot-tts-text and bot-llm-text are still
-    supported and generated. bot-transcript is now deprecated in lieu of this new, more
-    thorough, message).
-
-- Introduced new `AggregatedLLMTextFrame` type to support representing effective llm
+- Introduced new `AggregatedTextFrame` type to support representing effective llm
+types an enum)
   output whether or not it is processed by the TTS. This new frame type includes the
   field `aggregated_by` to represent the conceptual format by which the given text
-  is aggregated. `TTSTextFrame`s now inherit from `AggregatedLLMTextFrame`.
+  is aggregated. `TTSTextFrame`s now inherit from `AggregatedTextFrame`.
 
 - New `bot-output` RTVI message to represent what the bot actually "says".
-  - The `RTVIObserver` now emits `bot-output` messages based off the new `AggregatedLLMTextFrame`s
+  - The `RTVIObserver` now emits `bot-output` messages based off the new `AggregatedTextFrame`s
     (`bot-tts-text` and `bot-llm-text` are still supported and generated, but `bot-transcript` is
     now deprecated in lieu of this new, more thorough, message).
   - The new `RTVIBotOutputMessage` includes the fields:
     - `spoken`: A boolean indicating whether the text was spoken by TTS
     - `aggregated_by`: A string representing how the text was aggregated ("sentence", "word",
-      "custom")
+      "my custom aggregation")
 
 - Updated the base aggregator type:
   - Introduced a new `Aggregation` dataclass to represent both the aggregated `text` and
@@ -86,10 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
 
 - Added support for aggregating `LLMTextFrame`s from within the assistant `LLMAssistantAggregator`
-  when `skip_tts` is set to `True`, generating `AggregatedLLMTextFrame`s, therefore supporting
-  `bot-output` even when TTS is turned off. You can customize the aggregator used using the new
-  `llm_text_aggregator` field in the `LLMAssistantAggregatorParams`. NOTE: This feature is only
-  supported when using the new universal context.
+  when `skip_tts` is set to `True`, generating `AggregatedTextFrame`s, therefore supporting
+  the new `bot-output` event when TTS is turned off. You can customize the aggregator used using
+  the new `llm_text_aggregator` field in the `LLMAssistantAggregatorParams`. NOTE: This feature is
+  only supported when using the new `LLMContext`.
 
 ### Changed
 
@@ -116,11 +109,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - TTS flow respects aggregation metadata
   - `TTSService` accepts a new `skip_aggregator_types` to avoid speaking certain aggregation types
-    (asnow determined/returned by the aggregator)
-  - TTS services push `AggregatedLLMTextFrame` in addition to `TTSTextFrame`s when either an
+    (now determined/returned by the aggregator)
+  - TTS services push `AggregatedTextFrame` in addition to `TTSTextFrame`s when either an
     aggregation occurs that should not be spoken or when the TTS service supports word-by-word
     timestamping. In the latter case, the `TTSService` preliminarily generates an
-    `AggregatedLLMTextFrame`, aggregated by sentence to generate the full sentence content as early
+    `AggregatedTextFrame`, aggregated by sentence to generate the full sentence content as early
     as possible.
 
 ### Deprecated
