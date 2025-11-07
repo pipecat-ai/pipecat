@@ -231,7 +231,12 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
             standard_tools=[weather_function, restaurant_function, get_news_function]
         )
         await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
-        # Alternative pattern, useful if you're changing other session properties too
+        # Alternative pattern, useful if you're changing other session properties, too.
+        # (Though note that tools in your LLMContext take precedence over those
+        # in session properties, so if you have context-provided tools, prefer
+        # LLMSetToolsFrame instead, as it updates your context. Ditto for
+        # updating system instructions: send an LLMMessagesUpdateFrame with
+        # context messages updated with your new desired system message.)
         # await task.queue_frames(
         #     [LLMUpdateSettingsFrame(settings=SessionProperties(tools=new_tools).model_dump())]
         # )
