@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `TransportParams.audio_out_silence_secs`, which specifies how many
+  seconds of silence to output when an `EndFrame` reaches the output
+  transport. This can help ensure that all audio data is fully delivered to
+  clients.
+
+- Added new `FrameProcessor.broadcast_frame()` method. This will push two
+  instances of a given frame class, one upstream and the other downstream.
+
+  ```python
+  await self.broadcast_frame(UserSpeakingFrame)
+  ```
+
+- Added `MetricsLogObserver` for logging performance metrics from `MetricsFrame`
+  instances. Supports filtering via `include_metrics` parameter to control which
+  metrics types are logged (TTFB, processing time, LLM token usage, TTS usage,
+  smart turn metrics).
+
+- Added `pronunciation_dictionary_locators` to `ElevenLabsTTSService` and
+  `ElevenLabsHttpTTSService`.
+
 - Added support for loading external observers. You can now register custom
   pipeline observers by setting the `PIPECAT_OBSERVER_FILES` environment
   variable. This variable should contain a colon-separated list of Python files
@@ -28,8 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `CancelFrame` and `CancelTaskFrame` have an optional `reason` field to
   indicate why the pipeline is being canceled. This can be also specified when
-  you cancel a task with `PipelineTask.cancel(reason="cancellation your
-reason")`.
+  you cancel a task with `PipelineTask.cancel(reason="cancellation reason")`.
 
 - Added `include_prob_metrics` parameter to Whisper STT services to enable access
   to probability metrics from transcription results.
@@ -56,7 +75,24 @@ reason")`.
 - Added support for passing in an `LLMSwicher` to `MCPClient.register_tools()`
   (as well as the new `MCPClient.register_tools_schema()`).
 
+- Added `cpu_count` parameter to `LocalSmartTurnAnalyzerV3`. This is set to `1`
+  by default for more predictable performance on low-CPU systems.
+
 ### Changed
+
+- `STTMuteFilter` no longer sends `STTMuteFrame` to the STT service. The filter
+  now blocks frames locally without instructing the STT service to stop
+  processing audio. This prevents inactivity-related errors (such as 409 errors
+  from Google STT) while maintaining the same muting behavior at the application
+  level. Important: The STTMuteFilter should be placed _after_ the STT service
+  itself.
+
+- Improved `GoogleSTTService` error handling to properly catch gRPC `Aborted`
+  exceptions (corresponding to 409 errors) caused by stream inactivity. These
+  exceptions are now logged at DEBUG level instead of ERROR level, since they
+  indicate expected behavior when no audio is sent for 10+ seconds (e.g., during
+  long silences or when audio input is blocked). The service automatically
+  reconnects when this occurs.
 
 - Bumped the `fastapi` dependency's upperbound to `<0.122.0`.
 
@@ -86,6 +122,9 @@ reason")`.
 
 - `GeminiLiveLLMService` now properly supports context-provided system
   instruction and tools.
+
+- Fixed `GoogleLLMService` token counting to avoid double-counting tokens when
+  Gemini sends usage metadata across multiple streaming chunks.
 
 ### Removed
 

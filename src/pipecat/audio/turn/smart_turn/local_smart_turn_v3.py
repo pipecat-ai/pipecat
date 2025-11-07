@@ -35,12 +35,15 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
     enabling offline operation without network dependencies.
     """
 
-    def __init__(self, *, smart_turn_model_path: Optional[str] = None, **kwargs):
+    def __init__(
+        self, *, smart_turn_model_path: Optional[str] = None, cpu_count: int = 1, **kwargs
+    ):
         """Initialize the local ONNX smart-turn-v3 analyzer.
 
         Args:
             smart_turn_model_path: Path to the ONNX model file. If this is not
                 set, the bundled smart-turn-v3.0 model will be used.
+            cpu_count: The number of CPUs to use for inference. Defaults to 1.
             **kwargs: Additional arguments passed to BaseSmartTurn.
         """
         super().__init__(**kwargs)
@@ -70,6 +73,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         so = ort.SessionOptions()
         so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         so.inter_op_num_threads = 1
+        so.intra_op_num_threads = cpu_count
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
         self._feature_extractor = WhisperFeatureExtractor(chunk_length=8)

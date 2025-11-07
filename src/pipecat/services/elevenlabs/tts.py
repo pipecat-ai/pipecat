@@ -157,6 +157,18 @@ def build_elevenlabs_voice_settings(
     return voice_settings or None
 
 
+class PronunciationDictionaryLocator(BaseModel):
+    """Locator for a pronunciation dictionary.
+
+    Attributes:
+        pronunciation_dictionary_id: The ID of the pronunciation dictionary.
+        version_id: The version ID of the pronunciation dictionary.
+    """
+
+    pronunciation_dictionary_id: str
+    version_id: str
+
+
 def calculate_word_times(
     alignment_info: Mapping[str, Any],
     cumulative_time: float,
@@ -239,6 +251,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             enable_ssml_parsing: Whether to parse SSML tags in text.
             enable_logging: Whether to enable ElevenLabs logging.
             apply_text_normalization: Text normalization mode ("auto", "on", "off").
+            pronunciation_dictionary_locators: List of pronunciation dictionary locators to use.
         """
 
         language: Optional[Language] = None
@@ -251,6 +264,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         enable_ssml_parsing: Optional[bool] = None
         enable_logging: Optional[bool] = None
         apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
+        pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None
 
     def __init__(
         self,
@@ -321,6 +335,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         self.set_voice(voice_id)
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
 
         # Indicates if we have sent TTSStartedFrame. It will reset to False when
         # there's an interruption or TTSStoppedFrame.
@@ -704,12 +719,17 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     if not self.audio_context_available(self._context_id):
                         await self.create_audio_context(self._context_id)
 
-                    # Initialize context with voice settings
+                    # Initialize context with voice settings and pronunciation dictionaries
                     msg = {"text": " ", "context_id": self._context_id}
                     if self._voice_settings:
                         msg["voice_settings"] = self._voice_settings
+                    if self._pronunciation_dictionary_locators:
+                        msg["pronunciation_dictionary_locators"] = [
+                            locator.model_dump()
+                            for locator in self._pronunciation_dictionary_locators
+                        ]
                     await self._websocket.send(json.dumps(msg))
-                    logger.trace(f"Created new context {self._context_id} with voice settings")
+                    logger.trace(f"Created new context {self._context_id}")
 
                     await self._send_text(text)
                     await self.start_tts_usage_metrics(text)
@@ -745,6 +765,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             use_speaker_boost: Whether to use speaker boost enhancement.
             speed: Voice speed control (0.25 to 4.0).
             apply_text_normalization: Text normalization mode ("auto", "on", "off").
+            pronunciation_dictionary_locators: List of pronunciation dictionary locators to use.
         """
 
         language: Optional[Language] = None
@@ -755,6 +776,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         use_speaker_boost: Optional[bool] = None
         speed: Optional[float] = None
         apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
+        pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None
 
     def __init__(
         self,
@@ -813,6 +835,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self.set_voice(voice_id)
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
 
         # Track cumulative time to properly sequence word timestamps across utterances
         self._cumulative_time = 0
@@ -976,6 +999,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
+
+        if self._pronunciation_dictionary_locators:
+            payload["pronunciation_dictionary_locators"] = [
+                locator.model_dump() for locator in self._pronunciation_dictionary_locators
+            ]
 
         if self._settings["apply_text_normalization"] is not None:
             payload["apply_text_normalization"] = self._settings["apply_text_normalization"]
