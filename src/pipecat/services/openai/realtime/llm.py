@@ -14,6 +14,7 @@ from typing import Optional
 
 from loguru import logger
 
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_realtime_adapter import (
     OpenAIRealtimeLLMAdapter,
 )
@@ -155,6 +156,16 @@ class OpenAIRealtimeLLMService(LLMService):
         self._session_properties: events.SessionProperties = (
             session_properties or events.SessionProperties()
         )
+        # If needed, map session_properties.tools from ToolsSchema to list of
+        # dicts, which remote server expects
+        if self._session_properties.tools and isinstance(
+            self._session_properties.tools, ToolsSchema
+        ):
+            adapter = self.get_llm_adapter()
+            self._session_properties.tools = adapter.from_standard_tools(
+                self._session_properties.tools
+            )
+
         self._audio_input_paused = start_audio_paused
         self._websocket = None
         self._receive_task = None
