@@ -1314,7 +1314,11 @@ class RTVIProcessor(FrameProcessor):
     async def set_bot_ready(self):
         """Mark the bot as ready and send the bot-ready message."""
         self._bot_ready = True
-        await self._update_config(self._config, False)
+        # Only call the (deprecated) _update_config method if the we're using a
+        # config (which is deprecated). Otherwise we'd always print an
+        # unnecessary deprecation warning.
+        if self._config.config:
+            await self._update_config(self._config, False)
         await self._send_bot_ready()
 
     async def interrupt_bot(self):
