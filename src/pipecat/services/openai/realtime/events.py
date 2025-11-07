@@ -170,6 +170,10 @@ class SessionProperties(BaseModel):
         object: Object type identifier, always "realtime.session".
         id: Unique identifier for the session.
         model: The Realtime model used for this session.
+            Note: The model is set at connection time via the WebSocket URL query
+            parameter and cannot be changed during the session. This field is populated
+            by the server in session.created and session.updated responses, but is effectively
+            a no-op for session.update requests.
         output_modalities: The set of modalities the model can respond with.
         instructions: System instructions for the assistant.
         audio: Configuration for input and output audio.
