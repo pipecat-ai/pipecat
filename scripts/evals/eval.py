@@ -244,10 +244,10 @@ async def run_eval_pipeline(
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    llm.register_function("assert_eval", eval_runner.assert_eval)
+    llm.register_function("eval_function", eval_runner.assert_eval)
 
     eval_function = FunctionSchema(
-        name="assert_eval",
+        name="eval_function",
         description="Called when the user answers a question.",
         properties={
             "result": {
@@ -272,13 +272,15 @@ async def run_eval_pipeline(
         example_prompt, example_image = eval_config.prompt
 
     common_system_prompt = (
-        "The user might say things other than the answer and that's allowed. "
-        f"You should only call the eval function when the user: {eval_config.eval}"
+        "You should only call the eval function if:\n"
+        "- The user explicitly attempts to answer the question, AND\n"
+        f"- Their answer can be cleanly evaluated using: {eval_config.eval}\n"
+        "Ignore greetings, comments, non-answers, or requests for clarification."
     )
     if eval_config.eval_speaks_first:
-        system_prompt = f"You are an LLM eval, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
     else:
-        system_prompt = f"You are an LLM eval, be extremly brief. Your goal is to first ask one question: {example_prompt}. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
 
     messages = [
         {
