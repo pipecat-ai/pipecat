@@ -158,14 +158,17 @@ class SimliVideoService(FrameProcessor):
 
     async def _start_connection(self):
         """Start the connection to Simli service and begin processing tasks."""
-        if not self._initialized:
-            await self._simli_client.Initialize()
-            self._initialized = True
+        try:
+            if not self._initialized:
+                await self._simli_client.Initialize()
+                self._initialized = True
 
-        # Create task to consume and process audio and video
-        await self._simli_client.sendSilence()
-        self._audio_task = self.create_task(self._consume_and_process_audio())
-        self._video_task = self.create_task(self._consume_and_process_video())
+            # Create task to consume and process audio and video
+            await self._simli_client.sendSilence()
+            self._audio_task = self.create_task(self._consume_and_process_audio())
+            self._video_task = self.create_task(self._consume_and_process_video())
+        except Exception as e:
+            logger.error(f"{self}: unable to start connection: {e}")
 
     async def _consume_and_process_audio(self):
         """Consume audio frames from Simli and push them downstream."""
