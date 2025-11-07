@@ -114,10 +114,13 @@ class OpenAIRealtimeLLMService(LLMService):
         Args:
             api_key: OpenAI API key for authentication.
             model: OpenAI model name. Defaults to "gpt-realtime".
+                This is a connection-level parameter set via the WebSocket URL query
+                parameter and cannot be changed during the session.
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.openai.com/v1/realtime".
             session_properties: Configuration properties for the realtime session.
-                If None, uses default SessionProperties.
+                These are session-level settings that can be updated during the session
+                (except for voice and model). If None, uses default SessionProperties.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             send_transcription_frames: Whether to emit transcription frames.
 
@@ -139,6 +142,8 @@ class OpenAIRealtimeLLMService(LLMService):
                     stacklevel=2,
                 )
 
+        # Build WebSocket URL with model query parameter
+        # Source: https://platform.openai.com/docs/guides/realtime-websocket
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
 
@@ -146,6 +151,7 @@ class OpenAIRealtimeLLMService(LLMService):
         self.base_url = full_url
         self.set_model_name(model)
 
+        # Initialize session_properties
         self._session_properties: events.SessionProperties = (
             session_properties or events.SessionProperties()
         )
