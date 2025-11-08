@@ -64,6 +64,7 @@ class Language(StrEnum):
     AR_SA = "ar-SA"
     AR_SY = "ar-SY"
     AR_TN = "ar-TN"
+    AR_XA = "ar-XA"
     AR_YE = "ar-YE"
 
     # Assamese
