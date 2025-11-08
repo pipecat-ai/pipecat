@@ -129,6 +129,7 @@ def add_stt_span_attributes(
     settings: Optional[Dict[str, Any]] = None,
     vad_enabled: bool = False,
     ttfb: Optional[float] = None,
+    confidence: Optional[float] = None,
     **kwargs,
 ) -> None:
     """Add STT-specific attributes to a span.
@@ -145,6 +146,7 @@ def add_stt_span_attributes(
         settings: Service configuration settings.
         vad_enabled: Whether voice activity detection is enabled.
         ttfb: Time to first byte in seconds.
+        confidence: Confidence/probability score for the transcription (0-1).
         **kwargs: Additional attributes to add.
     """
     # Add standard attributes
@@ -168,6 +170,9 @@ def add_stt_span_attributes(
 
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
+
+    if confidence is not None:
+        span.set_attribute("metrics.confidence", confidence)
 
     # Add settings if provided
     if settings:

@@ -187,7 +187,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Optional[Language] = None, result=None
     ):
         """Handle a transcription result with tracing."""
         pass
@@ -214,7 +214,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             text = response.text.strip()
 
             if text:
-                await self._handle_transcription(text, True, self._language)
+                await self._handle_transcription(text, True, self._language, response)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(
                     text,
