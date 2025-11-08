@@ -1719,6 +1719,8 @@ class GeminiLiveLLMService(LLMService):
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cache_read_input_tokens=usage.cached_content_token_count,
+            reasoning_tokens=usage.thoughts_token_count,
         )
 
         await self.start_llm_usage_metrics(tokens)
