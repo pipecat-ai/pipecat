@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
-from pipecat.services.whisper.utils import (
+from pipecat.utils.service_results.extract_probability import (
     extract_deepgram_probability,
     extract_openai_gpt4o_probability,
     extract_whisper_probability,
