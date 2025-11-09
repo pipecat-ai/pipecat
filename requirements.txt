@@ -4,3 +4,4 @@ openai-whisper
 gtts
 torch
 python-multipart
+pipecat-ai
