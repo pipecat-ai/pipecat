@@ -20,11 +20,9 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.stt import CartesiaSTTService
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
@@ -68,8 +66,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         model="gpt-4o-transcribe",
         prompt="Expect normal helpful conversation.",
     )
-    ### alternative stt - cartesia ###
-    # stt = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
 
     ### LLM ###
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -78,19 +74,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = OpenAITTSService(
         api_key=os.getenv("OPENAI_API_KEY"),
         voice="ballad",
-        params=OpenAITTSService.InputParams(instructions="Please speak clearly and at a moderate pace."),
+        params=OpenAITTSService.InputParams(
+            instructions="Please speak clearly and at a moderate pace."
+        ),
     )
-    ### alternative tts - elevenlabs ###
-    # tts = ElevenLabsTTSService(
-    #     api_key=os.getenv("ELEVENLABS_API_KEY"),
-    #     voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
-    #     model="eleven_turbo_v2_5",
-    # )
-    ### alternative tts - cartesia ###
-    # tts = CartesiaTTSService(
-    #     api_key=os.getenv("CARTESIA_API_KEY"),
-    #     voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-    # )
 
     messages = [
         {
@@ -102,10 +89,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     context_aggregator = LLMContextAggregatorPair(context)
 
+    # RTVI events for detecting bot aggregation
+    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
     ### PIPELINE ###
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
+            rtvi,
             stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
@@ -125,7 +116,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        observers=[turn_detector],
+        observers=[turn_detector, RTVIObserver(rtvi)],
     )
 
     turn_detector.set_turn_observer_event_handlers(task.turn_tracking_observer)
@@ -141,6 +132,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    # not sure this is needed...
+    @rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        await rtvi.set_bot_ready()
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
