@@ -90,10 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `simli-ai` to 0.1.25.
 
-- Improved `concatenate_aggregated_text()` to one word outputs from OpenAI
-  Realtime and Gemini Live. Text fragments are now correctly concatenated
-  without spaces when these patterns are detected.
-
 - `STTMuteFilter` no longer sends `STTMuteFrame` to the STT service. The filter
   now blocks frames locally without instructing the STT service to stop
   processing audio. This prevents inactivity-related errors (such as 409 errors
