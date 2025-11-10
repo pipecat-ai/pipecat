@@ -685,7 +685,10 @@ class OpenAIRealtimeLLMService(LLMService):
         # We receive audio transcript deltas (as opposed to text deltas) when
         # the output modality is "audio" (the default)
         if evt.delta:
-            await self.push_frame(TTSTextFrame(evt.delta))
+            frame = TTSTextFrame(evt.delta)
+            # OpenAI Realtime includes spaces between audio transcription chunks
+            frame.includes_inter_frame_spaces = True
+            await self.push_frame(frame)
 
     async def _handle_evt_function_call_arguments_done(self, evt):
         """Handle completion of function call arguments.

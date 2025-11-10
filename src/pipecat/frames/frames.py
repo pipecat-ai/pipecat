@@ -330,10 +330,16 @@ class TextFrame(DataFrame):
 
     text: str
     skip_tts: bool = field(init=False)
+    # NOTE: Ideally this would be available at init time with a default value,
+    # but that would impact how subclasses can be initialized (it would require
+    # mandatory fields of theirs to have defaults to preserve
+    # non-default-before-default argument order)
+    includes_inter_frame_spaces: bool = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = False
+        self.includes_inter_frame_spaces = True
 
     def __str__(self):
         pts = format_pts(self.pts)

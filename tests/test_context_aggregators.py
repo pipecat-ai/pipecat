@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -673,14 +674,32 @@ class BaseTestAssistantContextAggregator:
 
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(context)
-        frames_to_send = [
-            LLMFullResponseStartFrame(),
-            TextFrame(text="Hello"),
-            TextFrame(text="Pipecat."),
-            TextFrame(text="How are"),
-            TextFrame(text="you?"),
-            LLMFullResponseEndFrame(),
-        ]
+
+        if self.AGGREGATOR_CLASS == LLMAssistantAggregator:
+            # LLMAssistantAggregator expects TextFrames to declare when they
+            # omit inter-frame spaces
+            def make_text_frame(text: str) -> TextFrame:
+                frame = TextFrame(text=text)
+                frame.includes_inter_frame_spaces = False
+                return frame
+
+            frames_to_send = [
+                LLMFullResponseStartFrame(),
+                make_text_frame("Hello"),
+                make_text_frame("Pipecat."),
+                make_text_frame("How are"),
+                make_text_frame("you?"),
+                LLMFullResponseEndFrame(),
+            ]
+        else:
+            frames_to_send = [
+                LLMFullResponseStartFrame(),
+                TextFrame(text="Hello"),
+                TextFrame(text="Pipecat."),
+                TextFrame(text="How are"),
+                TextFrame(text="you?"),
+                LLMFullResponseEndFrame(),
+            ]
         expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
@@ -969,7 +988,7 @@ class TestOpenAIAssistantContextAggregator(
 class TestLLMAssistantAggregator(
     BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
-    CONTEXT_CLASS = OpenAILLMContext
+    CONTEXT_CLASS = LLMContext
     AGGREGATOR_CLASS = LLMAssistantAggregator
     EXPECTED_CONTEXT_FRAMES = [LLMContextFrame, LLMContextAssistantTimestampFrame]
 
