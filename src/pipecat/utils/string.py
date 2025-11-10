@@ -198,7 +198,7 @@ def parse_start_end_tags(
     return (None, current_tag_index)
 
 
-def concatenate_aggregated_text(text_parts: List[str]) -> str:
+def concatenate_aggregated_text(text_parts: List[str], add_spaces: bool) -> str:
     """Concatenate a list of text parts into a single string.
 
     This function joins the provided list of text parts into a single string,
@@ -209,25 +209,14 @@ def concatenate_aggregated_text(text_parts: List[str]) -> str:
 
     Args:
         text_parts: A list of strings representing parts of text to concatenate.
+        add_spaces: Whether to add spaces between text parts during concatenation.
 
     Returns:
         A single concatenated string.
     """
-    # Check specifically for space characters, previously isspace() was used
-    # but that includes all whitespace characters (e.g. \n), not just spaces.
-    has_leading_spaces = any(part and part[0] == " " for part in text_parts[1:])
-    has_trailing_spaces = any(part and part[-1] == " " for part in text_parts[:-1])
-
-    # If there are embedded spaces in the fragments, use direct concatenation
-    contains_spacing_between_fragments = has_leading_spaces or has_trailing_spaces
-
-    # Apply corresponding joining method
-    if contains_spacing_between_fragments:
-        # Fragments already have spacing - just concatenate
-        result = "".join(text_parts)
-    else:
-        # Word-by-word fragments - join with spaces
-        result = " ".join(text_parts)
+    # Concatenate text parts with or without spaces based on the flag
+    separator = " " if add_spaces else ""
+    result = separator.join(text_parts)
 
     # Clean up any excessive whitespace
     result = result.strip()

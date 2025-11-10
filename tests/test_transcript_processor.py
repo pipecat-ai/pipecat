@@ -438,17 +438,22 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             received_updates.append(frame)
 
         # Test the specific pattern shared
+        def make_tts_text_frame(text: str) -> TTSTextFrame:
+            frame = TTSTextFrame(text=text)
+            frame.includes_inter_frame_spaces = True
+            return frame
+
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text=" there"),
-            TTSTextFrame(text="!"),
-            TTSTextFrame(text=" How"),
-            TTSTextFrame(text="'s"),
-            TTSTextFrame(text=" it"),
-            TTSTextFrame(text=" going"),
-            TTSTextFrame(text="?"),
+            make_tts_text_frame("Hello"),
+            make_tts_text_frame(" there"),
+            make_tts_text_frame("!"),
+            make_tts_text_frame(" How"),
+            make_tts_text_frame("'s"),
+            make_tts_text_frame(" it"),
+            make_tts_text_frame(" going"),
+            make_tts_text_frame("?"),
             BotStoppedSpeakingFrame(),
         ]
 
