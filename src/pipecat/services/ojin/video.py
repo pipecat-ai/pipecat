@@ -91,7 +91,7 @@ class OjinPersonaSettings:
     client_connect_max_retries: int = field(default=3)
     client_reconnect_delay: float = field(default=3.0)
     persona_config_id: str = field(default="")
-    image_size: Tuple[int, int] = field(default=(1920, 1080))
+    image_size: Tuple[int, int] = field(default=(1280, 720))
     tts_audio_passthrough: bool = field(default=False)
     extra_frames_lat: int = field(default=15)
 

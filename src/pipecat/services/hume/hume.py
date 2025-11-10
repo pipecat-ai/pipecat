@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     StartFrame,
+    StartInterruptionFrame,
     SystemFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -78,10 +79,12 @@ class HumeSTSService(LLMService):
         model: str = "evi",
         system_prompt: str | None = None,
         start_frame_cls: type[Frame] | None = None,
+        audio_passthrough: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         logger.debug("Initializing HumeSTSService")
+        self._audio_passthrough = audio_passthrough
         self.api_key = api_key
         self.config_id = config_id
         self.model = model
@@ -89,10 +92,11 @@ class HumeSTSService(LLMService):
         self._connection: ChatWebsocketConnection | None = None
         self._cm = None
         self.active_conversation: bool = False
+        self.active_conversation_id: str | None = None
+        self.cancelled_conversation_ids: list[str] = []
         self.system_prompt = system_prompt
         self._context: OpenAIRealtimeLLMContext | None = None
         self._hume_context: Context | None = None
-        self._user_stopped_time: float | None = None
         self._time_to_first_audio_list = []
         self._start_frame_cls = start_frame_cls or HumeStartFrame
 
@@ -116,8 +120,13 @@ class HumeSTSService(LLMService):
         await super().process_frame(frame, direction)
         if isinstance(frame, self._start_frame_cls):
             await self._connect()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            self._user_stopped_time = time.perf_counter()
+        elif isinstance(frame, StartInterruptionFrame):
+            if self.active_conversation_id is not None:
+                self.cancelled_conversation_ids.append(self.active_conversation_id)
+            self.active_conversation_id = None
+            self.active_conversation = False
+            await self.push_frame(frame)
+
         elif isinstance(frame, InputAudioRawFrame):
             if self._connection:
                 encoded_audio = base64.b64encode(frame.audio).decode("utf-8")
@@ -128,6 +137,8 @@ class HumeSTSService(LLMService):
                         break
                     except ConnectionClosed:
                         await self.reset_conversation()
+            if self._audio_passthrough:
+                await self.push_frame(frame, direction)
 
         elif isinstance(frame, OpenAILLMContextFrame):
             logger.info("OpenAILLMContextFrame frame received")
@@ -188,14 +199,13 @@ class HumeSTSService(LLMService):
     async def _on_message(self, message: SubscribeEvent):
         logger.trace(f"Received message from Hume: {message}")
         msg_type = message.type
+        if hasattr(message, "id") and message.id in self.cancelled_conversation_ids:
+            return
+
         if msg_type == "audio_output":
+            self.active_conversation_id = message.id
             if not self.active_conversation:
                 self.active_conversation = True
-                if self._user_stopped_time is not None:
-                    self._time_to_first_audio_list.append(
-                        time.perf_counter() - self._user_stopped_time
-                    )
-                self._user_stopped_time = None
                 await self.push_frame(TTSStartedFrame())
                 await self.push_frame(LLMFullResponseStartFrame())
 
@@ -212,7 +222,7 @@ class HumeSTSService(LLMService):
             await self.push_frame(frame)
             samples_count = len(audio_frames) / 2
             logger.info(
-                f"Received audio samples from HumeAI: {samples_count} samples, channels: {num_channels}, duration: {samples_count / num_channels / sample_rate}"
+                f"Received audio samples from HumeAI id: {message.id}, {samples_count} samples, channels: {num_channels}, duration: {samples_count / num_channels / sample_rate}"
             )
 
         elif msg_type == "assistant_end":
