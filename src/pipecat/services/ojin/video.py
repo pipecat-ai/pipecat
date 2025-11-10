@@ -34,10 +34,11 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
+@dataclass
 class OjinPersonaInitializedFrame(Frame):
     """Frame indicating that the persona has been initialized and can now output frames."""
 
-    pass
+    session_data: Optional[dict] = None
 
 
 class OjinFirstFramePlayedFrame(Frame):
@@ -263,9 +264,8 @@ class OjinPersonaService(FrameProcessor):
                 self._session_data = message.parameters
 
             logger.info(f"Received Session Ready session data: {message}")
-
-            await self.set_state(PersonaState.INITIALIZING)
-            assert self._client is not None
+            if self._session_data and self._session_data.get("server_id"):
+                logger.info(f"Connected to server: {self._session_data.get('server_id')}")
 
             self._server_fps_tracker.start()
 
@@ -300,12 +300,13 @@ class OjinPersonaService(FrameProcessor):
                     self._run_loop_task = self.create_task(self._run_loop())
 
                     # Notify that we're ready
+                    initialized_frame = OjinPersonaInitializedFrame(session_data=self._session_data)
                     await self.push_frame(
-                        OjinPersonaInitializedFrame(),
+                        initialized_frame,
                         direction=FrameDirection.DOWNSTREAM,
                     )
                     await self.push_frame(
-                        OjinPersonaInitializedFrame(), direction=FrameDirection.UPSTREAM
+                        initialized_frame, direction=FrameDirection.UPSTREAM
                     )
             else:
                 # Avoid getting frames that are not suposed to be part of the speak (remainings of old speech)
@@ -496,11 +497,13 @@ class OjinPersonaService(FrameProcessor):
                 image_bytes = idle_frame.image_bytes
                 # audio_bytes is already set to silence
 
-                if self._state == PersonaState.IDLE:
-                    if self._played_frame_idx % 25 == 0:
-                        logger.debug(f"Playing idle frame (%25) {self._played_frame_idx}")
-                else:
-                    logger.debug(f"Playing idle frame {self._played_frame_idx}")
+                if self._played_frame_idx % 150 == 0:
+                    logger.debug(f"Playing idle frame (%150) {self._played_frame_idx}")
+                # if self._state == PersonaState.IDLE:
+                #     if self._played_frame_idx % 25 == 0:
+                #         logger.debug(f"Playing idle frame (%25) {self._played_frame_idx}")
+                # else:
+                #     logger.debug(f"Playing idle frame {self._played_frame_idx}")
 
             # Output frame and audio
             image_frame = OutputImageRawFrame(
