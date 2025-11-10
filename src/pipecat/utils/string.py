@@ -218,43 +218,15 @@ def concatenate_aggregated_text(text_parts: List[str]) -> str:
     has_leading_spaces = any(part and part[0] == " " for part in text_parts[1:])
     has_trailing_spaces = any(part and part[-1] == " " for part in text_parts[:-1])
 
-    # Check for trailing non-space whitespace (e.g., \n, \r, \t) which indicates
-    # syllable-by-syllable output with line breaks.
-    # Example: Gemini Live: ["Met", "amo", "rph", "osi", "s.\n"]
-    has_trailing_whitespace = any(
-        part and part[-1] != " " and part[-1].isspace() for part in text_parts
-    )
+    # If there are embedded spaces in the fragments, use direct concatenation
+    contains_spacing_between_fragments = has_leading_spaces or has_trailing_spaces
 
-    # Check if we have punctuation-only fragments, which indicates syllable-by-syllable
-    # output where punctuation arrives as a separate fragment.
-    # Example: OpenAI Realtime single word: ["Met", "am", "orph", "osis", "."]
-    punctuation_chars = ".,!?;:—-'\"…"
-    has_punctuation_only = any(
-        part and len(part.strip()) == 0 or all(c in punctuation_chars for c in part)
-        for part in text_parts
-    )
-
-    # If there are embedded spaces or other whitespace in the fragments, use direct concatenation
-    contains_spacing_between_fragments = (
-        has_leading_spaces or has_trailing_spaces or has_trailing_whitespace
-    )
-
-    # Apply corresponding joining method based on detected spacing patterns:
-
-    if has_punctuation_only and not contains_spacing_between_fragments:
-        # Syllable-by-syllable output with standalone punctuation fragment. Examples:
-        # - OpenAI Realtime: ["Met", "am", "orph", "osis", "."] → "Metamorphosis."
-        result = "".join(text_parts)
-    elif contains_spacing_between_fragments:
-        # Fragments already have embedded spacing or trailing whitespace - concatenate directly. Examples:
-        # - OpenAI Realtime: ['Hey', ' there', '!', ' Great', ' to', ' meet', ' you', '!']
-        # - Gemini Live (spaces): ['Hel', 'lo.', ' Wo', 'u', 'ld ', 'you', ' li', 'ke ', 'to ', 'he', 'ar a joke?\n']
-        # - Gemini Live (newline): ["Met", "amo", "rph", "osi", "s.\n"] → "Metamorphosis."
-        # - Sentence level TTS services: ['Hello!', ' How can I assist you today?']
+    # Apply corresponding joining method
+    if contains_spacing_between_fragments:
+        # Fragments already have spacing - just concatenate
         result = "".join(text_parts)
     else:
-        # Word-by-word fragments without spacing - join with spaces. Examples:
-        # - Word level TTS services: ["Hello", "there.", "How", "are", "you?"] → "Hello there. How are you?"
+        # Word-by-word fragments - join with spaces
         result = " ".join(text_parts)
 
     # Clean up any excessive whitespace
