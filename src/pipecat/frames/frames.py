@@ -330,10 +330,18 @@ class TextFrame(DataFrame):
 
     text: str
     skip_tts: bool = field(init=False)
+    # Whether any necessary inter-frame (leading/trailing) spaces are already
+    # included in the text.
+    # NOTE: Ideally this would be available at init time with a default value,
+    # but that would impact how subclasses can be initialized (it would require
+    # mandatory fields of theirs to have defaults to preserve
+    # non-default-before-default argument order)
+    includes_inter_frame_spaces: bool = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = False
+        self.includes_inter_frame_spaces = False
 
     def __str__(self):
         pts = format_pts(self.pts)

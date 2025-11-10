@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -651,12 +652,20 @@ class BaseTestAssistantContextAggregator:
         aggregator = self.AGGREGATOR_CLASS(
             context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
+
+        # The newer LLMAssistantAggregator expects TextFrames to declare
+        # when they include inter-frame spaces.
+        def make_text_frame(text: str) -> TextFrame:
+            frame = TextFrame(text=text)
+            frame.includes_inter_frame_spaces = True
+            return frame
+
         frames_to_send = [
             LLMFullResponseStartFrame(),
-            TextFrame(text="Hello "),
-            TextFrame(text="Pipecat. "),
-            TextFrame(text="How are "),
-            TextFrame(text="you?"),
+            make_text_frame("Hello "),
+            make_text_frame("Pipecat. "),
+            make_text_frame("How are "),
+            make_text_frame("you?"),
             LLMFullResponseEndFrame(),
         ]
         expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
@@ -697,14 +706,22 @@ class BaseTestAssistantContextAggregator:
         aggregator = self.AGGREGATOR_CLASS(
             context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
+
+        # The newer LLMAssistantAggregator expects TextFrames to declare
+        # when they include inter-frame spaces.
+        def make_text_frame(text: str) -> TextFrame:
+            frame = TextFrame(text=text)
+            frame.includes_inter_frame_spaces = True
+            return frame
+
         frames_to_send = [
             LLMFullResponseStartFrame(),
-            TextFrame(text="Hello "),
-            TextFrame(text="Pipecat."),
+            make_text_frame("Hello "),
+            make_text_frame("Pipecat."),
             LLMFullResponseEndFrame(),
             LLMFullResponseStartFrame(),
-            TextFrame(text="How are "),
-            TextFrame(text="you?"),
+            make_text_frame(text="How are "),
+            make_text_frame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
         expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES, *self.EXPECTED_CONTEXT_FRAMES]
@@ -724,16 +741,24 @@ class BaseTestAssistantContextAggregator:
         aggregator = self.AGGREGATOR_CLASS(
             context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
         )
+
+        # The newer LLMAssistantAggregator expects TextFrames to declare
+        # when they include inter-frame spaces.
+        def make_text_frame(text: str) -> TextFrame:
+            frame = TextFrame(text=text)
+            frame.includes_inter_frame_spaces = True
+            return frame
+
         frames_to_send = [
             LLMFullResponseStartFrame(),
-            TextFrame(text="Hello "),
-            TextFrame(text="Pipecat."),
+            make_text_frame("Hello "),
+            make_text_frame("Pipecat."),
             LLMFullResponseEndFrame(),
             SleepFrame(AGGREGATION_SLEEP),
             InterruptionFrame(),
             LLMFullResponseStartFrame(),
-            TextFrame(text="How are "),
-            TextFrame(text="you?"),
+            make_text_frame("How are "),
+            make_text_frame("you?"),
             LLMFullResponseEndFrame(),
         ]
         expected_down_frames = [
@@ -969,7 +994,7 @@ class TestOpenAIAssistantContextAggregator(
 class TestLLMAssistantAggregator(
     BaseTestAssistantContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
-    CONTEXT_CLASS = OpenAILLMContext
+    CONTEXT_CLASS = LLMContext
     AGGREGATOR_CLASS = LLMAssistantAggregator
     EXPECTED_CONTEXT_FRAMES = [LLMContextFrame, LLMContextAssistantTimestampFrame]
 

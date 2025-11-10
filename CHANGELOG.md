@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `LivekitFrameSerializer` has been removed. Use `LiveKitTransport` instead.
 
+### Fixed
+
+- Fixed a bug related to `LLMAssistantAggregator` where spaces were sometimes
+  missing from assistant messages in context.
+
 ## [0.0.93] - 2025-11-07
 
 ### Added

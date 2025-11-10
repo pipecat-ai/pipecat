@@ -92,6 +92,14 @@ class LLMContextAggregator(FrameProcessor):
 
         self._aggregation: List[str] = []
 
+        # Whether to add spaces between text parts.
+        # (Currently only used by LLMAssistantAggregator, but could be expanded
+        # to LLMUserAggregator in the future if needed; that would require
+        # additional work since LLMUserAggregator currently trims spaces from
+        # incoming frames before determining whether it "really" received any
+        # text).
+        self._add_spaces = True
+
     @property
     def messages(self) -> List[LLMContextMessage]:
         """Get messages from the LLM context.
@@ -183,7 +191,7 @@ class LLMContextAggregator(FrameProcessor):
         Returns:
             The concatenated aggregation string.
         """
-        return concatenate_aggregated_text(self._aggregation)
+        return concatenate_aggregated_text(self._aggregation, self._add_spaces)
 
 
 class LLMUserAggregator(LLMContextAggregator):
@@ -812,6 +820,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Make sure we really have text (spaces count, too!)
         if len(frame.text) == 0:
             return
+
+        # Track whether we need to add spaces between text parts
+        # Assumption: we can just keep track of the latest frame's value
+        self._add_spaces = not frame.includes_inter_frame_spaces
 
         self._aggregation.append(frame.text)
 

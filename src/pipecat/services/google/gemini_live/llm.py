@@ -1453,7 +1453,10 @@ class GeminiLiveLLMService(LLMService):
 
             self._bot_text_buffer += text
             self._search_result_buffer += text  # Also accumulate for grounding
-            await self.push_frame(LLMTextFrame(text=text))
+            frame = LLMTextFrame(text=text)
+            # Gemini Live text already includes any necessary inter-chunk spaces
+            frame.includes_inter_frame_spaces = True
+            await self.push_frame(frame)
 
         # Check for grounding metadata in server content
         if msg.server_content and msg.server_content.grounding_metadata:
@@ -1645,7 +1648,11 @@ class GeminiLiveLLMService(LLMService):
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
-        await self.push_frame(TTSTextFrame(text=text))
+        frame = TTSTextFrame(text=text)
+        # Gemini Live text already includes any necessary inter-chunk spaces
+        frame.includes_inter_frame_spaces = True
+
+        await self.push_frame(frame)
 
     async def _handle_msg_grounding_metadata(self, message: LiveServerMessage):
         """Handle dedicated grounding metadata messages."""
