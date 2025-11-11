@@ -4,3 +4,8 @@ uvicorn
 loguru
 python-dotenv
 onnxruntime
+websockets
+openai
+requests
+aiofiles
+pydantic
