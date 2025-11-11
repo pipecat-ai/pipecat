@@ -121,6 +121,7 @@ class HeyGenVideoService(AIService):
                 on_participant_connected=self._on_participant_connected,
                 on_participant_disconnected=self._on_participant_disconnected,
             ),
+            connect_as_user=True,
         )
         await self._client.setup(setup)
 
