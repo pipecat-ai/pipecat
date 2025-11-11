@@ -159,7 +159,7 @@ class SpeechmaticsTTSService(TTSService):
                             attempt += 1
 
                             # Check if we've exceeded the maximum number of attempts
-                            if attempt > self._params.max_retries:
+                            if attempt >= self._params.max_retries:
                                 raise ValueError()
 
                             # Report error frame
