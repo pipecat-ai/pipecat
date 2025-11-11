@@ -28,6 +28,7 @@ class TTSTextTransformer:
     TIME_SIMPLE_PATTERN = r'\b[0-9]{1,2}[AaPp][Mm]\b'
     TIME_NO_BOUNDARY_COLON_PATTERN = r'([a-zA-Z])([0-9]{1,2}:[0-9]{2}(?:\s*[AaPp][Mm])?)'
     TIME_NO_BOUNDARY_SIMPLE_PATTERN = r'([a-zA-Z])([0-9]{1,2}[AaPp][Mm])'
+    TIME_RANGE_PATTERN = r'\b(\d{1,2}):(\d{2})(\s?[AaPp][Mm])?\s*([–—\-]|to)\s*(\d{1,2}):(\d{2})(\s?[AaPp][Mm])?\b'
     
     MONEY_WITH_DOLLARS_WORD_PATTERN = r'\$([0-9]+(?:\.[0-9]{2})?)\s+dollars?'
     MONEY_DOLLAR_SIGN_PATTERN = r'\$([0-9]+(?:\.[0-9]{2})?)'
@@ -131,6 +132,81 @@ class TTSTextTransformer:
 
         # Apply simple time transformations
         text = re.sub(simple_pattern, replace_simple_time, text)
+
+        return text
+
+    def time_range_transformer(self, text: str) -> str:
+        """
+        Transform time range formats for better TTS pronunciation.
+
+        Examples:
+        - '02:00 PM – 04:00 PM' -> 'two PM to four PM'
+        - '02:00 PM–04:00 PM' -> 'two PM to four PM'
+        - '02:00 PM - 04:00 PM' -> 'two PM to four PM'
+        - '14:00–16:00' -> 'fourteen to sixteen' (if valid times)
+        - '02:00 to 04:00' -> 'two to four'
+
+        Args:
+            text: Input text containing time range patterns
+
+        Returns:
+            Transformed text with improved time range pronunciation
+        """
+        def replace_time_range(match):
+            hour1 = match.group(1)
+            minute1 = match.group(2)
+            am_pm1 = match.group(3) or ""
+            separator = match.group(4)
+            hour2 = match.group(5)
+            minute2 = match.group(6)
+            am_pm2 = match.group(7) or ""
+
+            # Validate times when there's no AM/PM marker
+            # to ensure we're not blindly replacing dashes with "to"
+            if not am_pm1.strip() and not am_pm2.strip():
+                # Both times lack AM/PM - validate they're reasonable time values
+                h1, m1 = int(hour1), int(minute1)
+                h2, m2 = int(hour2), int(minute2)
+
+                # Validate hours (0-23) and minutes (0-59)
+                if not (0 <= h1 <= 23 and 0 <= m1 <= 59 and 0 <= h2 <= 23 and 0 <= m2 <= 59):
+                    # Invalid time values - don't transform
+                    return match.group(0)
+
+                # Additional validation: ensure it looks like a time range
+                # (first time should be before second time in most cases)
+                # Allow wrapping around midnight though
+                if h1 > h2 and not (h1 >= 22 and h2 <= 6):
+                    # Likely not a time range - don't transform
+                    return match.group(0)
+
+            # Transform first time
+            hour1_word = self.number_to_words(hour1)
+            if minute1 == "00":
+                time1 = hour1_word
+            else:
+                minute1_word = self.number_to_words(minute1)
+                time1 = f"{hour1_word} {minute1_word}"
+
+            if am_pm1.strip():
+                time1 = f"{time1} {am_pm1.strip()}"
+
+            # Transform second time
+            hour2_word = self.number_to_words(hour2)
+            if minute2 == "00":
+                time2 = hour2_word
+            else:
+                minute2_word = self.number_to_words(minute2)
+                time2 = f"{hour2_word} {minute2_word}"
+
+            if am_pm2.strip():
+                time2 = f"{time2} {am_pm2.strip()}"
+
+            # Join with "to"
+            return f"{time1} to {time2}"
+
+        # Apply time range transformation
+        text = re.sub(self.TIME_RANGE_PATTERN, replace_time_range, text, flags=re.IGNORECASE)
 
         return text
 
@@ -471,11 +547,14 @@ class TTSTextTransformer:
         """
         # Apply transformations in order of priority
         result = text
-        
+
         # 1. Time patterns (highest priority - colon patterns or AM/PM)
+        # First handle time ranges (must come before individual time patterns)
+        result = self.time_range_transformer(result)
+
         def replace_time(match):
             return self.time_transformer(match.group(0))
-        
+
         # First handle no-boundary patterns to avoid conflicts
         def replace_time_no_boundary(match):
             prefix = match.group(1)
@@ -761,8 +840,33 @@ def test_time_patterns():
         # Some bad formatting cases
         ("From8:00 AM to12:00PM", "From eight AM to twelve PM"),
         ("from 8 00 a m to 12 45 p m", "from eight a m to twelve forty five p m"),
+
+        # Time ranges with em-dash (with spaces)
+        ("02:00 PM – 04:00 PM", "two PM to four PM"),
+        ("Meeting from 02:00 PM – 04:00 PM", "Meeting from two PM to four PM"),
+        ("9:30 AM – 11:00 AM", "nine thirty AM to eleven AM"),
+
+        # Time ranges with em-dash (without spaces)
+        ("02:00 PM–04:00 PM", "two PM to four PM"),
+        ("Available 9:00 AM–5:00 PM", "Available nine AM to five PM"),
+
+        # Time ranges with hyphen
+        ("02:00 PM - 04:00 PM", "two PM to four PM"),
+        ("Hours: 8:00 AM - 6:00 PM", "Hours: eight AM to six PM"),
+
+        # Time ranges with "to" (should still work)
+        ("02:00 PM to 04:00 PM", "two PM to four PM"),
+        ("Open 9:00 AM to 5:30 PM", "Open nine AM to five thirty PM"),
+
+        # Time ranges without AM/PM (24-hour format)
+        ("14:00–16:00", "fourteen to sixteen"),
+        ("Meeting 09:30-11:45", "Meeting nine thirty to eleven forty five"),
+
+        # Mixed formats in time ranges
+        ("9:00 AM–12:00 PM", "nine AM to twelve PM"),
+        ("1:30 PM - 3:00 PM", "one thirty PM to three PM"),
     ]
-    
+
     return run_test_group("Time Patterns", test_cases, transformer)
 
 def test_phone_numbers():
