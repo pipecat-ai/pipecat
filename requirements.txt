@@ -3,3 +3,4 @@ fastapi
 uvicorn
 loguru
 python-dotenv
+onnxruntime
