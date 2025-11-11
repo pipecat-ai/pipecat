@@ -56,11 +56,11 @@ async def test_google_tracing_with_universal_llm_context():
     service._client.aio.models.generate_content_stream.return_value = mock_response
 
     # Mock tracing components
-    with patch("pipecat.utils.tracing.service_decorators.trace") as mock_trace:
+    with patch("opentelemetry.trace.get_tracer") as mock_get_tracer:
         mock_span = MagicMock()
         mock_tracer = MagicMock()
         mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        mock_trace.get_tracer.return_value = mock_tracer
+        mock_get_tracer.return_value = mock_tracer
 
         # Execute _process_context
         await service._process_context(context)
@@ -121,11 +121,11 @@ async def test_google_tracing_with_empty_context():
     service._client.aio.models.generate_content_stream.return_value = mock_response
 
     # Mock tracing components
-    with patch("pipecat.utils.tracing.service_decorators.trace") as mock_trace:
+    with patch("opentelemetry.trace.get_tracer") as mock_get_tracer:
         mock_span = MagicMock()
         mock_tracer = MagicMock()
         mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        mock_trace.get_tracer.return_value = mock_tracer
+        mock_get_tracer.return_value = mock_tracer
 
         # Execute _process_context
         await service._process_context(context)
@@ -183,11 +183,11 @@ async def test_google_tracing_uses_adapter_not_context():
     service._client.aio.models.generate_content_stream.return_value = mock_response
 
     # Mock tracing components
-    with patch("pipecat.utils.tracing.service_decorators.trace") as mock_trace:
+    with patch("opentelemetry.trace.get_tracer") as mock_get_tracer:
         mock_span = MagicMock()
         mock_tracer = MagicMock()
         mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        mock_trace.get_tracer.return_value = mock_tracer
+        mock_get_tracer.return_value = mock_tracer
 
         # Execute _process_context
         await service._process_context(context)
