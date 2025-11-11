@@ -1,4 +1,4 @@
-pipecat-ai
+pipecat-ai[speechmatics]
 fastapi
 uvicorn
 loguru
@@ -9,4 +9,3 @@ openai
 requests
 aiofiles
 pydantic
-speechmatics-python
