@@ -9,5 +9,4 @@ openai
 requests
 aiofiles
 pydantic
-speechmatics
 cartesia
