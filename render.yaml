@@ -2,6 +2,15 @@ services:
   - type: web
     name: pipecat-speech2speech
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port 10000
-    plan: free
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CARTESIA_API_KEY
+        sync: false
+      - key: SPEECHMATICS_API_KEY
+        sync: false
+      - key: VOICE_ID
+        value: "71a7ad14-091c-4e8e-a314-022ece01c121"
