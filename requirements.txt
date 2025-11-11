@@ -1,4 +1,4 @@
-pipecat-ai[speechmatics]
+pipecat-ai[speechmatics,cartesia]
 fastapi
 uvicorn
 loguru
