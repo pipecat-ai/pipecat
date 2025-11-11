@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -382,56 +384,57 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Replace push_frame to capture output
                             self.push_frame = traced_push_frame
 
-                            # Detect if we're using Google's service
-                            is_google_service = "google" in service_class_name.lower()
-
-                            # Try to get messages based on service type
+                            # Get messages for logging
+                            # For OpenAILLMContext: use context's own get_messages_for_logging() method
+                            # For LLMContext: use adapter's get_messages_for_logging() which returns
+                            # messages in provider's native format with sensitive data sanitized
                             messages = None
                             serialized_messages = None
 
-                            # TODO: Revisit once we unify the messages across services
-                            if is_google_service:
-                                # Handle Google service specifically
-                                # For universal LLMContext, use the adapter's logging method for proper formatting
-                                if hasattr(self, "get_llm_adapter") and hasattr(
-                                    context, "get_messages"
-                                ):
+                            if isinstance(context, OpenAILLMContext):
+                                # OpenAILLMContext and subclasses have their own method
+                                messages = context.get_messages_for_logging()
+                            elif isinstance(context, LLMContext):
+                                # Universal LLMContext - use adapter for provider-native format
+                                if hasattr(self, "get_llm_adapter"):
                                     adapter = self.get_llm_adapter()
-                                    if adapter and hasattr(adapter, "get_messages_for_logging"):
-                                        messages = adapter.get_messages_for_logging(context)
-                                # Fall back to context's get_messages_for_logging (for GoogleLLMContext/OpenAILLMContext)
-                                elif hasattr(context, "get_messages_for_logging"):
-                                    messages = context.get_messages_for_logging()
-                                # Fall back to standard methods for universal LLMContext (shouldn't normally reach here)
-                                elif hasattr(context, "get_messages"):
-                                    messages = context.get_messages()
-                                elif hasattr(context, "messages"):
-                                    messages = context.messages
-                            else:
-                                # Handle other services like OpenAI
-                                if hasattr(context, "get_messages"):
-                                    messages = context.get_messages()
-                                elif hasattr(context, "messages"):
-                                    messages = context.messages
+                                    messages = adapter.get_messages_for_logging(context)
+                            elif hasattr(context, "get_messages"):
+                                # Fallback for unknown context types
+                                messages = context.get_messages()
+                            elif hasattr(context, "messages"):
+                                messages = context.messages
 
-                            # Serialize messages if available (including empty lists)
-                            if messages is not None:
-                                try:
-                                    serialized_messages = json.dumps(messages)
-                                except Exception as e:
-                                    serialized_messages = f"Error serializing messages: {str(e)}"
+                            # Serialize messages if available
+                            if messages:
+                                serialized_messages = json.dumps(messages)
 
-                            # Get tools, system message, etc. based on the service type
-                            tools = getattr(context, "tools", None)
+                            # Get tools
+                            # For OpenAILLMContext: tools may need adapter conversion if set
+                            # For LLMContext: use adapter's from_standard_tools() to convert ToolsSchema
+                            tools = None
                             serialized_tools = None
                             tool_count = 0
 
-                            if tools:
-                                try:
-                                    serialized_tools = json.dumps(tools)
-                                    tool_count = len(tools) if isinstance(tools, list) else 1
-                                except Exception as e:
-                                    serialized_tools = f"Error serializing tools: {str(e)}"
+                            if isinstance(context, OpenAILLMContext):
+                                # OpenAILLMContext: tools property handles adapter conversion internally
+                                tools = context.tools
+                            elif isinstance(context, LLMContext):
+                                # Universal LLMContext - use adapter to convert ToolsSchema
+                                if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
+                                    adapter = self.get_llm_adapter()
+                                    tools = adapter.from_standard_tools(context.tools)
+                            elif hasattr(context, "tools"):
+                                # Fallback for unknown context types
+                                tools = context.tools
+
+                            # Serialize and count tools if available
+                            # Check if tools is not None and not NOT_GIVEN (using attribute check as fallback)
+                            if tools is not None and not (
+                                hasattr(tools, "__name__") and tools.__name__ == "NOT_GIVEN"
+                            ):
+                                serialized_tools = json.dumps(tools)
+                                tool_count = len(tools) if isinstance(tools, list) else 1
 
                             # Handle system message for different services
                             system_message = None
