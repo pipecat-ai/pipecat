@@ -9,4 +9,3 @@ openai
 requests
 aiofiles
 pydantic
-cartesia
