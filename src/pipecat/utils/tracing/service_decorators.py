@@ -392,8 +392,21 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # TODO: Revisit once we unify the messages across services
                             if is_google_service:
                                 # Handle Google service specifically
-                                if hasattr(context, "get_messages_for_logging"):
+                                # For universal LLMContext, use the adapter's logging method for proper formatting
+                                if hasattr(self, "get_llm_adapter") and hasattr(
+                                    context, "get_messages"
+                                ):
+                                    adapter = self.get_llm_adapter()
+                                    if adapter and hasattr(adapter, "get_messages_for_logging"):
+                                        messages = adapter.get_messages_for_logging(context)
+                                # Fall back to context's get_messages_for_logging (for GoogleLLMContext/OpenAILLMContext)
+                                elif hasattr(context, "get_messages_for_logging"):
                                     messages = context.get_messages_for_logging()
+                                # Fall back to standard methods for universal LLMContext (shouldn't normally reach here)
+                                elif hasattr(context, "get_messages"):
+                                    messages = context.get_messages()
+                                elif hasattr(context, "messages"):
+                                    messages = context.messages
                             else:
                                 # Handle other services like OpenAI
                                 if hasattr(context, "get_messages"):
@@ -401,8 +414,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 elif hasattr(context, "messages"):
                                     messages = context.messages
 
-                            # Serialize messages if available
-                            if messages:
+                            # Serialize messages if available (including empty lists)
+                            if messages is not None:
                                 try:
                                     serialized_messages = json.dumps(messages)
                                 except Exception as e:
