@@ -157,7 +157,7 @@ class SpeechmaticsTTSService(TTSService):
 
                             # Report error frame
                             yield ErrorFrame(
-                                error=f"{self} HTTP 503 (attempt {attempt}, retry in {backoff_time:.2f}s)"
+                                error=f"{self} Service unavailable [503] (attempt {attempt}, retry in {backoff_time:.2f}s)"
                             )
 
                             # Wait before retrying
@@ -171,14 +171,14 @@ class SpeechmaticsTTSService(TTSService):
 
                         except (ValueError, ArithmeticError):
                             yield FatalErrorFrame(
-                                error=f"{self} Service unavailable (attempts {attempt})"
+                                error=f"{self} Service unavailable [503] (attempts {attempt})"
                             )
                             return
 
                     # != 200 : Error
                     if response.status != 200:
                         yield FatalErrorFrame(
-                            error=f"{self} Service unavailable ({response.status})"
+                            error=f"{self} Service unavailable [{response.status}]"
                         )
                         return
 
