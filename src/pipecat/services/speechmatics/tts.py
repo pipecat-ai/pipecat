@@ -44,7 +44,12 @@ class SpeechmaticsTTSService(TTSService):
     SPEECHMATICS_SAMPLE_RATE = 16000
 
     class InputParams(BaseModel):
-        """Optional input parameters for Speechmatics TTS configuration."""
+        """Optional input parameters for Speechmatics TTS configuration.
+
+        Parameters:
+            retry_interval_s: Interval between retries in seconds. Defaults to 0.02.
+            retry_timeout_s: Timeout for retries in seconds. Defaults to 1.0.
+        """
 
         retry_interval_s: float = 0.02
         retry_timeout_s: float = 1.0
