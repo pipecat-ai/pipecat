@@ -9,3 +9,4 @@ openai
 requests
 aiofiles
 pydantic
+speechmatics-python
