@@ -36,13 +36,13 @@ load_dotenv(override=True)
 # -----------------------------------------------------
 app = FastAPI(title="Pipecat Speech2Speech", version="1.0")
 
+# ✅ Correct way to add CORS
 app.add_middleware(
-    CORSMiddleware(
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/")
@@ -50,7 +50,7 @@ async def root():
     return {
         "message": "🎙️ Pipecat Realtime Speech2Speech is running",
         "websocket": "/ws",
-        "health": "/health",
+        "health": "/health"
     }
 
 @app.get("/health")
@@ -58,7 +58,7 @@ async def health():
     return {"status": "ok"}
 
 # -----------------------------------------------------
-# Pipeline Logic (for a single client)
+# Speech2Speech Pipeline
 # -----------------------------------------------------
 async def run_pipeline(transport, handle_sigint: bool = False):
     logger.info("🎤 Starting Pipecat Realtime Speech2Speech pipeline")
@@ -79,12 +79,9 @@ async def run_pipeline(transport, handle_sigint: bool = False):
         params=BaseOpenAILLMService.InputParams(temperature=0.7),
     )
 
-    # --- Context and aggregator ---
+    # --- Context & aggregator ---
     messages = [
-        {
-            "role": "system",
-            "content": "You are Julia, a warm, conversational AI voice assistant.",
-        }
+        {"role": "system", "content": "You are Julia, a warm, conversational AI voice assistant."}
     ]
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
@@ -120,11 +117,10 @@ async def run_pipeline(transport, handle_sigint: bool = False):
     await runner.run(task)
 
 # -----------------------------------------------------
-# WebSocket endpoint (one pipeline per client)
+# WebSocket endpoint (Render will expose this as /ws)
 # -----------------------------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # This is what the frontend connects to (wss://.../ws)
     await websocket.accept()
     logger.info("🔌 WebSocket client connected")
 
@@ -132,10 +128,9 @@ async def websocket_endpoint(websocket: WebSocket):
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
-        # You can tweak or add serializer here if needed
     )
 
-    # ✅ NOTE: pass the WebSocket, NOT the FastAPI app
+    # ✅ Correct: pass WebSocket, not app
     transport = FastAPIWebsocketTransport(websocket, params)
 
     try:
