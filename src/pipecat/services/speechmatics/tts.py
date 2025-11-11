@@ -16,7 +16,6 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     ErrorFrame,
-    FatalErrorFrame,
     Frame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -174,15 +173,16 @@ class SpeechmaticsTTSService(TTSService):
                             continue
 
                         except (ValueError, ArithmeticError):
-                            yield FatalErrorFrame(
-                                error=f"{self} Service unavailable [503] (attempts {attempt})"
+                            yield ErrorFrame(
+                                error=f"{self} Service unavailable [503] (attempts {attempt})",
+                                fatal=True,
                             )
                             return
 
                     # != 200 : Error
                     if response.status != 200:
-                        yield FatalErrorFrame(
-                            error=f"{self} Service unavailable [{response.status}]"
+                        yield ErrorFrame(
+                            error=f"{self} Service unavailable [{response.status}]", fatal=True
                         )
                         return
 
@@ -225,7 +225,7 @@ class SpeechmaticsTTSService(TTSService):
                     break
 
         except Exception as e:
-            yield ErrorFrame(error=f"{self}: Error generating TTS: {e}")
+            yield ErrorFrame(error=f"{self}: Error generating TTS: {e}", fatal=True)
         finally:
             # Emit the TTS stopped frame
             yield TTSStoppedFrame()
