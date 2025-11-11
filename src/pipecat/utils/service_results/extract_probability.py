@@ -9,11 +9,9 @@
 import math
 from typing import Optional
 
-from pipecat.frames.frames import TranscriptionFrame
 
-
-def extract_whisper_probability(frame: TranscriptionFrame) -> Optional[float]:
-    """Extract probability from Whisper-based TranscriptionFrame result.
+def extract_whisper_probability(result) -> Optional[float]:
+    """Extract probability from Whisper-based STT result.
 
     Works with Groq, OpenAI Whisper, or other Whisper-based services that use
     verbose_json format with segments containing avg_logprob.
@@ -21,7 +19,7 @@ def extract_whisper_probability(frame: TranscriptionFrame) -> Optional[float]:
     Converts avg_logprob to probability.
 
     Args:
-        frame: TranscriptionFrame with result from GroqSTTService or OpenAISTTService
+        result: STT result object from GroqSTTService or OpenAISTTService
             (when include_prob_metrics=True and using Whisper models).
 
     Returns:
@@ -36,16 +34,16 @@ def extract_whisper_probability(frame: TranscriptionFrame) -> Optional[float]:
         # ... use stt in pipeline ...
         # In your frame processor:
         if isinstance(frame, TranscriptionFrame):
-            prob = extract_whisper_probability(frame)
+            prob = extract_whisper_probability(frame.result)
             if prob:
                 print(f"Transcription confidence: {prob:.2%}")
     """
-    if not frame.result:
+    if not result:
         return None
 
     # Whisper verbose_json format: response.segments[0].avg_logprob
-    if hasattr(frame.result, "segments") and frame.result.segments:
-        segment = frame.result.segments[0]
+    if hasattr(result, "segments") and result.segments:
+        segment = result.segments[0]
         avg_logprob = getattr(segment, "avg_logprob", None)
         if avg_logprob is not None:
             return math.exp(avg_logprob)
@@ -53,11 +51,11 @@ def extract_whisper_probability(frame: TranscriptionFrame) -> Optional[float]:
     return None
 
 
-def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> Optional[float]:
-    """Extract probability from OpenAI GPT-4o-transcribe TranscriptionFrame result.
+def extract_openai_gpt4o_probability(result) -> Optional[float]:
+    """Extract probability from OpenAI GPT-4o-transcribe STT result.
 
     Args:
-        frame: TranscriptionFrame with result from OpenAISTTService
+        result: STT result object from OpenAISTTService
             using GPT-4o-transcribe model (when include_prob_metrics=True).
 
     Returns:
@@ -72,16 +70,16 @@ def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> Optional[floa
         # ... use stt in pipeline ...
         # In your frame processor:
         if isinstance(frame, TranscriptionFrame):
-            prob = extract_openai_gpt4o_probability(frame)
+            prob = extract_openai_gpt4o_probability(frame.result)
             if prob:
                 print(f"Transcription confidence: {prob:.2%}")
     """
-    if not frame.result:
+    if not result:
         return None
 
     # OpenAI GPT-4o-transcribe format: response.logprobs
-    if hasattr(frame.result, "logprobs"):
-        logprobs = frame.result.logprobs
+    if hasattr(result, "logprobs"):
+        logprobs = result.logprobs
         if logprobs:
             # Calculate average logprob and convert to probability
             avg_logprob = sum(logprobs) / len(logprobs)
@@ -90,11 +88,11 @@ def extract_openai_gpt4o_probability(frame: TranscriptionFrame) -> Optional[floa
     return None
 
 
-def extract_deepgram_probability(frame: TranscriptionFrame) -> Optional[float]:
-    """Extract probability from Deepgram TranscriptionFrame result.
+def extract_deepgram_probability(result) -> Optional[float]:
+    """Extract probability from Deepgram STT result.
 
     Args:
-        frame: TranscriptionFrame with result from DeepgramSTTService.
+        result: STT result object from DeepgramSTTService.
 
     Returns:
         Probability (0-1) if available, None otherwise.
@@ -110,14 +108,13 @@ def extract_deepgram_probability(frame: TranscriptionFrame) -> Optional[float]:
         # ... use stt in pipeline ...
         # In your frame processor:
         if isinstance(frame, TranscriptionFrame):
-            prob = extract_deepgram_probability(frame)
+            prob = extract_deepgram_probability(frame.result)
             if prob:
                 print(f"Transcription confidence: {prob:.2%}")
     """
-    if not frame.result:
+    if not result:
         return None
 
-    result = frame.result
     if hasattr(result, "channel") and result.channel:
         if hasattr(result.channel, "alternatives") and result.channel.alternatives:
             alt = result.channel.alternatives[0]

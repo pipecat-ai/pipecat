@@ -272,7 +272,7 @@ class DeepgramSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Optional[Language] = None, result=None
     ):
         """Handle a transcription result with tracing."""
         pass
@@ -299,7 +299,7 @@ class DeepgramSTTService(STTService):
                         result=result,
                     )
                 )
-                await self._handle_transcription(transcript, is_final, language)
+                await self._handle_transcription(transcript, is_final, language, result)
                 await self.stop_processing_metrics()
             else:
                 # For interim transcriptions, just push the frame without tracing

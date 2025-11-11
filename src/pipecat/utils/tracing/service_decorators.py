@@ -23,6 +23,11 @@ if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
+from pipecat.utils.service_results.extract_probability import (
+    extract_deepgram_probability,
+    extract_openai_gpt4o_probability,
+    extract_whisper_probability,
+)
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -96,6 +101,43 @@ def _add_token_usage_to_span(span, token_usage):
         span.set_attribute(
             "gen_ai.usage.output_tokens", getattr(token_usage, "completion_tokens", 0)
         )
+
+
+def _extract_stt_confidence(result, service_class_name: str) -> Optional[float]:
+    """Extract confidence/probability score from STT result.
+
+    Args:
+        result: The STT result object (varies by service).
+        service_class_name: The name of the STT service class
+           (we only support Whisper-based services + gpt-4o-transcribe and Deepgram services for now).
+
+    Returns:
+        Probability as a float between 0 and 1, or None if unavailable.
+    """
+    if not result:
+        return None
+
+    # Try service-specific extraction based on service name
+    service_name_lower = service_class_name.lower()
+
+    # Deepgram services
+    if "deepgram" in service_name_lower:
+        return extract_deepgram_probability(result)
+
+    # OpenAI services (handles both Whisper and GPT-4o-transcribe)
+    elif "openai" in service_name_lower:
+        # Try GPT-4o first
+        prob = extract_openai_gpt4o_probability(result)
+        if prob is not None:
+            return prob
+        # Fall back to Whisper format
+        return extract_whisper_probability(result)
+
+    # Groq, SambaNova, and other Whisper-based services
+    elif any(provider in service_name_lower for provider in ["groq", "sambanova", "whisper"]):
+        return extract_whisper_probability(result)
+
+    return None
 
 
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
@@ -227,6 +269,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     - Transcription text and final status
     - Language information
     - Performance metrics like TTFB
+    - Probability/confidence metrics when available
 
     Args:
         func: The STT method to trace.
@@ -239,12 +282,19 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
         return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
+        # Check if the wrapped function accepts the 'result' parameter
+        sig = inspect.signature(f)
+        accepts_result = "result" in sig.parameters
+
         @functools.wraps(f)
-        async def wrapper(self, transcript, is_final, language=None):
+        async def wrapper(self, transcript, is_final, language=None, result=None):
             try:
                 # Check if tracing is enabled for this service instance
                 if not getattr(self, "_tracing_enabled", False):
-                    return await f(self, transcript, is_final, language)
+                    if accepts_result:
+                        return await f(self, transcript, is_final, language, result)
+                    else:
+                        return await f(self, transcript, is_final, language)
 
                 service_class_name = self.__class__.__name__
                 span_name = "stt"
@@ -267,6 +317,11 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         # Use settings from the service if available
                         settings = getattr(self, "_settings", {})
 
+                        # Extract confidence/probability metrics from result if available
+                        confidence = None
+                        if result:
+                            confidence = _extract_stt_confidence(result, service_class_name)
+
                         add_stt_span_attributes(
                             span=current_span,
                             service_name=service_class_name,
@@ -278,10 +333,14 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             vad_enabled=getattr(self, "vad_enabled", False),
                             settings=settings,
                             ttfb=ttfb,
+                            confidence=confidence,
                         )
 
-                        # Call the original function
-                        return await f(self, transcript, is_final, language)
+                        # Call the original function with appropriate parameters
+                        if accepts_result:
+                            return await f(self, transcript, is_final, language, result)
+                        else:
+                            return await f(self, transcript, is_final, language)
                     except Exception as e:
                         # Log any exception but don't disrupt the main flow
                         logging.warning(f"Error in STT transcription tracing: {e}")
@@ -289,7 +348,10 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             except Exception as e:
                 logging.error(f"Error in STT tracing (continuing without tracing): {e}")
                 # If tracing fails, fall back to the original function
-                return await f(self, transcript, is_final, language)
+                if accepts_result:
+                    return await f(self, transcript, is_final, language, result)
+                else:
+                    return await f(self, transcript, is_final, language)
 
         return wrapper
 
@@ -709,7 +771,7 @@ def traced_gemini_live(operation: str) -> Callable:
                                             else:
                                                 operation_attrs["tool.result_status"] = "completed"
 
-                                    except json.JSONDecodeError as e:
+                                    except json.JSONDecodeError:
                                         operation_attrs["tool.result"] = (
                                             f"Invalid JSON: {str(result_content)[:500]}"
                                         )
