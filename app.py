@@ -23,12 +23,16 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.frames.frames import EndFrame
 
+# -----------------------------------------------------
+# Load environment variables
+# -----------------------------------------------------
 load_dotenv(override=True)
 
 # -----------------------------------------------------
-# FastAPI server for Render + health check
+# FastAPI Server Setup
 # -----------------------------------------------------
-app = FastAPI()
+app = FastAPI(title="Pipecat Speech2Speech", version="1.0")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,10 +43,18 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "Pipecat Realtime Speech2Speech is running", "endpoint": "/ws"}
+    return {
+        "message": "🎙️ Pipecat Realtime Speech2Speech is running",
+        "websocket": "/ws",
+        "health": "/health"
+    }
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 # -----------------------------------------------------
-# Main speech pipeline
+# Pipeline Logic
 # -----------------------------------------------------
 async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
     logger.info("🎤 Starting Pipecat Realtime Speech2Speech pipeline")
@@ -50,7 +62,7 @@ async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
     # --- Services setup ---
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # You can change voice
+        voice_id=os.getenv("VOICE_ID", "71a7ad14-091c-4e8e-a314-022ece01c121"),
     )
 
     stt = SpeechmaticsSTTService(
@@ -63,7 +75,7 @@ async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
         params=BaseOpenAILLMService.InputParams(temperature=0.7),
     )
 
-    # --- Conversation context ---
+    # --- Context and aggregator ---
     messages = [
         {"role": "system", "content": "You are Julia, a warm, conversational AI voice assistant."}
     ]
@@ -74,18 +86,18 @@ async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
     task = PipelineTask(
         Pipeline(
             [
-                transport.input(),               # Mic input stream
+                transport.input(),               # Mic input
                 stt,                             # Speech → Text
-                context_aggregator.user(),       # Add to LLM context
-                llm,                             # Generate AI response
-                tts,                             # Convert text → Speech
-                transport.output(),              # Stream back audio
-                context_aggregator.assistant(),  # Save context turn
+                context_aggregator.user(),       # User context
+                llm,                             # LLM response
+                tts,                             # Text → Speech
+                transport.output(),              # Audio back to user
+                context_aggregator.assistant(),  # Assistant context
             ]
         )
     )
 
-    # --- Transport event hooks ---
+    # --- Event hooks ---
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("✅ Client connected to Pipecat stream")
@@ -96,14 +108,16 @@ async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
         logger.info("❌ Client disconnected")
         await task.queue_frames([EndFrame()])
 
-    # --- Start runner ---
+    # --- Run pipeline ---
     runner = PipelineRunner(handle_sigint=handle_sigint)
     await runner.run(task)
 
 # -----------------------------------------------------
-# Bootstrapping
+# Start pipeline automatically on app startup
 # -----------------------------------------------------
-def main():
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🚀 Starting server initialization")
     port = int(os.getenv("PORT", 8000))
     params = FastAPIWebsocketParams(
         app=app,
@@ -113,9 +127,6 @@ def main():
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
     )
-
     transport = FastAPIWebsocketTransport(params)
-    asyncio.run(run_pipeline(transport, argparse.Namespace(), handle_sigint=False))
-
-if __name__ == "__main__":
-    main()
+    asyncio.create_task(run_pipeline(transport, argparse.Namespace(), handle_sigint=False))
+    logger.info(f"✅ Speech2Speech pipeline running on port {port}")
