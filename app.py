@@ -1,18 +1,34 @@
 import os
-import tempfile
-import uuid
+import argparse
 import asyncio
-from fastapi import FastAPI, WebSocket, UploadFile, File, Form
-from fastapi.responses import FileResponse, JSONResponse
+from dotenv import load_dotenv
+from loguru import logger
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from gtts import gTTS
-import whisper
+
+# Pipecat imports
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.transports.network.fastapi_websocket import (
+    FastAPIWebsocketTransport,
+    FastAPIWebsocketParams,
+)
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
+from pipecat.transcriptions.language import Language
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.frames.frames import EndFrame
 
-app = FastAPI(title="Pipecat Speech↔Speech Server", version="2.0")
+load_dotenv(override=True)
 
-# Allow CORS for Bolt.new or browser clients
+# -----------------------------------------------------
+# FastAPI server for Render + health check
+# -----------------------------------------------------
+app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,48 +37,85 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Health Route ---
 @app.get("/")
 async def root():
-    return {"message": "✅ Pipecat Speech2Speech Server running!"}
+    return {"message": "Pipecat Realtime Speech2Speech is running", "endpoint": "/ws"}
 
-# --- Existing HTTP Speech2Speech route (batch mode) ---
-@app.post("/v1/speech2speech")
-async def speech_to_speech(file: UploadFile = File(...), source_language: str = Form("en")):
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_audio:
-            tmp_audio.write(await file.read())
-            input_path = tmp_audio.name
+# -----------------------------------------------------
+# Main speech pipeline
+# -----------------------------------------------------
+async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info("🎤 Starting Pipecat Realtime Speech2Speech pipeline")
 
-        model = whisper.load_model("small")
-        result = model.transcribe(input_path, language=source_language)
-        recognized_text = result["text"]
+    # --- Services setup ---
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # You can change voice
+    )
 
-        output_file = f"speech_{uuid.uuid4()}.mp3"
-        tts = gTTS(text=recognized_text, lang=source_language)
-        tts.save(output_file)
+    stt = SpeechmaticsSTTService(
+        api_key=os.getenv("SPEECHMATICS_API_KEY"),
+        language=Language.EN,
+    )
 
-        return FileResponse(output_file, media_type="audio/mpeg")
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        params=BaseOpenAILLMService.InputParams(temperature=0.7),
+    )
 
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    # --- Conversation context ---
+    messages = [
+        {"role": "system", "content": "You are Julia, a warm, conversational AI voice assistant."}
+    ]
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
 
+    # --- Define processing pipeline ---
+    task = PipelineTask(
+        Pipeline(
+            [
+                transport.input(),               # Mic input stream
+                stt,                             # Speech → Text
+                context_aggregator.user(),       # Add to LLM context
+                llm,                             # Generate AI response
+                tts,                             # Convert text → Speech
+                transport.output(),              # Stream back audio
+                context_aggregator.assistant(),  # Save context turn
+            ]
+        )
+    )
 
-# --- NEW: WebSocket Streaming Route ---
-@app.websocket("/v1/stream")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    await websocket.send_text("🔊 Connected to Pipecat Real-Time Speech Stream")
+    # --- Transport event hooks ---
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info("✅ Client connected to Pipecat stream")
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-    # Simple Pipecat placeholder (expand to full STT→LLM→TTS pipeline if desired)
-    try:
-        while True:
-            data = await websocket.receive_bytes()
-            # TODO: In production, decode and stream this audio into STT→LLM→TTS pipeline
-            await asyncio.sleep(0.2)
-            await websocket.send_text("Streaming response chunk...")
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("❌ Client disconnected")
+        await task.queue_frames([EndFrame()])
 
-    except Exception as e:
-        await websocket.send_text(f"❌ Error: {str(e)}")
-    finally:
-        await websocket.close()
+    # --- Start runner ---
+    runner = PipelineRunner(handle_sigint=handle_sigint)
+    await runner.run(task)
+
+# -----------------------------------------------------
+# Bootstrapping
+# -----------------------------------------------------
+def main():
+    port = int(os.getenv("PORT", 8000))
+    params = FastAPIWebsocketParams(
+        app=app,
+        host="0.0.0.0",
+        port=port,
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    )
+
+    transport = FastAPIWebsocketTransport(params)
+    asyncio.run(run_pipeline(transport, argparse.Namespace(), handle_sigint=False))
+
+if __name__ == "__main__":
+    main()
