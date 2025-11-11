@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Added support for retrying `SpeechmaticsTTSService` when it returns a 503
-  error. Default values in `InputParams`.
+  error.
 
 ### Deprecated
 
