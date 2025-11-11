@@ -5,7 +5,7 @@
 #
 
 import sys
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import version
 
 from loguru import logger
 

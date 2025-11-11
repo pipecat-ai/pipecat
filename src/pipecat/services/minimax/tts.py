@@ -123,6 +123,7 @@ class MiniMaxHttpTTSService(TTSService):
             emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
                 "disgusted", "surprised", "neutral", "fluent").
             text_normalization: Enable text normalization (Chinese/English).
+            english_normalization: (DEPRECATED) Use text_normalization instead.
             latex_read: Enable LaTeX formula reading.
             subtitle_enable: Enable subtitle generation with word-level timestamps.
         """
@@ -133,6 +134,7 @@ class MiniMaxHttpTTSService(TTSService):
         pitch: Optional[int] = 0
         emotion: Optional[str] = None
         text_normalization: Optional[bool] = None
+        english_normalization: Optional[bool] = None
         latex_read: Optional[bool] = None
         subtitle_enable: Optional[bool] = None
 
@@ -141,8 +143,6 @@ class MiniMaxHttpTTSService(TTSService):
         *,
         api_key: str,
         base_url: str = "https://api.minimax.io/v1/t2a_v2", 
-        # https://api-uw.minimax.io/v1/t2a_v2
-        # support western United States
         group_id: str,
         model: str = "speech-02-turbo",
         voice_id: str = "English_Persuasive_Man",
@@ -157,7 +157,7 @@ class MiniMaxHttpTTSService(TTSService):
             api_key: MiniMax API key for authentication.
             base_url: API base URL, defaults to MiniMax's T2A endpoint.
                 Global: https://api.minimax.io/v1/t2a_v2
-                Mainland China: https://api.minimaxi.com/v1/t2a_v2
+                Western US: https://api-uw.minimax.io/v1/t2a_v2
             group_id: MiniMax Group ID to identify project.
             model: TTS model name. Defaults to "speech-02-turbo". Options include:
                 "speech-2.6-turbo" (latest, supports Filipino/Tamil/Persian),
@@ -201,6 +201,15 @@ class MiniMaxHttpTTSService(TTSService):
         if params.text_normalization is not None:
             self._settings["voice_setting"]["text_normalization"] = params.text_normalization
 
+        # Add english_normalization if provided (deprecated)
+        if params.english_normalization is not None:
+            logger.warning(
+                "english_normalization is deprecated, use text_normalization instead"
+            )
+            # Map english_normalization to text_normalization for backward compatibility
+            if params.text_normalization is None:
+                self._settings["voice_setting"]["text_normalization"] = params.english_normalization
+
         # Add latex_read if provided
         if params.latex_read is not None:
             self._settings["voice_setting"]["latex_read"] = params.latex_read
@@ -226,17 +235,6 @@ class MiniMaxHttpTTSService(TTSService):
             service_lang = self.language_to_service_language(params.language)
             if service_lang:
                 self._settings["language_boost"] = service_lang
-                
-                # Validate language-model compatibility
-                # Filipino, Tamil, Persian only supported by speech-2.6-* models
-                if params.language in {Language.FA, Language.FIL, Language.TA}:
-                    if not model.startswith("speech-2.6"):
-                        logger.warning(
-                            f"Language {params.language.value} ({service_lang}) is only supported by "
-                            f"speech-2.6-hd and speech-2.6-turbo models. "
-                            f"Current model '{model}' may not support this language. "
-                            f"Consider using 'speech-2.6-turbo' or 'speech-2.6-hd'."
-                        )
 
         # Add optional emotion if provided
         if params.emotion:
@@ -303,7 +301,7 @@ class MiniMaxHttpTTSService(TTSService):
         """
         await super().start(frame)
         self._settings["audio_setting"]["sample_rate"] = self.sample_rate
-        logger.info(f"MiniMax TTS initialized with sample_rate={self.sample_rate}")
+        logger.info(f"MiniMax TTS initialized with sample_rate: {self.sample_rate}")
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -397,32 +395,6 @@ class MiniMaxHttpTTSService(TTSService):
 
                     buffer.extend(chunk)
                     
-                    # Check if first chunk is a direct JSON error (not streaming format)
-                    if not buffer.startswith(b"data:"):
-                        try:
-                            error_data = json.loads(buffer.decode("utf-8"))
-                            base_resp = error_data.get("base_resp", {})
-                            status_code = base_resp.get("status_code", 0)
-                            
-                            if status_code != 0:
-                                # This is a non-streaming error response
-                                # Use trace_id from header (already extracted above)
-                                status_msg = base_resp.get("status_msg", "Unknown error")
-                                
-                                error_message = (
-                                    f"MiniMax TTS API error: status_code={status_code}, "
-                                    f"status_msg={status_msg}, trace_id={self._current_trace_id}"
-                                )
-                                logger.error(
-                                    error_message,
-                                    extra={"trace_id": self._current_trace_id, "status_code": status_code},
-                                )
-                                yield ErrorFrame(error=error_message)
-                                return
-                        except (json.JSONDecodeError, UnicodeDecodeError):
-                            # Not a valid JSON, continue with streaming processing
-                            pass
-
                     # Find complete data blocks
                     while b"data:" in buffer:
                         start = buffer.find(b"data:")
