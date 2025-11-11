@@ -6,11 +6,11 @@ from loguru import logger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Pipecat imports
+# Pipecat imports (updated)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.transports.network.fastapi_websocket import (
+from pipecat.transports.websocket.fastapi import (  # ✅ new import path
     FastAPIWebsocketTransport,
     FastAPIWebsocketParams,
 )
@@ -118,15 +118,20 @@ async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
 @app.on_event("startup")
 async def startup_event():
     logger.info("🚀 Starting server initialization")
+
     port = int(os.getenv("PORT", 8000))
     params = FastAPIWebsocketParams(
-        app=app,
         host="0.0.0.0",
         port=port,
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
     )
-    transport = FastAPIWebsocketTransport(params)
+
+    # ✅ FIX: new constructor expects `app` first, then `params`
+    transport = FastAPIWebsocketTransport(app, params)
+
+    # ✅ Start pipeline in background
     asyncio.create_task(run_pipeline(transport, argparse.Namespace(), handle_sigint=False))
+
     logger.info(f"✅ Speech2Speech pipeline running on port {port}")
