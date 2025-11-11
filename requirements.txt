@@ -1,7 +1,5 @@
+pipecat-ai
 fastapi
 uvicorn
-openai-whisper
-gtts
-torch
-python-multipart
-pipecat-ai
+loguru
+python-dotenv
