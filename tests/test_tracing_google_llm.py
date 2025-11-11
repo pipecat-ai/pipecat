@@ -19,17 +19,6 @@ import pytest
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.google.llm import GoogleLLMService
 
-# Check if opentelemetry is available
-try:
-    import opentelemetry.trace  # noqa: F401
-
-    OPENTELEMETRY_AVAILABLE = True
-except ImportError:
-    OPENTELEMETRY_AVAILABLE = False
-
-# Skip all tests in this module if opentelemetry is not available
-pytestmark = pytest.mark.skipif(not OPENTELEMETRY_AVAILABLE, reason="opentelemetry not installed")
-
 
 @pytest.mark.asyncio
 async def test_google_tracing_with_universal_llm_context():
