@@ -16,12 +16,14 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     ErrorFrame,
+    FatalErrorFrame,
     Frame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.network import exponential_backoff_time
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -44,15 +46,9 @@ class SpeechmaticsTTSService(TTSService):
     SPEECHMATICS_SAMPLE_RATE = 16000
 
     class InputParams(BaseModel):
-        """Optional input parameters for Speechmatics TTS configuration.
+        """Optional input parameters for Speechmatics TTS configuration."""
 
-        Parameters:
-            retry_interval_s: Interval between retries in seconds. Defaults to 0.02.
-            retry_timeout_s: Timeout for retries in seconds. Defaults to 1.0.
-        """
-
-        retry_interval_s: float = 0.02
-        retry_timeout_s: float = 1.0
+        pass
 
     def __init__(
         self,
@@ -116,57 +112,87 @@ class SpeechmaticsTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
+        # Log the TTS started frame
         logger.debug(f"{self}: Generating TTS [{text}]")
 
+        # HTTP headers
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 
+        # HTTP payload
         payload = {
             "text": text,
         }
 
+        # Complete HTTP URL
         url = _get_endpoint_url(self._base_url, self._voice_id, self.sample_rate)
 
         try:
+            # Start TTS TTFB metrics
             await self.start_ttfb_metrics()
 
-            # Retry loop for 503 responses
-            start_time = asyncio.get_event_loop().time()
+            # Track attempt
+            attempt = 0
 
+            # Keep retrying until we get a 200 response or timeout
             while True:
                 async with self._session.post(url, json=payload, headers=headers) as response:
+                    """Evaluate response from TTS service."""
+
+                    # 503 : Service unavailable
                     if response.status == 503:
-                        elapsed_time = asyncio.get_event_loop().time() - start_time
-                        if elapsed_time >= self._params.retry_timeout_s:
-                            error_message = (
-                                f"{self} HTTP 503 (timeout after {self._params.retry_timeout_s}s)"
+                        """Calculate the backoff time and retry."""
+
+                        try:
+                            # Calculate the backoff time
+                            backoff_time = exponential_backoff_time(
+                                attempt=attempt, min_wait=0.25, max_wait=8.0, multiplier=0.5
                             )
-                            logger.error(error_message)
-                            yield ErrorFrame(error=error_message)
+
+                            # Check if we've exceeded the maximum number of attempts
+                            if backoff_time >= 8.0:
+                                raise ValueError()
+
+                            # Report error frame
+                            yield ErrorFrame(
+                                error=f"{self} HTTP 503 (attempt {attempt}, retry in {backoff_time:.2f}s)"
+                            )
+
+                            # Wait before retrying
+                            await asyncio.sleep(backoff_time)
+
+                            # Increment attempt
+                            attempt += 1
+
+                            # Retry
+                            continue
+
+                        except (ValueError, ArithmeticError):
+                            yield FatalErrorFrame(
+                                error=f"{self} Service unavailable (attempts {attempt})"
+                            )
                             return
 
-                        logger.debug(
-                            f"{self} Received 503, retrying in {self._params.retry_interval_s}s..."
-                        )
-                        await asyncio.sleep(self._params.retry_interval_s)
-                        continue
-
+                    # != 200 : Error
                     if response.status != 200:
-                        error_message = f"{self} HTTP {response.status}"
-                        logger.error(error_message)
-                        yield ErrorFrame(error=error_message)
+                        yield FatalErrorFrame(
+                            error=f"{self} Service unavailable ({response.status})"
+                        )
                         return
 
+                    # Update Pipecat metrics
                     await self.start_tts_usage_metrics(text)
 
+                    # Emit the TTS started frame
                     yield TTSStartedFrame()
 
                     # Process the response in streaming chunks
                     first_chunk = True
                     buffer = b""
 
+                    # Iterate over each audio data chunk from the TTS API
                     async for chunk in response.content.iter_any():
                         if not chunk:
                             continue
@@ -182,10 +208,9 @@ class SpeechmaticsTTSService(TTSService):
                             complete_bytes = complete_samples * 2
 
                             audio_data = buffer[:complete_bytes]
-                            buffer = buffer[
-                                complete_bytes:
-                            ]  # Keep remaining bytes for next iteration
+                            buffer = buffer[complete_bytes:]
 
+                            # Emit the audio frame
                             yield TTSAudioRawFrame(
                                 audio=audio_data,
                                 sample_rate=self.sample_rate,
@@ -196,9 +221,9 @@ class SpeechmaticsTTSService(TTSService):
                     break
 
         except Exception as e:
-            logger.exception(f"{self}: Error generating TTS: {e}")
-            yield ErrorFrame(error=f"Speechmatics TTS error: {str(e)}")
+            yield ErrorFrame(error=f"{self}: Error generating TTS: {e}")
         finally:
+            # Emit the TTS stopped frame
             yield TTSStoppedFrame()
 
 
