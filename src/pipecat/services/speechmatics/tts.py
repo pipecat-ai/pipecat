@@ -46,9 +46,13 @@ class SpeechmaticsTTSService(TTSService):
     SPEECHMATICS_SAMPLE_RATE = 16000
 
     class InputParams(BaseModel):
-        """Optional input parameters for Speechmatics TTS configuration."""
+        """Optional input parameters for Speechmatics TTS configuration.
 
-        pass
+        Parameters:
+            max_retries: Maximum number of retries for TTS requests. Defaults to 5.
+        """
+
+        max_retries: int = 5
 
     def __init__(
         self,
@@ -151,8 +155,11 @@ class SpeechmaticsTTSService(TTSService):
                                 attempt=attempt, min_wait=0.25, max_wait=8.0, multiplier=0.5
                             )
 
+                            # Increment attempt
+                            attempt += 1
+
                             # Check if we've exceeded the maximum number of attempts
-                            if backoff_time >= 8.0:
+                            if attempt > self._params.max_retries:
                                 raise ValueError()
 
                             # Report error frame
@@ -162,9 +169,6 @@ class SpeechmaticsTTSService(TTSService):
 
                             # Wait before retrying
                             await asyncio.sleep(backoff_time)
-
-                            # Increment attempt
-                            attempt += 1
 
                             # Retry
                             continue
