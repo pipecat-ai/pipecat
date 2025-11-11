@@ -6,6 +6,7 @@
 
 """Speechmatics TTS service integration."""
 
+import asyncio
 from typing import AsyncGenerator, Optional
 from urllib.parse import urlencode
 
@@ -45,7 +46,8 @@ class SpeechmaticsTTSService(TTSService):
     class InputParams(BaseModel):
         """Optional input parameters for Speechmatics TTS configuration."""
 
-        pass
+        retry_interval_s: float = 0.02
+        retry_timeout_s: float = 1.0
 
     def __init__(
         self,
@@ -125,46 +127,71 @@ class SpeechmaticsTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            async with self._session.post(url, json=payload, headers=headers) as response:
-                if response.status != 200:
-                    error_message = f"Speechmatics TTS error: HTTP {response.status}"
-                    logger.error(error_message)
-                    yield ErrorFrame(error=error_message)
-                    return
+            # Retry loop for 503 responses
+            start_time = asyncio.get_event_loop().time()
 
-                await self.start_tts_usage_metrics(text)
+            while True:
+                async with self._session.post(url, json=payload, headers=headers) as response:
+                    if response.status == 503:
+                        elapsed_time = asyncio.get_event_loop().time() - start_time
+                        if elapsed_time >= self._params.retry_timeout_s:
+                            error_message = (
+                                f"{self} HTTP 503 (timeout after {self._params.retry_timeout_s}s)"
+                            )
+                            logger.error(error_message)
+                            yield ErrorFrame(error=error_message)
+                            return
 
-                yield TTSStartedFrame()
-
-                # Process the response in streaming chunks
-                first_chunk = True
-                buffer = b""
-
-                async for chunk in response.content.iter_any():
-                    if not chunk:
-                        continue
-                    if first_chunk:
-                        await self.stop_ttfb_metrics()
-                        first_chunk = False
-
-                    buffer += chunk
-
-                    # Emit all complete 2-byte int16 samples from buffer
-                    if len(buffer) >= 2:
-                        complete_samples = len(buffer) // 2
-                        complete_bytes = complete_samples * 2
-
-                        audio_data = buffer[:complete_bytes]
-                        buffer = buffer[complete_bytes:]  # Keep remaining bytes for next iteration
-
-                        yield TTSAudioRawFrame(
-                            audio=audio_data,
-                            sample_rate=self.sample_rate,
-                            num_channels=1,
+                        logger.debug(
+                            f"{self} Received 503, retrying in {self._params.retry_interval_s}s..."
                         )
+                        await asyncio.sleep(self._params.retry_interval_s)
+                        continue
+
+                    if response.status != 200:
+                        error_message = f"{self} HTTP {response.status}"
+                        logger.error(error_message)
+                        yield ErrorFrame(error=error_message)
+                        return
+
+                    await self.start_tts_usage_metrics(text)
+
+                    yield TTSStartedFrame()
+
+                    # Process the response in streaming chunks
+                    first_chunk = True
+                    buffer = b""
+
+                    async for chunk in response.content.iter_any():
+                        if not chunk:
+                            continue
+                        if first_chunk:
+                            await self.stop_ttfb_metrics()
+                            first_chunk = False
+
+                        buffer += chunk
+
+                        # Emit all complete 2-byte int16 samples from buffer
+                        if len(buffer) >= 2:
+                            complete_samples = len(buffer) // 2
+                            complete_bytes = complete_samples * 2
+
+                            audio_data = buffer[:complete_bytes]
+                            buffer = buffer[
+                                complete_bytes:
+                            ]  # Keep remaining bytes for next iteration
+
+                            yield TTSAudioRawFrame(
+                                audio=audio_data,
+                                sample_rate=self.sample_rate,
+                                num_channels=1,
+                            )
+
+                    # Successfully processed the response, break out of retry loop
+                    break
 
         except Exception as e:
-            logger.exception(f"Error generating TTS: {e}")
+            logger.exception(f"{self}: Error generating TTS: {e}")
             yield ErrorFrame(error=f"Speechmatics TTS error: {str(e)}")
         finally:
             yield TTSStoppedFrame()
