@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed issue where `DeepgramFluxSTTService` failed to connect if passing a
+  `keyterm` or `tag` containing a space.
+
 - Prevented `HeyGenVideoService` from automatically disconnecting after 5 minutes.
 
 ## [0.0.94] - 2025-11-10
