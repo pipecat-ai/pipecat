@@ -1,30 +1,25 @@
 import os
-import argparse
 import asyncio
 from dotenv import load_dotenv
 from loguru import logger
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 # Pipecat imports
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.pipeline.runner import PipelineRunner
-
-from pipecat.transports.websocket.fastapi import (
-    FastAPIWebsocketTransport,
-    FastAPIWebsocketParams,
-)
-
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport, FastAPIWebsocketParams
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.frames.frames import EndFrame
+from pipecat.frames.llm import LLMRunFrame
 
 # -----------------------------------------------------
 # Load environment variables
@@ -34,9 +29,8 @@ load_dotenv(override=True)
 # -----------------------------------------------------
 # FastAPI Server Setup
 # -----------------------------------------------------
-app = FastAPI(title="Pipecat Speech2Speech", version="1.0")
+app = FastAPI(title="Pipecat Speech2Speech", version="2.0")
 
-# ✅ Correct way to add CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,7 +42,7 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {
-        "message": "🎙️ Pipecat Realtime Speech2Speech is running",
+        "message": "🎙️ Julia Voice Assistant is running!",
         "websocket": "/ws",
         "health": "/health"
     }
@@ -81,43 +75,60 @@ async def run_pipeline(transport, handle_sigint: bool = False):
 
     # --- Context & aggregator ---
     messages = [
-        {"role": "system", "content": "You are Julia, a warm, conversational AI voice assistant."}
+        {
+            "role": "system",
+            "content": (
+                "You are Julia, a warm, conversational AI voice assistant. "
+                "Keep your responses short and natural for real-time speech."
+            ),
+        }
     ]
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
+    # --- Audio Buffer (records all user audio) ---
+    audiobuffer = AudioBufferProcessor(user_continuous_stream=True)
+
     # --- Define processing pipeline ---
+    pipeline = Pipeline([
+        transport.input(),               # Mic input
+        stt,                             # Speech → Text
+        context_aggregator.user(),       # Update user context
+        llm,                             # Generate response
+        tts,                             # Text → Speech
+        transport.output(),              # Send audio back to user
+        audiobuffer,                     # Record audio (optional)
+        context_aggregator.assistant(),  # Update assistant context
+    ])
+
+    # --- Pipeline task parameters ---
     task = PipelineTask(
-        Pipeline(
-            [
-                transport.input(),               # Mic input
-                stt,                             # Speech → Text
-                context_aggregator.user(),       # User context
-                llm,                             # LLM response
-                tts,                             # Text → Speech
-                transport.output(),              # Audio back to user
-                context_aggregator.assistant(),  # Assistant context
-            ]
-        )
+        pipeline,
+        params=PipelineParams(
+            audio_in_sample_rate=16000,
+            audio_out_sample_rate=16000,
+            allow_interruptions=True,
+        ),
     )
 
-    # --- Event hooks ---
+    # --- Event Hooks ---
     @transport.event_handler("on_client_connected")
     async def on_client_connected(_transport, _client):
         logger.info("✅ Client connected to Pipecat stream")
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        # Trigger LLM startup message
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(_transport, _client):
         logger.info("❌ Client disconnected")
         await task.queue_frames([EndFrame()])
 
-    # --- Run pipeline ---
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    # --- Run the pipeline ---
+    runner = PipelineRunner(handle_sigint=handle_sigint, force_gc=True)
     await runner.run(task)
 
 # -----------------------------------------------------
-# WebSocket endpoint (Render will expose this as /ws)
+# WebSocket endpoint
 # -----------------------------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -127,10 +138,12 @@ async def websocket_endpoint(websocket: WebSocket):
     params = FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        add_wav_header=False,
+        vad_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
+        vad_audio_passthrough=True,
     )
 
-    # ✅ Correct: pass WebSocket, not app
     transport = FastAPIWebsocketTransport(websocket, params)
 
     try:
