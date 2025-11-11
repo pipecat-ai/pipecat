@@ -3,17 +3,20 @@ import argparse
 import asyncio
 from dotenv import load_dotenv
 from loguru import logger
-from fastapi import FastAPI
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-# Pipecat imports (updated)
+# Pipecat imports
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.transports.websocket.fastapi import (  # ✅ new import path
+
+from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketTransport,
     FastAPIWebsocketParams,
 )
+
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -34,11 +37,12 @@ load_dotenv(override=True)
 app = FastAPI(title="Pipecat Speech2Speech", version="1.0")
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware(
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 )
 
 @app.get("/")
@@ -46,7 +50,7 @@ async def root():
     return {
         "message": "🎙️ Pipecat Realtime Speech2Speech is running",
         "websocket": "/ws",
-        "health": "/health"
+        "health": "/health",
     }
 
 @app.get("/health")
@@ -54,9 +58,9 @@ async def health():
     return {"status": "ok"}
 
 # -----------------------------------------------------
-# Pipeline Logic
+# Pipeline Logic (for a single client)
 # -----------------------------------------------------
-async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
+async def run_pipeline(transport, handle_sigint: bool = False):
     logger.info("🎤 Starting Pipecat Realtime Speech2Speech pipeline")
 
     # --- Services setup ---
@@ -77,7 +81,10 @@ async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
 
     # --- Context and aggregator ---
     messages = [
-        {"role": "system", "content": "You are Julia, a warm, conversational AI voice assistant."}
+        {
+            "role": "system",
+            "content": "You are Julia, a warm, conversational AI voice assistant.",
+        }
     ]
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
@@ -99,12 +106,12 @@ async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
 
     # --- Event hooks ---
     @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
+    async def on_client_connected(_transport, _client):
         logger.info("✅ Client connected to Pipecat stream")
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
+    async def on_client_disconnected(_transport, _client):
         logger.info("❌ Client disconnected")
         await task.queue_frames([EndFrame()])
 
@@ -113,25 +120,31 @@ async def run_pipeline(transport, _: argparse.Namespace, handle_sigint: bool):
     await runner.run(task)
 
 # -----------------------------------------------------
-# Start pipeline automatically on app startup
+# WebSocket endpoint (one pipeline per client)
 # -----------------------------------------------------
-@app.on_event("startup")
-async def startup_event():
-    logger.info("🚀 Starting server initialization")
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    # This is what the frontend connects to (wss://.../ws)
+    await websocket.accept()
+    logger.info("🔌 WebSocket client connected")
 
-    port = int(os.getenv("PORT", 8000))
     params = FastAPIWebsocketParams(
-        host="0.0.0.0",
-        port=port,
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
+        # You can tweak or add serializer here if needed
     )
 
-    # ✅ FIX: new constructor expects `app` first, then `params`
-    transport = FastAPIWebsocketTransport(app, params)
+    # ✅ NOTE: pass the WebSocket, NOT the FastAPI app
+    transport = FastAPIWebsocketTransport(websocket, params)
 
-    # ✅ Start pipeline in background
-    asyncio.create_task(run_pipeline(transport, argparse.Namespace(), handle_sigint=False))
-
-    logger.info(f"✅ Speech2Speech pipeline running on port {port}")
+    try:
+        await run_pipeline(transport, handle_sigint=False)
+    except WebSocketDisconnect:
+        logger.info("🔌 WebSocket client disconnected")
+    except Exception as e:
+        logger.exception(f"❗ Error in WebSocket pipeline: {e}")
+        try:
+            await websocket.close()
+        except Exception:
+            pass
