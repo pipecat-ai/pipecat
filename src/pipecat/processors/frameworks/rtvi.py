@@ -24,6 +24,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Tuple,
     Union,
 )
 
@@ -933,6 +934,9 @@ class RTVIObserverParams:
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
         errors_enabled: [Deprecated] Indicates if errors messages should be sent.
+        skip_aggregator_types: List of aggregation types to skip sending as tts/output messages.
+          Note: if using this to avoid sending secure information, be sure to also disable
+                bot_llm_enabled to avoid leaking through LLM messages.
         audio_level_period_secs: How often audio levels should be sent if enabled.
     """
 
@@ -948,6 +952,7 @@ class RTVIObserverParams:
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
     errors_enabled: Optional[bool] = None
+    skip_aggregator_types: Optional[List[AggregationType | str]] = None
     audio_level_period_secs: float = 0.15
 
 
@@ -1000,8 +1005,26 @@ class RTVIObserver(BaseObserver):
                     DeprecationWarning,
                 )
 
+        self._aggregation_transforms: List[Tuple[str, Callable[[str, str], Awaitable[str]]]] = []
+
+    def transform_aggregation_type(
+        self, aggregation_type: str, transform_function: Callable[[str, str], Awaitable[str]]
+    ):
+        """Transform text for a specific aggregation type before sending as Bot Output or TTS.
+
+        # TODO: What if someone wanted to remove a registered transform?
+
+        Args:
+            aggregation_type: The type of aggregation to transform. This value can be set to "*" to
+                handle all text before sending to the client.
+            transform_function: The function to apply for transformation. This function should take
+                the text and aggregation type as input and return the transformed text.
+                Ex.: async def my_transform(text: str, aggregation_type: str) -> str:
+        """
+        self._aggregation_transforms.append((aggregation_type, transform_function))
+
     async def _logger_sink(self, message):
-        """Logger sink so we cna send system logs to RTVI clients."""
+        """Logger sink so we can send system logs to RTVI clients."""
         message = RTVISystemLogMessage(data=RTVITextMessageData(text=message))
         await self.send_rtvi_message(message)
 
@@ -1138,17 +1161,28 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Handle aggregated LLM text output frames."""
+        # Skip certain aggregator types if configured to do so.
+        if (
+            self._params.skip_aggregator_types
+            and frame.aggregated_by in self._params.skip_aggregator_types
+        ):
+            return
+
+        text = frame.text
+        type = frame.aggregated_by
+        for aggregation_type, transform in self._aggregation_transforms:
+            if aggregation_type == type or aggregation_type == "*":
+                text = await transform(text, type)
+
         isTTS = isinstance(frame, TTSTextFrame)
         if self._params.bot_output_enabled:
             message = RTVIBotOutputMessage(
-                data=RTVIBotOutputMessageData(
-                    text=frame.text, spoken=isTTS, aggregated_by=frame.aggregated_by
-                )
+                data=RTVIBotOutputMessageData(text=text, spoken=isTTS, aggregated_by=type)
             )
             await self.send_rtvi_message(message)
 
         if isTTS and self._params.bot_tts_enabled:
-            tts_message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
+            tts_message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=text))
             await self.send_rtvi_message(tts_message)
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
@@ -1156,7 +1190,7 @@ class RTVIObserver(BaseObserver):
         message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
         await self.send_rtvi_message(message)
 
-        # TODO: Remove all this logic when we fully deprecate bot-transcription messages.
+        # TODO (mrkb): Remove all this logic when we fully deprecate bot-transcription messages.
         self._bot_transcription += frame.text
 
         if match_endofsentence(self._bot_transcription) and len(self._bot_transcription) > 0:

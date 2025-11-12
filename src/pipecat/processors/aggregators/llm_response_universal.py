@@ -24,7 +24,6 @@ from pipecat.audio.interruptions.base_interruption_strategy import BaseInterrupt
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    AggregatedTextFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -48,7 +47,6 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
-    LLMTextFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
@@ -69,8 +67,6 @@ from pipecat.processors.aggregators.llm_response import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.string import concatenate_aggregated_text
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
-from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -599,11 +595,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
-        self._llm_text_aggregator: BaseTextAggregator = (
-            self._params.llm_text_aggregator or SimpleTextAggregator()
-        )
-        self._skip_tts = None
-
     @property
     def has_function_calls_in_progress(self) -> bool:
         """Check if there are any function calls currently in progress.
@@ -627,9 +618,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
             await self._handle_llm_start(frame)
-        # as a subclass of TextFrame, LLMTextFrame must be checked first
-        elif isinstance(frame, LLMTextFrame):
-            await self._handle_llm_text(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._handle_llm_end(frame)
         elif isinstance(frame, TextFrame):
@@ -818,47 +806,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)
 
-    async def _handle_llm_start(self, frame: LLMFullResponseStartFrame):
+    async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
         self._started += 1
-        if self._skip_tts is None:
-            # initialize skip_tts on first start frame
-            self._skip_tts = frame.skip_tts
 
-    async def _handle_llm_text(self, frame: LLMTextFrame):
-        await self._handle_text(frame)
-        await self._maybe_push_llm_aggregation(frame)
-
-    async def _handle_llm_end(self, frame: LLMFullResponseEndFrame):
+    async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
         self._started -= 1
         await self.push_aggregation()
-        await self._maybe_push_llm_aggregation(frame)
-
-    async def _maybe_push_llm_aggregation(self, frame: LLMTextFrame | LLMFullResponseEndFrame):
-        aggregate = None
-        should_reset_aggregator = False
-        if self._skip_tts and not frame.skip_tts:
-            # When skip_tts transitions to False, we need to push any accumulated text.
-            # This ensures that any remaining text accumulated while TTS was skipped is
-            # sent out when TTS resumes, preventing loss of data and maintaining a smooth
-            # transition.
-            aggregate = self._llm_text_aggregator.text
-            should_reset_aggregator = True
-        self._skip_tts = frame.skip_tts
-        if self._skip_tts:
-            if isinstance(frame, LLMFullResponseEndFrame):
-                # on end frame, always push the aggregation
-                aggregate = self._llm_text_aggregator.text
-                should_reset_aggregator = True
-            else:  # This is an LLMTextFrame
-                aggregate = await self._llm_text_aggregator.aggregate(frame.text)
-
-        if not aggregate:
-            return
-
-        llm_frame = AggregatedTextFrame(text=aggregate.text, aggregated_by=aggregate.type)
-        await self.push_frame(llm_frame)
-        if should_reset_aggregator:
-            await self._llm_text_aggregator.reset()
 
     async def _handle_text(self, frame: TextFrame):
         if not self._started or not frame.append_to_context:

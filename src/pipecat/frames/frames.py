@@ -359,11 +359,14 @@ class LLMTextFrame(TextFrame):
     pass
 
 
-class AggregationType(Enum):
+class AggregationType(str, Enum):
     """Built-in aggregation strings."""
 
     SENTENCE = "sentence"
     WORD = "word"
+
+    def __str__(self):
+        return self.value
 
 
 @dataclass
