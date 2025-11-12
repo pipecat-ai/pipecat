@@ -9,6 +9,7 @@
 import json
 from enum import Enum
 from typing import Any, AsyncGenerator, Dict, Optional
+from urllib.parse import urlencode
 
 from loguru import logger
 from pydantic import BaseModel
@@ -285,11 +286,11 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         # Add keyterm parameters (can have multiple)
         for keyterm in self._params.keyterm:
-            url_params.append(f"keyterm={keyterm}")
+            url_params.append(urlencode({"keyterm": keyterm}))
 
         # Add tag parameters (can have multiple)
         for tag_value in self._params.tag:
-            url_params.append(f"tag={tag_value}")
+            url_params.append(urlencode({"tag": tag_value}))
 
         self._websocket_url = f"{self._url}?{'&'.join(url_params)}"
         await self._connect()
