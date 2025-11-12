@@ -20,7 +20,9 @@ from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Ty
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
-from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.audio.interruptions.base_interruption_strategy import (
+    BaseInterruptionStrategy as OldBaseInterruptionStrategy,
+)
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
@@ -47,6 +49,10 @@ from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.turns.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.turns.base_speaking_strategy import BaseSpeakingStrategy
+from pipecat.turns.transcription_speaking_strategy import TranscriptionSpeakingStrategy
+from pipecat.turns.vad_interruption_strategy import VADInterruptionStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
@@ -112,6 +118,7 @@ class PipelineParams(BaseModel):
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
         interruption_strategies: Strategies for bot interruption behavior.
+        speaking_strategies: Strategies for bot speaking behavior.
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
 
             .. deprecated:: 0.0.58
@@ -131,7 +138,10 @@ class PipelineParams(BaseModel):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     heartbeats_period_secs: float = HEARTBEAT_SECS
-    interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
+    interruption_strategies: List[BaseInterruptionStrategy | OldBaseInterruptionStrategy] = Field(
+        default_factory=list
+    )
+    speaking_strategies: List[BaseSpeakingStrategy] = Field(default_factory=list)
     observers: List[BaseObserver] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
@@ -278,6 +288,13 @@ class PipelineTask(BasePipelineTask):
                 additional_span_attributes=self._additional_span_attributes,
             )
             observers.append(self._turn_trace_observer)
+
+        # Initialize default strategies.
+        if not self._params.interruption_strategies:
+            self._params.interruption_strategies = [VADInterruptionStrategy()]
+        if not self._params.speaking_strategies:
+            self._params.speaking_strategies = [TranscriptionSpeakingStrategy()]
+
         self._finished = False
         self._cancelled = False
 
@@ -694,6 +711,7 @@ class PipelineTask(BasePipelineTask):
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             interruption_strategies=self._params.interruption_strategies,
+            speaking_strategies=self._params.speaking_strategies,
         )
         start_frame.metadata = self._params.start_metadata
         await self._pipeline.queue_frame(start_frame)
