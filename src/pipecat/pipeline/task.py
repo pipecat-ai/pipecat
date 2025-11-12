@@ -47,6 +47,11 @@ from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.turns.bot.transcription_bot_turn_start_strategy import (
+    TranscriptionBotTurnStartStrategy,
+)
+from pipecat.turns.turn_start_strategies import TurnStartStrategies
+from pipecat.turns.user.vad_user_turn_start_strategy import VADUserTurnStartStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
@@ -111,7 +116,12 @@ class PipelineParams(BaseModel):
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
-        interruption_strategies: Strategies for bot interruption behavior.
+        interruption_strategies: [deprecated] Strategies for bot interruption behavior.
+
+            .. deprecated:: 0.0.99
+                Use the `turn_start_strategies` instead.
+
+        turn_start_strategies: User and bot turn start strategies.
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
 
             .. deprecated:: 0.0.58
@@ -132,6 +142,7 @@ class PipelineParams(BaseModel):
     enable_usage_metrics: bool = False
     heartbeats_period_secs: float = HEARTBEAT_SECS
     interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
+    turn_start_strategies: Optional[TurnStartStrategies] = None
     observers: List[BaseObserver] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
@@ -278,6 +289,14 @@ class PipelineTask(BasePipelineTask):
                 additional_span_attributes=self._additional_span_attributes,
             )
             observers.append(self._turn_trace_observer)
+
+        # Initialize default user and bot turn start strategies.
+        if not self._params.turn_start_strategies:
+            self._params.turn_start_strategies = TurnStartStrategies(
+                user=[VADUserTurnStartStrategy()],
+                bot=[TranscriptionBotTurnStartStrategy()],
+            )
+
         self._finished = False
         self._cancelled = False
 
@@ -694,6 +713,7 @@ class PipelineTask(BasePipelineTask):
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             interruption_strategies=self._params.interruption_strategies,
+            turn_start_strategies=self._params.turn_start_strategies,
         )
         start_frame.metadata = self._params.start_metadata
         await self._pipeline.queue_frame(start_frame)
