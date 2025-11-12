@@ -60,6 +60,7 @@ def language_to_rime_language(language: Language) -> str:
         Language.FR: "fra",
         Language.EN: "eng",
         Language.ES: "spa",
+        Language.HI: "hin",
     }
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
