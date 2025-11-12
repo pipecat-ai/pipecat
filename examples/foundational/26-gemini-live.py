@@ -61,7 +61,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     system_instruction = f"""
     You are a helpful AI assistant.
     Your goal is to demonstrate your capabilities in a helpful and engaging way.
-    Your output will be converted to audio so don't include special characters in your answers.
+    Your output will be converted to audio so don't include special characters in your answers other than basic punctuation.
     Respond to what the user said in a creative and helpful way.
     """
 

@@ -63,7 +63,7 @@ You should use Google Search for:
 
 Always be proactive about using search when the user asks about anything that could benefit from real-time information.
 
-Your output will be converted to audio so don't include special characters in your answers.
+Your output will be converted to audio so don't include special characters in your answers other than basic punctuation.
 
 Respond to what the user said in a creative and helpful way, always using search for current information.
 """

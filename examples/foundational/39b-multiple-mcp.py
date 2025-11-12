@@ -136,7 +136,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         Offer, for example, to show the earliest Rembrandt work from the museum. Use the `search_artwork` tool.
         The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
         Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
-        Your output will be converted to audio so don't include special characters in your answers.
+        Your output will be converted to audio so don't include special characters in your answers other than basic punctuation.
         Respond to what the user said in a creative and helpful way.
         Don't overexplain what you are doing.
         Just respond with short sentences when you are carrying out tool calls.
