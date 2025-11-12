@@ -113,6 +113,10 @@ class TransportParams(BaseModel):
 
         vad_analyzer: Voice Activity Detection analyzer instance.
         turn_analyzer: Turn-taking analyzer instance for conversation management.
+
+            .. deprecated:: 0.0.95
+                The `turn_analyzer` parameter is deprecated, use speaking strategies instead.
+
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
