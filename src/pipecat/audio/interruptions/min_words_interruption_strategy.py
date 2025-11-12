@@ -36,6 +36,16 @@ class MinWordsInterruptionStrategy(BaseInterruptionStrategy):
         self._min_words = min_words
         self._text = ""
 
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'pipecat.audio.interruptions' is deprecated. "
+                "Use the new interruption and speaking strategies.",
+                DeprecationWarning,
+            )
+
     async def append_text(self, text: str):
         """Append text for word count analysis.
 
