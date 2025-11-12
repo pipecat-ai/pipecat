@@ -40,6 +40,7 @@ from pipecat.utils.utils import obj_count, obj_id
 if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 
 class DeprecatedKeypadEntry:
@@ -959,6 +960,7 @@ class StartFrame(SystemFrame):
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
     interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
+    turn_start_strategies: Optional["TurnStartStrategies"] = None
     report_only_initial_ttfb: bool = False
 
 
