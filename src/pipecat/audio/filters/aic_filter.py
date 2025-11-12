@@ -185,7 +185,7 @@ class AICFilter(BaseAudioFilter):
             )
 
             # Process planar in-place; returns ndarray (same shape)
-            out_f32 = self._aic.process(block_f32)
+            out_f32 = await self._aic.process_async(block_f32)
 
             # Convert back to int16 bytes, planar layout
             out_i16 = np.clip(out_f32 * 32768.0, -32768, 32767).astype(np.int16)
