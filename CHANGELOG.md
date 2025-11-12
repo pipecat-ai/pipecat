@@ -16,11 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   services that subclass `TTSService` can indicate whether the text in the
   `TTSTextFrame`s they push already contain any necessary inter-frame spaces.
 
-- Introduced new `AggregatedTextFrame` type to support representing effective llm
-types an enum)
-  output whether or not it is processed by the TTS. This new frame type includes the
-  field `aggregated_by` to represent the conceptual format by which the given text
-  is aggregated. `TTSTextFrame`s now inherit from `AggregatedTextFrame`.
+- Introduced new `AggregatedTextFrame` type to support representing a best effort of
+  the perceived llm output whether or not it is processed by the TTS. This new frame
+  type includes the field `aggregated_by` to represent the conceptual format by which
+  the given text is aggregated. `TTSTextFrame`s now inherit from `AggregatedTextFrame`.
+  With this inheritance, an observer can watch for `AggregatedTextFrame`s to accumlate
+  the perceived output and determine whether or not the text was spoken based on if that
+  frame is also a `TTSTextFrame`. (See bullet below on new `bot-output` which takes
+  advantage of this)
+
+- Introduced `LLMTextProcessor`: A new processor meant to allow customization for how
+  LLMTextFrames should be aggregated and considered. It's purpose is to turn
+  `LLMTextFrame`s into `AggregatedTextFrame`s. By default, a TTSService will still
+  aggregate `LLMTextFrame`s by sentence for the service to consume. However, if you
+  wish to override how the llm text is aggregated, you should no longer override the
+  TTS's internal aggregator, but instead, insert this processor between your LLM and
+  TTS in the pipeline.
 
 - New `bot-output` RTVI message to represent what the bot actually "says".
   - The `RTVIObserver` now emits `bot-output` messages based off the new `AggregatedTextFrame`s
@@ -30,11 +41,21 @@ types an enum)
     - `spoken`: A boolean indicating whether the text was spoken by TTS
     - `aggregated_by`: A string representing how the text was aggregated ("sentence", "word",
       "my custom aggregation")
+  - Introduced new fields to `RTVIObserver` to support the new `bot-output` messaging:
+    - `bot_output_enabled`: Defaults to True. Set to false to disable bot-output messages.
+    - `skip_aggregator_types`: Defaults to `None`. Set to a list of strings that match
+        aggregation types that should not be included in bot-output messages. (Ex. `credit_card`)
+  - Introduced new `transform_aggregation_type` method to `RTVIObserver` to support providing
+    callbacks for various types of aggregations (or all aggregations with `*`) that can modify the
+    text before being sent as a `bot-output` or `tts-text` message. (Think obscuring the credit card
+    or inserting extra detail the client might want that the context doesn't need.)
 
 - Updated the base aggregator type:
   - Introduced a new `Aggregation` dataclass to represent both the aggregated `text` and
     a string identifying the `type` of aggregation (ex. "sentence", "word", "my custom
     aggregation")
+    # MRKB TODO -- don't break. leave pattern_id as-is and remove 'type', so that the old
+              remove param can remain
   - **BREAKING**: `BaseTextAggregator.text` now returns an `Aggregation` (instead of `str`).
     To update: `aggregated_text = myAggregator.text` -> `aggregated_text = myAggregator.text.text`
   - **BREAKING**: `BaseTextAggregator.aggregate()` now returns `Optional[Aggregation]`
@@ -78,12 +99,6 @@ types an enum)
               aggregated by sentence. It is aggregated as one single block of text.
     - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
 
-- Added support for aggregating `LLMTextFrame`s from within the assistant `LLMAssistantAggregator`
-  when `skip_tts` is set to `True`, generating `AggregatedTextFrame`s, therefore supporting
-  the new `bot-output` event when TTS is turned off. You can customize the aggregator used using
-  the new `llm_text_aggregator` field in the `LLMAssistantAggregatorParams`. NOTE: This feature is
-  only supported when using the new `LLMContext`.
-
 ### Changed
 
 - Updated all STT and TTS services to use consistent error handling pattern with
@@ -115,6 +130,11 @@ types an enum)
     timestamping. In the latter case, the `TTSService` preliminarily generates an
     `AggregatedTextFrame`, aggregated by sentence to generate the full sentence content as early
     as possible.
+  - Introduced a new method, `transform_aggregation_type()`:
+    This function provides the ability to provide callbacks to the TTS to transform text based on
+    its aggregated type prior to sending the text to the underlying TTS service. This makes it
+    possible to do things like introduce TTS-specific tags for spelling or emotion or change the
+    pronunciation of something on the fly.
 
 ### Deprecated
 
@@ -122,6 +142,11 @@ types an enum)
   `credentials` or `credentials_path` instead for Google Cloud authentication.
 
 - The RTVI `bot-transcription` event is deprecated in favor of the new `bot-output` message which is the canonical representation of bot output (spoken or not). The code still emits a transcription message for backwards compatibility while transition occurs.
+
+- The TTS constructor field, `text_aggregator` is deprecated in favor of the new
+  `LLMTextProcessor`. TTSServices still have an internal aggregator for support of default
+  behavior, but if you want to override the aggregation behavior, you should use the new
+  processor.
 
 ### Fixed
 
