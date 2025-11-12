@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added Hindi support for Rime TTS services.
 
+- Updated `GeminiTTSService` to use Google Cloud Text-to-Speech streaming API
+  instead of the deprecated Gemini API. Now uses `credentials` /
+  `credentials_path` for authentication. The `api_key` parameter is deprecated.
+  Also, added support for `prompt` parameter for style instructions and
+  expressive markup tags. Significantly improved latency with streaming
+  synthesis.
+
+- Updated language mappings for the Google and Gemini TTS services to match
+  official documentation.
+
+### Deprecated
+
+- The `api_key` parameter in `GeminiTTSService` is deprecated. Use
+  `credentials` or `credentials_path` instead for Google Cloud authentication.
+
 ### Fixed
 
 - Fixed subtle issue of assistant context messages ending up with double spaces
