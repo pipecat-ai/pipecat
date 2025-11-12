@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `ElevenLabsRealtimeSTTService` which implements the Realtime STT
+  service from ElevenLabs.
+
 - Added a `TTSService.includes_inter_frame_spaces` property getter, so that TTS
   services that subclass `TTSService` can indicate whether the text in the
   `TTSTextFrame`s they push already contain any necessary inter-frame spaces.
