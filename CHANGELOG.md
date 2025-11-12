@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added a `TTSService.includes_inter_frame_spaces` property getter, so that TTS
+  services that subclass `TTSService` can indicate whether the text in the
+  `TTSTextFrame`s they push already contain any necessary inter-frame spaces.
+
 ### Fixed
+
+- Fixed subtle issue of assistant context messages ending up with double spaces
+  between words or sentences.
+
+- Fixed an issue where `NeuphonicTTSService` wasn't pushing `TTSTextFrame`s,
+  meaning assistant messages weren't being written to context.
 
 - Fixed an issue with OpenTelemetry where tracing wasn't correctly displaying
   LLM completions and tools when using the universal `LLMContext`.

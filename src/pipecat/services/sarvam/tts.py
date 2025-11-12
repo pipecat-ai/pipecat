@@ -195,6 +195,15 @@ class SarvamHttpTTSService(TTSService):
         """
         return True
 
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Sarvam TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Sarvam's text frames include necessary inter-frame spaces.
+        """
+        return True
+
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to Sarvam AI language format.
 
@@ -455,6 +464,15 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Returns:
             True, as Sarvam service supports metrics generation.
+        """
+        return True
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Sarvam TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Sarvam's text frames include necessary inter-frame spaces.
         """
         return True
 

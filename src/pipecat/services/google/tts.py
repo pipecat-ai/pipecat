@@ -606,6 +606,15 @@ class GoogleTTSService(TTSService):
         """
         return True
 
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Google TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Google's text frames include necessary inter-frame spaces.
+        """
+        return True
+
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to Google TTS language format.
 
@@ -837,6 +846,15 @@ class GeminiTTSService(TTSService):
 
         Returns:
             True, as Gemini TTS service supports metrics generation.
+        """
+        return True
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Gemini TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Gemini's text frames include necessary inter-frame spaces.
         """
         return True
 

@@ -192,6 +192,23 @@ class TTSService(AIService):
         CHUNK_SECONDS = 0.5
         return int(self.sample_rate * CHUNK_SECONDS * 2)  # 2 bytes/sample
 
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates whether TTSTextFrames include necesary inter-frame spaces.
+
+        When True, the TTSTextFrame objects pushed by this service already
+        include all necessary spaces between subsequent frames. When False,
+        downstream processors (like the assistant context aggregator) may need
+        to add spacing.
+
+        Subclasses should override this property to return True if their text
+        generation process already includes necessary inter-frame spaces.
+
+        Returns:
+            False by default. Subclasses can override to return True.
+        """
+        return False
+
     async def set_model(self, model: str):
         """Set the TTS model to use.
 
@@ -490,7 +507,9 @@ class TTSService(AIService):
         if self._push_text_frames:
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
-            await self.push_frame(TTSTextFrame(text))
+            frame = TTSTextFrame(text)
+            frame.includes_inter_frame_spaces = self.includes_inter_frame_spaces
+            await self.push_frame(frame)
 
     async def _stop_frame_handler(self):
         has_started = False

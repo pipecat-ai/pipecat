@@ -117,7 +117,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         super().__init__(
             aggregate_sentences=aggregate_sentences,
-            push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
@@ -149,6 +148,15 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
         Returns:
             True, as Neuphonic service supports metrics generation.
+        """
+        return True
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Neuphonic TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Neuphonic's text frames include necessary inter-frame spaces.
         """
         return True
 
@@ -434,6 +442,15 @@ class NeuphonicHttpTTSService(TTSService):
 
         Returns:
             True, as Neuphonic HTTP service supports metrics generation.
+        """
+        return True
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Neuphonic TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Neuphonic's text frames include necessary inter-frame spaces.
         """
         return True
 
