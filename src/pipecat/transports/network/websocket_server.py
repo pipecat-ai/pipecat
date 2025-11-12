@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.serializers.vonage import VonageFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -378,7 +379,9 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         await self._write_frame(frame)
 
         # Simulate audio playback with a sleep.
-        await self._write_audio_sleep()
+        # Skip sleep for VonageFrameSerializer ===
+        if not isinstance(self._params.serializer, VonageFrameSerializer):
+            await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
         """Serialize and send a frame to the WebSocket client."""
@@ -388,7 +391,12 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload and self._websocket:
-                await self._websocket.send(payload)
+                if isinstance(self._params.serializer, VonageFrameSerializer):
+                    for chunk in payload:
+                        await self._websocket.send(chunk)
+                        await asyncio.sleep(self._params.serializer.sleep_interval)
+                else:
+                    await self._websocket.send(payload)
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
