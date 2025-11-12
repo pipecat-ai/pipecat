@@ -176,7 +176,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+                frame = LLMTextFrame(chunk.choices[0].delta.content)
+                frame.includes_inter_frame_spaces = True
+                await self.push_frame(frame)
 
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript
