@@ -11,6 +11,7 @@ from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport, FastAPIWebsocketParams
+from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
@@ -18,8 +19,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.frames.frames import EndFrame
-from pipecat.frames.llm import LLMRunFrame
+from pipecat.frames.frames import EndFrame, LLMRunFrame
 
 # -----------------------------------------------------
 # Load environment variables
@@ -42,7 +42,7 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {
-        "message": "🎙️ Julia Voice Assistant is running!",
+        "message": "🎙️ Nova Voice Assistant is running!",
         "websocket": "/ws",
         "health": "/health"
     }
@@ -142,6 +142,7 @@ async def websocket_endpoint(websocket: WebSocket):
         vad_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
         vad_audio_passthrough=True,
+        serializer=ProtobufFrameSerializer(),
     )
 
     transport = FastAPIWebsocketTransport(websocket, params)
