@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   services that subclass `TTSService` can indicate whether the text in the
   `TTSTextFrame`s they push already contain any necessary inter-frame spaces.
 
+### Changed
+
+- Added Hindi support for Rime TTS services.
+
 ### Fixed
 
 - Fixed subtle issue of assistant context messages ending up with double spaces
