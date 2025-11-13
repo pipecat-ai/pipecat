@@ -94,7 +94,7 @@ class DeepgramTTSService(TTSService):
         options = SpeakOptions(
             model=self._voice_id,
             encoding=self._settings["encoding"],
-            sample_rate=self.sample_rate,
+            sample_rate=self._init_sample_rate or self.sample_rate or None,
             container="none",
         )
 
@@ -188,7 +188,7 @@ class DeepgramHttpTTSService(TTSService):
         params = {
             "model": self._voice_id,
             "encoding": self._settings["encoding"],
-            "sample_rate": self.sample_rate,
+            "sample_rate": self._init_sample_rate or self.sample_rate or None,
             "container": "none",
         }
 
