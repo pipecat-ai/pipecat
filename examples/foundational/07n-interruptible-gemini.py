@@ -101,7 +101,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             - "[whispering] Let me tell you a secret."
             - "The answer is... [long pause] ...42!"
 
-            Your output will be converted to audio, so avoid special characters in your answers. Respond to what the user said in a creative and helpful way.""",
+            Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.""",
         },
     ]
 
