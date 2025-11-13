@@ -6,10 +6,11 @@
 
 """LLM text processor module for processing and aggregating raw LLM output text.
 
-This processor provides functionality to handle or manipulate LLM text frames
-before they are sent to other components such as TTS services or context
-aggregators. It can be used to pre-aggregate, modify, or filter direct output
-tokens from the LLM.
+This processor will convert LLMTextFrames into AggregatedTextFrames based on the
+configured text aggregator. Using the customizable aggregator, it provides
+functionality to handle or manipulate LLM text frames before they are sent to other
+components such as TTS services or context aggregators. It can be used to pre-aggregate
+and categorize, modify, or filter direct output tokens from the LLM.
 """
 
 from typing import Optional
@@ -30,8 +31,11 @@ from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 class LLMTextProcessor(FrameProcessor):
     """A processor for handling or manipulating LLM text frames before they are processed further.
 
-    This processor can be used to pre-aggregate, modify, or filter direct output tokens from the LLM
-    before they are sent to other components such as TTS services or context aggregators.
+    This processor will convert LLMTextFrames into AggregatedTextFrames based on the configured
+    text aggregator. Using the customizable aggregator, it provides functionality to handle or
+    manipulate LLM text frames before they are sent to other components such as TTS services or
+    context aggregators. It can be used to pre-aggregate and categorize, modify, or filter direct
+    output tokens from the LLM.
     """
 
     def __init__(self, *, text_aggregator: Optional[BaseTextAggregator] = None, **kwargs):

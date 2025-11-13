@@ -322,21 +322,34 @@ class TTSService(AIService):
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
 
-    def transform_aggregation_type(
-        self, aggregation_type: str, transform_function: Callable[[str, str], Awaitable[str]]
+    def add_text_transformer(
+        self, transform_function: Callable[[str, str], Awaitable[str]], aggregation_type: str = "*"
     ):
         """Transform text for a specific aggregation type.
 
-        # TODO: What if someone wanted to remove a registered transform?
-
         Args:
-            aggregation_type: The type of aggregation to transform. This value can be set to "*" to
-                handle all text before sending to TTS.
             transform_function: The function to apply for transformation. This function should take
                 the text and aggregation type as input and return the transformed text.
                 Ex.: async def my_transform(text: str, aggregation_type: str) -> str:
+            aggregation_type: The type of aggregation to transform. This value defaults to "*" indicating
+                the function should handle all text before sending to TTS.
         """
         self._text_transforms.append((aggregation_type, transform_function))
+
+    def remove_text_transformer(
+        self, transform_function: Callable[[str, str], Awaitable[str]], aggregation_type: str = "*"
+    ):
+        """Remove a text transformer for a specific aggregation type.
+
+        Args:
+            transform_function: The function to remove.
+            aggregation_type: The type of aggregation to remove the transformer for.
+        """
+        self._text_transforms = [
+            (agg_type, func)
+            for agg_type, func in self._text_transforms
+            if not (agg_type == aggregation_type and func == transform_function)
+        ]
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         for key, value in settings.items():

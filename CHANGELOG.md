@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `bot_output_enabled`: Defaults to True. Set to false to disable bot-output messages.
     - `skip_aggregator_types`: Defaults to `None`. Set to a list of strings that match
         aggregation types that should not be included in bot-output messages. (Ex. `credit_card`)
-  - Introduced new `transform_aggregation_type` method to `RTVIObserver` to support providing
+  - Introduced new methods, `add_text_transformer()` and `remove_text_transformer()`, to `RTVIObserver` to support providing (and subsequently removing)
     callbacks for various types of aggregations (or all aggregations with `*`) that can modify the
     text before being sent as a `bot-output` or `tts-text` message. (Think obscuring the credit card
     or inserting extra detail the client might want that the context doesn't need.)
@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
               as a separate aggregation. Any text before the start of the pattern will be
               returned early, whether or not a complete sentence was found. Then the pattern
               will be returned. Then the aggregation will continue on sentence matching after
-              the closing delimeter is found. The content between the delimeters is not
+              the closing delimiter is found. The content between the delimiters is not
               aggregated by sentence. It is aggregated as one single block of text.
     - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
 
@@ -130,8 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     timestamping. In the latter case, the `TTSService` preliminarily generates an
     `AggregatedTextFrame`, aggregated by sentence to generate the full sentence content as early
     as possible.
-  - Introduced a new method, `transform_aggregation_type()`:
-    This function provides the ability to provide callbacks to the TTS to transform text based on
+  - Introduced a new methods, `add_text_transformer()` and `remove_text_transformer()`:
+    These functions introduce the ability to provide (and subsequently remove) callbacks to the TTS to transform text based on
     its aggregated type prior to sending the text to the underlying TTS service. This makes it
     possible to do things like introduce TTS-specific tags for spelling or emotion or change the
     pronunciation of something on the fly.

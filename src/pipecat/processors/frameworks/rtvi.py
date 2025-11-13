@@ -713,8 +713,8 @@ class RTVIBotOutputMessageData(RTVITextMessageData):
     Extends RTVITextMessageData to include metadata about the output.
     """
 
-    spoken: bool = True  # Indicates if the text has been spoken by TTS
-    aggregated_by: Optional[AggregationType | str] = None
+    spoken: bool = False  # Indicates if the text has been spoken by TTS
+    aggregated_by: AggregationType | str
     # Indicates what form the text is in (e.g., by word, sentence, etc.)
 
 
@@ -1007,21 +1007,36 @@ class RTVIObserver(BaseObserver):
 
         self._aggregation_transforms: List[Tuple[str, Callable[[str, str], Awaitable[str]]]] = []
 
-    def transform_aggregation_type(
-        self, aggregation_type: str, transform_function: Callable[[str, str], Awaitable[str]]
+    def add_bot_output_transformer(
+        self, transform_function: Callable[[str, str], Awaitable[str]], aggregation_type: str = "*"
     ):
         """Transform text for a specific aggregation type before sending as Bot Output or TTS.
 
         # TODO: What if someone wanted to remove a registered transform?
 
         Args:
-            aggregation_type: The type of aggregation to transform. This value can be set to "*" to
-                handle all text before sending to the client.
             transform_function: The function to apply for transformation. This function should take
                 the text and aggregation type as input and return the transformed text.
                 Ex.: async def my_transform(text: str, aggregation_type: str) -> str:
+            aggregation_type: The type of aggregation to transform. This value defaults to "*" to
+                handle all text before sending to the client.
         """
         self._aggregation_transforms.append((aggregation_type, transform_function))
+
+    def remove_bot_output_transformer(
+        self, transform_function: Callable[[str, str], Awaitable[str]], aggregation_type: str = "*"
+    ):
+        """Remove a text transformer for a specific aggregation type.
+
+        Args:
+            transform_function: The function to remove.
+            aggregation_type: The type of aggregation to remove the transformer for.
+        """
+        self._aggregation_transforms = [
+            (agg_type, func)
+            for agg_type, func in self._aggregation_transforms
+            if not (agg_type == aggregation_type and func == transform_function)
+        ]
 
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""
