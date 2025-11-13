@@ -110,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pattern_aggregator = PatternPairAggregator()
 
     # Add pattern for voice switching
-    pattern_aggregator.add_pattern_pair(
+    pattern_aggregator.add_pattern(
         type="voice",
         start_pattern="<voice>",
         end_pattern="</voice>",

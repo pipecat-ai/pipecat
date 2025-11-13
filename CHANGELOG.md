@@ -54,8 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Introduced a new `Aggregation` dataclass to represent both the aggregated `text` and
     a string identifying the `type` of aggregation (ex. "sentence", "word", "my custom
     aggregation")
-    # MRKB TODO -- don't break. leave pattern_id as-is and remove 'type', so that the old
-              remove param can remain
   - **BREAKING**: `BaseTextAggregator.text` now returns an `Aggregation` (instead of `str`).
     To update: `aggregated_text = myAggregator.text` -> `aggregated_text = myAggregator.text.text`
   - **BREAKING**: `BaseTextAggregator.aggregate()` now returns `Optional[Aggregation]`
@@ -68,36 +66,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `SimpleTextAggregator`, `SkipTagsAggregator`, `PatternPairAggregator` updated to
     produce/consume `Aggregation` objects.
 
-- Augmented the `PatterPairAggregator`:
-  - **BREAKING CHANGES**: Support for the items below resulted in two breaking changes to the
-    `PatternPairAggregator` methods
-    1. The `add_pattern_pair` method arguments have changed:
-        - The `pattern_id` argument is now `type`
-        - The `remove_match` argument has been replaced with the `action` argument. To update,
-          change `remove_match: True` to `action: MatchAction.REMOVE` or `remove_match: False` to
-          `action: MatchAction.KEEP`
-    2. The `PatternMatch` type returned to handlers registered via `on_pattern_match` has been
-       updated to subclass from the new `Aggregation` type, which means that `content` has been
-       replaced with `text` and `pattern_id` has been replaced with `type`:
-         ```
-         async dev on_match_tag(match: PatternMatch):
-            pattern = match.type # instead of match.pattern_id
-            text = match.text # instead of match.content
-         ```
-  - `PatternPairAggregator` now supports `type` and `action` per pattern.
-  - New `MatchAction` enum: `REMOVE`, `KEEP`, `AGGREGATE`, allowing customization for how
-    a match should be handled.
-    - `REMOVE`: The text along with its delimiters will be removed from the streaming text.
-                Sentence aggregation will continue on as if this text did not exist.
-    - `KEEP`: The delimiters will be removed, but the content between them will be kept.
-              Sentence aggregation will continue on with the internal text included.
-    - `AGGREGATE`: The delimiters will be removed and the content between will be treated
-              as a separate aggregation. Any text before the start of the pattern will be
-              returned early, whether or not a complete sentence was found. Then the pattern
-              will be returned. Then the aggregation will continue on sentence matching after
-              the closing delimiter is found. The content between the delimiters is not
-              aggregated by sentence. It is aggregated as one single block of text.
-    - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
+- Augmented the `PatternPairAggregator`:
+  - Introduced a new, preferred version of `add_pattern` to support a new option for treating a
+    match as a separate aggregation returned from `aggregate()`. This replaces the now
+    deprecated `add_pattern_pair` method and you provide a `MatchAction` in lieu of the `remove_match` field.
+    - `MatchAction` enum: `REMOVE`, `KEEP`, `AGGREGATE`, allowing customization for how
+      a match should be handled.
+      - `REMOVE`: The text along with its delimiters will be removed from the streaming text.
+                  Sentence aggregation will continue on as if this text did not exist.
+      - `KEEP`: The delimiters will be removed, but the content between them will be kept.
+                Sentence aggregation will continue on with the internal text included.
+      - `AGGREGATE`: The delimiters will be removed and the content between will be treated
+                as a separate aggregation. Any text before the start of the pattern will be
+                returned early, whether or not a complete sentence was found. Then the pattern
+                will be returned. Then the aggregation will continue on sentence matching after
+                the closing delimiter is found. The content between the delimiters is not
+                aggregated by sentence. It is aggregated as one single block of text.
+      - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
+  - **BREAKING**: The `PatternMatch` type returned to handlers registered via `on_pattern_match`
+     has been updated to subclass from the new `Aggregation` type, which means that `content`
+     has been replaced with `text` and `pattern_id` has been replaced with `type`:
+       ```
+       async dev on_match_tag(match: PatternMatch):
+          pattern = match.type # instead of match.pattern_id
+          text = match.text # instead of match.content
+       ```
 
 ### Changed
 
@@ -147,6 +140,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LLMTextProcessor`. TTSServices still have an internal aggregator for support of default
   behavior, but if you want to override the aggregation behavior, you should use the new
   processor.
+
+- Deprecated `add_pattern_pair` in the `PatternPairAggregator` which takes a `pattern_id`
+  and `remove_match` field in favor of the new `add_pattern` method which takes a `type` and an
+  `action`
 
 ### Fixed
 

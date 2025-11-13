@@ -22,12 +22,11 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
         # Add a test pattern
         self.aggregator.add_pattern_pair(
-            type="test_pattern",
+            pattern_id="test_pattern",
             start_pattern="<test>",
             end_pattern="</test>",
-            action=MatchAction.REMOVE,
         )
-        self.aggregator.add_pattern_pair(
+        self.aggregator.add_pattern(
             type="code_pattern",
             start_pattern="<code>",
             end_pattern="</code>",
@@ -119,14 +118,14 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         voice_handler = AsyncMock()
         emphasis_handler = AsyncMock()
 
-        self.aggregator.add_pattern_pair(
+        self.aggregator.add_pattern(
             type="voice",
             start_pattern="<voice>",
             end_pattern="</voice>",
             action=MatchAction.REMOVE,
         )
 
-        self.aggregator.add_pattern_pair(
+        self.aggregator.add_pattern(
             type="emphasis",
             start_pattern="<em>",
             end_pattern="</em>",

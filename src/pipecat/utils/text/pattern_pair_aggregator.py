@@ -25,9 +25,16 @@ class MatchAction(Enum):
     """Actions to take when a pattern pair is matched.
 
     Parameters:
-        REMOVE: Remove the matched pattern from the text.
-        KEEP: Keep the matched pattern in the text as normal text.
-        AGGREGATE: Return the matched pattern as a separate aggregation object.
+        REMOVE: The text along with its delimiters will be removed from the streaming text.
+              Sentence aggregation will continue on as if this text did not exist.
+        KEEP: The delimiters will be removed, but the content between them will be kept.
+              Sentence aggregation will continue on with the internal text included.
+        AGGREGATE: The delimiters will be removed and the content between will be treated
+              as a separate aggregation. Any text before the start of the pattern will be
+              returned early, whether or not a complete sentence was found. Then the pattern
+              will be returned. Then the aggregation will continue on sentence matching after
+              the closing delimiter is found. The content between the delimiters is not
+              aggregated by sentence. It is aggregated as one single block of text.
     """
 
     REMOVE = "remove"
@@ -106,7 +113,7 @@ class PatternPairAggregator(BaseTextAggregator):
             return Aggregation(self._text, pattern_start[1].get("type", "sentence"))
         return Aggregation(self._text, "sentence")
 
-    def add_pattern_pair(
+    def add_pattern(
         self,
         type: str,
         start_pattern: str,
@@ -147,6 +154,46 @@ class PatternPairAggregator(BaseTextAggregator):
             "action": action,
         }
         return self
+
+    def add_pattern_pair(
+        self, pattern_id: str, start_pattern: str, end_pattern: str, remove_match: bool = True
+    ):
+        """Add a pattern pair to detect in the text.
+
+        .. deprecated:: 0.0.95
+            This function is deprecated and will be removed in a future version.
+            Use `add_pattern` with a type and MatchAction instead.
+
+            This method calls `add_pattern` setting type with the provided pattern_id and action
+            to either MatchAction.REMOVE or MatchAction.KEEP based on `remove_match`.
+
+        Args:
+            pattern_id: Identifier for this pattern pair. Should be unique and ideally descriptive.
+                        (e.g., 'code', 'speaker', 'custom'). pattern_id can not be 'sentence' as that is
+                        reserved for the default behavior.
+            start_pattern: Pattern that marks the beginning of content.
+            end_pattern: Pattern that marks the end of content.
+            remove_match: If True, the matched pattern will be removed from the text. (Same as MatchAction.REMOVE)
+                          If False, it will be kept and treated as normal text. (Same as MatchAction.KEEP)
+        """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("once")
+            warnings.warn(
+                "add_pattern_pair with a pattern_id or remove_match is deprecated and will be"
+                " removed in a future version. Use add_pattern with a type and MatchAction instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        action = MatchAction.REMOVE if remove_match else MatchAction.KEEP
+        return self.add_pattern(
+            type=pattern_id,
+            start_pattern=start_pattern,
+            end_pattern=end_pattern,
+            action=action,
+        )
 
     def on_pattern_match(
         self, type: str, handler: Callable[[PatternMatch], Awaitable[None]]
