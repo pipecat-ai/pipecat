@@ -107,6 +107,14 @@ class TTSService(AIService):
         text_aggregator: Optional[BaseTextAggregator] = None,
         # Types of text aggregations that should not be spoken.
         skip_aggregator_types: Optional[List[str]] = [],
+        # A list of callables to transform text before just before sending it to TTS.
+        # Each callable takes the aggregated text and its type, and returns the transformed text.
+        # To register, provide a list of tuples of (aggregation_type | '*', transform_function).
+        text_transforms: Optional[
+            List[
+                Tuple[AggregationType | str, Callable[[str, str | AggregationType], Awaitable[str]]]
+            ]
+        ] = None,
         # Text filter executed after text has been aggregated.
         text_filters: Optional[Sequence[BaseTextFilter]] = None,
         text_filter: Optional[BaseTextFilter] = None,
@@ -131,6 +139,11 @@ class TTSService(AIService):
                     Use an LLMTextProcessor before the TTSService for custom text aggregation.
 
             skip_aggregator_types: List of aggregation types that should not be spoken.
+            text_transforms: A list of callables to transform text before just before sending it
+                to TTS. Each callable takes the aggregated text and its type, and returns the
+                transformed text. To register, provide a list of tuples of
+                (aggregation_type | '*', transform_function).
+
             text_filters: Sequence of text filters to apply after aggregation.
             text_filter: Single text filter (deprecated, use text_filters).
 
@@ -164,7 +177,9 @@ class TTSService(AIService):
                 )
 
         self._skip_aggregator_types: List[str] = skip_aggregator_types or []
-        self._text_transforms: List[Tuple[str, Callable[[str, str], Awaitable[str]]]] = []
+        self._text_transforms: List[
+            Tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
+        ] = text_transforms or []
         # TODO: Deprecate _text_filters when added to LLMTextProcessor
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
@@ -323,7 +338,9 @@ class TTSService(AIService):
             self._stop_frame_task = None
 
     def add_text_transformer(
-        self, transform_function: Callable[[str, str], Awaitable[str]], aggregation_type: str = "*"
+        self,
+        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        aggregation_type: AggregationType | str = "*",
     ):
         """Transform text for a specific aggregation type.
 
@@ -337,7 +354,9 @@ class TTSService(AIService):
         self._text_transforms.append((aggregation_type, transform_function))
 
     def remove_text_transformer(
-        self, transform_function: Callable[[str, str], Awaitable[str]], aggregation_type: str = "*"
+        self,
+        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        aggregation_type: AggregationType | str = "*",
     ):
         """Remove a text transformer for a specific aggregation type.
 

@@ -937,6 +937,10 @@ class RTVIObserverParams:
         skip_aggregator_types: List of aggregation types to skip sending as tts/output messages.
           Note: if using this to avoid sending secure information, be sure to also disable
                 bot_llm_enabled to avoid leaking through LLM messages.
+        bot_output_transforms: A list of callables to transform text before just before sending it
+            to TTS. Each callable takes the aggregated text and its type, and returns the
+            transformed text. To register, provide a list of tuples of
+            (aggregation_type | '*', transform_function).
         audio_level_period_secs: How often audio levels should be sent if enabled.
     """
 
@@ -953,6 +957,14 @@ class RTVIObserverParams:
     system_logs_enabled: bool = False
     errors_enabled: Optional[bool] = None
     skip_aggregator_types: Optional[List[AggregationType | str]] = None
+    bot_output_transforms: Optional[
+        List[
+            Tuple[
+                AggregationType | str,
+                Callable[[str, AggregationType | str], Awaitable[str]],
+            ]
+        ]
+    ] = None
     audio_level_period_secs: float = 0.15
 
 
@@ -1005,14 +1017,16 @@ class RTVIObserver(BaseObserver):
                     DeprecationWarning,
                 )
 
-        self._aggregation_transforms: List[Tuple[str, Callable[[str, str], Awaitable[str]]]] = []
+        self._aggregation_transforms: List[
+            Tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
+        ] = self._params.bot_output_transforms or []
 
     def add_bot_output_transformer(
-        self, transform_function: Callable[[str, str], Awaitable[str]], aggregation_type: str = "*"
+        self,
+        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        aggregation_type: AggregationType | str = "*",
     ):
         """Transform text for a specific aggregation type before sending as Bot Output or TTS.
-
-        # TODO: What if someone wanted to remove a registered transform?
 
         Args:
             transform_function: The function to apply for transformation. This function should take
@@ -1024,7 +1038,9 @@ class RTVIObserver(BaseObserver):
         self._aggregation_transforms.append((aggregation_type, transform_function))
 
     def remove_bot_output_transformer(
-        self, transform_function: Callable[[str, str], Awaitable[str]], aggregation_type: str = "*"
+        self,
+        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        aggregation_type: AggregationType | str = "*",
     ):
         """Remove a text transformer for a specific aggregation type.
 
