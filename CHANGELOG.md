@@ -99,7 +99,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added Hindi support for Rime TTS services.
 
-<<<<<<< HEAD
 - Updated `GeminiTTSService` to use Google Cloud Text-to-Speech streaming API
   instead of the deprecated Gemini API. Now uses `credentials` /
   `credentials_path` for authentication. The `api_key` parameter is deprecated.
@@ -109,11 +108,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated language mappings for the Google and Gemini TTS services to match
   official documentation.
-=======
+
 - `TextFrame` new field `append_to_context` used to indicate if the encompassing
   text should be added to the LLM context (by the LLM assistant aggregator). It
   defaults to `True`.
->>>>>>> 3e3b946a (CHANGELOG improvements)
 
 - TTS flow respects aggregation metadata
   - `TTSService` accepts a new `skip_aggregator_types` to avoid speaking certain aggregation types
@@ -134,7 +132,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `api_key` parameter in `GeminiTTSService` is deprecated. Use
   `credentials` or `credentials_path` instead for Google Cloud authentication.
 
-- The RTVI `bot-transcription` event is deprecated in favor of the new `bot-output` message which is the canonical representation of bot output (spoken or not). The code still emits a transcription message for backwards compatibility while transition occurs.
+- The RTVI `bot-transcription` event is deprecated in favor of the new `bot-output`
+  message which is the canonical representation of bot output (spoken or not). The code
+  still emits a transcription message for backwards compatibility while transition occurs.
 
 - The TTS constructor field, `text_aggregator` is deprecated in favor of the new
   `LLMTextProcessor`. TTSServices still have an internal aggregator for support of default
