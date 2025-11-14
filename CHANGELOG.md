@@ -108,6 +108,33 @@ Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and 
     produce/consume `Aggregation` objects.
   - All uses of the above Aggregators have been updated accordingly.
 
+- Augmented the `PatternPairAggregator` so that matched patterns can be treated as their own
+  aggregation, taking advantage of the new. To that end:
+  - Introduced a new, preferred version of `add_pattern` to support a new option for treating a
+    match as a separate aggregation returned from `aggregate()`. This replaces the now
+    deprecated `add_pattern_pair` method and you provide a `MatchAction` in lieu of the `remove_match` field.
+    - `MatchAction` enum: `REMOVE`, `KEEP`, `AGGREGATE`, allowing customization for how
+      a match should be handled.
+      - `REMOVE`: The text along with its delimiters will be removed from the streaming text.
+                  Sentence aggregation will continue on as if this text did not exist.
+      - `KEEP`: The delimiters will be removed, but the content between them will be kept.
+                Sentence aggregation will continue on with the internal text included.
+      - `AGGREGATE`: The delimiters will be removed and the content between will be treated
+                as a separate aggregation. Any text before the start of the pattern will be
+                returned early, whether or not a complete sentence was found. Then the pattern
+                will be returned. Then the aggregation will continue on sentence matching after
+                the closing delimiter is found. The content between the delimiters is not
+                aggregated by sentence. It is aggregated as one single block of text.
+      - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
+  - **BREAKING**: The `PatternMatch` type returned to handlers registered via `on_pattern_match`
+     has been updated to subclass from the new `Aggregation` type, which means that `content`
+     has been replaced with `text` and `pattern_id` has been replaced with `type`:
+       ```
+       async dev on_match_tag(match: PatternMatch):
+          pattern = match.type # instead of match.pattern_id
+          text = match.text # instead of match.content
+       ```
+
 ### Deprecated
 
 - The `api_key` parameter in `GeminiTTSService` is deprecated. Use
