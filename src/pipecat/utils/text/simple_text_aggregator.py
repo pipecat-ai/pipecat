@@ -41,30 +41,57 @@ class SimpleTextAggregator(BaseTextAggregator):
         """
         return self._text
 
-    async def aggregate(self, text: str) -> Optional[str]:
-        """Aggregate text and return completed sentences.
+    def _extract_next_sentence(self) -> Optional[str]:
+        """Extract the next complete sentence from the buffer.
 
-        Adds the new text to the buffer and checks for end-of-sentence markers.
-        When a sentence boundary is found, returns the completed sentence and
-        removes it from the buffer.
+        Returns:
+            The first complete sentence if a sentence boundary is found,
+            or None if the buffer is empty or contains only incomplete text.
+        """
+        eos_end_marker = match_endofsentence(self._text)
+        if eos_end_marker:
+            # Extract the first complete sentence
+            sentence = self._text[:eos_end_marker]
+            # Remove it from buffer
+            self._text = self._text[eos_end_marker:]
+            return sentence
+
+        return None
+
+    async def aggregate(self, text: str) -> Optional[str]:
+        """Aggregate text and return the first completed sentence.
+
+        Adds the new text to the buffer and checks for sentence boundaries.
+        When a sentence boundary is found, returns the first completed sentence
+        and removes it from the buffer. Subsequent calls (even with empty strings)
+        will return additional complete sentences if they exist in the buffer.
+
+        This handles varying input patterns from different LLM providers:
+        - Word-by-word tokens (e.g., 'Hello', '!', ' I', ' am', ' Doug.')
+        - Chunks with one or more sentences (e.g., 'Hello! I am Doug. Nice to meet you!')
 
         Args:
             text: New text to add to the aggregation buffer.
 
         Returns:
-            A complete sentence if an end-of-sentence marker is found,
+            The first complete sentence if a sentence boundary is found,
             or None if more text is needed to complete a sentence.
         """
-        result: Optional[str] = None
-
         self._text += text
+        return self._extract_next_sentence()
 
-        eos_end_marker = match_endofsentence(self._text)
-        if eos_end_marker:
-            result = self._text[:eos_end_marker]
-            self._text = self._text[eos_end_marker:]
+    async def flush_next_sentence(self) -> Optional[str]:
+        """Retrieve the next complete sentence from the buffer without adding new text.
 
-        return result
+        This method extracts the next complete sentence from the internal buffer
+        without requiring new input text. It's useful for draining multiple
+        complete sentences that were received in a single chunk.
+
+        Returns:
+            The next complete sentence if one exists in the buffer, or None if
+            the buffer is empty or contains only incomplete text.
+        """
+        return self._extract_next_sentence()
 
     async def handle_interruption(self):
         """Handle interruptions by clearing the text buffer.

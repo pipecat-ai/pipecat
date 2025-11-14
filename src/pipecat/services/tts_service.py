@@ -352,17 +352,26 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            sentence = self._text_aggregator.text
+            # Flush any remaining complete sentences from the aggregator.
+            # This ensures all buffered sentences are sent to TTS individually.
+            sentence = await self._text_aggregator.flush_next_sentence()
             includes_inter_frame_spaces = self._aggregated_text_includes_inter_frame_spaces
+            while sentence:
+                await self._push_tts_frames(
+                    sentence, includes_inter_frame_spaces=includes_inter_frame_spaces
+                )
+                sentence = await self._text_aggregator.flush_next_sentence()
 
-            # Reset aggregator state
+            # Send any remaining incomplete text
+            remaining_text = self._text_aggregator.text
+            if remaining_text:
+                await self._push_tts_frames(
+                    remaining_text, includes_inter_frame_spaces=includes_inter_frame_spaces
+                )
+
             await self._text_aggregator.reset()
             self._processing_text = False
             self._aggregated_text_includes_inter_frame_spaces = False
-
-            await self._push_tts_frames(
-                sentence, includes_inter_frame_spaces=includes_inter_frame_spaces
-            )
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
                     await self.push_frame(frame, direction)

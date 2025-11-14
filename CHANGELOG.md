@@ -47,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `maybe_capture_participant_screen()` for `SmallWebRTCTransport` in the runner
   utils.
 
+- Improved `SimpleTextAggregator` and `TTSService` to properly handle buffered
+  sentences at the end of LLM responses. Previously, when an LLM response ended,
+  any complete sentences remaining in the aggregator's buffer would be sent to
+  TTS as one large chunk. Now these sentences are flushed individually, providing
+  better interruption points. Added `flush_next_sentence()` method to
+  `SimpleTextAggregator` to extract buffered sentences without adding new text.
+
 - Added Hindi support for Rime TTS services.
 
 - Updated `GeminiTTSService` to use Google Cloud Text-to-Speech streaming API
