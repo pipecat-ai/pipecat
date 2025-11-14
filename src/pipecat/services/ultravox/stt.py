@@ -446,6 +446,7 @@ class UltravoxSTTService(AIService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             yield ErrorFrame(f"Error processing audio: {str(e)}")
         finally:
