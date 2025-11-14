@@ -84,6 +84,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and Tamil
 -- Added new emotions: calm and fluent
 
+- `BaseTextAggregator` changes:
+  Modified the BaseTextAggregator type so that when text gets aggregated, metadata can
+  be associated with it. Currently, that just means a `type`, so that the aggregation
+  can be classified or described. Changes made to support this:
+  - **IMPORTANT**: Aggregators are now expected to strip leading/trailing white space
+    characters before returning their aggregation from `aggregation()` or `.text`. This
+    way all aggregators have a consistent contract allowing downstream use to know how
+    to stitch aggregations back together.
+  - Introduced a new `Aggregation` dataclass to represent both the aggregated `text` and
+    a string identifying the `type` of aggregation (ex. "sentence", "word", "my custom
+    aggregation")
+  - **BREAKING**: `BaseTextAggregator.text` now returns an `Aggregation` (instead of `str`).
+    To update: `aggregated_text = myAggregator.text` -> `aggregated_text = myAggregator.text.text`
+  - **BREAKING**: `BaseTextAggregator.aggregate()` now returns `Optional[Aggregation]`
+    (instead of `Optional[str]`). To update:
+      ```
+      aggregation = myAggregator.aggregate(text)
+      if (aggregation):
+        print(f"successfully aggregated text: {aggregation.text}") // instead of {aggregation}
+      ```
+  - `SimpleTextAggregator`, `SkipTagsAggregator`, `PatternPairAggregator` updated to
+    produce/consume `Aggregation` objects.
+  - All uses of the above Aggregators have been updated accordingly.
+
 ### Deprecated
 
 - The `api_key` parameter in `GeminiTTSService` is deprecated. Use

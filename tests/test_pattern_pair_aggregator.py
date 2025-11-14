@@ -30,7 +30,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         # First part doesn't complete the pattern
         result = await self.aggregator.aggregate("Hello <test>pattern")
         self.assertIsNone(result)
-        self.assertEqual(self.aggregator.text, "Hello <test>pattern")
+        self.assertEqual(self.aggregator.text.text, "Hello <test>pattern")
 
         # Second part completes the pattern and includes an exclamation point
         result = await self.aggregator.aggregate(" content</test>!")
@@ -45,14 +45,16 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
         # The exclamation point should be treated as a sentence boundary,
         # so the result should include just text up to and including "!"
-        self.assertEqual(result, "Hello !")
+        self.assertEqual(result.text, "Hello !")
+        self.assertEqual(result.type, "sentence")
 
-        # Next sentence should be processed separately
+        # Next sentence should be processed separately. Spaces around the sentence
+        # should be stripped in the returned Aggregation.
         result = await self.aggregator.aggregate(" This is another sentence.")
-        self.assertEqual(result, " This is another sentence.")
-
+        self.assertEqual(result.text, "This is another sentence.")
+        self.assertEqual(result.type, "sentence")
         # Buffer should be empty after returning a complete sentence
-        self.assertEqual(self.aggregator.text, "")
+        self.assertEqual(self.aggregator.text.text, "")
 
     async def test_incomplete_pattern(self):
         # Add text with incomplete pattern
@@ -65,11 +67,11 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.test_handler.assert_not_called()
 
         # Buffer should contain the incomplete text
-        self.assertEqual(self.aggregator.text, "Hello <test>pattern content")
+        self.assertEqual(self.aggregator.text.text, "Hello <test>pattern content")
 
         # Reset and confirm buffer is cleared
         await self.aggregator.reset()
-        self.assertEqual(self.aggregator.text, "")
+        self.assertEqual(self.aggregator.text.text, "")
 
     async def test_multiple_patterns(self):
         # Set up multiple patterns and handlers
@@ -106,10 +108,11 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(emphasis_match.content, "very")
 
         # Voice pattern should be removed, emphasis pattern should remain
-        self.assertEqual(result, "Hello  I am <em>very</em> excited to meet you!")
+        self.assertEqual(result.text, "Hello  I am <em>very</em> excited to meet you!")
+        self.assertEqual(result.type, "sentence")
 
         # Buffer should be empty
-        self.assertEqual(self.aggregator.text, "")
+        self.assertEqual(self.aggregator.text.text, "")
 
     async def test_handle_interruption(self):
         # Start with incomplete pattern
@@ -120,7 +123,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         await self.aggregator.handle_interruption()
 
         # Buffer should be cleared
-        self.assertEqual(self.aggregator.text, "")
+        self.assertEqual(self.aggregator.text.text, "")
 
         # Handler should not have been called
         self.test_handler.assert_not_called()
@@ -141,7 +144,8 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_args.content, "This is sentence one. This is sentence two.")
 
         # Pattern should be removed, resulting in text with sentences merged
-        self.assertEqual(result, "Hello  Final sentence.")
+        self.assertEqual(result.text, "Hello  Final sentence.")
+        self.assertEqual(result.type, "sentence")
 
         # Buffer should be empty
-        self.assertEqual(self.aggregator.text, "")
+        self.assertEqual(self.aggregator.text.text, "")

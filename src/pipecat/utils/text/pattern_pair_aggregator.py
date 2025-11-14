@@ -17,7 +17,7 @@ from typing import Awaitable, Callable, Optional, Tuple
 from loguru import logger
 
 from pipecat.utils.string import match_endofsentence
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
+from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
 
 
 class PatternMatch:
@@ -75,13 +75,13 @@ class PatternPairAggregator(BaseTextAggregator):
         self._handlers = {}
 
     @property
-    def text(self) -> str:
+    def text(self) -> Aggregation:
         """Get the currently buffered text.
 
         Returns:
             The current text buffer content that hasn't been processed yet.
         """
-        return self._text
+        return Aggregation(text=self._text.strip(), type=AggregationType.SENTENCE)
 
     def add_pattern_pair(
         self, pattern_id: str, start_pattern: str, end_pattern: str, remove_match: bool = True
@@ -208,7 +208,7 @@ class PatternPairAggregator(BaseTextAggregator):
 
         return False
 
-    async def aggregate(self, text: str) -> Optional[str]:
+    async def aggregate(self, text: str) -> Optional[Aggregation]:
         """Aggregate text and process pattern pairs.
 
         This method adds the new text to the buffer, processes any complete pattern
@@ -220,8 +220,9 @@ class PatternPairAggregator(BaseTextAggregator):
             text: New text to add to the buffer.
 
         Returns:
-            Processed text up to a sentence boundary, or None if more
-            text is needed to form a complete sentence or pattern.
+            An Aggregation object containing processed text up to a sentence boundary
+            and marked as SENTENCE type, or None if more text is needed to form a
+            complete sentence or pattern.
         """
         # Add new text to buffer
         self._text += text
@@ -244,7 +245,7 @@ class PatternPairAggregator(BaseTextAggregator):
             # Extract text up to the sentence boundary
             result = self._text[:eos_marker]
             self._text = self._text[eos_marker:]
-            return result
+            return Aggregation(text=result.strip(), type=AggregationType.SENTENCE)
 
         # No complete sentence found yet
         return None
