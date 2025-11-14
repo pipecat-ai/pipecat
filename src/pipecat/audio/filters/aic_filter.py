@@ -68,6 +68,58 @@ class AICFilter(BaseAudioFilter):
         # Model will be created in start() since the API now requires sample_rate
         self._aic = None
 
+    def get_vad_factory(self):
+        """Return a zero-arg factory that will create the VAD once the model exists.
+
+        Returns:
+            A zero-argument callable that, when invoked, returns an initialized
+            VoiceActivityDetector bound to the underlying AIC model. Raises a
+            RuntimeError if the model has not been initialized (i.e. start()
+            has not been called successfully).
+        """
+
+        def _factory():
+            if self._aic is None:
+                raise RuntimeError("AIC model not initialized yet. Call start(sample_rate) first.")
+            return self._aic.create_vad()
+
+        return _factory
+
+    def create_vad_analyzer(
+        self,
+        *,
+        lookback_buffer_size: Optional[float] = None,
+        sensitivity: Optional[float] = None,
+    ):
+        """Return an analyzer that will lazily instantiate the AIC VAD when ready.
+
+        AIC VAD parameters:
+          - lookback_buffer_size:
+              Number of window-length audio buffers used as a lookback buffer.
+              Higher values increase prediction stability but add latency.
+              Range: 1.0 .. 20.0, Default (SDK): 6.0
+          - sensitivity:
+              Energy threshold sensitivity. Energy threshold = 10 ** (-sensitivity).
+              Range: 1.0 .. 15.0, Default (SDK): 6.0
+
+        Args:
+            lookback_buffer_size: Optional lookback buffer size to configure on the VAD.
+                Range: 1.0 .. 20.0. If None, SDK default is used.
+            sensitivity: Optional sensitivity (energy threshold) to configure on the VAD.
+                Range: 1.0 .. 15.0. If None, SDK default is used.
+
+        Returns:
+            A lazily-initialized AICVADAnalyzer that will bind to the VAD backend
+            once the filter's model has been created (after start(sample_rate)).
+        """
+        from pipecat.audio.vad.aic_vad import AICVADAnalyzer
+
+        return AICVADAnalyzer(
+            vad_factory=self.get_vad_factory(),
+            lookback_buffer_size=lookback_buffer_size,
+            sensitivity=sensitivity,
+        )
+
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
 
@@ -185,7 +237,7 @@ class AICFilter(BaseAudioFilter):
             )
 
             # Process planar in-place; returns ndarray (same shape)
-            out_f32 = self._aic.process(block_f32)
+            out_f32 = await self._aic.process_async(block_f32)
 
             # Convert back to int16 bytes, planar layout
             out_i16 = np.clip(out_f32 * 32768.0, -32768, 32767).astype(np.int16)
