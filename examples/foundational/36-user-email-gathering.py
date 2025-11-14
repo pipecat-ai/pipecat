@@ -109,9 +109,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         {
             "role": "system",
             # Cartesia <spell></spell>
-            "content": "You need to gather a valid email or emails from the user. Your output will be converted to audio so don't include special characters in your answers. If the user provides one or more email addresses confirm them with the user. Enclose all emails with <spell> tags, for example <spell>a@a.com</spell>.",
+            "content": "You need to gather a valid email or emails from the user. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. If the user provides one or more email addresses confirm them with the user. Enclose all emails with <spell> tags, for example <spell>a@a.com</spell>.",
             # Rime spell()
-            # "content": "You need to gather a valid email or emails from the user. Your output will be converted to audio so don't include special characters in your answers. If the user provides one or more email addresses confirm them with the user. Enclose all emails with spell(), for example spell(a@a.com).",
+            # "content": "You need to gather a valid email or emails from the user. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. If the user provides one or more email addresses confirm them with the user. Enclose all emails with spell(), for example spell(a@a.com).",
         },
     ]
 

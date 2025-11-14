@@ -412,8 +412,10 @@ class BaseOpenAILLMService(LLMService):
                 if not text_generation_signaled:
                     await self.push_frame(LLMGeneratedTextFrame())
                     text_generation_signaled = True
-
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+                
+                frame = LLMTextFrame(chunk.choices[0].delta.content)
+                frame.includes_inter_frame_spaces = True
+                await self.push_frame(frame)
 
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript

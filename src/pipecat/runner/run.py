@@ -74,7 +74,7 @@ import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict, Union
 
 import aiohttp
 from fastapi.responses import FileResponse, Response
@@ -205,7 +205,7 @@ def _setup_webrtc_routes(
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-        from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
         from pipecat.transports.smallwebrtc.request_handler import (
             IceCandidate,
             SmallWebRTCPatchRequest,
@@ -215,6 +215,9 @@ def _setup_webrtc_routes(
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
+
+    class IceServer(TypedDict, total=False):
+        urls: Union[str, List[str]]
 
     class IceConfig(TypedDict):
         iceServers: List[IceServer]
@@ -555,6 +558,7 @@ def _setup_daily_routes(app: FastAPI):
             {
                 "createDailyRoom": true,
                 "dailyRoomProperties": { "start_video_off": true },
+                "dailyMeetingTokenProperties": { "is_owner": true, "user_name": "Bot" },
                 "body": { "custom_data": "value" }
             }
         """
@@ -570,6 +574,8 @@ def _setup_daily_routes(app: FastAPI):
 
         create_daily_room = request_data.get("createDailyRoom", False)
         body = request_data.get("body", {})
+        daily_room_properties_dict = request_data.get("dailyRoomProperties", None)
+        daily_token_properties_dict = request_data.get("dailyMeetingTokenProperties", None)
 
         bot_module = _get_bot_module()
 
@@ -584,9 +590,37 @@ def _setup_daily_routes(app: FastAPI):
             import aiohttp
 
             from pipecat.runner.daily import configure
+            from pipecat.transports.daily.utils import (
+                DailyMeetingTokenProperties,
+                DailyRoomProperties,
+            )
 
             async with aiohttp.ClientSession() as session:
-                room_url, token = await configure(session)
+                # Parse dailyRoomProperties if provided
+                room_properties = None
+                if daily_room_properties_dict:
+                    try:
+                        room_properties = DailyRoomProperties(**daily_room_properties_dict)
+                        logger.debug(f"Using custom room properties: {room_properties}")
+                    except Exception as e:
+                        logger.error(f"Failed to parse dailyRoomProperties: {e}")
+                        # Continue without custom properties
+
+                # Parse dailyMeetingTokenProperties if provided
+                token_properties = None
+                if daily_token_properties_dict:
+                    try:
+                        token_properties = DailyMeetingTokenProperties(
+                            **daily_token_properties_dict
+                        )
+                        logger.debug(f"Using custom token properties: {token_properties}")
+                    except Exception as e:
+                        logger.error(f"Failed to parse dailyMeetingTokenProperties: {e}")
+                        # Continue without custom properties
+
+                room_url, token = await configure(
+                    session, room_properties=room_properties, token_properties=token_properties
+                )
                 runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=body)
                 result = {
                     "dailyRoom": room_url,

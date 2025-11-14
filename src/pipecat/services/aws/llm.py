@@ -1078,7 +1078,9 @@ class AWSBedrockLLMService(LLMService):
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]
                         if "text" in delta:
-                            await self.push_frame(LLMTextFrame(delta["text"]))
+                            frame = LLMTextFrame(delta["text"])
+                            frame.includes_inter_frame_spaces = True
+                            await self.push_frame(frame)
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use
@@ -1167,6 +1169,8 @@ class AWSBedrockLLMService(LLMService):
         if isinstance(frame, LLMContextFrame):
             context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
+            # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
+            # LLMContext with it
             context = AWSBedrockLLMContext.from_messages(frame.messages)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)

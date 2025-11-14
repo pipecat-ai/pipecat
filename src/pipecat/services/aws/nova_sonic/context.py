@@ -11,36 +11,34 @@ including conversation history management and role-specific message processing.
 
 .. deprecated:: 0.0.91
     AWS Nova Sonic no longer uses types from this module under the hood.
-    It now uses `LLMContext` and `LLMContextAggregatorPair`.
+    It now uses ``LLMContext`` and ``LLMContextAggregatorPair``.
     Using the new patterns should allow you to not need types from this module.
 
-    BEFORE:
-    ```
-    # Setup
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    BEFORE::
 
-    # Context frame type
-    frame: OpenAILLMContextFrame
+        # Setup
+        context = OpenAILLMContext(messages, tools)
+        context_aggregator = llm.create_context_aggregator(context)
 
-    # Context type
-    context: AWSNovaSonicLLMContext
-    # or
-    context: OpenAILLMContext
-    ```
+        # Context frame type
+        frame: OpenAILLMContextFrame
 
-    AFTER:
-    ```
-    # Setup
-    context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(context)
+        # Context type
+        context: AWSNovaSonicLLMContext
+        # or
+        context: OpenAILLMContext
 
-    # Context frame type
-    frame: LLMContextFrame
+    AFTER::
 
-    # Context type
-    context: LLMContext
-    ```
+        # Setup
+        context = LLMContext(messages, tools)
+        context_aggregator = LLMContextAggregatorPair(context)
+
+        # Context frame type
+        frame: LLMContextFrame
+
+        # Context type
+        context: LLMContext
 """
 
 import warnings

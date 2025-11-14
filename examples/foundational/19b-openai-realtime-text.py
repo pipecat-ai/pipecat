@@ -18,7 +18,8 @@ from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -169,20 +170,20 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
-    context = OpenAILLMContext(
+    context = LLMContext(
         [{"role": "user", "content": "Say hello!"}],
         tools,
     )
 
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             context_aggregator.user(),
+            transcript.user(),  # LLM pushes TranscriptionFrames upstream
             llm,  # LLM
             tts,  # TTS
-            transcript.user(),  # Placed after the LLM, as LLM pushes TranscriptionFrames downstream
             transport.output(),  # Transport bot output
             transcript.assistant(),  # After the transcript output, to time with the audio output
             context_aggregator.assistant(),

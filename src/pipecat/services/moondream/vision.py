@@ -11,15 +11,17 @@ for image analysis and description generation.
 """
 
 import asyncio
-import base64
-from io import BytesIO
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from PIL import Image
 
-from pipecat.frames.frames import ErrorFrame, Frame, TextFrame
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    TextFrame,
+    UserImageRawFrame,
+)
 from pipecat.services.vision_service import VisionService
 
 try:
@@ -92,16 +94,16 @@ class MoondreamService(VisionService):
             trust_remote_code=True,
             revision=revision,
             device_map={"": device},
-            torch_dtype=dtype,
+            dtype=dtype,
         ).eval()
 
         logger.debug("Loaded Moondream model")
 
-    async def run_vision(self, context: LLMContext) -> AsyncGenerator[Frame, None]:
+    async def run_vision(self, frame: UserImageRawFrame) -> AsyncGenerator[Frame, None]:
         """Analyze an image and generate a description.
 
         Args:
-            context: The context to process, containing image data.
+            frame: The image frame to process.
 
         Yields:
             Frame: TextFrame containing the generated image description, or ErrorFrame
@@ -112,45 +114,14 @@ class MoondreamService(VisionService):
             yield ErrorFrame("Moondream model not available")
             return
 
-        image_bytes = None
-        text = None
-        try:
-            messages = context.get_messages()
-            last_message = messages[-1]
-            last_message_content = last_message.get("content")
+        logger.debug(f"Analyzing image (bytes length: {len(frame.image)})")
 
-            for item in last_message_content:
-                if isinstance(item, dict):
-                    if (
-                        "image_url" in item
-                        and isinstance(item["image_url"], dict)
-                        and item["image_url"].get("url")
-                    ):
-                        image_bytes = base64.b64decode(item["image_url"]["url"].split(",")[1])
-                    elif "text" in item and isinstance(item["text"], str):
-                        text = item["text"]
-
-        except Exception as e:
-            logger.error(f"Exception during image extraction: {e}")
-            yield ErrorFrame("Failed to extract image from context")
-            return
-
-        if not image_bytes:
-            logger.error("No image found in context")
-            yield ErrorFrame("No image found in context")
-            return
-
-        logger.debug(
-            f"Analyzing image (bytes length: {len(image_bytes) if image_bytes else 'None'})"
-        )
-
-        def get_image_description(bytes: bytes, text: Optional[str]) -> str:
-            image_buffer = BytesIO(bytes)
-            image = Image.open(image_buffer)
+        def get_image_description(image_bytes: bytes, text: Optional[str]) -> str:
+            image = Image.frombytes(frame.format, frame.size, image_bytes)
             image_embeds = self._model.encode_image(image)
             description = self._model.query(image_embeds, text)["answer"]
             return description
 
-        description = await asyncio.to_thread(get_image_description, image_bytes, text)
+        description = await asyncio.to_thread(get_image_description, frame.image, frame.text)
 
         yield TextFrame(text=description)

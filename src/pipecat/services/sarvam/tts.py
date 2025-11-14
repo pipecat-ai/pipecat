@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -64,7 +64,7 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
         Language.TE: "te-IN",  # Telugu
     }
 
-    return LANGUAGE_MAP.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class SarvamHttpTTSService(TTSService):
@@ -192,6 +192,15 @@ class SarvamHttpTTSService(TTSService):
 
         Returns:
             True, as Sarvam service supports metrics generation.
+        """
+        return True
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Sarvam TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Sarvam's text frames include necessary inter-frame spaces.
         """
         return True
 
@@ -455,6 +464,15 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Returns:
             True, as Sarvam service supports metrics generation.
+        """
+        return True
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Sarvam TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Sarvam's text frames include necessary inter-frame spaces.
         """
         return True
 

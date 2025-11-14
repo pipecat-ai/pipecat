@@ -39,6 +39,13 @@ class SmallWebRTCRequest:
     restart_pc: Optional[bool] = None
     request_data: Optional[Any] = None
 
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Accept both snake_case and camelCase for the request_data field."""
+        if "requestData" in data and "request_data" not in data:
+            data["request_data"] = data.pop("requestData")
+        return cls(**data)
+
 
 @dataclass
 class IceCandidate:

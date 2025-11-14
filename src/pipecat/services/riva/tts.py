@@ -66,7 +66,7 @@ class RivaTTSService(TTSService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str = "Magpie-Multilingual.EN-US.Ray",
+        voice_id: str = "Magpie-Multilingual.EN-US.Aria",
         sample_rate: Optional[int] = None,
         model_function_map: Mapping[str, str] = {
             "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
@@ -111,6 +111,15 @@ class RivaTTSService(TTSService):
         config_response = self._service.stub.GetRivaSynthesisConfig(
             riva.client.proto.riva_tts_pb2.RivaSynthesisConfigRequest()
         )
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Riva TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Riva's text frames include necessary inter-frame spaces.
+        """
+        return True
 
     async def set_model(self, model: str):
         """Attempt to set the TTS model.

@@ -18,7 +18,9 @@ from pipecat.frames.frames import EndTaskFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response import LLMAssistantAggregatorParams
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -62,7 +64,7 @@ You have three tools available to you:
 
 After you've responded to the user three times, do two things, in order:
 1. Politely let them know that that's all the time you have today and say goodbye.
-2. Call the end_conversation tool to gracefully end the conversation.
+2. *WITHOUT WAITING FOR THE USER TO RESPOND*, call the end_conversation tool to gracefully end the conversation.
 """
 
 
@@ -152,10 +154,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
     llm.register_function("end_conversation", end_conversation)
 
-    context = OpenAILLMContext(
+    context = LLMContext(
         [{"role": "user", "content": "Say hello."}],
     )
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

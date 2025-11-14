@@ -216,6 +216,7 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "account_sid": start_data.get("account_sid"),
                 "from": start_data.get("from", ""),
                 "to": start_data.get("to", ""),
+                "custom_parameters": start_data.get("custom_parameters", ""),
             }
 
         else:

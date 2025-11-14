@@ -4,8 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
-import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -17,12 +15,14 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, UserImageRequestFrame
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -32,6 +32,7 @@ from pipecat.runner.utils import (
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.moondream.vision import MoondreamService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -39,34 +40,30 @@ from pipecat.transports.daily.transport import DailyParams
 load_dotenv(override=True)
 
 
-# Global variable to store the client ID
-client_id = ""
+async def fetch_user_image(params: FunctionCallParams):
+    """Fetch the user image.
 
-
-async def get_weather(params: FunctionCallParams):
-    location = params.arguments["location"]
-    await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
-
-
-async def get_image(params: FunctionCallParams):
+    When called, this function pushes a UserImageRequestFrame upstream to the
+    transport. As a result, the transport will request the user image and push a
+    UserImageRawFrame downstream.
+    """
+    user_id = params.arguments["user_id"]
     question = params.arguments["question"]
-    logger.debug(f"Requesting image with user_id={client_id}, question={question}")
+    logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
-    # Request the image frame
-    await params.llm.request_image_frame(
-        user_id=client_id,
-        function_name=params.function_name,
-        tool_call_id=params.tool_call_id,
-        text_content=question,
+    # Request a user image frame. In this case, we don't want the requested
+    # image to be added to the context because we will process it with
+    # Moondream.
+    await params.llm.push_frame(
+        UserImageRequestFrame(user_id=user_id, text=question, append_to_context=False),
+        FrameDirection.UPSTREAM,
     )
 
-    # Wait a short time for the frame to be processed
-    await asyncio.sleep(0.5)
+    await params.result_callback(None)
 
-    # Return a result to complete the function call
-    await params.result_callback(
-        f"I've captured an image from your camera and I'm analyzing what you asked about: {question}"
-    )
+    # Instead of None, it's possible to also provide a tool call answer to
+    # tell the LLM that we are grabbing the image to analyze.
+    # await params.result_callback({"result": "Image is being captured."})
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -101,94 +98,74 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-    llm.register_function("get_weather", get_weather)
-    llm.register_function("get_image", get_image)
+    llm.register_function("fetch_user_image", fetch_user_image)
 
-    weather_function = FunctionSchema(
-        name="get_weather",
-        description="Get the current weather",
+    fetch_image_function = FunctionSchema(
+        name="fetch_user_image",
+        description="Called when the user requests a description of their camera feed",
         properties={
-            "location": {
+            "user_id": {
                 "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
+                "description": "The ID of the user to grab the image from",
             },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location"],
-    )
-    get_image_function = FunctionSchema(
-        name="get_image",
-        description="Get an image from the video stream.",
-        properties={
             "question": {
                 "type": "string",
-                "description": "The question that the user is asking about the image.",
-            }
+                "description": "The question that the user is asking about the image",
+            },
         },
-        required=["question"],
+        required=["user_id", "question"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function, get_image_function])
+    tools = ToolsSchema(standard_tools=[fetch_image_function])
 
-    system_prompt = """\
-You are a helpful assistant who converses with a user and answers questions. Respond concisely to general questions.
-
-Your response will be turned into speech so use only simple words and punctuation.
-
-You have access to two tools: get_weather and get_image.
-
-You can respond to questions about the weather using the get_weather tool.
-
-You can answer questions about the user's video stream using the get_image tool. Some examples of phrases that \
-indicate you should use the get_image tool are:
-- What do you see?
-- What's in the video?
-- Can you describe the video?
-- Tell me about what you see.
-- Tell me something interesting about what you see.
-- What's happening in the video?
-"""
     messages = [
-        {"role": "system", "content": system_prompt},
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
+        },
     ]
 
     context = LLMContext(messages, tools)
     context_aggregator = LLMContextAggregatorPair(context)
 
+    # If you run into weird description, try with use_cpu=True
+    moondream = MoondreamService()
+
     pipeline = Pipeline(
         [
-            transport.input(),
-            stt,
-            context_aggregator.user(),
-            llm,
-            tts,
-            transport.output(),
-            context_aggregator.assistant(),
+            transport.input(),  # Transport user input
+            stt,  # STT
+            context_aggregator.user(),  # User responses
+            ParallelPipeline(
+                [llm],  # LLM
+                [moondream],
+            ),
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
     task = PipelineTask(
         pipeline,
-        params=PipelineParams(
-            enable_metrics=True,
-            enable_usage_metrics=True,
-        ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info(f"Client connected: {client}")
 
         await maybe_capture_participant_camera(transport, client)
 
-        global client_id
+        # Set the participant ID in the image requester
         client_id = get_transport_client_id(transport, client)
 
         # Kick off the conversation.
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
+            }
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

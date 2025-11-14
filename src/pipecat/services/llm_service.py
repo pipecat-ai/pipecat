@@ -419,17 +419,6 @@ class LLMService(AIService):
             return True
         return function_name in self._functions.keys()
 
-    def needs_mcp_alternate_schema(self) -> bool:
-        """Check if this LLM service requires alternate MCP schema.
-
-        Some LLM services have stricter JSON schema validation and require
-        certain properties to be removed or modified for compatibility.
-
-        Returns:
-            True if MCP schemas should be cleaned for this service, False otherwise.
-        """
-        return False
-
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
         """Execute a sequence of function calls from the LLM.
 
@@ -444,11 +433,7 @@ class LLMService(AIService):
 
         await self._call_event_handler("on_function_calls_started", function_calls)
 
-        # Push frame both downstream and upstream
-        started_frame_downstream = FunctionCallsStartedFrame(function_calls=function_calls)
-        started_frame_upstream = FunctionCallsStartedFrame(function_calls=function_calls)
-        await self.push_frame(started_frame_downstream, FrameDirection.DOWNSTREAM)
-        await self.push_frame(started_frame_upstream, FrameDirection.UPSTREAM)
+        await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=function_calls)
 
         for function_call in function_calls:
             if function_call.function_name in self._functions.keys():
@@ -492,11 +477,19 @@ class LLMService(AIService):
         tool_call_id: Optional[str] = None,
         text_content: Optional[str] = None,
         video_source: Optional[str] = None,
+        timeout: Optional[float] = 10.0,
     ):
         """Request an image from a user.
 
         Pushes a UserImageRequestFrame upstream to request an image from the
-        specified user.
+        specified user. The user image can then be processed by the LLM.
+
+        Use this function from a function call if you want the LLM to process
+        the image. If you expect the image to be processed by a vision service,
+        you might want to push a UserImageRequestFrame upstream directly.
+
+        .. deprecated:: 0.0.92
+            This method is deprecated, push a `UserImageRequestFrame` instead.
 
         Args:
             user_id: The ID of the user to request an image from.
@@ -504,14 +497,25 @@ class LLMService(AIService):
             tool_call_id: Optional tool call ID associated with the request.
             text_content: Optional text content/context for the image request.
             video_source: Optional video source identifier.
+            timeout: Optional timeout for the requested image to be added to the LLM context.
+
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Method `request_image_frame()` is deprecated, push a `UserImageRequestFrame` instead.",
+                DeprecationWarning,
+            )
         await self.push_frame(
             UserImageRequestFrame(
                 user_id=user_id,
+                text=text_content,
+                # Deprecated fields below.
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 context=text_content,
-                video_source=video_source,
             ),
             FrameDirection.UPSTREAM,
         )
@@ -551,33 +555,24 @@ class LLMService(AIService):
         # NOTE(aleix): This needs to be removed after we remove the deprecation.
         await self._call_start_function(runner_item.context, runner_item.function_name)
 
-        # Push a function call in-progress downstream. This frame will let our
-        # assistant context aggregator know that we are in the middle of a
-        # function call. Some contexts/aggregators may not need this. But some
-        # definitely do (Anthropic, for example).  Also push it upstream for use
-        # by other processors, like STTMuteFilter.
-        progress_frame_downstream = FunctionCallInProgressFrame(
+        # Broadcast function call in-progress. This frame will let our assistant
+        # context aggregator know that we are in the middle of a function
+        # call. Some contexts/aggregators may not need this. But some definitely
+        # do (Anthropic, for example).
+        await self.broadcast_frame(
+            FunctionCallInProgressFrame,
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
             arguments=runner_item.arguments,
             cancel_on_interruption=item.cancel_on_interruption,
         )
-        progress_frame_upstream = FunctionCallInProgressFrame(
-            function_name=runner_item.function_name,
-            tool_call_id=runner_item.tool_call_id,
-            arguments=runner_item.arguments,
-            cancel_on_interruption=item.cancel_on_interruption,
-        )
-
-        # Push frame both downstream and upstream
-        await self.push_frame(progress_frame_downstream, FrameDirection.DOWNSTREAM)
-        await self.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
         async def function_call_result_callback(
             result: Any, *, properties: Optional[FunctionCallResultProperties] = None
         ):
-            result_frame_downstream = FunctionCallResultFrame(
+            await self.broadcast_frame(
+                FunctionCallResultFrame,
                 function_name=runner_item.function_name,
                 tool_call_id=runner_item.tool_call_id,
                 arguments=runner_item.arguments,
@@ -585,17 +580,6 @@ class LLMService(AIService):
                 run_llm=runner_item.run_llm,
                 properties=properties,
             )
-            result_frame_upstream = FunctionCallResultFrame(
-                function_name=runner_item.function_name,
-                tool_call_id=runner_item.tool_call_id,
-                arguments=runner_item.arguments,
-                result=result,
-                run_llm=runner_item.run_llm,
-                properties=properties,
-            )
-
-            await self.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
-            await self.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 
         if isinstance(item.handler, DirectFunctionWrapper):
             # Handler is a DirectFunctionWrapper

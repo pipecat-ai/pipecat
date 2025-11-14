@@ -129,7 +129,7 @@ class TaskObserver(BaseObserver):
         for proxy in self._proxies:
             await proxy.cleanup()
 
-    async def on_process_frame(self, data: FramePushed):
+    async def on_process_frame(self, data: FrameProcessed):
         """Queue frame data for all managed observers.
 
         Args:

@@ -19,7 +19,9 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response import LLMAssistantAggregatorParams
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -139,10 +141,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
-    context = OpenAILLMContext(
-        [{"role": "user", "content": "Say hello."}],
+    # You can provide the system instructions and tools in the context rather
+    # than as arguments to GeminiLiveLLMService, but note that doing so will
+    # trigger a (fast) reconnection when the GeminiLiveLLMService first
+    # receives the context (i.e. when we send the LLMRunFrame below).
+    context = LLMContext(
+        [
+            # {"role": "system", "content": system_instruction},
+            {"role": "user", "content": "Say hello."},
+        ],
+        # tools,
     )
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

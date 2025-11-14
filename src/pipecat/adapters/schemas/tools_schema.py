@@ -22,9 +22,12 @@ class AdapterType(Enum):
 
     Parameters:
         GEMINI: Google Gemini adapter - currently the only service supporting custom tools.
+        SHIM: Backward compatibility shim for creating ToolsSchemas from lists of tools in
+              any format, used by LLMContext.from_openai_context.
     """
 
     GEMINI = "gemini"  # that is the only service where we are able to add custom tools for now
+    SHIM = "shim"  # for use as backward compatibility shim for creating ToolsSchemas from list of tools in any format
 
 
 class ToolsSchema:
