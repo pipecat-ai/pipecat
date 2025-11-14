@@ -454,7 +454,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
             # treat a send-side error as fatal.
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}"))
 
     async def _update_settings(self):
         settings = self._session_properties
@@ -627,9 +627,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self._current_assistant_response = None
         # error handling
         if evt.response.status == "failed":
-            await self.push_error(
-                ErrorFrame(error=evt.response.status_details["error"]["message"], fatal=True)
-            )
+            await self.push_error(ErrorFrame(error=evt.response.status_details["error"]["message"]))
             return
         # response content
         for item in evt.response.output:
@@ -687,7 +685,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
-        await self.push_error(ErrorFrame(error=f"Error: {evt}", fatal=True))
+        await self.push_error(ErrorFrame(error=f"Error: {evt}"))
 
     async def _handle_assistant_output(self, output):
         # We haven't seen intermixed audio and function_call items in the same response. But let's

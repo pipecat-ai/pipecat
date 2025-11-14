@@ -23,6 +23,7 @@ from pipecat import __version__ as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -467,7 +468,8 @@ class GladiaSTTService(STTService):
                             break
 
             except Exception as e:
-                logger.error(f"Error in connection handler: {e}")
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 self._connection_active = False
 
                 if not self._should_reconnect:
@@ -557,7 +559,8 @@ class GladiaSTTService(STTService):
         except websockets.exceptions.ConnectionClosed:
             logger.debug("Connection closed during keepalive")
         except Exception as e:
-            logger.error(f"Error in Gladia keepalive task: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _receive_task_handler(self):
         try:
@@ -620,7 +623,8 @@ class GladiaSTTService(STTService):
             # Expected when closing the connection
             pass
         except Exception as e:
-            logger.error(f"Error in Gladia WebSocket handler: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _maybe_reconnect(self) -> bool:
         """Handle exponential backoff reconnection logic."""

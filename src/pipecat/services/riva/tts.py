@@ -23,6 +23,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -165,6 +166,7 @@ class RivaTTSService(TTSService):
                 add_response(None)
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
+                yield ErrorFrame(error=f"{self} error: {e}")
                 add_response(None)
 
         await self.start_ttfb_metrics()

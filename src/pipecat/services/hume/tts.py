@@ -225,8 +225,8 @@ class HumeTTSService(TTSService):
                 self._audio_bytes = b""
 
         except Exception as e:
-            logger.exception(f"{self} error generating TTS: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             # Ensure TTFB timer is stopped even on early failures
             await self.stop_ttfb_metrics()

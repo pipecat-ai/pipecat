@@ -347,8 +347,8 @@ class MiniMaxHttpTTSService(TTSService):
                             continue
 
         except Exception as e:
-            logger.exception(f"Error generating TTS: {e}")
-            yield ErrorFrame(error=f"MiniMax TTS error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

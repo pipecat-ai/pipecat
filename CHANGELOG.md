@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated all STT and TTS services to use consistent error handling pattern with
+  `push_error()` method for better pipeline error event integration.
+
 - Added Hindi support for Rime TTS services.
 
 - Updated `GeminiTTSService` to use Google Cloud Text-to-Speech streaming API

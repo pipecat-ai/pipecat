@@ -351,8 +351,8 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 )
 
         except Exception as e:
-            logger.error(f"ElevenLabs STT error: {e}")
-            yield ErrorFrame(f"ElevenLabs STT error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 def audio_format_from_sample_rate(sample_rate: int) -> str:
