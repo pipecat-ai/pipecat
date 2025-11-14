@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
@@ -399,11 +399,6 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 if hasattr(self, "get_llm_adapter"):
                                     adapter = self.get_llm_adapter()
                                     messages = adapter.get_messages_for_logging(context)
-                            elif hasattr(context, "get_messages"):
-                                # Fallback for unknown context types
-                                messages = context.get_messages()
-                            elif hasattr(context, "messages"):
-                                messages = context.messages
 
                             # Serialize messages if available
                             if messages:
@@ -424,15 +419,10 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
                                     adapter = self.get_llm_adapter()
                                     tools = adapter.from_standard_tools(context.tools)
-                            elif hasattr(context, "tools"):
-                                # Fallback for unknown context types
-                                tools = context.tools
 
                             # Serialize and count tools if available
-                            # Check if tools is not None and not NOT_GIVEN (using attribute check as fallback)
-                            if tools is not None and not (
-                                hasattr(tools, "__name__") and tools.__name__ == "NOT_GIVEN"
-                            ):
+                            # Check if tools is not None and not NOT_GIVEN
+                            if tools is not None and tools is not NOT_GIVEN:
                                 serialized_tools = json.dumps(tools)
                                 tool_count = len(tools) if isinstance(tools, list) else 1
 
