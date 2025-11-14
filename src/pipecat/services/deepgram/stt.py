@@ -290,6 +290,31 @@ class DeepgramSTTService(STTService):
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
+                # Report comprehensive STT usage metrics
+                # Deepgram includes duration and confidence in the result metadata
+                if hasattr(result, "duration") and result.duration:
+                    audio_duration = result.duration
+
+                    # Get performance metrics
+                    ttft = self._metrics.ttfb
+                    processing_time = self._metrics.processing_time
+
+                    # Get confidence score if available
+                    confidence = None
+                    if result.channel.alternatives[0].confidence:
+                        confidence = result.channel.alternatives[0].confidence
+
+                    # Use configured cost_per_minute (if provided)
+                    await self.start_stt_usage_metrics(
+                        audio_duration=audio_duration,
+                        transcript=transcript,
+                        processing_time=processing_time,
+                        ttft=ttft,
+                        confidence=confidence,
+                        cost_per_minute=self._cost_per_minute,
+                        ground_truth=self._ground_truth,
+                    )
+
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,
