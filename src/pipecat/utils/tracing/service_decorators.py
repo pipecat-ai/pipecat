@@ -19,12 +19,15 @@ from typing import TYPE_CHECKING, Callable, Optional, TypeVar
 
 from loguru import logger
 
+from pipecat.processors.frame_processor import FrameDirection
+
 # Type imports for type checking only
 if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.utils.tracing.context_registry import get_current_turn_context
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
@@ -368,7 +371,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                         # Accumulator for function call information emitted during the
                         # generation (captured from FunctionCallsStartedFrame frames)
-                        function_calls_info = []  # type: list[dict]
+                        function_calls_info = []
 
                         async def traced_push_frame(frame, direction=None):
                             nonlocal output_text, function_calls_info
@@ -433,36 +436,42 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Replace push_frame to capture output
                             self.push_frame = traced_push_frame
 
-                            # Detect if we're using Google's service
-                            is_google_service = "google" in service_class_name.lower()
-
-                            # Try to get messages based on service type
+                            # Get messages for logging
+                            # For OpenAILLMContext: use context's own get_messages_for_logging() method
+                            # For LLMContext: use adapter's get_messages_for_logging() which returns
+                            # messages in provider's native format with sensitive data sanitized
                             messages = None
-                            serialized_messages = None
 
-                            # TODO: Revisit once we unify the messages across services
-                            if is_google_service:
-                                # Handle Google service specifically
-                                if hasattr(context, "get_messages_for_logging"):
-                                    messages = context.get_messages_for_logging()
-                            else:
-                                # Handle other services like OpenAI
-                                if hasattr(context, "get_messages"):
-                                    messages = context.get_messages()
-                                elif hasattr(context, "messages"):
-                                    messages = context.messages
+                            if isinstance(context, OpenAILLMContext):
+                                # OpenAILLMContext and subclasses have their own method
+                                messages = context.get_messages_for_logging()
+                            elif isinstance(context, LLMContext):
+                                # Universal LLMContext - use adapter for provider-native format
+                                if hasattr(self, "get_llm_adapter"):
+                                    adapter = self.get_llm_adapter()
+                                    messages = adapter.get_messages_for_logging(context)
+                            elif hasattr(context, "get_messages"):
+                                # Fallback for unknown context types
+                                messages = context.get_messages()
+                            elif hasattr(context, "messages"):
+                                messages = context.messages
 
-                            # Get tools, system message, etc. based on the service type
-                            tools = getattr(context, "tools", None)
-                            serialized_tools = None
-                            tool_count = 0
+                            # Get tools
+                            # For OpenAILLMContext: tools may need adapter conversion if set
+                            # For LLMContext: use adapter's from_standard_tools() to convert ToolsSchema
+                            tools = None
 
-                            if tools:
-                                try:
-                                    serialized_tools = json.dumps(tools)
-                                    tool_count = len(tools) if isinstance(tools, list) else 1
-                                except Exception as e:
-                                    serialized_tools = f"Error serializing tools: {str(e)}"
+                            if isinstance(context, OpenAILLMContext):
+                                # OpenAILLMContext: tools property handles adapter conversion internally
+                                tools = context.tools
+                            elif isinstance(context, LLMContext):
+                                # Universal LLMContext - use adapter to convert ToolsSchema
+                                if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
+                                    adapter = self.get_llm_adapter()
+                                    tools = adapter.from_standard_tools(context.tools)
+                            elif hasattr(context, "tools"):
+                                # Fallback for unknown context types
+                                tools = context.tools
 
                             # Handle system message for different services
                             system_message = None
@@ -482,9 +491,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                     messages = [
                                         {"role": "system", "content": system_message}
                                     ] + messages
-                                serialized_messages = json.dumps(messages)
                             except Exception as e:
-                                serialized_messages = f"Error serializing messages: {str(e)}"
+                                logger.error("Error serializing messages")
+                                messages = f"Error serializing messages: {str(e)}"
 
                             # Get settings from the service
                             params = {}
@@ -509,20 +518,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             }
 
                             # Add optional attributes only if they exist
-                            if serialized_messages:
-                                attribute_kwargs["messages"] = serialized_messages
-                            if serialized_tools:
-                                attribute_kwargs["tools"] = serialized_tools
-                                attribute_kwargs["tool_count"] = tool_count
-                            if system_message:
-                                attribute_kwargs["system"] = system_message
-
-                            # Tool choice (if explicitly set)
-                            tool_choice_val = getattr(context, "tool_choice", None)
-                            try:
-                                attribute_kwargs["tool_choice"] = str(tool_choice_val)
-                            except Exception as e:
-                                logger.warning(f"Error serializing tool choice: {e}")
+                            attribute_kwargs["messages"] = messages
+                            attribute_kwargs["tools"] = tools
 
                             # Add all gathered attributes to the span
                             add_llm_span_attributes(span=current_span, **attribute_kwargs)
@@ -538,25 +535,17 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         # Append JSON dump of function calls to the output text so that
                         # the consumer can see both in a single attribute.
                         # --------------------------------------------------------------
-                        output_payload = None
+                        span_output = {}
                         if output_text:
-                            output_payload = output_text
+                            span_output["content"] = output_text
 
                         if function_calls_info:
-                            try:
-                                calls_json = json.dumps(function_calls_info, indent=2)
-                            except Exception:
-                                calls_json = str(function_calls_info)
+                            span_output["tool_calls"] = function_calls_info
 
-                            calls_json = f"###FUNCTION_CALLS###{calls_json}###FUNCTION_CALLS###"
-
-                            if output_payload:
-                                output_payload = f"{output_payload}\n{calls_json}"
-                            else:
-                                output_payload = calls_json
-
-                        if output_payload is not None:
-                            current_span.set_attribute("output", output_payload)
+                        try:
+                            current_span.set_attribute("output", json.dumps(span_output))
+                        except Exception:
+                            logger.error(f"Unable to serialize span output: {span_output}")
 
                         return result
 
@@ -989,7 +978,9 @@ def traced_openai_realtime(operation: str) -> Callable:
                             # Capture context messages being sent
                             if hasattr(self, "_context") and self._context:
                                 try:
-                                    messages = self._context.get_messages_for_logging()
+                                    messages = self.get_llm_adapter().get_messages_for_logging(
+                                        self._context
+                                    )
                                     if messages:
                                         operation_attrs["context_messages"] = json.dumps(messages)
                                 except Exception as e:

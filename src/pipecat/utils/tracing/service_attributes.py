@@ -11,6 +11,7 @@ attributes to OpenTelemetry spans, following standard semantic conventions
 where applicable and Pipecat-specific conventions for additional context.
 """
 
+import json
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # Import for type checking only
@@ -186,12 +187,10 @@ def add_llm_span_attributes(
     service_name: str,
     model: str,
     stream: bool = True,
-    messages: Optional[str] = None,
+    messages: Optional[Dict[str, Any] | str] = None,
+    tools: Optional[Dict[str, Any] | str] = None,
     output: Optional[str] = None,
-    tools: Optional[str] = None,
-    tool_count: Optional[int] = None,
     tool_choice: Optional[str] = None,
-    system: Optional[str] = None,
     parameters: Optional[Dict[str, Any]] = None,
     extra_parameters: Optional[Dict[str, Any]] = None,
     ttfb: Optional[float] = None,
@@ -204,12 +203,10 @@ def add_llm_span_attributes(
         service_name: Name of the LLM service (e.g., "openai").
         model: Model name/identifier.
         stream: Whether streaming is enabled.
-        messages: JSON-serialized messages.
+        messages: messages.
+        tools: tools configuration.
         output: Aggregated output text from the LLM.
-        tools: JSON-serialized tools configuration.
-        tool_count: Number of tools available.
         tool_choice: Tool selection configuration.
-        system: System message.
         parameters: Service parameters.
         extra_parameters: Additional parameters.
         ttfb: Time to first byte in seconds.
@@ -222,24 +219,23 @@ def add_llm_span_attributes(
     span.set_attribute("gen_ai.output.type", "text")
     span.set_attribute("stream", stream)
 
+    span_input = {}
+
     # Add optional attributes
     if messages:
-        span.set_attribute("input", messages)
+        span_input["messages"] = messages
+
+    if tools:
+        span_input["tools"] = tools
+
+    # Set input in ChatML format
+    span.set_attribute("input", json.dumps(span_input))
 
     if output:
         span.set_attribute("output", output)
 
-    if tools:
-        span.set_attribute("tools", tools)
-
-    if tool_count is not None:
-        span.set_attribute("tool_count", tool_count)
-
     if tool_choice:
         span.set_attribute("tool_choice", tool_choice)
-
-    if system:
-        span.set_attribute("system", system)
 
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
