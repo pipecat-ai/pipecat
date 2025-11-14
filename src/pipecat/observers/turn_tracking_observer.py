@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     StartFrame,
-    STTMuteFrame,
     UserStartedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
@@ -67,9 +66,6 @@ class TurnTrackingObserver(BaseObserver):
         self._processed_frames = set()
         self._frame_history = deque(maxlen=max_frames)
 
-        # STT mute tracking
-        self._stt_muted = False
-
         self._register_event_handler("on_turn_started")
         self._register_event_handler("on_turn_ended")
 
@@ -96,8 +92,6 @@ class TurnTrackingObserver(BaseObserver):
             # Start the first turn immediately when the pipeline starts
             if self._turn_count == 0:
                 await self._start_turn(data)
-        elif isinstance(data.frame, STTMuteFrame):
-            self._stt_muted = data.frame.mute
         elif isinstance(data.frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(data)
         elif isinstance(data.frame, BotStartedSpeakingFrame):
@@ -136,11 +130,6 @@ class TurnTrackingObserver(BaseObserver):
 
     async def _handle_user_started_speaking(self, data: FramePushed):
         """Handle user speaking events, including interruptions."""
-        # Skip if STT is muted - we don't want to change turns when STT is muted
-        if self._stt_muted:
-            logger.debug("Ignoring UserStartedSpeaking while STT is muted")
-            return
-
         if self._is_bot_speaking:
             # Handle interruption - end current turn and start a new one
             self._cancel_turn_end_timer()  # Cancel any pending end turn timer

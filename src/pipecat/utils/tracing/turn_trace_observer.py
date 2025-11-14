@@ -139,31 +139,17 @@ class TurnTraceObserver(BaseObserver):
         frame = data.frame
 
         # ------------------------------------------------------------
-        # 0) Handle STT mute state updates early and skip user stop events
-        # ------------------------------------------------------------
-        if isinstance(frame, STTMuteFrame):
-            # Update the internal mute flag so latency calculations can
-            # ignore VAD/UserStoppedSpeaking events when STT is muted.
-            self._stt_muted = frame.mute
-            # Nothing else to do for this frame.
-            return
-
-        # ------------------------------------------------------------
         # 1) Latency attributes within the pre-allocated span
         # ------------------------------------------------------------
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            # Ignore VAD events while STT is muted – the audio is not being
-            # processed, so these timestamps are not meaningful.
-            if not self._stt_muted:
-                # Record the timestamp – actual span already exists from turn start
-                # logger.debug("VADUserStoppedSpeakingFrame in TurnTraceObserver")
-                self._vad_stopped_ts = time.time()
+            # Record the timestamp – actual span already exists from turn start
+            # logger.debug("VADUserStoppedSpeakingFrame in TurnTraceObserver")
+            self._vad_stopped_ts = time.time()
 
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            if not self._stt_muted:
-                # Record generic user stop speaking timestamp (may occur before definitive VAD stop)
-                # logger.debug("UserStoppedSpeakingFrame in TurnTraceObserver")
-                self._user_stopped_ts = time.time()
+            # Record generic user stop speaking timestamp (may occur before definitive VAD stop)
+            # logger.debug("UserStoppedSpeakingFrame in TurnTraceObserver")
+            self._user_stopped_ts = time.time()
 
         elif isinstance(frame, BotStartedSpeakingFrame):
             # Capture latency attribute once
