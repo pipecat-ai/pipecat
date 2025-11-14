@@ -73,13 +73,13 @@ Transform your local bot into a production-ready service. Pipecat Cloud handles 
 
 1. [Sign up for Pipecat Cloud](https://pipecat.daily.co/sign-up).
 
-2. Install the Pipecat Cloud CLI:
+2. Install the Pipecat CLI:
 
    ```bash
-   uv add pipecatcloud
+   uv tool install pipecat-ai-cli
    ```
 
-> 💡 Tip: You can run the `pipecatcloud` CLI using the `pcc` alias.
+> 💡 Tip: You can run the `pipecat` CLI using the `pc` alias.
 
 3. Set up Docker for building your bot image:
 
@@ -113,12 +113,22 @@ secret_set = "quickstart-secrets"
 
 > 💡 Tip: [Set up `image_credentials`](https://docs.pipecat.ai/deployment/pipecat-cloud/fundamentals/secrets#image-pull-secrets) in your TOML file for authenticated image pulls
 
+### Log in to Pipecat Cloud
+
+To start using the CLI, authenticate to Pipecat Cloud:
+
+```bash
+pipecat cloud auth login
+```
+
+You'll be presented with a link that you can click to authenticate your client.
+
 ### Configure secrets
 
 Upload your API keys to Pipecat Cloud's secure storage:
 
 ```bash
-uv run pcc secrets set quickstart-secrets --file .env
+pipecat cloud secrets set quickstart-secrets --file .env
 ```
 
 This creates a secret set called `quickstart-secrets` (matching your TOML file) and uploads all your API keys from `.env`.
@@ -128,13 +138,13 @@ This creates a secret set called `quickstart-secrets` (matching your TOML file) 
 Build your Docker image and push to Docker Hub:
 
 ```bash
-uv run pcc docker build-push
+pipecat cloud docker build-push
 ```
 
 Deploy to Pipecat Cloud:
 
 ```bash
-uv run pcc deploy
+pipecat cloud deploy
 ```
 
 ### Connect to your agent

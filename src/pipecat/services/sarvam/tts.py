@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -64,7 +64,7 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
         Language.TE: "te-IN",  # Telugu
     }
 
-    return LANGUAGE_MAP.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class SarvamHttpTTSService(TTSService):
@@ -192,6 +192,15 @@ class SarvamHttpTTSService(TTSService):
 
         Returns:
             True, as Sarvam service supports metrics generation.
+        """
+        return True
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Sarvam TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Sarvam's text frames include necessary inter-frame spaces.
         """
         return True
 
@@ -374,7 +383,6 @@ class SarvamTTSService(InterruptibleTTSService):
         model: str = "bulbul:v2",
         voice_id: str = "anushka",
         url: str = "wss://api.sarvam.ai/text-to-speech/ws",
-        aiohttp_session: Optional[aiohttp.ClientSession] = None,
         aggregate_sentences: Optional[bool] = True,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -388,11 +396,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 Supports "bulbul:v2", "bulbul:v3-beta" and "bulbul:v3".
             voice_id: Voice identifier for synthesis (default "anushka").
             url: WebSocket URL for connecting to the TTS backend (default production URL).
-            aiohttp_session: Optional shared aiohttp session. To maintain backward compatibility.
-
-                .. deprecated:: 0.0.81
-                    aiohttp_session is no longer used. This parameter will be removed in a future version.
-
             aggregate_sentences: Whether to merge multiple sentences into one audio chunk (default True).
             sample_rate: Desired sample rate for the output audio in Hz (overrides default if set).
             params: Optional input parameters to override global configuration.
@@ -413,16 +416,7 @@ class SarvamTTSService(InterruptibleTTSService):
             **kwargs,
         )
         params = params or SarvamTTSService.InputParams()
-        if aiohttp_session is not None:
-            import warnings
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'aiohttp_session' parameter is deprecated and will be removed in a future version. ",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
         # WebSocket endpoint URL
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
@@ -470,6 +464,15 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Returns:
             True, as Sarvam service supports metrics generation.
+        """
+        return True
+
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Sarvam TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Sarvam's text frames include necessary inter-frame spaces.
         """
         return True
 

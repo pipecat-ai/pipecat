@@ -250,6 +250,15 @@ class InworldTTSService(TTSService):
         """
         return True
 
+    @property
+    def includes_inter_frame_spaces(self) -> bool:
+        """Indicates that Inworld TTSTextFrames include necessary inter-frame spaces.
+
+        Returns:
+            True, indicating that Inworld's text frames include necessary inter-frame spaces.
+        """
+        return True
+
     async def start(self, frame: StartFrame):
         """Start the Inworld TTS service.
 

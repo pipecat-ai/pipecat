@@ -18,7 +18,7 @@ Dependencies:
 """
 
 import re
-from typing import FrozenSet, Optional, Sequence, Tuple
+from typing import FrozenSet, List, Optional, Sequence, Tuple
 
 import nltk
 from loguru import logger
@@ -196,3 +196,29 @@ def parse_start_end_tags(
             return (None, len(text))
 
     return (None, current_tag_index)
+
+
+def concatenate_aggregated_text(text_parts: List[str], add_spaces: bool) -> str:
+    """Concatenate a list of text parts into a single string.
+
+    This function joins the provided list of text parts into a single string,
+    taking into account whether or not the parts already contain spacing.
+
+    This function is useful for aggregating text segments received from LLMs or
+    transcription services.
+
+    Args:
+        text_parts: A list of strings representing parts of text to concatenate.
+        add_spaces: Whether to add spaces between text parts during concatenation.
+
+    Returns:
+        A single concatenated string.
+    """
+    # Concatenate text parts with or without spaces based on the flag
+    separator = " " if add_spaces else ""
+    result = separator.join(text_parts)
+
+    # Clean up any excessive whitespace
+    result = result.strip()
+
+    return result

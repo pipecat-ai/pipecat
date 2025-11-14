@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.stt_service import SegmentedSTTService, STTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -48,7 +48,7 @@ def language_to_riva_language(language: Language) -> Optional[str]:
     Returns:
         Optional[str]: Riva language code or None if not supported.
     """
-    language_map = {
+    LANGUAGE_MAP = {
         # Arabic
         Language.AR: "ar-AR",
         # English
@@ -85,7 +85,7 @@ def language_to_riva_language(language: Language) -> Optional[str]:
         Language.ES_US: "es-US",  # US Spanish
     }
 
-    return language_map.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class RivaSTTService(STTService):

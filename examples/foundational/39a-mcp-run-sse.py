@@ -79,13 +79,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.error(f"error setting up mcp")
         logger.exception("error trace:")
 
-    tools = await mcp.register_tools(llm)
+    tools = {}
+    try:
+        tools = await mcp.register_tools(llm)
+    except Exception as e:
+        logger.error(f"error registering tools")
+        logger.exception("error trace:")
 
     system = f"""
     You are a helpful LLM in a WebRTC call.
     Your goal is to demonstrate your capabilities in a succinct way.
     You have access to a number of tools provided by mcp.run. Use any and all tools to help users.
-    Your output will be converted to audio so don't include special characters in your answers.
+    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
     Respond to what the user said in a creative and helpful way.
     When asked for today's date, use 'https://www.datetoday.net/'.
     Don't overexplain what you are doing.

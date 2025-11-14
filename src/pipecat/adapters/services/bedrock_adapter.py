@@ -107,7 +107,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         system = None
         messages = []
 
-        # first, map messages using self._from_universal_context_message(m)
+        # First, map messages using self._from_universal_context_message(m)
         try:
             messages = [self._from_universal_context_message(m) for m in universal_context_messages]
         except Exception as e:
@@ -256,15 +256,22 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                     new_content.append({"text": text_content})
                 # handle image_url -> image conversion
                 if item["type"] == "image_url":
-                    new_item = {
-                        "image": {
-                            "format": "jpeg",
-                            "source": {
-                                "bytes": base64.b64decode(item["image_url"]["url"].split(",")[1])
-                            },
+                    if item["image_url"]["url"].startswith("data:"):
+                        new_item = {
+                            "image": {
+                                "format": "jpeg",
+                                "source": {
+                                    "bytes": base64.b64decode(
+                                        item["image_url"]["url"].split(",")[1]
+                                    )
+                                },
+                            }
                         }
-                    }
-                    new_content.append(new_item)
+                        new_content.append(new_item)
+                    else:
+                        url = item["image_url"]["url"]
+                        logger.warning(f"Unsupported 'image_url': {url}")
+
             # In the case where there's a single image in the list (like what
             # would result from a UserImageRawFrame), ensure that the image
             # comes before text

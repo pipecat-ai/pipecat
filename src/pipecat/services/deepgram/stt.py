@@ -236,7 +236,7 @@ class DeepgramSTTService(STTService):
             logger.error(f"{self}: unable to connect to Deepgram")
 
     async def _disconnect(self):
-        if self._connection.is_connected:
+        if await self._connection.is_connected():
             logger.debug("Disconnecting from Deepgram")
             # Deepgram swallows asyncio.CancelledError internally which prevents
             # proper cancellation propagation. This issue was found with

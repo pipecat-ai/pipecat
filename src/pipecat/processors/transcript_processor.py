@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -100,6 +101,12 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         self._current_text_parts: List[str] = []
         self._aggregation_start_time: Optional[str] = None
 
+        # Whether to add spaces between text parts.
+        # (The use of this could be expanded to the UserTranscriptProcessor in
+        # the future if needed; currently the UserTranscriptProcessor assumes
+        # that user transcription frames do not need aggregation).
+        self._add_spaces = True
+
     async def _emit_aggregated_text(self):
         """Aggregates and emits text fragments as a transcript message.
 
@@ -140,29 +147,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
                 Result: "Hello there how are you"
         """
         if self._current_text_parts and self._aggregation_start_time:
-            # Check specifically for space characters, previously isspace() was used
-            # but that includes all whitespace characters (e.g. \n), not just spaces.
-            has_leading_spaces = any(
-                part and part[0] == " " for part in self._current_text_parts[1:]
-            )
-            has_trailing_spaces = any(
-                part and part[-1] == " " for part in self._current_text_parts[:-1]
-            )
-
-            # If there are embedded spaces in the fragments, use direct concatenation
-            contains_spacing_between_fragments = has_leading_spaces or has_trailing_spaces
-
-            # Apply corresponding joining method
-            if contains_spacing_between_fragments:
-                # Fragments already have spacing - just concatenate
-                content = "".join(self._current_text_parts)
-            else:
-                # Word-by-word fragments - join with spaces
-                content = " ".join(self._current_text_parts)
-
-            # Clean up any excessive whitespace
-            content = content.strip()
-
+            content = concatenate_aggregated_text(self._current_text_parts, self._add_spaces)
             if content:
                 logger.trace(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(
@@ -205,6 +190,10 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             # Start timestamp on first text part
             if not self._aggregation_start_time:
                 self._aggregation_start_time = time_now_iso8601()
+
+            # Track whether we need to add spaces between text parts
+            # Assumption: we can just keep track of the latest frame's value
+            self._add_spaces = not frame.includes_inter_frame_spaces
 
             self._current_text_parts.append(frame.text)
 

@@ -715,7 +715,6 @@ class GoogleLLMService(LLMService):
         self._system_instruction = system_instruction
         self._http_options = http_options
 
-        self._create_client(api_key, http_options)
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
@@ -726,6 +725,9 @@ class GoogleLLMService(LLMService):
         self._tools = tools
         self._tool_config = tool_config
 
+        # Initialize the API client. Subclasses can override this if needed.
+        self.create_client()
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
 
@@ -734,8 +736,9 @@ class GoogleLLMService(LLMService):
         """
         return True
 
-    def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
-        self._client = genai.Client(api_key=api_key, http_options=http_options)
+    def create_client(self):
+        """Create the Gemini client instance. Subclasses can override this."""
+        self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
 
     async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
@@ -774,17 +777,6 @@ class GoogleLLMService(LLMService):
                     return part.text
 
         return None
-
-    def needs_mcp_alternate_schema(self) -> bool:
-        """Check if this LLM service requires alternate MCP schema.
-
-        Google/Gemini has stricter JSON schema validation and requires
-        certain properties to be removed or modified for compatibility.
-
-        Returns:
-            True for Google/Gemini services.
-        """
-        return True
 
     def _maybe_unset_thinking_budget(self, generation_params: Dict[str, Any]):
         try:
@@ -907,12 +899,18 @@ class GoogleLLMService(LLMService):
             async for chunk in response:
                 # Stop TTFB metrics after the first chunk
                 await self.stop_ttfb_metrics()
+                # Gemini may send usage_metadata in multiple chunks with varying behavior:
+                # - Sometimes a single chunk, sometimes multiple chunks
+                # - Token counts may be cumulative (growing) or may change between chunks
+                # - Early chunks may include estimates/overhead that gets refined
+                # We use assignment (not accumulation) because the final chunk always contains
+                # the authoritative, billable token usage for the entire response.
                 if chunk.usage_metadata:
-                    prompt_tokens += chunk.usage_metadata.prompt_token_count or 0
-                    completion_tokens += chunk.usage_metadata.candidates_token_count or 0
-                    total_tokens += chunk.usage_metadata.total_token_count or 0
-                    cache_read_input_tokens += chunk.usage_metadata.cached_content_token_count or 0
-                    reasoning_tokens += chunk.usage_metadata.thoughts_token_count or 0
+                    prompt_tokens = chunk.usage_metadata.prompt_token_count or 0
+                    completion_tokens = chunk.usage_metadata.candidates_token_count or 0
+                    total_tokens = chunk.usage_metadata.total_token_count or 0
+                    cache_read_input_tokens = chunk.usage_metadata.cached_content_token_count or 0
+                    reasoning_tokens = chunk.usage_metadata.thoughts_token_count or 0
 
                 if not chunk.candidates:
                     continue
@@ -922,7 +920,9 @@ class GoogleLLMService(LLMService):
                         for part in candidate.content.parts:
                             if not part.thought and part.text:
                                 search_result += part.text
-                                await self.push_frame(LLMTextFrame(part.text))
+                                frame = LLMTextFrame(part.text)
+                                frame.includes_inter_frame_spaces = True
+                                await self.push_frame(frame)
                             elif part.function_call:
                                 function_call = part.function_call
                                 id = function_call.id or str(uuid.uuid4())
@@ -1033,6 +1033,23 @@ class GoogleLLMService(LLMService):
 
         if context:
             await self._process_context(context)
+
+    async def stop(self, frame):
+        """Override stop to gracefully close the client."""
+        await super().stop(frame)
+        await self._close_client()
+
+    async def cancel(self, frame):
+        """Override cancel to gracefully close the client."""
+        await super().cancel(frame)
+        await self._close_client()
+
+    async def _close_client(self):
+        try:
+            await self._client.aio.aclose()
+        except Exception:
+            # Do nothing - we're shutting down anyway
+            pass
 
     def create_context_aggregator(
         self,

@@ -49,6 +49,33 @@ END_TOKEN = "<end>"
 FINALIZED_TOKEN = "<fin>"
 
 
+class SonioxContextGeneralItem(BaseModel):
+    """Represents a key-value pair for structured general context information."""
+
+    key: str
+    value: str
+
+
+class SonioxContextTranslationTerm(BaseModel):
+    """Represents a custom translation mapping for ambiguous or domain-specific terms."""
+
+    source: str
+    target: str
+
+
+class SonioxContextObject(BaseModel):
+    """Context object for models with context_version 2, for Soniox stt-rt-v3-preview and higher.
+
+    Learn more about context in the documentation:
+    https://soniox.com/docs/stt/concepts/context
+    """
+
+    general: Optional[List[SonioxContextGeneralItem]] = None
+    text: Optional[str] = None
+    terms: Optional[List[str]] = None
+    translation_terms: Optional[List[SonioxContextTranslationTerm]] = None
+
+
 class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
@@ -60,9 +87,9 @@ class SonioxInputParams(BaseModel):
         audio_format: Audio format to use for transcription.
         num_channels: Number of channels to use for transcription.
         language_hints: List of language hints to use for transcription.
-        context: Customization for transcription.
-        enable_non_final_tokens: Whether to enable non-final tokens. If false, only final tokens will be returned.
-        max_non_final_tokens_duration_ms: Maximum duration of non-final tokens.
+        context: Customization for transcription. String for models with context_version 1 and ContextObject for models with context_version 2.
+        enable_speaker_diarization: Whether to enable speaker diarization. Tokens are annotated with speaker IDs.
+        enable_language_identification: Whether to enable language identification. Tokens are annotated with language IDs.
         client_reference_id: Client reference ID to use for transcription.
     """
 
@@ -72,10 +99,10 @@ class SonioxInputParams(BaseModel):
     num_channels: Optional[int] = 1
 
     language_hints: Optional[List[Language]] = None
-    context: Optional[str] = None
+    context: Optional[SonioxContextObject | str] = None
 
-    enable_non_final_tokens: Optional[bool] = True
-    max_non_final_tokens_duration_ms: Optional[int] = None
+    enable_speaker_diarization: Optional[bool] = False
+    enable_language_identification: Optional[bool] = False
 
     client_reference_id: Optional[str] = None
 
@@ -173,6 +200,10 @@ class SonioxSTTService(STTService):
         # Either one or the other is required.
         enable_endpoint_detection = not self._vad_force_turn_endpoint
 
+        context = self._params.context
+        if isinstance(context, SonioxContextObject):
+            context = context.model_dump()
+
         # Send the initial configuration message.
         config = {
             "api_key": self._api_key,
@@ -182,9 +213,9 @@ class SonioxSTTService(STTService):
             "enable_endpoint_detection": enable_endpoint_detection,
             "sample_rate": self.sample_rate,
             "language_hints": _prepare_language_hints(self._params.language_hints),
-            "context": self._params.context,
-            "enable_non_final_tokens": self._params.enable_non_final_tokens,
-            "max_non_final_tokens_duration_ms": self._params.max_non_final_tokens_duration_ms,
+            "context": context,
+            "enable_speaker_diarization": self._params.enable_speaker_diarization,
+            "enable_language_identification": self._params.enable_language_identification,
             "client_reference_id": self._params.client_reference_id,
         }
 
