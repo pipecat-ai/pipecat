@@ -148,7 +148,7 @@ class IVRProcessor(FrameProcessor):
             result = await self._aggregator.aggregate(frame.text)
             if result:
                 # Push aggregated text that doesn't contain XML patterns
-                await self.push_frame(LLMTextFrame(result), direction)
+                await self.push_frame(LLMTextFrame(result.text), direction)
 
         else:
             await self.push_frame(frame, direction)
