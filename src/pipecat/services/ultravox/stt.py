@@ -377,7 +377,7 @@ class UltravoxSTTService(AIService):
                             if arr.size > 0:  # Check if array is not empty
                                 audio_arrays.append(arr)
                         except Exception as e:
-                            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                            yield ErrorFrame(error=f"{self} error: {e}")
                     # Handle numpy array data
                     elif isinstance(f.audio, np.ndarray):
                         if f.audio.size > 0:  # Check if array is not empty
@@ -445,9 +445,7 @@ class UltravoxSTTService(AIService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             import traceback
-
             logger.error(traceback.format_exc())
             yield ErrorFrame(f"Error processing audio: {str(e)}")
         finally:

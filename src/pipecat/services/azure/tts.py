@@ -365,14 +365,14 @@ class AzureTTSService(AzureBaseTTSService):
 
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 # Could add reconnection logic here if needed
                 return
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class AzureHttpTTSService(AzureBaseTTSService):

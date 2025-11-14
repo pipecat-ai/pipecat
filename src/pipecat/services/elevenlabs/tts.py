@@ -742,13 +742,13 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
                 yield TTSStoppedFrame()
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                yield ErrorFrame(error=f"{self} error: {e}")
                 self._started = False
                 return
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class ElevenLabsHttpTTSService(WordTTSService):
@@ -1092,7 +1092,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         continue
                     except Exception as e:
                         logger.error(f"{self} exception: {e}")
-                        await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                        yield ErrorFrame(error=f"{self} error: {e}")
                         continue
 
                 # After processing all chunks, emit any remaining partial word

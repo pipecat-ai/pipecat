@@ -166,7 +166,7 @@ class RivaTTSService(TTSService):
                 add_response(None)
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                yield ErrorFrame(error=f"{self} error: {e}")
                 add_response(None)
 
         await self.start_ttfb_metrics()

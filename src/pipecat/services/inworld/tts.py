@@ -374,7 +374,7 @@ class InworldTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Inworld API error: {error_text}")
-                    await self.push_error(ErrorFrame(error=f"Inworld API error: {error_text}"))
+                    yield ErrorFrame(error=f"Inworld API error: {error_text}")
                     return
 
                 # ================================================================================
