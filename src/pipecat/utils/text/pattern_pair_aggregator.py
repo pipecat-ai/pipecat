@@ -18,7 +18,7 @@ from typing import Awaitable, Callable, List, Optional, Tuple
 from loguru import logger
 
 from pipecat.utils.string import match_endofsentence
-from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator
+from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
 
 
 class MatchAction(Enum):
@@ -110,8 +110,8 @@ class PatternPairAggregator(BaseTextAggregator):
         """
         pattern_start = self._match_start_of_pattern(self._text)
         if pattern_start:
-            return Aggregation(self._text, pattern_start[1].get("type", "sentence"))
-        return Aggregation(self._text, "sentence")
+            return Aggregation(self._text, pattern_start[1].get("type", AggregationType.SENTENCE))
+        return Aggregation(self._text, AggregationType.SENTENCE)
 
     def add_pattern(
         self,
@@ -128,8 +128,8 @@ class PatternPairAggregator(BaseTextAggregator):
 
         Args:
             type: Identifier for this pattern pair. Should be unique and ideally descriptive.
-                  (e.g., 'code', 'speaker', 'custom'). type can not be 'sentence' as that is
-                  reserved for the default behavior.
+                  (e.g., 'code', 'speaker', 'custom'). type can not be 'sentence' or 'word' as
+                  those are reserved for the default behavior.
             start_pattern: Pattern that marks the beginning of content.
             end_pattern: Pattern that marks the end of content.
             action: What to do when a complete pattern is matched:
@@ -143,9 +143,9 @@ class PatternPairAggregator(BaseTextAggregator):
         Returns:
             Self for method chaining.
         """
-        if type == "sentence":
+        if type in [AggregationType.SENTENCE, AggregationType.WORD]:
             raise ValueError(
-                "The aggregation type 'sentence' is reserved for default behavior and can not be used for custom patterns."
+                f"The aggregation type '{type}' is reserved for default behavior and can not be used for custom patterns."
             )
         self._patterns[type] = {
             "start": start_pattern,
@@ -169,8 +169,8 @@ class PatternPairAggregator(BaseTextAggregator):
 
         Args:
             pattern_id: Identifier for this pattern pair. Should be unique and ideally descriptive.
-                        (e.g., 'code', 'speaker', 'custom'). pattern_id can not be 'sentence' as that is
-                        reserved for the default behavior.
+                        (e.g., 'code', 'speaker', 'custom'). pattern_id can not be 'sentence' or 'word'
+                        as those arereserved for the default behavior.
             start_pattern: Pattern that marks the beginning of content.
             end_pattern: Pattern that marks the end of content.
             remove_match: If True, the matched pattern will be removed from the text. (Same as MatchAction.REMOVE)
@@ -345,7 +345,7 @@ class PatternPairAggregator(BaseTextAggregator):
             # Otherwise, strip the text up to the start pattern and return it
             result = self._text[: pattern_start[0]]
             self._text = self._text[pattern_start[0] :]
-            return PatternMatch(content=result, type="sentence", full_match=result)
+            return PatternMatch(content=result, type=AggregationType.SENTENCE, full_match=result)
 
         # Find sentence boundary if no incomplete patterns
         eos_marker = match_endofsentence(self._text)
@@ -353,7 +353,7 @@ class PatternPairAggregator(BaseTextAggregator):
             # Extract text up to the sentence boundary
             result = self._text[:eos_marker]
             self._text = self._text[eos_marker:]
-            return PatternMatch(content=result, type="sentence", full_match=result)
+            return PatternMatch(content=result, type=AggregationType.SENTENCE, full_match=result)
 
         # No complete sentence found yet
         return None

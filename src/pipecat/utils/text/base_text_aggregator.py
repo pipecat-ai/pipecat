@@ -13,7 +13,18 @@ aggregated text should be sent for speech synthesis.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
+
+
+class AggregationType(str, Enum):
+    """Built-in aggregation strings."""
+
+    SENTENCE = "sentence"
+    WORD = "word"
+
+    def __str__(self):
+        return self.value
 
 
 @dataclass

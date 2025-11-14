@@ -584,36 +584,38 @@ class TTSService(AIService):
             await filter.reset_interruption()
             text = await filter.filter(text)
 
-        if text:
-            if not self._push_text_frames:
-                # In a typical pipeline, there is an assistant context aggregator
-                # that listens for TTSTextFrames to add spoken text to the context.
-                # If the TTS service supports word timestamps, then _push_text_frames
-                # is set to False and these are sent word by word as part of the
-                # _words_task_handler in the WordTTSService subclass. However, to
-                # support use cases where an observer may want the full text before
-                # the audio is generated, we send along the AggregatedTextFrame here,
-                # but we set append_to_context to False so it does not cause duplication
-                # in the context. This is primarily used by the RTVIObserver to
-                # generate a complete bot-output.
-                src_frame.append_to_context = False
-                await self.push_frame(src_frame)
-            # Note: Text transformations only affect the text sent to the TTS. This allows
-            # for explicit TTS-specific modifications (e.g., inserting TTS supported tags
-            # for spelling or emotion or replacing an @ with "at"). For TTS services that
-            # support word-level timestamps, this DOES affect the resulting context as the
-            # the context is built from the TTSTextFrames generated during word timestamping.
-            for aggregation_type, transform in self._text_transforms:
-                if aggregation_type == type or aggregation_type == "*":
-                    text = await transform(text, type)
-            await self.process_generator(self.run_tts(text))
+        if not text.strip():
+            await self.stop_processing_metrics()
+            return
+
+        # To support use cases that may want to know the text before it's spoken, we
+        # push the AggregatedTextFrame version before transforming and sending to TTS.
+        # However, we do not want to add this text to the assistant context until it
+        # is spoken, so we set append_to_context to False.
+        src_frame.append_to_context = False
+        await self.push_frame(src_frame)
+
+        # Note: Text transformations are meant to only affect the text sent to the TTS for
+        # TTS-specific purposes. This allows for explicit TTS modifications (e.g., inserting
+        # TTS supported tags for spelling or emotion or replacing an @ with "at"). For TTS
+        # services that support word-level timestamps, this CAN affect the resulting context
+        # since the TTSTextFrames are generated from the TTS output stream
+        transformed_text = text
+        for aggregation_type, transform in self._text_transforms:
+            if aggregation_type == type or aggregation_type == "*":
+                transformed_text = await transform(transformed_text, type)
+        await self.process_generator(self.run_tts(transformed_text))
 
         await self.stop_processing_metrics()
 
         if self._push_text_frames:
-            # In the case where the TTS service does not support word timestamps,
-            # we send the full aggregated text after the audio. This way, if we are
-            # interrupted, the text is not added to the assistant context.
+            # In TTS services that support word timestamps, the TTSTextFrames
+            # are pushed as words are spoken. However, in the case where the TTS service
+            # does not support word timestamps (i.e. _push_text_frames is True), we send
+            # the original (non-transformed) text after the TTS generation has completed.
+            # This way, if we are interrupted, the text is not added to the assistant
+            # context and the context that IS added does not include TTS-specific tags
+            # or transformations.
             frame = TTSTextFrame(text, aggregated_by=type)
             frame.includes_inter_frame_spaces = self.includes_inter_frame_spaces
             await self.push_frame(frame)

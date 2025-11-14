@@ -14,7 +14,7 @@ as a unit regardless of internal punctuation.
 from typing import Optional, Sequence
 
 from pipecat.utils.string import StartEndTags, match_endofsentence, parse_start_end_tags
-from pipecat.utils.text.base_text_aggregator import Aggregation, BaseTextAggregator
+from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
 
 
 class SkipTagsAggregator(BaseTextAggregator):
@@ -49,7 +49,7 @@ class SkipTagsAggregator(BaseTextAggregator):
         Returns:
             The current text buffer content that hasn't been processed yet.
         """
-        return Aggregation(self._text, "sentence")
+        return Aggregation(self._text, AggregationType.SENTENCE)
 
     async def aggregate(self, text: str) -> Optional[Aggregation]:
         """Aggregate text while respecting tag boundaries.
@@ -80,7 +80,7 @@ class SkipTagsAggregator(BaseTextAggregator):
                 # Extract text up to the sentence boundary
                 result = self._text[:eos_marker]
                 self._text = self._text[eos_marker:]
-                return Aggregation(result, "sentence")
+                return Aggregation(result, AggregationType.SENTENCE)
 
         # No complete sentence found yet
         return None
