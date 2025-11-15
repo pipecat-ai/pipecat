@@ -105,15 +105,6 @@ class SpeechmaticsTTSService(TTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Speechmatics TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Speechmatics's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Speechmatics' HTTP API.

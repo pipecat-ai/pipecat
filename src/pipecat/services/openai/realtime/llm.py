@@ -678,8 +678,6 @@ class OpenAIRealtimeLLMService(LLMService):
         # the output modality is "text"
         if evt.delta:
             frame = LLMTextFrame(evt.delta)
-            # OpenAI Realtime text already includes any necessary inter-chunk spaces
-            frame.includes_inter_frame_spaces = True
             await self.push_frame(frame)
 
     async def _handle_evt_audio_transcript_delta(self, evt):

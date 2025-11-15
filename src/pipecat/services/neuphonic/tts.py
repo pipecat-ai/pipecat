@@ -151,15 +151,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Neuphonic TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Neuphonic's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to Neuphonic service language format.
 
@@ -446,15 +437,6 @@ class NeuphonicHttpTTSService(TTSService):
 
         Returns:
             True, as Neuphonic HTTP service supports metrics generation.
-        """
-        return True
-
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Neuphonic TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Neuphonic's text frames include necessary inter-frame spaces.
         """
         return True
 
