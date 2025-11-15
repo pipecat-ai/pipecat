@@ -657,6 +657,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self.reset()
 
         if aggregation:
+            if self._params.correct_aggregation_callback:
+                try:
+                    aggregation = self._params.correct_aggregation_callback(aggregation)
+                except Exception as e:
+                    logger.error(f"Error in aggregation correction callback: {e}")
+
             self._context.add_message({"role": "assistant", "content": aggregation})
 
         # Push context frame

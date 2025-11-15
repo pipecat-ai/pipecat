@@ -157,14 +157,14 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """
         if self._current_text_parts and self._aggregation_start_time:
             content = concatenate_aggregated_text(self._current_text_parts, self._add_spaces)
-            
+
             # Apply correction if callback is provided
             if content and self._correct_aggregation_callback:
                 try:
                     content = self._correct_aggregation_callback(content)
                 except Exception as e:
                     logger.error(f"Error in transcript correction callback: {e}")
-                    
+
             if content:
                 logger.trace(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(

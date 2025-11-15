@@ -784,12 +784,6 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
-        # Register event handler that will be triggered when an aggregation is pushed.
-        # External components (e.g., PipecatEngine) can subscribe to this event to be
-        # notified whenever the assistant context has been updated and pushed
-        # downstream.
-        self._register_event_handler("on_push_aggregation")
-
     @property
     def has_function_calls_in_progress(self) -> bool:
         """Check if there are any function calls currently in progress.
@@ -904,10 +898,6 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
         if aggregation:
             await self.handle_aggregation(aggregation)
-
-        # If there is an _aggregation, lets notify **after** the context has been
-        # updated
-        await self._call_event_handler("on_push_aggregation")
 
         # Push context frame
         await self.push_context_frame()

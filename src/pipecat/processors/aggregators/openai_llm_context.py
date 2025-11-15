@@ -82,10 +82,6 @@ class OpenAILLMContext:
         self._tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = tools
         self._llm_adapter: Optional[BaseLLMAdapter] = None
 
-        # Name of the current workflow node (set by the Pipecat engine). This is useful
-        # for downstream tracing where we want to include the node name in the span.
-        self._node_name: Optional[str] = None
-
     def get_llm_adapter(self) -> Optional[BaseLLMAdapter]:
         """Get the current LLM adapter.
 
@@ -350,18 +346,6 @@ class OpenAILLMContext:
         header.extend(b"data")  # Subchunk2ID
         header.extend(data_size.to_bytes(4, "little"))  # Subchunk2Size
         return header
-
-    def set_node_name(self, node_name: Optional[str]):
-        """Attach the current workflow node name to the context.
-
-        This value is later accessed by the tracing decorators so that span names can
-        include the node name (e.g. ``llm-check-user-intent``).
-        """
-        self._node_name = node_name
-
-    def get_node_name(self) -> Optional[str]:
-        """Return the node name previously set with ``set_node_name`` (if any)."""
-        return self._node_name
 
 
 @dataclass

@@ -1043,6 +1043,17 @@ class FunctionCallFromLLM:
 
 
 @dataclass
+class FunctionCallsFromLLMInfoFrame(SystemFrame):
+    """Frame that help trace function calls that are generated from LLM.
+
+    Parameters:
+        function_calls: Sequence of function calls that will be executed.
+    """
+
+    function_calls: Sequence[FunctionCallFromLLM]
+
+
+@dataclass
 class FunctionCallsStartedFrame(SystemFrame):
     """Frame signaling that function call execution is starting.
 
@@ -1759,14 +1770,3 @@ class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
     """
 
     service: "FrameProcessor"
-
-
-@dataclass
-class LLMGeneratedTextFrame(ControlFrame):
-    """Indicates that the LLM has generated some text in the current generation.
-
-    This can help distinguish between cases when there is content generated
-    along with function call by the LLM.
-    """
-
-    pass

@@ -124,7 +124,6 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             if not in standard format.
         """
         if isinstance(tools, ToolsSchema):
-            logger.debug(f"Retrieving the tools using the adapter: {type(self)}")
             return self.to_provider_tools_format(tools)
         # Fallback to return the same tools in case they are not in a standard format
         return tools

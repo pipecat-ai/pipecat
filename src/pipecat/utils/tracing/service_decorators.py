@@ -391,7 +391,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # ------------------------------------------------------------------
                             if (
                                 hasattr(frame, "__class__")
-                                and frame.__class__.__name__ == "FunctionCallsStartedFrame"
+                                and frame.__class__.__name__ == "FunctionCallsFromLLMInfoFrame"
                                 and direction == FrameDirection.DOWNSTREAM
                             ):
                                 try:
@@ -535,9 +535,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         # Append JSON dump of function calls to the output text so that
                         # the consumer can see both in a single attribute.
                         # --------------------------------------------------------------
-                        span_output = {}
-                        if output_text:
-                            span_output["content"] = output_text
+                        span_output = {"content": output_text}
 
                         if function_calls_info:
                             span_output["tool_calls"] = function_calls_info

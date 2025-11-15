@@ -25,11 +25,12 @@ from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     Frame,
+    FunctionCallsFromLLMInfoFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMGeneratedTextFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
@@ -142,6 +143,8 @@ class BaseOpenAILLMService(LLMService):
             default_headers=default_headers,
             **kwargs,
         )
+        # Store pending function calls that need to be executed after TTS
+        self._pending_function_calls = []
 
     def create_client(
         self,
@@ -277,23 +280,9 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions_specific_context(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        # Truncate messages for logging to avoid overwhelming the logs
-        messages_for_log = context.get_messages_for_logging()
-        for i, message in enumerate(messages_for_log):
-            # Handle both string and dict message types
-            if isinstance(message, dict):
-                # For dict messages, process the 'content' field if it exists
-                if "content" in message and isinstance(message["content"], str):
-                    words = message["content"].split()
-                    if len(words) > 120:
-                        message["content"] = " ".join(words[:20] + ["......"] + words[-100:])
-                    messages_for_log[i] = message
-            elif isinstance(message, str):
-                words = message.split()
-                if len(words) > 120:
-                    messages_for_log[i] = " ".join(words[:20] + ["......"] + words[-100:])
-
-        logger.debug(f"{self}: Generating chat from LLM-specific context {messages_for_log}")
+        logger.debug(
+            f"{self}: Generating chat from LLM-specific context {context.get_messages_for_logging()}"
+        )
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
 
@@ -326,9 +315,22 @@ class BaseOpenAILLMService(LLMService):
         self, context: LLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
         adapter = self.get_llm_adapter()
-        logger.debug(
-            f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
-        )
+        messages_for_log = adapter.get_messages_for_logging(context)
+        for i, message in enumerate(messages_for_log):
+            # Handle both string and dict message types
+            if isinstance(message, dict):
+                # For dict messages, process the 'content' field if it exists
+                if "content" in message and isinstance(message["content"], str):
+                    words = message["content"].split()
+                    if len(words) > 120:
+                        message["content"] = " ".join(words[:20] + ["......"] + words[-100:])
+                    messages_for_log[i] = message
+            elif isinstance(message, str):
+                words = message.split()
+                if len(words) > 120:
+                    messages_for_log[i] = " ".join(words[:20] + ["......"] + words[-100:])
+
+        logger.debug(f"{self}: Generating chat from universal context {messages_for_log}")
 
         params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
         chunks = await self.get_chat_completions(params)
@@ -345,10 +347,13 @@ class BaseOpenAILLMService(LLMService):
         arguments = ""
         tool_call_id = ""
 
-        await self.start_ttfb_metrics()
+        # Reset pending function calls when processing a new context
+        self._pending_function_calls = []
 
-        # Track if we've sent the LLMGeneratedTextFrame signal for this response
-        text_generation_signaled = False
+        # Flag to store whether some text was generated in the current generation
+        text_generated_signal = False
+
+        await self.start_ttfb_metrics()
 
         # Generate chat completions using either OpenAILLMContext or universal LLMContext
         chunk_stream = await (
@@ -408,11 +413,8 @@ class BaseOpenAILLMService(LLMService):
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                # Send a frame that signals that some text was generated in the current generation
-                if not text_generation_signaled:
-                    await self.push_frame(LLMGeneratedTextFrame())
-                    text_generation_signaled = True
-                
+                text_generated_signal = True
+
                 frame = LLMTextFrame(chunk.choices[0].delta.content)
                 frame.includes_inter_frame_spaces = True
                 await self.push_frame(frame)
@@ -451,20 +453,46 @@ class BaseOpenAILLMService(LLMService):
                     )
                 )
 
-            await self.run_function_calls(function_calls)
+            # Send the info frame with function calls so that it can be traced by service_decorators
+            await self.push_frame(
+                FunctionCallsFromLLMInfoFrame(function_calls=function_calls),
+                direction=FrameDirection.DOWNSTREAM,
+            )
+
+            # If text was generated, defer function calls until after TTS plays
+            # Otherwise, execute them immediately
+            if text_generated_signal:
+                self._pending_function_calls = function_calls
+                logger.debug(
+                    f"{self}: Deferring {len(function_calls)} function calls until after TTS"
+                )
+            else:
+                logger.debug(f"{self}: Executing {len(function_calls)} function calls")
+                await self.run_function_calls(function_calls)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
         Handles OpenAILLMContextFrame, LLMContextFrame, LLMMessagesFrame,
-        and LLMUpdateSettingsFrame to trigger LLM completions and manage
-        settings.
+        LLMUpdateSettingsFrame, and BotStoppedSpeakingFrame to trigger LLM
+        completions, manage settings, and handle deferred function calls.
 
         Args:
             frame: The frame to process.
             direction: The direction of frame processing.
         """
         await super().process_frame(frame, direction)
+
+        # Handle BotStoppedSpeakingFrame to execute pending function calls
+        if isinstance(frame, BotStoppedSpeakingFrame):
+            if self._pending_function_calls:
+                logger.debug(
+                    f"{self}: Executing {len(self._pending_function_calls)} deferred function calls after TTS"
+                )
+                await self.run_function_calls(self._pending_function_calls)
+                self._pending_function_calls = []
+            await self.push_frame(frame, direction)
+            return
 
         context = None
         if isinstance(frame, OpenAILLMContextFrame):

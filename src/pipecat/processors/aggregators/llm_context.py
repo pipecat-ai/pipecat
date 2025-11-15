@@ -196,6 +196,9 @@ class LLMContext:
         )
 
         return {"role": role, "content": content}
+        # Name of the current workflow node (set by the Pipecat engine). This is useful
+        # for downstream tracing where we want to include the node name in the span.
+        self._node_name = ""
 
     @property
     def messages(self) -> List[LLMContextMessage]:
@@ -364,3 +367,15 @@ class LLMContext:
             raise TypeError(
                 f"In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN. Got type: {type(tools)}",
             )
+
+    def set_node_name(self, node_name: Optional[str]):
+        """Attach the current workflow node name to the context.
+
+        This value is later accessed by the tracing decorators so that span names can
+        include the node name (e.g. ``llm-check-user-intent``).
+        """
+        self._node_name = node_name
+
+    def get_node_name(self) -> Optional[str]:
+        """Return the node name previously set with ``set_node_name`` (if any)."""
+        return self._node_name

@@ -52,8 +52,6 @@ from pipecat.utils.time import nanoseconds_to_seconds
 BOT_VAD_STOP_SECS = 0
 
 
-
-
 class BaseOutputTransport(FrameProcessor):
     """Base class for output transport implementations.
 
