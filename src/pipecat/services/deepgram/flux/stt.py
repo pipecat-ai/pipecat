@@ -15,6 +15,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -157,12 +159,32 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         self._language = Language.EN
         self._websocket_url = None
         self._receive_task = None
+        # Track bot speaking state for interruption strategies
+        self._bot_speaking = False
         # Flux event handlers
         self._register_event_handler("on_start_of_turn")
         self._register_event_handler("on_turn_resumed")
         self._register_event_handler("on_end_of_turn")
         self._register_event_handler("on_eager_end_of_turn")
         self._register_event_handler("on_update")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames with bot speaking state tracking.
+
+        Tracks bot speaking state to enable interruption strategy support.
+        When interruption strategies are configured, the service will defer
+        interruption decisions to aggregators based on strategy evaluation.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
 
     async def _connect(self):
         """Connect to WebSocket and start background tasks.
@@ -518,19 +540,40 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """Handle StartOfTurn events from Deepgram Flux.
 
         StartOfTurn events are fired when Deepgram Flux detects the beginning
-        of a new speaking turn. This triggers bot interruption to stop any
-        ongoing speech synthesis and signals the start of user speech detection.
+        of a new speaking turn. Depending on configuration, this may trigger
+        immediate bot interruption or defer interruption to aggregators.
 
         The service will:
-        - Send a BotInterruptionFrame upstream to stop bot speech
-        - Send a UserStartedSpeakingFrame downstream to notify other components
+        - Send a UserStartedSpeakingFrame to notify the pipeline
+        - Conditionally send interruption based on interruption strategies:
+          * If no strategies configured OR bot not speaking: interrupt immediately
+          * If strategies configured AND bot speaking: defer to aggregator
         - Start metrics collection for measuring response times
+
+        When interruption strategies are configured and bot is speaking, the
+        aggregators will evaluate the strategies (e.g., MinWordsInterruptionStrategy)
+        and only interrupt if the criteria are met.
 
         Args:
             transcript: maybe the first few words of the turn.
         """
         logger.debug("User started speaking")
-        await self.push_interruption_task_frame_and_wait()
+
+        # Only push InterruptionFrame if:
+        # 1. No interruption config is set, OR
+        # 2. Interruption config is set but bot is not speaking
+        should_push_immediate_interruption = (
+            not self.interruption_strategies or not self._bot_speaking
+        )
+
+        if should_push_immediate_interruption and self.interruptions_allowed:
+            await self.push_interruption_task_frame_and_wait()
+        elif self.interruption_strategies and self._bot_speaking:
+            logger.debug(
+                "User started speaking while bot is speaking with interruption strategies - "
+                "deferring interruption to aggregator"
+            )
+
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.start_metrics()
         await self._call_event_handler("on_start_of_turn", transcript)
