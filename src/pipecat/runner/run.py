@@ -322,7 +322,7 @@ def _setup_webrtc_routes(
                         type=request_data["type"],
                         pc_id=request_data.get("pc_id"),
                         restart_pc=request_data.get("restart_pc"),
-                        request_data=request_data,
+                        request_data=active_session,
                     )
                     return await offer(webrtc_request, background_tasks)
                 elif request.method == HTTPMethod.PATCH.value:
