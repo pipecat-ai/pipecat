@@ -86,9 +86,7 @@ class HumeTTSService(WordTTSService):
         """
         api_key = api_key or os.getenv("HUME_API_KEY")
         if not api_key:
-            raise ValueError(
-                "HumeTTSService requires an API key (env HUME_API_KEY or api_key=)"
-            )
+            raise ValueError("HumeTTSService requires an API key (env HUME_API_KEY or api_key=)")
 
         if sample_rate != HUME_SAMPLE_RATE:
             logger.warning(
@@ -227,9 +225,7 @@ class HumeTTSService(WordTTSService):
                             begin_ms = getattr(time_obj, "begin", None)
                             if begin_ms is not None:
                                 begin_seconds = begin_ms / 1000.0
-                                await self.add_word_timestamps(
-                                    [(word_text, begin_seconds)]
-                                )
+                                await self.add_word_timestamps([(word_text, begin_seconds)])
                     continue
 
                 # Process audio chunk
