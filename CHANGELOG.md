@@ -18,7 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `ElevenLabsRealtimeSTTService` which implements the Realtime STT
   service from ElevenLabs.
 
+- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
+  example wiring; leverages the enhancement model for robust detection with no
+  ONNX dependency or added processing complexity.
+
 ### Changed
+
+- `BaseTextFilter` only require subclasses to implement the `filter()` method.
 
 - Extracted the logic for retrying connections, and create a new `send_with_retry`
   method inside `WebSocketService`.
@@ -64,12 +70,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `keyterm` or `tag` containing a space.
 
 - Prevented `HeyGenVideoService` from automatically disconnecting after 5 minutes.
-
-### Added
-
-- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
-  example wiring; leverages the enhancement model for robust detection with no
-  ONNX dependency or added processing complexity.
 
 ## [0.0.94] - 2025-11-10
 
