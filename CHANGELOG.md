@@ -159,6 +159,10 @@ Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and 
     encompassing text should be added to the LLM context (by the LLM assistant aggregator). It
     defaults to `True`.
 
+  - `TTSService` base class updates:
+    - `TTSService`s now accept a new `skip_aggregator_types` to avoid speaking certain aggregation
+      types (now determined/returned by the aggregator)
+
 ### Deprecated
 
 - The `api_key` parameter in `GeminiTTSService` is deprecated. Use
