@@ -52,7 +52,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramFluxSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramFluxSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        params=DeepgramFluxSTTService.InputParams(min_confidence=0.3),
+    )
 
     tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-2-andromeda-en")
 
