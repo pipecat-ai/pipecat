@@ -39,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added word-level timestamps support to Hume TTS service
 
+- Introduced a new `AggregatedTextFrame` type to support passing text along with an
+  `aggregated_by` field to describe the type of text included. `TTSTextFrame`s now
+  inherit from `AggregatedTextFrame`. With this inheritance, an observer can watch for
+  `AggregatedTextFrame`s to accumlate the perceived output and determine whether or not
+  the text was spoken based on if that frame is also a `TTSTextFrame`.
+
+  With this frame, the llm token stream can be transformed into custom composable
+  chunks, allowing for aggregation outside the TTS service. This makes it possible to
+  listen for or handle those aggregations and sets the stage for doing things like
+  composing a best effort of the perceived llm output in a more digestable form and
+  to do so whether or not it is processed by a TTS or if even a TTS exists.
+
 ### Changed
 
 - ⚠️ Breaking change: `LLMContext.create_image_message()`,
