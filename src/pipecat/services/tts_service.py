@@ -122,6 +122,10 @@ class TTSService(AIService):
             pause_frame_processing: Whether to pause frame processing during audio generation.
             sample_rate: Output sample rate for generated audio.
             text_aggregator: Custom text aggregator for processing incoming text.
+
+                .. deprecated:: 0.0.95
+                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
+
             text_filters: Sequence of text filters to apply after aggregation.
             text_filter: Single text filter (deprecated, use text_filters).
 
@@ -144,6 +148,16 @@ class TTSService(AIService):
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
+        if text_aggregator:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'text_aggregator' is deprecated. Use an LLMTextProcessor before the TTSService for custom text aggregation.",
+                    DeprecationWarning,
+                )
+
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
         self._tracing_enabled: bool = False
@@ -338,6 +352,8 @@ class TTSService(AIService):
             and frame.skip_tts
         ):
             await self.push_frame(frame, direction)
+        elif isinstance(frame, AggregatedTextFrame):
+            await self._push_tts_frames(frame)
         elif (
             isinstance(frame, TextFrame)
             and not isinstance(frame, InterimTranscriptionFrame)
@@ -482,8 +498,11 @@ class TTSService(AIService):
     async def _push_tts_frames(
         self, src_frame: AggregatedTextFrame, includes_inter_frame_spaces: Optional[bool] = False
     ):
+        type = src_frame.aggregated_by
+        text = src_frame.text
+
         # Remove leading newlines only
-        text = src_frame.text.lstrip("\n")
+        text = text.lstrip("\n")
 
         # Don't send only whitespace. This causes problems for some TTS models. But also don't
         # strip all whitespace, as whitespace can influence prosody.
@@ -497,20 +516,35 @@ class TTSService(AIService):
 
         await self.start_processing_metrics()
 
-        # Process all filter.
+        # Process all filters.
         for filter in self._text_filters:
             await filter.reset_interruption()
             text = await filter.filter(text)
 
-        if text:
-            await self.process_generator(self.run_tts(text))
+        if not text.strip():
+            await self.stop_processing_metrics()
+            return
+
+        # To support use cases that may want to know the text before it's spoken, we
+        # push the AggregatedTextFrame version before transforming and sending to TTS.
+        # However, we do not want to add this text to the assistant context until it
+        # is spoken, so we set append_to_context to False.
+        src_frame.append_to_context = False
+        await self.push_frame(src_frame)
+
+        await self.process_generator(self.run_tts(text))
 
         await self.stop_processing_metrics()
 
         if self._push_text_frames:
-            # We send the original text after the audio. This way, if we are
-            # interrupted, the text is not added to the assistant context.
-            frame = TTSTextFrame(text, aggregated_by=src_frame.aggregated_by)
+            # In TTS services that support word timestamps, the TTSTextFrames
+            # are pushed as words are spoken. However, in the case where the TTS service
+            # does not support word timestamps (i.e. _push_text_frames is True), we send
+            # the original (non-transformed) text after the TTS generation has completed.
+            # This way, if we are interrupted, the text is not added to the assistant
+            # context and the context that IS added does not include TTS-specific tags
+            # or transformations.
+            frame = TTSTextFrame(text, aggregated_by=type)
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             await self.push_frame(frame)
 
