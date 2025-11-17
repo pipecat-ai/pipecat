@@ -135,6 +135,10 @@ Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and 
           text = match.text # instead of match.content
        ```
 
+  - `TextFrame` now includes the field `append_to_context` to support setting whether or not the
+    encompassing text should be added to the LLM context (by the LLM assistant aggregator). It
+    defaults to `True`.
+
 ### Deprecated
 
 - The `api_key` parameter in `GeminiTTSService` is deprecated. Use
