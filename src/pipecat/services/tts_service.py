@@ -23,6 +23,8 @@ from typing import (
 from loguru import logger
 
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -358,7 +360,9 @@ class TTSService(AIService):
             self._processing_text = False
 
             if pending_aggregation.text:
-                await self._push_tts_frames(pending_aggregation.text)
+                await self._push_tts_frames(
+                    AggregatedTextFrame(pending_aggregation.text, pending_aggregation.type)
+                )
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
                     await self.push_frame(frame, direction)
@@ -368,7 +372,7 @@ class TTSService(AIService):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
-            await self._push_tts_frames(frame.text)
+            await self._push_tts_frames(AggregatedTextFrame(frame.text, AggregationType.SENTENCE))
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
@@ -462,18 +466,24 @@ class TTSService(AIService):
         if not self._aggregate_sentences:
             text = frame.text
             includes_inter_frame_spaces = frame.includes_inter_frame_spaces
+            aggregated_by = "token"
         else:
-            aggregation = await self._text_aggregator.aggregate(frame.text)
-            text = aggregation.text
+            aggregate = await self._text_aggregator.aggregate(frame.text)
+            if aggregate:
+                text = aggregate.text
+                aggregated_by = aggregate.type
 
         if text:
-            await self._push_tts_frames(text, includes_inter_frame_spaces)
+            logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
+            await self._push_tts_frames(
+                AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
+            )
 
     async def _push_tts_frames(
-        self, text: str, includes_inter_frame_spaces: Optional[bool] = False
+        self, src_frame: AggregatedTextFrame, includes_inter_frame_spaces: Optional[bool] = False
     ):
         # Remove leading newlines only
-        text = text.lstrip("\n")
+        text = src_frame.text.lstrip("\n")
 
         # Don't send only whitespace. This causes problems for some TTS models. But also don't
         # strip all whitespace, as whitespace can influence prosody.
@@ -500,7 +510,7 @@ class TTSService(AIService):
         if self._push_text_frames:
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
-            frame = TTSTextFrame(text)
+            frame = TTSTextFrame(text, aggregated_by=src_frame.aggregated_by)
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             await self.push_frame(frame)
 
@@ -630,7 +640,7 @@ class WordTTSService(TTSService):
             else:
                 # Assumption: word-by-word text frames don't include spaces, so
                 # we can rely on the default includes_inter_frame_spaces=False
-                frame = TTSTextFrame(word)
+                frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
                 frame.pts = self._initial_word_timestamp + timestamp
             if frame:
                 last_pts = frame.pts
