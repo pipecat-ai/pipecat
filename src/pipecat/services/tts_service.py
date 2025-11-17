@@ -103,6 +103,8 @@ class TTSService(AIService):
         sample_rate: Optional[int] = None,
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
         text_aggregator: Optional[BaseTextAggregator] = None,
+        # Types of text aggregations that should not be spoken.
+        skip_aggregator_types: Optional[List[str]] = [],
         # Text filter executed after text has been aggregated.
         text_filters: Optional[Sequence[BaseTextFilter]] = None,
         text_filter: Optional[BaseTextFilter] = None,
@@ -121,6 +123,7 @@ class TTSService(AIService):
             silence_time_s: Duration of silence to push when push_silence_after_stop is True.
             pause_frame_processing: Whether to pause frame processing during audio generation.
             sample_rate: Output sample rate for generated audio.
+            skip_aggregator_types: List of aggregation types that should not be spoken.
             text_aggregator: Custom text aggregator for processing incoming text.
 
                 .. deprecated:: 0.0.95
@@ -158,6 +161,7 @@ class TTSService(AIService):
                     DeprecationWarning,
                 )
 
+        self._skip_aggregator_types: List[str] = skip_aggregator_types or []
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
         self._tracing_enabled: bool = False
@@ -500,6 +504,12 @@ class TTSService(AIService):
     ):
         type = src_frame.aggregated_by
         text = src_frame.text
+
+        # Skip sending to TTS if the aggregation type is in the skip list. Simply
+        # push the original frame downstream.
+        if type in self._skip_aggregator_types:
+            await self.push_frame(src_frame)
+            return
 
         # Remove leading newlines only
         text = text.lstrip("\n")
