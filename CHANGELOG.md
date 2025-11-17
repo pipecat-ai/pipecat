@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   services that subclass `TTSService` can indicate whether the text in the
   `TTSTextFrame`s they push already contain any necessary inter-frame spaces.
 
+- Added word-level timestamps support to Hume TTS service
+
 ### Changed
 
 - Updated all STT and TTS services to use consistent error handling pattern with
@@ -56,8 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and 
-  example wiring; leverages the enhancement model for robust detection with no 
+- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
+  example wiring; leverages the enhancement model for robust detection with no
   ONNX dependency or added processing complexity.
 
 ## [0.0.94] - 2025-11-10
