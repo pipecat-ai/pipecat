@@ -13,13 +13,17 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import Frame, LLMRunFrame, TTSTextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -28,8 +32,24 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.frames.frames import format_pts
 
 load_dotenv(override=True)
+
+
+class TimestampLogger(FrameProcessor):
+    """Frame processor that logs TTSTextFrame objects with their timestamps.
+
+    This helps verify that word timestamps are working correctly by showing
+    when each word is spoken with its presentation timestamp (PTS).
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, TTSTextFrame):
+            pts_str = format_pts(frame.pts) if frame.pts else "no PTS"
+            logger.info(f"🎯 Word timestamp: '{frame.text}' at {pts_str}")
+        await self.push_frame(frame, direction)
+
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -81,15 +101,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
+    # Add transcript processor to show timestamps in conversation history
+    transcript = TranscriptProcessor()
+
+    # Add timestamp logger to verify word timestamps are being generated
+    timestamp_logger = TimestampLogger()
+
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             rtvi,
             stt,
+            transcript.user(),  # User transcripts
             context_aggregator.user(),  # User responses
             llm,  # LLM
-            tts,  # TTS
+            tts,  # TTS (HumeTTSService with word timestamps)
+            timestamp_logger,  # Log word timestamps for verification
             transport.output(),  # Transport bot output
+            transcript.assistant(),  # Assistant transcripts with timestamps
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
@@ -109,11 +138,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_ready(rtvi):
         await rtvi.set_bot_ready()
 
+    @transcript.event_handler("on_transcript_update")
+    async def on_transcript_update(processor, frame):
+        """Log transcript updates to show timestamps in conversation."""
+        for msg in frame.messages:
+            timestamp_str = f"[{msg.timestamp}] " if msg.timestamp else ""
+            logger.info(f"📝 Transcript: {timestamp_str}{msg.role}: {msg.content}")
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        logger.info(
+            "💡 Word timestamps are enabled! Watch for '🎯 Word timestamp' logs showing each word with its PTS."
+        )
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append(
+            {"role": "system", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
