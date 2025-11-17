@@ -51,6 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   composing a best effort of the perceived llm output in a more digestable form and
   to do so whether or not it is processed by a TTS or if even a TTS exists.
 
+- Introduced `LLMTextProcessor`: A new processor meant to allow customization for how
+  LLMTextFrames should be aggregated and considered. It's purpose is to turn
+  `LLMTextFrame`s into `AggregatedTextFrame`s. By default, a TTSService will still
+  aggregate `LLMTextFrame`s by sentence for the service to consume. However, if you
+  wish to override how the llm text is aggregated, you should no longer override the
+  TTS's internal text_aggregator, but instead, insert this processor between your LLM
+  and TTS in the pipeline.
+
 ### Changed
 
 - ⚠️ Breaking change: `LLMContext.create_image_message()`,
@@ -158,6 +166,11 @@ Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and 
 
 - `english_normalization` input parameter for `MiniMaxHttpTTSService` is deprecated,
 use `test_normalization` instead.
+
+- The TTS constructor field, `text_aggregator` is deprecated in favor of the new
+  `LLMTextProcessor`. TTSServices still have an internal aggregator for support of default
+  behavior, but if you want to override the aggregation behavior, you should use the new
+  processor.
 
 ### Fixed
 
