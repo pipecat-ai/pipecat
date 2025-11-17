@@ -169,6 +169,18 @@ Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and 
       fly. `remove_text_transformer` has also been added to support removing a registered
       transform callback.
 
+  - Updated `CartesiaTTSService`:
+    - Modified use of custom default text_aggregator to avoid deprecation warnings and push users
+      towards use of transformers or the `LLMTextProcessor`
+    - Added convenience methods for taking advantage of Cartesia's SSML tags: spell, emotion,
+      pauses, volume, and speed.
+  
+  - Updated `RimeTTSService`:
+    - Modified use of custom default text_aggregator to avoid deprecation warnings and push users
+      towards use of transformers or the `LLMTextProcessor`
+    - Added convenience methods for taking advantage of Rime's customization options: spell,
+      pauses, pronunciations, and inline speed control.
+
 ### Deprecated
 
 - The `api_key` parameter in `GeminiTTSService` is deprecated. Use
