@@ -501,15 +501,6 @@ class RimeHttpTTSService(TTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Rime TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Rime's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert pipecat language to Rime language code.
 

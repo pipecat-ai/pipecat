@@ -18,10 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `ElevenLabsRealtimeSTTService` which implements the Realtime STT
   service from ElevenLabs.
 
-- Added a `TTSService.includes_inter_frame_spaces` property getter, so that TTS
-  services that subclass `TTSService` can indicate whether the text in the
-  `TTSTextFrame`s they push already contain any necessary inter-frame spaces.
-
 ### Changed
 
 - Extracted the logic for retrying connections, and create a new `send_with_retry`
@@ -68,8 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and 
-  example wiring; leverages the enhancement model for robust detection with no 
+- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
+  example wiring; leverages the enhancement model for robust detection with no
   ONNX dependency or added processing complexity.
 
 ## [0.0.94] - 2025-11-10

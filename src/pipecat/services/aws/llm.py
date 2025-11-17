@@ -1078,9 +1078,7 @@ class AWSBedrockLLMService(LLMService):
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]
                         if "text" in delta:
-                            frame = LLMTextFrame(delta["text"])
-                            frame.includes_inter_frame_spaces = True
-                            await self.push_frame(frame)
+                            await self.push_frame(LLMTextFrame(delta["text"]))
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use

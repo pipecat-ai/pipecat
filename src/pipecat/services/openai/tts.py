@@ -131,15 +131,6 @@ class OpenAITTSService(TTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that OpenAI TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that OpenAI's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     async def set_model(self, model: str):
         """Set the TTS model to use.
 

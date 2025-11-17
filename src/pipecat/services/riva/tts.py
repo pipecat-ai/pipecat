@@ -113,15 +113,6 @@ class RivaTTSService(TTSService):
             riva.client.proto.riva_tts_pb2.RivaSynthesisConfigRequest()
         )
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Riva TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Riva's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     async def set_model(self, model: str):
         """Attempt to set the TTS model.
 

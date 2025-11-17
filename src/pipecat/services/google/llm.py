@@ -920,9 +920,7 @@ class GoogleLLMService(LLMService):
                         for part in candidate.content.parts:
                             if not part.thought and part.text:
                                 search_result += part.text
-                                frame = LLMTextFrame(part.text)
-                                frame.includes_inter_frame_spaces = True
-                                await self.push_frame(frame)
+                                await self.push_frame(LLMTextFrame(part.text))
                             elif part.function_call:
                                 function_call = part.function_call
                                 id = function_call.id or str(uuid.uuid4())
