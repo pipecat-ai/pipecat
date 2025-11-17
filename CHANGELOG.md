@@ -162,6 +162,12 @@ Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and 
   - `TTSService` base class updates:
     - `TTSService`s now accept a new `skip_aggregator_types` to avoid speaking certain aggregation
       types (now determined/returned by the aggregator)
+    - Introduced the ability to do a just-in-time transform of text before it gets sent to the
+      TTS service via callbacks you can set up via a new init field, `text_transforms` or a new
+      method `add_text_transformer()`. This makes it possible to do things like introduce
+      TTS-specific tags for spelling or emotion or change the pronunciation of something on the
+      fly. `remove_text_transformer` has also been added to support removing a registered
+      transform callback.
 
 ### Deprecated
 
