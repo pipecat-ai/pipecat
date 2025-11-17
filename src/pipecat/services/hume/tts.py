@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.tts_service import TTSService
+from pipecat.services.tts_service import WordTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -28,6 +28,7 @@ try:
         FormatPcm,
         PostedUtterance,
         PostedUtteranceVoiceWithId,
+        TimestampType,
     )
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
     logger.error(f"Exception: {e}")
@@ -38,7 +39,7 @@ except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
 HUME_SAMPLE_RATE = 48_000  # Hume TTS streams at 48 kHz
 
 
-class HumeTTSService(TTSService):
+class HumeTTSService(WordTTSService):
     """Hume Octave Text-to-Speech service.
 
     Streams PCM audio via Hume's HTTP output streaming (JSON chunks) endpoint
@@ -48,6 +49,7 @@ class HumeTTSService(TTSService):
 
     - Generates speech from text using Hume TTS.
     - Streams PCM audio.
+    - Supports word timestamps for synchronization with text.
     - Supports dynamic updates of voice and synthesis parameters at runtime.
     - Provides metrics for Time To First Byte (TTFB) and TTS usage.
     """
@@ -85,7 +87,9 @@ class HumeTTSService(TTSService):
         """
         api_key = api_key or os.getenv("HUME_API_KEY")
         if not api_key:
-            raise ValueError("HumeTTSService requires an API key (env HUME_API_KEY or api_key=)")
+            raise ValueError(
+                "HumeTTSService requires an API key (env HUME_API_KEY or api_key=)"
+            )
 
         if sample_rate != HUME_SAMPLE_RATE:
             logger.warning(
@@ -101,6 +105,7 @@ class HumeTTSService(TTSService):
         self.set_voice(voice_id)
 
         self._audio_bytes = b""
+        self._first_audio_chunk = True
 
     def can_generate_metrics(self) -> bool:
         """Can generate metrics.
@@ -193,6 +198,7 @@ class HumeTTSService(TTSService):
             # Hume emits mono PCM at 48 kHz; downstream can resample if needed.
             # We buffer audio bytes before sending to prevent glitches.
             self._audio_bytes = b""
+            self._first_audio_chunk = True
 
             # Use version "2" by default if no description is provided
             # Version "1" is needed when description is used
@@ -202,10 +208,41 @@ class HumeTTSService(TTSService):
                 format=pcm_fmt,
                 instant_mode=True,
                 version=version,
+                include_timestamp_types=[TimestampType.WORD],
             ):
+                # Check if this is a timestamp chunk
+                chunk_type = getattr(chunk, "type", None)
+                if chunk_type == "timestamp":
+                    # Start word timestamps if we haven't received audio yet
+                    if self._first_audio_chunk:
+                        await self.stop_ttfb_metrics()
+                        self.start_word_timestamps()
+                        self._first_audio_chunk = False
+                    # Process word timestamp
+                    timestamp = getattr(chunk, "timestamp", None)
+                    if timestamp:
+                        word_text = getattr(timestamp, "text", None)
+                        time_obj = getattr(timestamp, "time", None)
+                        if word_text and time_obj:
+                            # Convert milliseconds to seconds
+                            begin_ms = getattr(time_obj, "begin", None)
+                            if begin_ms is not None:
+                                begin_seconds = begin_ms / 1000.0
+                                await self.add_word_timestamps(
+                                    [(word_text, begin_seconds)]
+                                )
+                    continue
+
+                # Process audio chunk
                 audio_b64 = getattr(chunk, "audio", None)
                 if not audio_b64:
                     continue
+
+                # Start word timestamps on first audio chunk
+                if self._first_audio_chunk:
+                    await self.stop_ttfb_metrics()
+                    self.start_word_timestamps()
+                    self._first_audio_chunk = False
 
                 pcm_bytes = base64.b64decode(audio_b64)
                 self._audio_bytes += pcm_bytes
@@ -230,4 +267,6 @@ class HumeTTSService(TTSService):
         finally:
             # Ensure TTFB timer is stopped even on early failures
             await self.stop_ttfb_metrics()
+            # Signal end of word timestamps
+            await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
             yield TTSStoppedFrame()
