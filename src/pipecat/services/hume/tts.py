@@ -28,7 +28,6 @@ try:
         FormatPcm,
         PostedUtterance,
         PostedUtteranceVoiceWithId,
-        TimestampType,
     )
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
     logger.error(f"Exception: {e}")
@@ -208,7 +207,7 @@ class HumeTTSService(WordTTSService):
                 format=pcm_fmt,
                 instant_mode=True,
                 version=version,
-                include_timestamp_types=[TimestampType.WORD],
+                include_timestamp_types=["word"],
             ):
                 # Check if this is a timestamp chunk
                 chunk_type = getattr(chunk, "type", None)

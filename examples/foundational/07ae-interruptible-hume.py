@@ -45,9 +45,13 @@ class TimestampLogger(FrameProcessor):
     """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TTSTextFrame):
             pts_str = format_pts(frame.pts) if frame.pts else "no PTS"
             logger.info(f"🎯 Word timestamp: '{frame.text}' at {pts_str}")
+
+        # Always push all frames through
         await self.push_frame(frame, direction)
 
 
