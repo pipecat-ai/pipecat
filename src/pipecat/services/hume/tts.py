@@ -14,11 +14,13 @@ from pydantic import BaseModel
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import WordTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -29,6 +31,7 @@ try:
         PostedUtterance,
         PostedUtteranceVoiceWithId,
     )
+    from hume.tts.types import TimestampMessage
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
     logger.error(f"Exception: {e}")
     logger.error("In order to use Hume, you need to `pip install pipecat-ai[hume]`.")
@@ -48,7 +51,7 @@ class HumeTTSService(WordTTSService):
 
     - Generates speech from text using Hume TTS.
     - Streams PCM audio.
-    - Supports word timestamps for synchronization with text.
+    - Supports word-level timestamps for precise audio-text synchronization.
     - Supports dynamic updates of voice and synthesis parameters at runtime.
     - Provides metrics for Time To First Byte (TTFB) and TTS usage.
     """
@@ -93,7 +96,12 @@ class HumeTTSService(WordTTSService):
                 f"Hume TTS streams at {HUME_SAMPLE_RATE} Hz; configured sample_rate={sample_rate}"
             )
 
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # WordTTSService sets push_text_frames=False by default, which we want
+        super().__init__(
+            sample_rate=sample_rate,
+            push_text_frames=False,
+            **kwargs,
+        )
 
         self._client = AsyncHumeClient(api_key=api_key)
         self._params = params or HumeTTSService.InputParams()
@@ -102,7 +110,10 @@ class HumeTTSService(WordTTSService):
         self.set_voice(voice_id)
 
         self._audio_bytes = b""
-        self._first_audio_chunk = True
+
+        # Track cumulative time for word timestamps across utterances
+        self._cumulative_time = 0.0
+        self._started = False
 
     def can_generate_metrics(self) -> bool:
         """Can generate metrics.
@@ -128,6 +139,27 @@ class HumeTTSService(WordTTSService):
             frame: The start frame.
         """
         await super().start(frame)
+        self._reset_state()
+
+    def _reset_state(self):
+        """Reset internal state variables."""
+        self._cumulative_time = 0.0
+        self._started = False
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame and handle state changes.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+        if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
+            # Reset timing on interruption or stop
+            self._reset_state()
+
+            if isinstance(frame, TTSStoppedFrame):
+                await self.add_word_timestamps([("Reset", 0)])
 
     async def update_setting(self, key: str, value: Any) -> None:
         """Runtime updates via `TTSUpdateSettingsFrame`.
@@ -144,7 +176,7 @@ class HumeTTSService(WordTTSService):
 
         if key_l == "voice_id":
             self.set_voice(str(value))
-            logger.info(f"HumeTTSService voice_id set to: {self.voice}")
+            logger.debug(f"HumeTTSService voice_id set to: {self.voice}")
         elif key_l == "description":
             self._params.description = None if value is None else str(value)
         elif key_l == "speed":
@@ -157,7 +189,7 @@ class HumeTTSService(WordTTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Generate speech from text using Hume TTS.
+        """Generate speech from text using Hume TTS with word timestamps.
 
         Args:
             text: The text to be synthesized.
@@ -188,64 +220,66 @@ class HumeTTSService(WordTTSService):
 
         await self.start_ttfb_metrics()
         await self.start_tts_usage_metrics(text)
-        yield TTSStartedFrame()
+
+        # Start TTS sequence if not already started
+        if not self._started:
+            self.start_word_timestamps()
+            yield TTSStartedFrame()
+            self._started = True
 
         try:
             # Instant mode is always enabled here (not user-configurable)
             # Hume emits mono PCM at 48 kHz; downstream can resample if needed.
             # We buffer audio bytes before sending to prevent glitches.
             self._audio_bytes = b""
-            self._first_audio_chunk = True
 
             # Use version "2" by default if no description is provided
             # Version "1" is needed when description is used
             version = "1" if self._params.description is not None else "2"
+
+            # Track the duration of this utterance based on the last timestamp
+            utterance_duration = 0.0
+
             async for chunk in self._client.tts.synthesize_json_streaming(
                 utterances=[utterance],
                 format=pcm_fmt,
                 instant_mode=True,
                 version=version,
-                include_timestamp_types=["word"],
+                include_timestamp_types=["word"],  # Request word-level timestamps
             ):
-                # Check if this is a timestamp chunk
-                chunk_type = getattr(chunk, "type", None)
-                if chunk_type == "timestamp":
-                    # Start word timestamps if we haven't received audio yet
-                    if self._first_audio_chunk:
-                        await self.stop_ttfb_metrics()
-                        self.start_word_timestamps()
-                        self._first_audio_chunk = False
-                    # Process word timestamp
-                    timestamp = getattr(chunk, "timestamp", None)
-                    if timestamp:
-                        word_text = getattr(timestamp, "text", None)
-                        time_obj = getattr(timestamp, "time", None)
-                        if word_text and time_obj:
-                            # Convert milliseconds to seconds
-                            begin_ms = getattr(time_obj, "begin", None)
-                            if begin_ms is not None:
-                                begin_seconds = begin_ms / 1000.0
-                                await self.add_word_timestamps([(word_text, begin_seconds)])
-                    continue
-
-                # Process audio chunk
+                # Process audio chunks
                 audio_b64 = getattr(chunk, "audio", None)
-                if not audio_b64:
-                    continue
-
-                # Start word timestamps on first audio chunk
-                if self._first_audio_chunk:
+                if audio_b64:
                     await self.stop_ttfb_metrics()
-                    self.start_word_timestamps()
-                    self._first_audio_chunk = False
+                    pcm_bytes = base64.b64decode(audio_b64)
+                    self._audio_bytes += pcm_bytes
 
-                pcm_bytes = base64.b64decode(audio_b64)
-                self._audio_bytes += pcm_bytes
+                    # Buffer audio until we have enough to avoid glitches
+                    if len(self._audio_bytes) >= self.chunk_size:
+                        frame = TTSAudioRawFrame(
+                            audio=self._audio_bytes,
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                        )
+                        yield frame
+                        self._audio_bytes = b""
 
-                # Buffer audio until we have enough to avoid glitches
-                if len(self._audio_bytes) < self.chunk_size:
-                    continue
+                # Process timestamp messages
+                if isinstance(chunk, TimestampMessage):
+                    timestamp = chunk.timestamp
+                    if timestamp.type == "word":
+                        # Convert milliseconds to seconds and add cumulative offset
+                        word_start_time = self._cumulative_time + (timestamp.time.begin / 1000.0)
+                        word_end_time = self._cumulative_time + (timestamp.time.end / 1000.0)
 
+                        # Track the maximum end time for this utterance
+                        utterance_duration = max(utterance_duration, word_end_time)
+
+                        # Add word timestamp
+                        await self.add_word_timestamps([(timestamp.text, word_start_time)])
+
+            # Flush any remaining audio bytes
+            if self._audio_bytes:
                 frame = TTSAudioRawFrame(
                     audio=self._audio_bytes,
                     sample_rate=self.sample_rate,
@@ -256,12 +290,14 @@ class HumeTTSService(WordTTSService):
 
                 self._audio_bytes = b""
 
+            # Update cumulative time for next utterance
+            if utterance_duration > 0:
+                self._cumulative_time = utterance_duration
+
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             # Ensure TTFB timer is stopped even on early failures
             await self.stop_ttfb_metrics()
-            # Signal end of word timestamps
-            await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
-            yield TTSStoppedFrame()
+            # Let the parent class handle TTSStoppedFrame via push_stop_frames
