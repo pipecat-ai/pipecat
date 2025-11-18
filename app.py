@@ -320,7 +320,7 @@ async def health():
     }
 
 # -----------------------------------------------------
-# Speech2Speech Pipeline
+# Speech2Speech Pipeline 
 # -----------------------------------------------------
 async def run_pipeline(transport, session_id: str, handle_sigint: bool = False):
     logger.info(f"🎤 Starting pipeline for session: {session_id}")
@@ -328,7 +328,7 @@ async def run_pipeline(transport, session_id: str, handle_sigint: bool = False):
     # --- Services setup ---
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id=os.getenv("VOICE_ID", "71a7ad14-091c-4e8e-a314-022ece01c121"),
+        voice_id=os.getenv("VOICE_ID", "829ccd10-f8b3-43cd-b8a0-4aeaa81f3b30"),
     )
 
     stt = SpeechmaticsSTTService(
