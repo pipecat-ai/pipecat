@@ -900,7 +900,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                 "repetition_penalty",
                 "temperature",
                 "top_p",
-                "audio_format",
             ]:
                 if value != prev_settings.get(key):
                     logger.info(f"Updating extra parameter {key} to: [{value}]")
