@@ -793,7 +793,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
 
-        self._context.add_image_frame_message(
+        await self._context.add_image_frame_message(
             format=frame.format,
             size=frame.size,
             image=frame.image,

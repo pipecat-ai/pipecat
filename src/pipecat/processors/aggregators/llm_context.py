@@ -180,7 +180,7 @@ class LLMContext:
             text: Optional text to include with the audio.
         """
 
-        def encode_audio():
+        async def encode_audio():
             sample_rate = audio_frames[0].sample_rate
             num_channels = audio_frames[0].num_channels
 
@@ -198,7 +198,7 @@ class LLMContext:
             encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
             return encoded_audio
 
-        encoded_audio = asyncio.to_thread(encode_audio)
+        encoded_audio = await asyncio.to_thread(encode_audio)
 
         content.append(
             {
@@ -333,7 +333,7 @@ class LLMContext:
         """
         self._tool_choice = tool_choice
 
-    def add_image_frame_message(
+    async def add_image_frame_message(
         self, *, format: str, size: tuple[int, int], image: bytes, text: Optional[str] = None
     ):
         """Add a message containing an image frame.
@@ -344,10 +344,12 @@ class LLMContext:
             image: Raw image bytes.
             text: Optional text to include with the image.
         """
-        message = LLMContext.create_image_message(format=format, size=size, image=image, text=text)
+        message = await LLMContext.create_image_message(
+            format=format, size=size, image=image, text=text
+        )
         self.add_message(message)
 
-    def add_audio_frames_message(
+    async def add_audio_frames_message(
         self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
     ):
         """Add a message containing audio frames.
@@ -356,7 +358,7 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
-        message = LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
+        message = await LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
         self.add_message(message)
 
     @staticmethod
