@@ -17,7 +17,6 @@ from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
 from loguru import logger
-from pipecat.transcriptions import language
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -37,6 +36,7 @@ from pipecat.services.tts_service import (
     InterruptibleTTSService,
     TTSService,
 )
+from pipecat.transcriptions import language
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -582,8 +582,7 @@ class RimeHttpTTSService(TTSService):
 
 
 class RimeNonJsonTTSService(InterruptibleTTSService):
-    """
-    Pipecat TTS service for Rime's non-JSON WebSocket API.
+    """Pipecat TTS service for Rime's non-JSON WebSocket API.
 
     This service enables Text-to-Speech synthesis over WebSocket endpoints that require plain text (not JSON) messages and return raw audio bytes. It is designed for use with TTS models like Arcana, which currently do not support JSON-based WebSocket protocols (though this may change in the future).
 
@@ -625,8 +624,8 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         aggregate_sentences: Optional[bool] = True,
         **kwargs,
     ):
-        """
-        Initialize Rime Non-JSON WebSocket TTS service.
+        """Initialize Rime Non-JSON WebSocket TTS service.
+
         Args:
             api_key: Rime API key for authentication.
             voice_id: ID of the voice to use.
@@ -673,6 +672,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
+
         Returns:
             True, as Rime Non-JSON WebSocket service supports metrics generation.
         """
@@ -692,6 +692,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
     async def start(self, frame: StartFrame):
         """Start the Rime Non-JSON WebSocket TTS service.
+
         Args:
             frame: The start frame containing initialization parameters.
         """
@@ -711,6 +712,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with special handling for stop conditions.
+
         Args:
             frame: The frame to push.
             direction: The direction to push the frame.
@@ -808,8 +810,8 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """
-        Generate speech from text using Rime's streaming API.
+        """Generate speech from text using Rime's streaming API.
+
         Args:
             text: The text to synthesize into speech.
 
