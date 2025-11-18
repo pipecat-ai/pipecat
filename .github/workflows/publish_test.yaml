@@ -1,0 +1,51 @@
+name: publish-test
+
+on: workflow_dispatch
+
+jobs:
+  build:
+    name: 'Build and upload wheels'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 100
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: 'latest'
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install development dependencies
+        run: uv sync --group dev
+      - name: Build project
+        run: uv build
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: ./dist
+
+  publish-to-test-pypi:
+    name: 'Publish to Test PyPI'
+    runs-on: ubuntu-latest
+    needs: [build]
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/pipecat-ai
+    permissions:
+      id-token: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: ./dist
+      - name: Publish to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+          print-hash: true
+          repository-url: https://test.pypi.org/legacy/

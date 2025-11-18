@@ -1,0 +1,61 @@
+name: Python Compatibility Test
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['pyproject.toml']
+  pull_request:
+    branches: [main, develop]
+    paths: ['pyproject.toml']
+
+jobs:
+  test-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10.18', '3.11.13', '3.12.11', '3.13.5']
+
+    name: Python ${{ matrix.python-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            portaudio19-dev \
+            libcairo2-dev \
+            libgirepository1.0-dev \
+            pkg-config
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: 'latest'
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: |
+          uv python install ${{ matrix.python-version }}
+          uv python pin ${{ matrix.python-version }}
+
+      - name: Test uv sync with all extras (Python < 3.13)
+        if: "!startsWith(matrix.python-version, '3.13.')"
+        run: |
+          uv sync --group dev --all-extras --no-extra krisp
+
+      - name: Test uv sync without PyTorch extras (Python 3.13+)
+        if: startsWith(matrix.python-version, '3.13.')
+        run: |
+          uv sync --group dev --all-extras \
+            --no-extra krisp \
+            --no-extra ultravox \
+            --no-extra local-smart-turn \
+            --no-extra moondream \
+            --no-extra mlx-whisper
+
+      - name: Verify installation
+        run: |
+          uv run python --version
+          uv run python -c "import pipecat; print('✅ Pipecat imports successfully')"

@@ -1,0 +1,47 @@
+name: coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "**"
+    paths-ignore:
+      - "docs/**"
+
+jobs:
+  coverage:
+    name: "Coverage"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install system packages
+        run: |
+          sudo apt-get install -y portaudio19-dev
+
+      - name: Install dependencies
+        run: |
+          uv sync --group dev --extra anthropic --extra aws --extra google --extra langchain
+
+      - name: Run tests with coverage
+        run: |
+          uv run coverage run
+          uv run coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pipecat-ai/pipecat

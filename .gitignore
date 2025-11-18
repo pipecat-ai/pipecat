@@ -1,0 +1,54 @@
+.vscode
+env/
+__pycache__/
+*~
+venv
+.venv
+/.idea
+#*#
+
+# Distribution / Packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.DS_Store
+.env
+fly.toml
+
+# Examples
+examples/**/node_modules/
+examples/**/.expo/
+examples/**/dist/
+examples/**/npm-debug.*
+examples/**/*.jks
+examples/**/*.p8
+examples/**/*.p12
+examples/**/*.key
+examples/**/*.mobileprovision
+examples/**/*.orig.*
+examples/**/web-build/
+
+# macOS
+.DS_Store
+
+# Documentation
+docs/api/_build/
+docs/api/api
+
+# uv
+.python-version

@@ -1,0 +1,82 @@
+name: Service Issue
+description: An issue with a third-party service
+type: Service Issue
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Service Issue
+
+        Use this form to report an issue with a third-party service integration.
+
+  - type: input
+    id: pipecat-version
+    attributes:
+      label: pipecat version
+      description: Which version are you using?
+      placeholder: e.g., 0.0.63
+    validations:
+      required: true
+
+  - type: input
+    id: service-name
+    attributes:
+      label: Service Name
+      description: Which third-party service is having issues?
+      placeholder: e.g., OpenAI, ElevenLabs, Anthropic
+    validations:
+      required: true
+
+  - type: input
+    id: service-version
+    attributes:
+      label: Service or model version
+      description: Which version of the service API or model are you using?
+      placeholder: e.g., v1, gpt-4.1
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue Description
+      description: Provide a clear description of the service issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: Provide steps to reproduce the issue.
+      placeholder: |
+        1. Configure service X
+        2. Call method Y
+        3. See error Z
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs
+      description: If available, include any error messages or logs.
+      render: shell
+    validations:
+      required: false

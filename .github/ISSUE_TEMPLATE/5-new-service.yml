@@ -1,0 +1,56 @@
+name: New Service
+description: Request to support a new third-party service
+type: New Service
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## New Service Request
+
+        Use this form to request support for a new third-party service in pipecat.
+
+  - type: input
+    id: service-name
+    attributes:
+      label: Service Name
+      description: What is the name of the third-party service?
+      placeholder: e.g., NewAPI, SomeService
+    validations:
+      required: true
+
+  - type: input
+    id: service-website
+    attributes:
+      label: Service Website
+      description: Link to the service's website or documentation
+      placeholder: e.g., https://newapi.com
+    validations:
+      required: true
+
+  - type: textarea
+    id: service-description
+    attributes:
+      label: Service Description
+      description: Briefly describe what this service does and how it works.
+    validations:
+      required: true
+
+  - type: textarea
+    id: api-info
+    attributes:
+      label: API Information
+      description: If available, provide details about the service's API.
+      placeholder: |
+        - API documentation link
+        - Authentication method
+        - Key endpoints you'd like supported
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Would you be willing to help implement this service?
+      options:
+        - label: Yes, I'd like to contribute
+        - label: No, I'm just suggesting
