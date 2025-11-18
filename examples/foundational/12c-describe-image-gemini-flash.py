@@ -110,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         # Kick off the conversation.
         image = Image.open(image_path)
-        message = LLMContext.create_image_message(
+        message = await LLMContext.create_image_message(
             image=image.tobytes(),
             format="RGB",
             size=image.size,
