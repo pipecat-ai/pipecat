@@ -845,3 +845,61 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"{self} error: {e}")
+            
+    async def _update_settings(self, settings: Mapping[str, Any]):  
+        """Update service settings and reconnect if necessary.  
+        
+        Since all settings are WebSocket URL query parameters,  
+        any setting change requires reconnecting to apply the new values.  
+        """  
+        needs_reconnect = False  
+        
+        # Track previous values from self._settings only  
+        prev_settings = self._settings.copy()  
+        
+        # Let parent class handle standard settings (voice, model, language)  
+        await super()._update_settings(settings)  
+        
+        # Check if voice changed and update settings dict  
+        if "voice" in settings or "voice_id" in settings:  
+            self._settings["speaker"] = self._voice_id  
+            if prev_settings.get("speaker") != self._voice_id:  
+                logger.info(f"Switching TTS voice to: [{self._voice_id}]")  
+                needs_reconnect = True  
+        
+        # Check if model changed and update settings dict  
+        if "model" in settings:  
+            self._settings["modelId"] = self._model  
+            if prev_settings.get("modelId") != self._model:  
+                logger.info(f"Switching TTS model to: [{self._model}]")  
+                needs_reconnect = True  
+        
+        # Handle language explicitly  
+        if "language" in settings:  
+            new_lang = self.language_to_service_language(settings["language"])  
+            if new_lang and new_lang != prev_settings.get("lang"):  
+                logger.info(f"Updating language to: [{new_lang}]")  
+                self._settings["lang"] = new_lang  
+                needs_reconnect = True  
+        
+        # Check other parameters  
+        for key in ["segment", "repetition_penalty", "temperature", "top_p"]:  
+            if key in settings and settings[key] != prev_settings.get(key):  
+                logger.info(f"Updating {key} to: [{settings[key]}]")  
+                self._settings[key] = settings[key]  
+                needs_reconnect = True  
+                
+        # Handle extra parameters  
+        for key, value in settings.items():  
+            if key not in ["voice", "voice_id", "model", "language", "segment",   
+                        "repetition_penalty", "temperature", "top_p", "audio_format"]:  
+                if value != prev_settings.get(key):  
+                    logger.info(f"Updating extra parameter {key} to: [{value}]")  
+                    self._settings[key] = value  
+                    needs_reconnect = True  
+        
+        # Reconnect if any setting changed  
+        if needs_reconnect:  
+            logger.debug("Settings changed, reconnecting WebSocket with new parameters")  
+            await self._disconnect()  
+            await self._connect()
