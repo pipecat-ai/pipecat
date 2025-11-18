@@ -100,6 +100,7 @@ class HumeTTSService(WordTTSService):
         super().__init__(
             sample_rate=sample_rate,
             push_text_frames=False,
+            push_stop_frames=True,
             **kwargs,
         )
 
