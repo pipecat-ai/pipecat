@@ -241,7 +241,7 @@ def _setup_webrtc_routes(
     async def download_file(filename: str):
         """Handle file downloads."""
         if not folder:
-            logger.warning(f"Attempting to dowload {filename}, but downloads folder not setup.")
+            logger.warning(f"Attempting to download {filename}, but downloads folder not setup.")
             return
 
         file_path = Path(folder) / filename
@@ -807,7 +807,7 @@ def main():
         "--whatsapp",
         action="store_true",
         default=False,
-        help="Ensure requried WhatsApp environment variables are present",
+        help="Ensure required WhatsApp environment variables are present",
     )
 
     args = parser.parse_args()
