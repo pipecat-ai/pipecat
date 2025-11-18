@@ -1174,7 +1174,7 @@ class GeminiLiveLLMService(LLMService):
             self._connection_task = self.create_task(self._connection_task_handler(config=config))
 
         except Exception as e:
-            await self.push_error(ErrorFrame(error=f"{self} Initialization error: {e}"))
+            await self.push_error(exception=e)
 
     async def _connection_task_handler(self, config: LiveConnectConfig):
         async with self._client.aio.live.connect(model=self._model_name, config=config) as session:

@@ -327,8 +327,7 @@ class SonioxSTTService(STTService):
             # Expected when closing the connection
             logger.debug("WebSocket connection closed, keepalive task stopped.")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
     async def _receive_task_handler(self):
         if not self._websocket:
@@ -404,14 +403,7 @@ class SonioxSTTService(STTService):
                 if error_code or error_message:
                     # In case of error, still send the final transcript (if any remaining in the buffer).
                     await send_endpoint_transcript()
-                    logger.error(
-                        f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
-                    )
-                    await self.push_error(
-                        ErrorFrame(
-                            error=f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
-                        )
-                    )
+                    await self.push_error(error_msg=f"{self} error: {error_code} (_receive_task_handler) - {error_message}")
 
                 finished = content.get("finished")
                 if finished:

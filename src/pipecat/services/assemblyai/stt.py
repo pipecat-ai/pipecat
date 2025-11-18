@@ -240,8 +240,7 @@ class AssemblyAISTTService(STTService):
             await self._websocket.close()
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
         finally:
             self._websocket = None
@@ -293,8 +292,7 @@ class AssemblyAISTTService(STTService):
             elif isinstance(parsed_message, TerminationMessage):
                 await self._handle_termination(parsed_message)
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""

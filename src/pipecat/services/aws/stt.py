@@ -288,8 +288,7 @@ class AWSTranscribeSTTService(STTService):
 
                 await self._call_event_handler("on_connected")
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(exception=e)
                 await self._disconnect()
                 raise
 
@@ -536,6 +535,5 @@ class AWSTranscribeSTTService(STTService):
                 logger.error(f"{self} WebSocket connection closed in receive loop: {e}")
                 break
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(exception=e)
                 break

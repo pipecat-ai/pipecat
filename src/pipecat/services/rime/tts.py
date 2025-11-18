@@ -259,8 +259,7 @@ class RimeTTSService(AudioContextWordTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -366,10 +365,9 @@ class RimeTTSService(AudioContextWordTTSService):
                         logger.debug(f"Updated cumulative time to: {self._cumulative_time}")
 
             elif msg["type"] == "error":
-                logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(error=f"{self} error: {msg['message']}"))
+                await self.push_error(error_msg=f"{self} error: {msg['message']}")
                 self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):

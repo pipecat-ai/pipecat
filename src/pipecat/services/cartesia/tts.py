@@ -409,8 +409,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 logger.debug("Disconnecting from Cartesia")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
         finally:
             self._context_id = None
             self._websocket = None

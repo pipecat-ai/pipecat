@@ -478,7 +478,7 @@ class OpenAIRealtimeLLMService(LLMService):
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
             # treat a send-side error as fatal.
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}"))
+            await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
     async def _update_settings(self):
         settings = self._session_properties
@@ -759,7 +759,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
-        await self.push_error(ErrorFrame(error=f"Error: {evt}"))
+        await self.push_error(error_msg=f"Error: {evt}")
 
     #
     # state and client events for the current conversation

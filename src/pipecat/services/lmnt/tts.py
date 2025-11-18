@@ -214,8 +214,7 @@ class LmntTTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -266,10 +265,9 @@ class LmntTTSService(InterruptibleTTSService):
                 try:
                     msg = json.loads(message)
                     if "error" in msg:
-                        logger.error(f"{self} error: {msg['error']}")
                         await self.push_frame(TTSStoppedFrame())
                         await self.stop_all_metrics()
-                        await self.push_error(ErrorFrame(error=f"{self} error: {msg['error']}"))
+                        await self.push_error(error_msg=f"{self} error: {msg['error']}")
                         return
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")

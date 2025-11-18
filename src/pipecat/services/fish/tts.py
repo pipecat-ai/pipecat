@@ -284,8 +284,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                                 continue
 
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(exception=e)
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:

@@ -774,8 +774,7 @@ class GoogleSTTService(STTService):
                 yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             raise
 
     async def _stream_audio(self):
@@ -813,8 +812,7 @@ class GoogleSTTService(STTService):
                     self._stream_start_time = int(time.time() * 1000)
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process an audio chunk for STT transcription.

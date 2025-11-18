@@ -266,8 +266,7 @@ class PlayHTTTSService(InterruptibleTTSService):
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -352,7 +351,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                             self._request_id = None
                     elif "error" in msg:
                         logger.error(f"{self} error: {msg}")
-                        await self.push_error(ErrorFrame(error=f"{self} error: {msg['error']}"))
+                        await self.push_error(error_msg=f"{self} error: {msg['error']}")
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 

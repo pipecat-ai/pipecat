@@ -240,8 +240,7 @@ class AsyncAITTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from Async")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
         finally:
             self._websocket = None
             self._started = False
@@ -476,8 +475,7 @@ class AsyncAIHttpTTSService(TTSService):
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Async API error: {error_text}")
-                    await self.push_error(ErrorFrame(error=f"Async API error: {error_text}"))
+                    await self.push_error(error_msg=f"Async API error: {error_text}")
                     raise Exception(f"Async API returned status {response.status}: {error_text}")
 
                 audio_data = await response.read()

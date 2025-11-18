@@ -284,8 +284,7 @@ class CartesiaSTTService(WebsocketSTTService):
                 logger.debug("Disconnecting from Cartesia STT")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"{self} error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")

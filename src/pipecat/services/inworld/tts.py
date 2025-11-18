@@ -392,8 +392,7 @@ class InworldTTSService(TTSService):
             # STEP 7: ERROR HANDLING
             # ================================================================================
             # Log any unexpected errors and notify the pipeline
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
         finally:
             # ================================================================================
             # STEP 8: CLEANUP AND COMPLETION

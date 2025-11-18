@@ -468,8 +468,7 @@ class GladiaSTTService(STTService):
                             break
 
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(exception=e)
                 self._connection_active = False
 
                 if not self._should_reconnect:
@@ -623,8 +622,7 @@ class GladiaSTTService(STTService):
             # Expected when closing the connection
             pass
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
     async def _maybe_reconnect(self) -> bool:
         """Handle exponential backoff reconnection logic."""

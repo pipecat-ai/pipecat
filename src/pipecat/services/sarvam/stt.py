@@ -275,8 +275,7 @@ class SarvamSTTService(STTService):
                 await self._socket_client.translate(**method_kwargs)
 
         except Exception as e:
-            logger.error(f"Error sending audio to Sarvam: {e}")
-            await self.push_error(ErrorFrame(f"Failed to send audio: {e}"))
+            await self.push_error(error_msg=f"Error sending audio to Sarvam: {e}", exception=e)
 
         yield None
 
@@ -332,13 +331,11 @@ class SarvamSTTService(STTService):
             logger.info("Connected to Sarvam successfully")
 
         except ApiError as e:
-            logger.error(f"Sarvam API error: {e}")
-            await self.push_error(ErrorFrame(f"Sarvam API error: {e}"))
+            await self.push_error(error_msg=f"Sarvam API error: {e}", exception=e)
         except Exception as e:
-            logger.error(f"Failed to connect to Sarvam: {e}")
             self._socket_client = None
             self._websocket_context = None
-            await self.push_error(ErrorFrame(f"Failed to connect to Sarvam: {e}"))
+            await self.push_error(error_msg=f"Failed to connect to Sarvam: {e}", exception=e)
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
@@ -427,8 +424,7 @@ class SarvamSTTService(STTService):
                 await self.stop_processing_metrics()
 
         except Exception as e:
-            logger.error(f"Error handling Sarvam message: {e}")
-            await self.push_error(ErrorFrame(f"Failed to handle message: {e}"))
+            await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
             await self.stop_all_metrics()
 
     @traced_stt
