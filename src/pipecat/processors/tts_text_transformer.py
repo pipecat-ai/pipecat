@@ -549,10 +549,72 @@ class TTSTextTransformer:
             "seventeen", "eighteen", "nineteen"
         ]
 
-    @property 
+    @property
     def tens(self) -> List[str]:
         """Tens place to words."""
         return ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+
+    def _clean_special_characters(self, text: str) -> str:
+        """
+        Clean special characters from text after all pattern transformations.
+
+        This is the final cleanup step that:
+        - Converts dashes (-, –, —) to " to " in range contexts (numbers, days, months)
+        - Removes dashes in non-range contexts (hyphenated words become separate words)
+        - Removes *, +, / characters completely
+
+        Range contexts include:
+        - Number to number: "5-12" -> "5 to 12", "2024-01-15" -> "2024 to 01 to 15"
+        - Day to day: "Monday-Friday" -> "Monday to Friday"
+        - Month to month: "Jan-Feb" -> "Jan to Feb"
+        - Single letters: "A-Z" -> "A to Z"
+
+        Examples:
+        - "Monday-Friday" -> "Monday to Friday"
+        - "ages 5-12" -> "ages 5 to 12"
+        - "test-case" -> "test case" (non-range, space-separated for TTS clarity)
+        - "2 + 2 = 4" -> "2  2  4" (symbols removed)
+        - "a/b/c" -> "a b c" (slashes removed)
+
+        Args:
+            text: Input text after all pattern transformations
+
+        Returns:
+            Text with special characters cleaned for TTS pronunciation
+        """
+        result = text
+
+        # Define patterns for known range contexts
+        days = r'(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Wed|Thu|Fri|Sat|Sun)'
+        months = r'(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)'
+
+        # 1. Convert dashes to " to " in range contexts
+
+        # Number-dash-number (e.g., "5-12", "2024-01-15")
+        result = re.sub(r'(\d+)([-–—])(\d+)', r'\1 to \3', result)
+
+        # Day-dash-day (e.g., "Monday-Friday")
+        result = re.sub(f'({days})([-–—])({days})', r'\1 to \3', result, flags=re.IGNORECASE)
+
+        # Month-dash-month (e.g., "Jan-Feb")
+        result = re.sub(f'({months})([-–—])({months})', r'\1 to \3', result, flags=re.IGNORECASE)
+
+        # Single letter ranges (e.g., "A-Z", "a-z")
+        result = re.sub(r'(\b[A-Za-z])([-–—])([A-Za-z]\b)', r'\1 to \3', result)
+
+        # 2. Remove any remaining dashes (replace with space to keep words separate for TTS)
+        result = re.sub(r'[-–—]', ' ', result)
+
+        # 3. Remove *, +, /, = characters (replace with space)
+        result = re.sub(r'[*+/=]', ' ', result)
+
+        # 4. Clean up multiple spaces created by character removal
+        result = re.sub(r'\s+', ' ', result)
+
+        # 5. Clean up any leading/trailing spaces
+        result = result.strip()
+
+        return result
 
     def transform(self, text: str) -> str:
         """
@@ -626,12 +688,7 @@ class TTSTextTransformer:
             return self.transform_money_number(match.group(1), preserve_dollars_word=True)
         result = re.sub(self.MONEY_DOLLAR_SIGN_PATTERN, replace_money_dollar, result)
         
-        # 3. Numbers starting with zeros - always use digit-by-digit pronunciation
-        def replace_zero_leading_number(match):
-            return self.number_to_digits(match.group(0))
-        result = re.sub(r'(?<![,\d])\b0[0-9]+\b', replace_zero_leading_number, result)
-        
-        # 4. Phone numbers (10+ digit numbers unlikely to be other things)
+        # 3. Phone numbers (highest priority for dash-separated numbers)
         # Most specific patterns first
         def replace_phone_formatted(match):
             digits = re.sub(r'[^0-9]', '', match.group(0))
@@ -656,8 +713,32 @@ class TTSTextTransformer:
         
         # 10-digit phone numbers
         result = re.sub(self.PHONE_10_DIGIT_PATTERN, replace_phone_digits, result)
-        
-        # 5. Address patterns
+
+        # 4. Number ranges (like "5-12", "2024-01-15") - after phone numbers, before zero-leading numbers
+        # Match chains of numbers separated by dashes and convert to "number to number to number" format
+        def replace_number_range(match):
+            # Split the entire match on dashes to get all numbers in the chain
+            numbers = re.split(r'[-–—]', match.group(0))
+            # Convert each number to words
+            # Use digit-by-digit for numbers with leading zeros, otherwise use quantity
+            number_words = []
+            for n in numbers:
+                if n.startswith('0') and len(n) > 1:
+                    # Leading zero: use digit-by-digit
+                    number_words.append(self.number_to_digits(n))
+                else:
+                    # Normal number: use quantity transformation
+                    number_words.append(self.transform_quantity_number(n))
+            # Join with " to "
+            return ' to '.join(number_words)
+        result = re.sub(r'\d+(?:[-–—]\d+)+', replace_number_range, result)
+
+        # 5. Numbers starting with zeros - always use digit-by-digit pronunciation
+        def replace_zero_leading_number(match):
+            return self.number_to_digits(match.group(0))
+        result = re.sub(r'(?<![,\d])\b0[0-9]+\b', replace_zero_leading_number, result)
+
+        # 6. Address patterns
         # Street addresses: "1713 Springhurst Drive", "2500 Oak Street"
         def replace_street_address(match):
             return self.transform_address_number(match.group(1)) + match.group(2)
@@ -678,7 +759,7 @@ class TTSTextTransformer:
             return match.group(1) + self.transform_address_number(match.group(2))
         result = re.sub(self.STATE_ZIP_PATTERN, replace_state_code_zip, result)
         
-        # 6. Date patterns (month + number should be ordinal)
+        # 7. Date patterns (month + number should be ordinal)
         def replace_date_ordinal(match):
             month = match.group(1)
             day_num = int(match.group(2))
@@ -736,7 +817,7 @@ class TTSTextTransformer:
             return self.number_to_ordinal(day_num)
         result = re.sub(self.ORDINAL_TEXT_PATTERN, replace_ordinal_text, result)
         
-        # 7. Numbers with units (use full quantity transformation)
+        # 8. Numbers with units (use full quantity transformation)
         def replace_quantity_with_unit(match):
             number_text = self.transform_quantity_with_units(match.group(1))
             unit_text = match.group(2)
@@ -747,14 +828,14 @@ class TTSTextTransformer:
             return number_text + unit_text
         result = re.sub(self.UNITS_PATTERN, replace_quantity_with_unit, result, flags=re.IGNORECASE)
         
-        # 8. Numbers adjacent to letters (like "from8" -> "from eight")
+        # 9. Numbers adjacent to letters (like "from8" -> "from eight")
         def replace_number_adjacent_letter(match):
             prefix = match.group(1)
             number = match.group(2)
             return prefix + " " + self.transform_quantity_number(number)
         result = re.sub(self.NUMBER_ADJACENT_LETTER_PATTERN, replace_number_adjacent_letter, result)
         
-        # 9. Comma-separated numbers (like "25,000")  
+        # 10. Comma-separated numbers (like "25,000")
         def replace_comma_number(match):
             # Remove commas and convert to standard number format
             full_match = match.group(0)
@@ -766,13 +847,16 @@ class TTSTextTransformer:
             # Use standard format for comma-separated numbers
             return self.number_to_standard(clean_number)
         result = re.sub(self.COMMA_SEPARATED_NUMBER_PATTERN, replace_comma_number, result)
-        
-        # 10. All remaining standalone numbers (default to quantity transformation)
+
+        # 11. All remaining standalone numbers (default to quantity transformation)
         def replace_number(match):
             return self.transform_quantity_number(match.group(0))
         result = re.sub(self.STANDALONE_NUMBER_PATTERN, replace_number, result)
         
-        # 11. Apply pronunciation dictionary with phoneme tags
+        # 12. Apply pronunciation dictionary with phoneme tags
         result = self.apply_pronunciation_dictionary(result)
-        
+
+        # 13. Clean special characters (final step after all pattern transformations)
+        result = self._clean_special_characters(result)
+
         return result
