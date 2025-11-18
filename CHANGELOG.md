@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `SimliVideoService` connection issue.
+
 - Fixed an issue in the `Runner` where, when using `SmallWebRTCTransport`, the
   `request_data` was not being passed to the `SmallWebRTCRunnerArguments` body.
 
