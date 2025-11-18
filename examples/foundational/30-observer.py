@@ -150,7 +150,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             LLMLogObserver(),
             DebugLogObserver(
                 frame_types={
-                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.DESTINATION),
+                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
                     UserStartedSpeakingFrame: (BaseInputTransport, FrameEndpoint.SOURCE),
                     EndFrame: None,
                 }
