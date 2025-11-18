@@ -181,6 +181,11 @@ Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and 
       TTS-specific tags for spelling or emotion or change the pronunciation of something on the
       fly. `remove_text_transformer` has also been added to support removing a registered
       transform callback.
+    - TTS services push `AggregatedTextFrame` in addition to `TTSTextFrame`s when either an
+      aggregation occurs that should not be spoken or when the TTS service supports word-by-word
+      timestamping. In the latter case, the `TTSService` preliminarily generates an
+      `AggregatedTextFrame`, aggregated by sentence to generate the full sentence content as early
+      as possible.
 
   - Updated `CartesiaTTSService`:
     - Modified use of custom default text_aggregator to avoid deprecation warnings and push users
@@ -210,6 +215,10 @@ use `test_normalization` instead.
 - The RTVI `bot-transcription` event is deprecated in favor of the new `bot-output`
   message which is the canonical representation of bot output (spoken or not). The code
   still emits a transcription message for backwards compatibility while transition occurs.
+
+- Deprecated `add_pattern_pair` in the `PatternPairAggregator` which takes a `pattern_id`
+  and `remove_match` field in favor of the new `add_pattern` method which takes a `type` and an
+  `action`
 
 ### Fixed
 
