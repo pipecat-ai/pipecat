@@ -817,3 +817,26 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             Frame: Audio frames containing the synthesized speech.
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
+        try:
+            if not self._websocket or self._websocket.state is State.CLOSED:
+                await self._connect()
+            try:
+                if not self._started:
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame()
+                    self._started = True
+                # Send bare text (not JSON)
+                await self._get_websocket().send(text)
+                await self.start_tts_usage_metrics(text)
+
+            except Exception as e:
+                logger.error(f"{self} exception: {e}")
+                yield ErrorFrame(error=f"{self} error: {e}")
+                yield TTSStoppedFrame()
+                await self._disconnect()
+                await self._connect()
+                return
+            yield None
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")
