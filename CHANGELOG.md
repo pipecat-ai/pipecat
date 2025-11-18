@@ -59,6 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TTS's internal text_aggregator, but instead, insert this processor between your LLM
   and TTS in the pipeline.
 
+- New `bot-output` RTVI message to represent what the bot actually "says".
+  - The `RTVIObserver` now emits `bot-output` messages based off the new `AggregatedTextFrame`s
+    (`bot-tts-text` and `bot-llm-text` are still supported and generated, but `bot-transcript` is
+    now deprecated in lieu of this new, more thorough, message).
+  - The new `RTVIBotOutputMessage` includes the fields:
+    - `spoken`: A boolean indicating whether the text was spoken by TTS
+    - `aggregated_by`: A string representing how the text was aggregated ("sentence", "word",
+      "my custom aggregation")
+  - Introduced new fields to `RTVIObserver` to support the new `bot-output` messaging:
+    - `bot_output_enabled`: Defaults to True. Set to false to disable bot-output messages.
+    - `skip_aggregator_types`: Defaults to `None`. Set to a list of strings that match
+        aggregation types that should not be included in bot-output messages. (Ex. `credit_card`)
+
 ### Changed
 
 - ⚠️ Breaking change: `LLMContext.create_image_message()`,
@@ -193,6 +206,10 @@ use `test_normalization` instead.
   `LLMTextProcessor`. TTSServices still have an internal aggregator for support of default
   behavior, but if you want to override the aggregation behavior, you should use the new
   processor.
+
+- The RTVI `bot-transcription` event is deprecated in favor of the new `bot-output`
+  message which is the canonical representation of bot output (spoken or not). The code
+  still emits a transcription message for backwards compatibility while transition occurs.
 
 ### Fixed
 
