@@ -17,6 +17,7 @@ from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
 from loguru import logger
+from pipecat.transcriptions import language
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -31,7 +32,11 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
+from pipecat.services.tts_service import (
+    AudioContextWordTTSService,
+    InterruptibleTTSService,
+    TTSService,
+)
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -574,3 +579,241 @@ class RimeHttpTTSService(TTSService):
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
+
+
+class RimeNonJsonTTSService(InterruptibleTTSService):
+    """
+    Pipecat TTS service for Rime's non-JSON WebSocket API.
+
+    This service enables Text-to-Speech synthesis over WebSocket endpoints that require plain text (not JSON) messages and return raw audio bytes. It is designed for use with TTS models like Arcana, which currently do not support JSON-based WebSocket protocols (though this may change in the future).
+
+    Limitations:
+        - Does not support word-level timestamps or context IDs.
+        - Intended specifically for integrations where the TTS provider only accepts and returns non-JSON messages.
+        - Arcana and similar models may add JSON WebSocket support in the future; this service focuses on the current plain text protocol.
+    """
+
+    class InputParams(BaseModel):
+        """Configuration parameters for Rime WebSocket TTS service.
+
+        Parameters:
+            language: Language for synthesis. Defaults to English.
+            segment: Text segmentation mode ("immediate", "bySentence", "never").
+            repetition_penalty: Token repetition penalty (1.0-2.0).
+            temperature: Sampling temperature (0.0-1.0).
+            top_p: Cumulative probability threshold (0.0-1.0).
+            extra: Additional parameters to pass to the API (for future compatibility).
+        """
+
+        language: Optional[Language] = None
+        segment: Optional[str] = None
+        repetition_penalty: Optional[float] = None
+        temperature: Optional[float] = None
+        top_p: Optional[float] = None
+        extra: Optional[dict[str, Any]] = None
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        voice_id: str,
+        url: str = "wss://users.rime.ai/ws",
+        model: str = "arcana",
+        audio_format: str = "pcm",
+        sample_rate: Optional[int] = 24000,
+        params: Optional[InputParams] = None,
+        aggregate_sentences: Optional[bool] = True,
+        **kwargs,
+    ):
+        """
+        Initialize Rime Non-JSON WebSocket TTS service.
+        Args:
+            api_key: Rime API key for authentication.
+            voice_id: ID of the voice to use.
+            url: Rime websocket API endpoint.
+            model: Model ID to use for synthesis.
+            audio_format: Audio format to use.
+            sample_rate: Audio sample rate in Hz.
+            params: Additional configuration parameters.
+            aggregate_sentences: Whether to aggregate sentences within the TTSService.
+            **kwargs: Additional arguments passed to parent class.
+        """
+        super().__init__(
+            sample_rate=sample_rate,
+            aggregate_sentences=aggregate_sentences,
+            push_stop_frames=True,
+            pause_frame_processing=True,
+            **kwargs,
+        )
+        params = params or RimeNonJsonTTSService.InputParams()
+
+        self._settings = {
+            "speaker": voice_id,
+            "modelId": model,
+            "audioFormat": audio_format,
+            "samplingRate": sample_rate,
+        }
+
+        if params.language:
+            self._settings["lang"] = self.language_to_service_language(params.language)
+        if params.segment is not None:
+            self._settings["segment"] = params.segment
+        if params.repetition_penalty is not None:
+            self._settings["repetition_penalty"] = params.repetition_penalty
+        if params.temperature is not None:
+            self._settings["temperature"] = params.temperature
+        if params.top_p is not None:
+            self._settings["top_p"] = params.top_p
+        # Add any extra parameters for future compatibility
+        if params.extra:
+            self._settings.update(params.extra)
+
+        self._started = False
+        self._receive_task = None
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+        Returns:
+            True, as Rime Non-JSON WebSocket service supports metrics generation.
+        """
+        return True
+
+    def language_to_service_language(self, language: Language) -> str:
+        """Convert pipecat Language enum to Rime language code.
+
+        Args:
+            language: The Language enum value to convert.
+
+        Returns:
+            Three-letter Rime language code (e.g., 'eng' for English).
+            Falls back to the language's base code with a warning if not in the verified list.
+        """
+        return language_to_rime_language(language)
+
+    async def start(self, frame: StartFrame):
+        """Start the Rime Non-JSON WebSocket TTS service.
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        self._settings["samplingRate"] = self.sample_rate
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the service and close connection."""
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel current operation and clean up."""
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream with special handling for stop conditions.
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
+            self._started = False
+
+    async def _connect(self):
+        """Establish WebSocket connection and start receive task."""
+        await self._connect_websocket()
+        if self._websocket and not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+    async def _disconnect(self):
+        """Close WebSocket connection and clean up tasks."""
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+        await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
+        """Establish WebSocket connection to Rime None json websocket."""
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+            # Build URL with query parameters (only non-None values)
+            params = "&".join(f"{k}={v}" for k, v in self._settings.items() if v is not None)
+            url = f"{self._url}?{params}"
+            headers = {"Authorization": f"Bearer {self._api_key}"}
+            self._websocket = await websocket_connect(url, additional_headers=headers)
+            await self._call_event_handler("on_connected")
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
+
+    async def _disconnect_websocket(self):
+        """Close WebSocket connection and clean up state."""
+        try:
+            await self.stop_all_metrics()
+            if self._websocket:
+                # Send EOS command to gracefully close
+                await self._websocket.send("<EOS>")
+                await self._websocket.close()
+                logger.debug("Disconnected from Rime None json websocket")
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+        finally:
+            self._started = False
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
+
+    def _get_websocket(self):
+        """Get active WebSocket connection or raise exception."""
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        """Handle interruption by clearing buffer."""
+        await super()._handle_interruption(frame, direction)
+        await self.stop_all_metrics()
+        if self._websocket:
+            # Send CLEAR command to clear buffer
+            await self._websocket.send("<CLEAR>")
+
+    async def flush_audio(self):
+        """Flush any pending audio synthesis."""
+        if not self._websocket:
+            return
+
+        logger.trace(f"{self}: flushing audio")
+        await self._websocket.send("<FLUSH>")
+
+    async def _receive_messages(self):
+        """Process incoming WebSocket messages (raw audio bytes)."""
+        async for message in self._get_websocket():
+            try:
+                # Rime Arcana sends raw audio bytes directly (not JSON)
+                if isinstance(message, bytes):
+                    await self.stop_ttfb_metrics()
+
+                    frame = TTSAudioRawFrame(
+                        audio=message,
+                        sample_rate=self.sample_rate,
+                        num_channels=1,
+                    )
+                    await self.push_frame(frame)
+            except Exception as e:
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+
+    @traced_tts
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """
+        Generate speech from text using Rime's streaming API.
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
+        logger.debug(f"{self}: Generating TTS [{text}]")
