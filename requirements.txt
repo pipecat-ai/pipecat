@@ -1,0 +1,12 @@
+pipecat-ai[speechmatics,cartesia]
+fastapi
+uvicorn
+loguru
+python-dotenv
+onnxruntime
+websockets
+openai
+requests
+aiofiles
+pydantic
+httpx
