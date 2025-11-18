@@ -142,6 +142,7 @@ class FrameProcessor(BaseObject):
     - on_after_process_frame: Called after a frame is processed
     - on_before_push_frame: Called before a frame is pushed
     - on_after_push_frame: Called after a frame is pushed
+    - on_error: Called when an error is raised in the frame processing.
     """
 
     def __init__(
@@ -234,6 +235,7 @@ class FrameProcessor(BaseObject):
         self._register_event_handler("on_after_process_frame", sync=True)
         self._register_event_handler("on_before_push_frame", sync=True)
         self._register_event_handler("on_after_push_frame", sync=True)
+        self._register_event_handler("on_error", sync=True)
 
     @property
     def id(self) -> int:
@@ -630,15 +632,46 @@ class FrameProcessor(BaseObject):
         elif isinstance(frame, (FrameProcessorResumeFrame, FrameProcessorResumeUrgentFrame)):
             await self.__resume(frame)
 
-    async def push_error(self, error: ErrorFrame):
-        """Push an error frame upstream.
+    async def push_error(
+        self,
+        error_message: Optional[str] = None,
+        exception: Optional[Exception] = None,
+        fatal: bool = False,
+    ):
+        """Creates and pushes an ErrorFrame upstream.
+
+        Creates and pushes an ErrorFrame upstream to notify other processors in the
+        pipeline about an error condition. The error frame will include context about
+        which processor generated the error.
 
         Args:
-            error: The error frame to push.
+            error_message: Optional descriptive message explaining the error condition.
+            exception: Optional exception object that caused the error, if available.
+                This provides additional context for debugging and error handling.
+            fatal: Whether this error should be considered fatal to the pipeline.
+                Fatal errors typically cause the entire pipeline to stop processing.
+                Defaults to False for non-fatal errors.
+
+        Example:
+            ```python
+            # Non-fatal error
+            await self.push_error("Failed to process audio chunk, skipping")
+
+            # Fatal error with exception context
+            try:
+                result = some_critical_operation()
+            except Exception as e:
+                await self.push_error("Critical operation failed", exception=e, fatal=True)
+            ```
         """
-        if not error.processor:
-            error.processor = self
-        await self.push_frame(error, FrameDirection.UPSTREAM)
+        error_message = error_message or f"{self} exception: {exception}"
+        logger.error(error_message)
+        error_frame = ErrorFrame(error=error_message, fatal=fatal, exception=exception)
+        await self._call_event_handler("on_error", error_frame)
+        await self.push_frame(
+            error_frame,
+            FrameDirection.UPSTREAM,
+        )
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame to the next processor in the pipeline.

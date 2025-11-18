@@ -812,6 +812,7 @@ class ErrorFrame(SystemFrame):
     error: str
     fatal: bool = False
     processor: Optional["FrameProcessor"] = None
+    exception: Optional[Exception] = None
 
     def __str__(self):
         return f"{self.name}(error: {self.error}, fatal: {self.fatal})"
