@@ -242,8 +242,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 await self._websocket.send(ormsgpack.packb(stop_message))
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
         finally:
             self._request_id = None
             self._started = False

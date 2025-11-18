@@ -645,8 +645,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.debug("Connected to ElevenLabs Realtime STT")
         except Exception as e:
-            logger.error(f"{self}: unable to connect to ElevenLabs Realtime STT: {e}")
-            await self.push_error(ErrorFrame(f"Connection error: {str(e)}"))
+            await self.push_error(error_msg=f"{self}: unable to connect to ElevenLabs Realtime STT: {e}", exception=e)
 
     async def _disconnect_websocket(self):
         """Disconnect from ElevenLabs Realtime STT WebSocket."""
@@ -714,13 +713,11 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         elif message_type == "input_error":
             error_msg = data.get("error", "Unknown input error")
-            logger.error(f"ElevenLabs input error: {error_msg}")
-            await self.push_error(ErrorFrame(f"Input error: {error_msg}"))
+            await self.push_error(error_msg=f"ElevenLabs input error: {error_msg}")
 
         elif message_type in ["auth_error", "quota_exceeded", "transcriber_error", "error"]:
             error_msg = data.get("error", data.get("message", "Unknown error"))
-            logger.error(f"ElevenLabs error ({message_type}): {error_msg}")
-            await self.push_error(ErrorFrame(f"{message_type}: {error_msg}"))
+            await self.push_error(error_msg=f"ElevenLabs error ({message_type}): {error_msg}")
 
         else:
             logger.debug(f"Unknown message type: {message_type}")

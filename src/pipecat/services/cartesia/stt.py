@@ -276,8 +276,7 @@ class CartesiaSTTService(WebsocketSTTService):
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
     async def _disconnect_websocket(self):
         try:
@@ -319,8 +318,7 @@ class CartesiaSTTService(WebsocketSTTService):
 
             elif data["type"] == "error":
                 error_msg = data.get("message", "Unknown error")
-                logger.error(f"Cartesia error: {error_msg}")
-                await self.push_error(ErrorFrame(error=error_msg))
+                await self.push_error(error_msg=error_msg, exception=e)
 
     @traced_stt
     async def _handle_transcription(

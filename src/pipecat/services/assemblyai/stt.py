@@ -206,9 +206,8 @@ class AssemblyAISTTService(STTService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
             self._connected = False
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             raise
 
     async def _disconnect(self):
@@ -233,8 +232,7 @@ class AssemblyAISTTService(STTService):
                     logger.warning("Timed out waiting for termination message from server")
 
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(exception=e)
 
             if self._receive_task:
                 await self.cancel_task(self._receive_task)
@@ -262,13 +260,11 @@ class AssemblyAISTTService(STTService):
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:
-                    logger.error(f"{self} exception: {e}")
-                    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                    await self.push_error(exception=e)
                     break
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
     def _parse_message(self, message: Dict[str, Any]) -> BaseMessage:
         """Parse a raw message into the appropriate message type."""

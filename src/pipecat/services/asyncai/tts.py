@@ -228,8 +228,7 @@ class AsyncAITTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -290,7 +289,7 @@ class AsyncAITTSService(InterruptibleTTSService):
                 logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(error=f"{self} error: {msg['message']}"))
+                await self.push_error(error_msg=f"{self} error: {msg['message']}", exception=e)
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 
@@ -494,8 +493,7 @@ class AsyncAIHttpTTSService(TTSService):
             yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

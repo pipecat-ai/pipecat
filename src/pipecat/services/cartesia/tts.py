@@ -397,8 +397,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             )
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -464,10 +463,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 )
                 await self.append_to_audio_context(msg["context_id"], frame)
             elif msg["type"] == "error":
-                logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(error=f"{self} error: {msg['error']}"))
+                await self.push_error(error_msg=f"{self} error: {msg}", exception=e)
                 self._context_id = None
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
@@ -708,8 +706,7 @@ class CartesiaHttpTTSService(TTSService):
             async with session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Cartesia API error: {error_text}")
-                    await self.push_error(ErrorFrame(error=f"Cartesia API error: {error_text}"))
+                    await self.push_error(error_msg=f"Cartesia API error: {error_text}")
                     raise Exception(f"Cartesia API returned status {response.status}: {error_text}")
 
                 audio_data = await response.read()
@@ -725,8 +722,7 @@ class CartesiaHttpTTSService(TTSService):
             yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
