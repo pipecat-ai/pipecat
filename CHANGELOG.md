@@ -66,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a race condition where, if the LLM received instructions to both produce
+  text and invoke a function call at the same time, the context would not be 
+  updated before the function call result arrived, causing the bot to repeat 
+  itself.
+
 - Fixed an issue in the `Runner` where, when using `SmallWebRTCTransport`, the
   `request_data` was not being passed to the `SmallWebRTCRunnerArguments` body.
 
