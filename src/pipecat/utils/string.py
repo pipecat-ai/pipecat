@@ -18,6 +18,7 @@ Dependencies:
 """
 
 import re
+from dataclasses import dataclass
 from typing import FrozenSet, List, Optional, Sequence, Tuple
 
 import nltk
@@ -198,7 +199,24 @@ def parse_start_end_tags(
     return (None, current_tag_index)
 
 
-def concatenate_aggregated_text(text_parts: List[str], add_spaces: bool) -> str:
+@dataclass
+class TextPartForConcatenation:
+    """Class representing a part of text for concatenation with concatenate_aggregated_text.
+
+    Attributes:
+        text: The text content.
+        includes_inter_part_spaces: Whether any necessary inter-frame
+            (leading/trailing) spaces are already included in the text.
+    """
+
+    text: str
+    includes_inter_part_spaces: bool
+
+    def __str__(self):
+        return f"{self.name}(text: [{self.text}], includes_inter_part_spaces: {self.includes_inter_part_spaces})"
+
+
+def concatenate_aggregated_text(text_parts: List[TextPartForConcatenation]) -> str:
     """Concatenate a list of text parts into a single string.
 
     This function joins the provided list of text parts into a single string,
@@ -208,15 +226,55 @@ def concatenate_aggregated_text(text_parts: List[str], add_spaces: bool) -> str:
     transcription services.
 
     Args:
-        text_parts: A list of strings representing parts of text to concatenate.
-        add_spaces: Whether to add spaces between text parts during concatenation.
+        text_parts: A list of text parts to concatenate.
 
     Returns:
         A single concatenated string.
     """
-    # Concatenate text parts with or without spaces based on the flag
-    separator = " " if add_spaces else ""
-    result = separator.join(text_parts)
+    result = ""
+    last_includes_inter_part_spaces = False
+
+    if not text_parts:
+        return result
+
+    def append_part(part: TextPartForConcatenation):
+        nonlocal result
+        nonlocal last_includes_inter_part_spaces
+        result += part.text
+        last_includes_inter_part_spaces = part.includes_inter_part_spaces
+
+    for part in text_parts:
+        # Part is empty.
+        # Skip.
+        if not part.text:
+            continue
+
+        # Result is as yet empty.
+        # Just append.
+        if not result:
+            append_part(part)
+            continue
+
+        if part.includes_inter_part_spaces and last_includes_inter_part_spaces:
+            # This part is part of an ongoing run that has spaces already included.
+            # Just append.
+            append_part(part)
+        elif not part.includes_inter_part_spaces and not last_includes_inter_part_spaces:
+            # This part is part of an ongoing run that has no spaces included.
+            # Add a space before appending.
+            result += " "
+            append_part(part)
+        else:
+            # This part represents a transition to a new run (spaces -> no spaces, or vice versa).
+            # Add a space if needed, before appending.
+            if not result[-1].isspace() and not part.text[0].isspace():
+                result += " "
+            append_part(part)
+
+    # NOTE: the above logic assumes that runs of text parts with
+    # includes_inter_part_spaces=True are well-formed, i.e. they're not
+    # actually multiple separate runs with a space-less boundary, like
+    # "hello ", "world.", "goodnight ", "moon."
 
     # Clean up any excessive whitespace
     result = result.strip()

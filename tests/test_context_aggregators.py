@@ -1005,3 +1005,53 @@ class TestLLMAssistantAggregator(
     ) -> Optional[LLMAssistantAggregatorParams]:
         kwargs.pop("expect_stripped_words", None)
         return LLMAssistantAggregatorParams(**kwargs) if kwargs else None
+
+    async def test_multiple_text_mixed(self):
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=self.create_assistant_aggregator_params(expect_stripped_words=False)
+        )
+
+        # The newer LLMAssistantAggregator expects TextFrames to declare
+        # when they include inter-frame spaces.
+        def make_text_frame(text: str, includes_spaces: bool) -> TextFrame:
+            frame = TextFrame(text=text)
+            frame.includes_inter_frame_spaces = includes_spaces
+            return frame
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            make_text_frame("Hello ", includes_spaces=True),
+            make_text_frame("Pipecat. ", includes_spaces=True),
+            make_text_frame("Here's some", includes_spaces=True),
+            make_text_frame(
+                " code:", includes_spaces=True
+            ),  # Validates ending includes_inter_frame_spaces run with no space
+            make_text_frame("```python\nprint('Hello, World!')\n```", includes_spaces=False),
+            make_text_frame(
+                "```javascript\nconsole.log('Hello, World!');\n```", includes_spaces=False
+            ),
+            make_text_frame(
+                " And some more: ", includes_spaces=True
+            ),  # Validates starting includes_inter_frame_spaces run with a space and ending it with no space
+            make_text_frame("```html\n<div>Hello, World!</div>\n```", includes_spaces=False),
+            make_text_frame(
+                "Hope that ", includes_spaces=True
+            ),  # Validates starting includes_inter_frame_spaces run with no space
+            make_text_frame("helps!", includes_spaces=True),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.check_message_content(
+            context,
+            0,
+            "Hello Pipecat. Here's some code: ```python\nprint('Hello, World!')\n``` ```javascript\nconsole.log('Hello, World!');\n``` And some more: ```html\n<div>Hello, World!</div>\n``` Hope that helps!",
+        )
