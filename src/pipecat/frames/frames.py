@@ -28,7 +28,6 @@ from typing import (
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry as NewKeypadEntry
-from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
@@ -39,6 +38,8 @@ from pipecat.utils.utils import obj_count, obj_id
 if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.turns.base_interruption_strategy import BaseInterruptionStrategy
+    from pipecat.turns.base_speaking_strategy import BaseSpeakingStrategy
 
 
 class DeprecatedKeypadEntry:
@@ -774,7 +775,8 @@ class StartFrame(SystemFrame):
     enable_metrics: bool = False
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
-    interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
+    interruption_strategies: List["BaseInterruptionStrategy"] = field(default_factory=list)
+    speaking_strategies: List["BaseSpeakingStrategy"] = field(default_factory=list)
     report_only_initial_ttfb: bool = False
 
 

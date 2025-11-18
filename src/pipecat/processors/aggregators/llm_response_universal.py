@@ -20,23 +20,15 @@ from typing import Any, Dict, List, Literal, Optional, Set
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    EmulateUserStartedSpeakingFrame,
-    EmulateUserStoppedSpeakingFrame,
     EndFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
-    InputAudioRawFrame,
-    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
@@ -47,7 +39,6 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
-    SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -66,6 +57,8 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.turns.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.turns.base_speaking_strategy import BaseSpeakingStrategy
 from pipecat.utils.string import concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
@@ -226,36 +219,21 @@ class LLMUserAggregator(LLMContextAggregator):
         """
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
-        self._vad_params: Optional[VADParams] = None
-        self._turn_params: Optional[SmartTurnParams] = None
-
-        if "aggregation_timeout" in kwargs:
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Parameter 'aggregation_timeout' is deprecated, use 'params' instead.",
-                    DeprecationWarning,
-                )
-
-            self._params.aggregation_timeout = kwargs["aggregation_timeout"]
 
         self._user_speaking = False
-        self._bot_speaking = False
-        self._was_bot_speaking = False
-        self._emulating_vad = False
-        self._seen_interim_results = False
-        self._waiting_for_aggregation = False
 
-        self._aggregation_event = asyncio.Event()
-        self._aggregation_task = None
+    async def cleanup(self):
+        """Clean up processor resources."""
+        await super().cleanup()
+        await self._cleanup()
 
     async def reset(self):
         """Reset the aggregation state and interruption strategies."""
         await super().reset()
-        self._was_bot_speaking = False
-        self._seen_interim_results = False
-        self._waiting_for_aggregation = False
-        [await s.reset() for s in self._interruption_strategies]
+        for s in self.interruption_strategies:
+            s.reset()
+        for s in self.speaking_strategies:
+            s.reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for user speech aggregation and context management.
@@ -265,6 +243,12 @@ class LLMUserAggregator(LLMContextAggregator):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
+
+        for strategy in self.interruption_strategies:
+            await strategy.process_frame(frame)
+
+        for strategy in self.speaking_strategies:
+            await strategy.process_frame(frame)
 
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
@@ -279,25 +263,8 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, InputAudioRawFrame):
-            await self._handle_input_audio(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStartedSpeakingFrame):
-            await self._handle_user_started_speaking(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            await self._handle_bot_started_speaking(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._handle_bot_stopped_speaking(frame)
-            await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
-        elif isinstance(frame, InterimTranscriptionFrame):
-            await self._handle_interim_transcription(frame)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -314,76 +281,42 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, SpeechControlParamsFrame):
-            self._vad_params = frame.vad_params
-            self._turn_params = frame.turn_params
-            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
-    async def _process_aggregation(self):
-        """Process the current aggregation and push it downstream."""
+    async def push_aggregation(self):
+        """Push the current aggregation."""
+        if len(self._aggregation) == 0:
+            return
+
         aggregation = self.aggregation_string()
         await self.reset()
         self._context.add_message({"role": self.role, "content": aggregation})
         frame = LLMContextFrame(self._context)
         await self.push_frame(frame)
 
-    async def push_aggregation(self):
-        """Push the current aggregation based on interruption strategies and conditions."""
-        if len(self._aggregation) > 0:
-            if self.interruption_strategies and self._bot_speaking:
-                should_interrupt = await self._should_interrupt_based_on_strategies()
-
-                if should_interrupt:
-                    logger.debug(
-                        "Interruption conditions met - pushing interruption and aggregation"
-                    )
-                    await self.push_interruption_task_frame_and_wait()
-                    await self._process_aggregation()
-                else:
-                    logger.debug("Interruption conditions not met - not pushing aggregation")
-                    # Don't process aggregation, just reset it
-                    await self.reset()
-            else:
-                # No interruption config - normal behavior (always push aggregation)
-                await self._process_aggregation()
-        # Handles the case where both the user and the bot are not speaking,
-        # and the bot was previously speaking before the user interruption.
-        # Normally, when the user stops speaking, new text is expected,
-        # which triggers the bot to respond. However, if no new text
-        # is received, this safeguard ensures
-        # the bot doesn't hang indefinitely while waiting to speak again.
-        elif not self._seen_interim_results and self._was_bot_speaking and not self._bot_speaking:
-            logger.warning("User stopped speaking but no new aggregation received.")
-            # Resetting it so we don't trigger this twice
-            self._was_bot_speaking = False
-            # TODO: we are not enabling this for now, due to some STT services which can take as long as 2 seconds two return a transcription
-            # So we need more tests and probably make this feature configurable, disabled it by default.
-            # We are just pushing the same previous context to be processed again in this case
-            # await self.push_frame(LLMContextFrame(self._context))
-
-    async def _should_interrupt_based_on_strategies(self) -> bool:
-        """Check if interruption should occur based on configured strategies.
-
-        Returns:
-            True if any interruption strategy indicates interruption should occur.
-        """
-
-        async def should_interrupt(strategy: BaseInterruptionStrategy):
-            await strategy.append_text(self.aggregation_string())
-            return await strategy.should_interrupt()
-
-        return any([await should_interrupt(s) for s in self._interruption_strategies])
-
     async def _start(self, frame: StartFrame):
-        self._create_aggregation_task()
+        for s in self.interruption_strategies:
+            await s.setup(self.task_manager)
+            s.add_event_handler("on_push_frame", self._on_push_frame)
+            s.add_event_handler("on_should_interrupt", self._on_should_interrupt)
+
+        for s in self.speaking_strategies:
+            await s.setup(self.task_manager)
+            s.add_event_handler("on_push_frame", self._on_push_frame)
+            s.add_event_handler("on_should_speak", self._on_should_speak)
 
     async def _stop(self, frame: EndFrame):
-        await self._cancel_aggregation_task()
+        await self._cleanup()
 
     async def _cancel(self, frame: CancelFrame):
-        await self._cancel_aggregation_task()
+        await self._cleanup()
+
+    async def _cleanup(self):
+        for s in self.interruption_strategies:
+            await s.cleanup()
+        for s in self.speaking_strategies:
+            await s.cleanup()
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame()
@@ -398,42 +331,6 @@ class LLMUserAggregator(LLMContextAggregator):
         if frame.run_llm:
             await self.push_context_frame()
 
-    async def _handle_input_audio(self, frame: InputAudioRawFrame):
-        for s in self.interruption_strategies:
-            await s.append_audio(frame.audio, frame.sample_rate)
-
-    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
-        self._user_speaking = True
-        self._waiting_for_aggregation = True
-        self._was_bot_speaking = self._bot_speaking
-
-        # If we get a non-emulated UserStartedSpeakingFrame but we are in the
-        # middle of emulating VAD, let's stop emulating VAD (i.e. don't send the
-        # EmulateUserStoppedSpeakingFrame).
-        if not frame.emulated and self._emulating_vad:
-            self._emulating_vad = False
-
-    async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
-        self._user_speaking = False
-        # We just stopped speaking. Let's see if there's some aggregation to
-        # push. If the last thing we saw is an interim transcription, let's wait
-        # pushing the aggregation as we will probably get a final transcription.
-        if len(self._aggregation) > 0:
-            if not self._seen_interim_results:
-                await self.push_aggregation()
-        # Handles the case where both the user and the bot are not speaking,
-        # and the bot was previously speaking before the user interruption.
-        # So in this case we are resetting the aggregation timer
-        elif not self._seen_interim_results and self._was_bot_speaking and not self._bot_speaking:
-            # Reset aggregation timer.
-            self._aggregation_event.set()
-
-    async def _handle_bot_started_speaking(self, _: BotStartedSpeakingFrame):
-        self._bot_speaking = True
-
-    async def _handle_bot_stopped_speaking(self, _: BotStoppedSpeakingFrame):
-        self._bot_speaking = False
-
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
 
@@ -442,101 +339,52 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         self._aggregation.append(text)
-        # We just got a final result, so let's reset interim results.
-        self._seen_interim_results = False
-        # Reset aggregation timer.
-        self._aggregation_event.set()
 
-    async def _handle_interim_transcription(self, _: InterimTranscriptionFrame):
-        self._seen_interim_results = True
+    async def _on_should_interrupt(self, strategy: BaseInterruptionStrategy):
+        await self._trigger_bot_interruption(strategy)
 
-    def _create_aggregation_task(self):
-        if not self._aggregation_task:
-            self._aggregation_task = self.create_task(self._aggregation_task_handler())
+    async def _on_should_speak(self, strategy: BaseSpeakingStrategy):
+        await self._trigger_bot_speech(strategy)
 
-    async def _cancel_aggregation_task(self):
-        if self._aggregation_task:
-            await self.cancel_task(self._aggregation_task)
-            self._aggregation_task = None
+    async def _on_push_frame(
+        self,
+        strategy: BaseInterruptionStrategy | BaseSpeakingStrategy,
+        frame: Frame,
+        direction: FrameDirection,
+    ):
+        await self.push_frame(frame, direction)
 
-    async def _aggregation_task_handler(self):
-        while True:
-            try:
-                # The _aggregation_task_handler handles two distinct timeout scenarios:
-                #
-                # 1. When emulating_vad=True: Wait for emulated VAD timeout before
-                #    pushing aggregation (simulating VAD behavior when no actual VAD
-                #    detection occurred).
-                #
-                # 2. When emulating_vad=False: Use aggregation_timeout as a buffer
-                #    to wait for potential late-arriving transcription frames after
-                #    a real VAD event.
-                #
-                # For emulated VAD scenarios, the timeout strategy depends on whether
-                # a turn analyzer is configured:
-                #
-                # - WITH turn analyzer: Use turn_emulated_vad_timeout parameter because
-                #   the VAD's stop_secs is set very low (e.g. 0.2s) for rapid speech
-                #   chunking to feed the turn analyzer. This low value is too fast
-                #   for emulated VAD scenarios where we need to allow users time to
-                #   finish speaking (e.g. 0.8s).
-                #
-                # - WITHOUT turn analyzer: Use VAD's stop_secs directly to maintain
-                #   consistent user experience between real VAD detection and
-                #   emulated VAD scenarios.
-                if not self._emulating_vad:
-                    timeout = self._params.aggregation_timeout
-                elif self._turn_params:
-                    timeout = self._params.turn_emulated_vad_timeout
-                else:
-                    # Use VAD stop_secs when no turn analyzer is present, fallback if no VAD params
-                    timeout = (
-                        self._vad_params.stop_secs
-                        if self._vad_params
-                        else self._params.turn_emulated_vad_timeout
-                    )
-                await asyncio.wait_for(self._aggregation_event.wait(), timeout=timeout)
-                await self._maybe_emulate_user_speaking()
-            except asyncio.TimeoutError:
-                if not self._user_speaking:
-                    await self.push_aggregation()
+    async def _trigger_bot_interruption(self, strategy: BaseInterruptionStrategy):
+        """Generate an interruption if one of the strategies conditions is met."""
+        if self._user_speaking:
+            return
 
-                # If we are emulating VAD we still need to send the user stopped
-                # speaking frame.
-                if self._emulating_vad:
-                    await self.push_frame(
-                        EmulateUserStoppedSpeakingFrame(), FrameDirection.UPSTREAM
-                    )
-                    self._emulating_vad = False
-            finally:
-                self._aggregation_event.clear()
+        self._user_speaking = True
 
-    async def _maybe_emulate_user_speaking(self):
-        """Maybe emulate user speaking based on transcription.
+        logger.debug(f"User started speaking ({strategy})")
 
-        Emulate user speaking if we got a transcription but it was not
-        detected by VAD. Behavior when bot is speaking depends on the
-        enable_emulated_vad_interruptions parameter.
-        """
-        # Check if we received a transcription but VAD was not able to detect
-        # voice (e.g. when you whisper a short utterance). In that case, we need
-        # to emulate VAD (i.e. user start/stopped speaking), but we do it only
-        # if the bot is not speaking. If the bot is speaking and we really have
-        # a short utterance we don't really want to interrupt the bot.
-        if (
-            not self._user_speaking
-            and not self._waiting_for_aggregation
-            and len(self._aggregation) > 0
-        ):
-            if self._bot_speaking and not self._params.enable_emulated_vad_interruptions:
-                # If emulated VAD interruptions are disabled and bot is speaking, ignore
-                logger.debug("Ignoring user speaking emulation, bot is speaking.")
-                await self.reset()
-            else:
-                # Either bot is not speaking, or emulated VAD interruptions are enabled
-                # - trigger user speaking emulation.
-                await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
-                self._emulating_vad = True
+        # Once we are interrupting, we reset all the interruption strategies.
+        for s in self.interruption_strategies:
+            s.reset()
+
+        await self.push_frame(UserStartedSpeakingFrame())
+        await self.push_frame(InterruptionFrame())
+
+    async def _trigger_bot_speech(self, strategy: BaseSpeakingStrategy):
+        """Generate an interruption if one of the strategies conditions is met."""
+        if not self._user_speaking:
+            return
+
+        self._user_speaking = False
+
+        logger.debug(f"User stopped speaking ({strategy})")
+
+        # Reset all speaking strategies to start fresh.
+        for s in self.speaking_strategies:
+            s.reset()
+
+        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.push_aggregation()
 
 
 class LLMAssistantAggregator(LLMContextAggregator):

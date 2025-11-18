@@ -59,6 +59,9 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.turns.base_interruption_strategy import (
+    BaseInterruptionStrategy as NewBaseInterruptionStrategy,
+)
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -567,6 +570,17 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         """
 
         async def should_interrupt(strategy: BaseInterruptionStrategy):
+            if isinstance(strategy, NewBaseInterruptionStrategy):
+                import warnings
+
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "To use the new interruption strategies, use the new LLMContext and LLMContextAggregatorPair.",
+                        DeprecationWarning,
+                    )
+                return False
+
             await strategy.append_text(self._aggregation)
             return await strategy.should_interrupt()
 
