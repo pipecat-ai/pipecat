@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ⚠️ Breaking change: `LLMContext.create_image_message()` and
+  `LLMContext.create_audio_message()` are now async methods. This fixes and
+  issue where the asyncio event loop would be blocked while encoding audio or
+  images.
+
 - `ConsumerProcessor` now queues frames from the producer internally instead of
   pushing them directly. This allows us to subclass consumer processors and
   manipulate frames before they are pushed.

@@ -14,6 +14,7 @@ translation from this universal context into whatever format it needs, using a
 service-specific adapter.
 """
 
+import asyncio
 import base64
 import io
 import wave
@@ -137,7 +138,7 @@ class LLMContext:
         return {"role": role, "content": content}
 
     @staticmethod
-    def create_image_message(
+    async def create_image_message(
         *,
         role: str = "user",
         format: str,
@@ -154,15 +155,21 @@ class LLMContext:
             image: Raw image bytes.
             text: Optional text to include with the image.
         """
-        buffer = io.BytesIO()
-        Image.frombytes(format, size, image).save(buffer, format="JPEG")
-        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        def encode_image():
+            buffer = io.BytesIO()
+            Image.frombytes(format, size, image).save(buffer, format="JPEG")
+            encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            return encoded_image
+
+        encoded_image = await asyncio.to_thread(encode_image)
+
         url = f"data:image/jpeg;base64,{encoded_image}"
 
         return LLMContext.create_image_url_message(role=role, url=url, text=text)
 
     @staticmethod
-    def create_audio_message(
+    async def create_audio_message(
         *, role: str = "user", audio_frames: list[AudioRawFrame], text: str = "Audio follows"
     ) -> LLMContextMessage:
         """Create a context message containing audio.
@@ -172,21 +179,26 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
-        sample_rate = audio_frames[0].sample_rate
-        num_channels = audio_frames[0].num_channels
 
-        content = []
-        content.append({"type": "text", "text": text})
-        data = b"".join(frame.audio for frame in audio_frames)
+        def encode_audio():
+            sample_rate = audio_frames[0].sample_rate
+            num_channels = audio_frames[0].num_channels
 
-        with io.BytesIO() as buffer:
-            with wave.open(buffer, "wb") as wf:
-                wf.setsampwidth(2)
-                wf.setnchannels(num_channels)
-                wf.setframerate(sample_rate)
-                wf.writeframes(data)
+            content = []
+            content.append({"type": "text", "text": text})
+            data = b"".join(frame.audio for frame in audio_frames)
 
-        encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            with io.BytesIO() as buffer:
+                with wave.open(buffer, "wb") as wf:
+                    wf.setsampwidth(2)
+                    wf.setnchannels(num_channels)
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(data)
+
+            encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            return encoded_audio
+
+        encoded_audio = asyncio.to_thread(encode_audio)
 
         content.append(
             {
