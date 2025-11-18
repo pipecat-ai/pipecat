@@ -1452,8 +1452,6 @@ class GeminiLiveLLMService(LLMService):
             self._bot_text_buffer += text
             self._search_result_buffer += text  # Also accumulate for grounding
             frame = LLMTextFrame(text=text)
-            # Gemini Live text already includes any necessary inter-chunk spaces
-            frame.includes_inter_frame_spaces = True
             await self.push_frame(frame)
 
         # Check for grounding metadata in server content

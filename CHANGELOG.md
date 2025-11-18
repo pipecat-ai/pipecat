@@ -9,19 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
+  example wiring; leverages the enhancement model for robust detection with no
+  ONNX dependency or added processing complexity.
+
+- Added a watchdog to `DeepgramFluxSTTService` to prevent dangling tasks in case the
+  user was speaking and we stop receiving audio.
+
+- Introduced a minimum confidence parameter in `DeepgramFluxSTTService` to avoid
+  generating transcriptions below a defined threshold.
+
 - Added `ElevenLabsRealtimeSTTService` which implements the Realtime STT
   service from ElevenLabs.
 
-- Added a `TTSService.includes_inter_frame_spaces` property getter, so that TTS
-  services that subclass `TTSService` can indicate whether the text in the
-  `TTSTextFrame`s they push already contain any necessary inter-frame spaces.
+- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
+  example wiring; leverages the enhancement model for robust detection with no
+  ONNX dependency or added processing complexity.
 
 - Added word-level timestamps support to Hume TTS service
 
 ### Changed
 
+- ⚠️ Breaking change: `LLMContext.create_image_message()` and
+  `LLMContext.create_audio_message()` are now async methods. This fixes and
+  issue where the asyncio event loop would be blocked while encoding audio or
+  images.
+
+- `ConsumerProcessor` now queues frames from the producer internally instead of
+  pushing them directly. This allows us to subclass consumer processors and
+  manipulate frames before they are pushed.
+
+- `BaseTextFilter` only require subclasses to implement the `filter()` method.
+
+- Extracted the logic for retrying connections, and create a new `send_with_retry`
+  method inside `WebSocketService`.
+
+- Refactored `DeepgramFluxSTTService` to automatically reconnect if sending a
+  message fails.
+
 - Updated all STT and TTS services to use consistent error handling pattern with
   `push_error()` method for better pipeline error event integration.
+
+- Added support for `maybe_capture_participant_camera()` and
+  `maybe_capture_participant_screen()` for `SmallWebRTCTransport` in the runner
+  utils.
 
 - Added Hindi support for Rime TTS services.
 
@@ -41,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `credentials` or `credentials_path` instead for Google Cloud authentication.
 
 ### Fixed
+
+- Fixed an issue in the `Runner` where, when using `SmallWebRTCTransport`, the
+  `request_data` was not being passed to the `SmallWebRTCRunnerArguments` body.
 
 - Fixed subtle issue of assistant context messages ending up with double spaces
   between words or sentences.

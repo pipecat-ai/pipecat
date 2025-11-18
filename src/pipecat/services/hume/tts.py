@@ -123,15 +123,6 @@ class HumeTTSService(WordTTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Hume TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Hume's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     async def start(self, frame: StartFrame) -> None:
         """Start the service.
 

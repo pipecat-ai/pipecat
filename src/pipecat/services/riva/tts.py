@@ -113,15 +113,6 @@ class RivaTTSService(TTSService):
             riva.client.proto.riva_tts_pb2.RivaSynthesisConfigRequest()
         )
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Riva TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Riva's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     async def set_model(self, model: str):
         """Attempt to set the TTS model.
 
@@ -166,7 +157,6 @@ class RivaTTSService(TTSService):
                 add_response(None)
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
                 add_response(None)
 
         await self.start_ttfb_metrics()
@@ -191,6 +181,7 @@ class RivaTTSService(TTSService):
                 resp = await asyncio.wait_for(queue.get(), timeout=RIVA_TTS_TIMEOUT_SECS)
         except asyncio.TimeoutError:
             logger.error(f"{self} timeout waiting for audio response")
+            yield ErrorFrame(error=f"{self} error: {e}")
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()
