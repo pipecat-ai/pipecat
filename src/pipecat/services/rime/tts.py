@@ -645,10 +645,10 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             **kwargs,
         )
         params = params or RimeNonJsonTTSService.InputParams()
-        self._api_key = api_key  
+        self._api_key = api_key
         self._url = url
-        self._voice_id = voice_id  
-        self._model = model 
+        self._voice_id = voice_id
+        self._model = model
         self._settings = {
             "speaker": voice_id,
             "modelId": model,
