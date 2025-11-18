@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ConsumerProcessor` now queues frames from the producer internally instead of
+  pushing them directly. This allows us to subclass consumer processors and
+  manipulate frames before they are pushed.
+
 - `BaseTextFilter` only require subclasses to implement the `filter()` method.
 
 - Extracted the logic for retrying connections, and create a new `send_with_retry`
