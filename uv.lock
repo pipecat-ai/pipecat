@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -4448,6 +4448,7 @@ aws = [
 ]
 aws-nova-sonic = [
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12'" },
+    { name = "smithy-aws-core", marker = "python_full_version >= '3.12'" },
 ]
 azure = [
     { name = "azure-cognitiveservices-speech" },
@@ -4728,6 +4729,7 @@ requires-dist = [
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.21" },
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.28.0,<3" },
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=0.1.25" },
+    { name = "smithy-aws-core", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.1.1" },
     { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.1" },
     { name = "soxr", specifier = "~=0.5.0" },
     { name = "speechmatics-rt", marker = "extra == 'speechmatics'", specifier = ">=0.5.0" },

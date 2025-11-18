@@ -59,6 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.time import time_now_iso8601
+from smithy_aws_core.identity.environment import EnvironmentCredentialsResolver
 
 try:
     from aws_sdk_bedrock_runtime.client import (
@@ -73,8 +74,7 @@ try:
         InvokeModelWithBidirectionalStreamOperationOutput,
         InvokeModelWithBidirectionalStreamOutput,
     )
-    from smithy_aws_core.auth.sigv4 import SigV4AuthScheme
-    from smithy_aws_core.identity.static import StaticCredentialsResolver
+
     from smithy_core.aio.eventstream import DuplexEventStream
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -187,10 +187,7 @@ class AWSNovaSonicLLMService(LLMService):
     def __init__(
         self,
         *,
-        secret_access_key: str,
-        access_key_id: str,
-        session_token: Optional[str] = None,
-        region: str,
+        region: str = "us-east-1",
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
         params: Optional[Params] = None,
@@ -202,9 +199,6 @@ class AWSNovaSonicLLMService(LLMService):
         """Initializes the AWS Nova Sonic LLM service.
 
         Args:
-            secret_access_key: AWS secret access key for authentication.
-            access_key_id: AWS access key ID for authentication.
-            session_token: AWS session token for authentication.
             region: AWS region where the service is hosted.
             model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
             voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
@@ -220,9 +214,6 @@ class AWSNovaSonicLLMService(LLMService):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         super().__init__(**kwargs)
-        self._secret_access_key = secret_access_key
-        self._access_key_id = access_key_id
-        self._session_token = session_token
         self._region = region
         self._model = model
         self._client: Optional[BedrockRuntimeClient] = None
@@ -582,11 +573,7 @@ class AWSNovaSonicLLMService(LLMService):
         config = Config(
             endpoint_uri=f"https://bedrock-runtime.{self._region}.amazonaws.com",
             region=self._region,
-            aws_access_key_id=self._access_key_id,
-            aws_secret_access_key=self._secret_access_key,
-            aws_session_token=self._session_token,
-            aws_credentials_identity_resolver=StaticCredentialsResolver(),
-            auth_schemes={"aws.auth#sigv4": SigV4AuthScheme(service="bedrock")},
+            aws_credentials_identity_resolver=EnvironmentCredentialsResolver(),
         )
         return BedrockRuntimeClient(config=config)
 
