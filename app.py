@@ -2,7 +2,7 @@ import os
 import asyncio
 import httpx
 import uuid
-from typing import Dict, Any, List
+from typing import Dict
 from dotenv import load_dotenv
 from loguru import logger
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -36,14 +36,12 @@ from pipecat.frames.frames import (
 load_dotenv(override=True)
 
 # -----------------------------------------------------
-# Session Management & Config
+# Session Management
 # -----------------------------------------------------
-conversation_sessions: Dict[str, List[Dict[str, Any]]] = {}
-MAX_MESSAGES = int(os.getenv("MAX_MESSAGES", "30"))  # when exceeded, summarize or collapse
-SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "300"))  # optional cleanup TTL
+conversation_sessions: Dict[str, list] = {}
 
 # -----------------------------------------------------
-# Function/Tool Definitions (unchanged)
+# Function/Tool Definitions
 # -----------------------------------------------------
 TRANSACTION_TOOLS = [
     {
@@ -141,7 +139,7 @@ TRANSACTION_TOOLS = [
 ]
 
 # -----------------------------------------------------
-# Helpers: execute_function + context summarization/trimming
+# Function Execution Handler
 # -----------------------------------------------------
 async def execute_function(function_name: str, arguments: dict):
     """Execute function calls against Supabase edge functions"""
@@ -201,6 +199,7 @@ async def execute_function(function_name: str, arguments: dict):
                 return result
 
             elif function_name == "send_email_report":
+                # First get transaction data
                 logger.info(f"📧 Fetching transaction data for client {arguments['clientId']}")
                 query_response = await client.post(
                     f"{supabase_url}/functions/v1/transaction-query",
@@ -214,6 +213,7 @@ async def execute_function(function_name: str, arguments: dict):
                 query_response.raise_for_status()
                 query_data = query_response.json()
 
+                # Then send email
                 logger.info(f"📧 Sending email to {arguments['to']}")
                 email_response = await client.post(
                     f"{supabase_url}/functions/v1/transaction-email",
@@ -242,19 +242,6 @@ async def execute_function(function_name: str, arguments: dict):
                 logger.info(f"✅ Chart generated: {result}")
                 return result
 
-            elif function_name == "summarize_context":
-                # optional summarization function if you have it
-                response = await client.post(
-                    f"{supabase_url}/functions/v1/summarize-context",
-                    headers=headers,
-                    json=arguments,
-                    timeout=60.0
-                )
-                response.raise_for_status()
-                result = response.json()
-                logger.info("✅ Context summarized by edge function")
-                return result
-
             else:
                 logger.error(f"❌ Unknown function: {function_name}")
                 return {"error": f"Unknown function: {function_name}", "success": False}
@@ -266,48 +253,8 @@ async def execute_function(function_name: str, arguments: dict):
         logger.error(f"❌ Function execution error for {function_name}: {e}")
         return {"error": str(e), "success": False}
 
-
-def trim_or_summarize_messages(session_id: str):
-    """
-    Trim or summarize conversation_sessions[session_id] if it grows beyond MAX_MESSAGES.
-    This function:
-      - If a Supabase 'summarize-context' function exists, prefer calling it (async in execute_function).
-      - Otherwise, collapse the oldest half of messages into a short system summary message.
-    Note: This is synchronous trimming; if you want a better summary run async summarize via execute_function.
-    """
-    messages = conversation_sessions.get(session_id)
-    if not messages:
-        return
-
-    if len(messages) <= MAX_MESSAGES:
-        return
-
-    logger.info(f"✂️ Trimming conversation for session {session_id} (size {len(messages)})")
-
-    # collapse oldest half into a single system summary message (fast fallback)
-    keep = MAX_MESSAGES // 2
-    to_collapse = messages[: len(messages) - keep]
-    remaining = messages[len(messages) - keep :]
-
-    # create a simple combined summary (this is a cheap fallback)
-    combined_texts = []
-    for m in to_collapse:
-        role = m.get("role", "unknown")
-        content = m.get("content", "")
-        combined_texts.append(f"[{role}]: {content}")
-
-    summary_text = "Previous conversation summary (collapsed): " + " | ".join(combined_texts[:20])
-    # If it's too long, truncate
-    if len(summary_text) > 1000:
-        summary_text = summary_text[:1000] + "..."
-
-    system_summary = {"role": "system", "content": summary_text}
-    conversation_sessions[session_id] = [system_summary] + remaining
-    logger.info(f"✅ Trimmed conversation to {len(conversation_sessions[session_id])} messages for session {session_id}")
-
-
 # -----------------------------------------------------
-# Function Call Processor (improved robustness)
+# Function Call Processor
 # -----------------------------------------------------
 class FunctionCallProcessor(FrameProcessor):
     """Handles function call execution and returns results to LLM"""
@@ -316,57 +263,32 @@ class FunctionCallProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, FunctionCallInProgressFrame):
-            logger.info(f"🔧 Function call detected: {getattr(frame, 'function_name', 'unknown')}")
-
-            # Robustly extract function name and arguments (support a couple of shapes)
-            function_name = getattr(frame, "function_name", None) or getattr(frame, "name", None)
-            raw_args = getattr(frame, "arguments", None) or getattr(frame, "args", None) or {}
-
-            # Attempt to normalize arguments into a dict
-            try:
-                if hasattr(raw_args, "to_dict"):
-                    arguments = raw_args.to_dict()
-                elif isinstance(raw_args, dict):
-                    arguments = raw_args
-                else:
-                    # Try JSON-like string
-                    arguments = raw_args
-            except Exception:
-                arguments = {}
-
-            if not function_name:
-                logger.error("❌ Function call frame missing function name")
-                # Forward the frame unchanged so LLM can handle or error
-                await self.push_frame(frame)
-                return
+            logger.info(f"🔧 Function call detected: {frame.function_name}")
 
             try:
-                # Execute the function (your Supabase edge function layer)
-                result = await execute_function(function_name, arguments or {})
+                # Execute the function
+                result = await execute_function(frame.function_name, frame.arguments)
 
-                # Create result frame - keep payload in a dict to be robust to Pipecat versions
-                payload = {"function": function_name, "result": result}
+                # Create result frame
                 result_frame = FunctionCallResultFrame(
-                    function_name=function_name,
-                    call_id=getattr(frame, "call_id", None),
-                    result=payload
+                    function_name=frame.function_name,
+                    call_id=frame.call_id,
+                    result=result
                 )
 
                 await self.push_frame(result_frame)
-                logger.info(f"✅ Function result pushed to pipeline for {function_name}")
+                logger.info(f"✅ Function result pushed to pipeline")
 
             except Exception as e:
-                logger.exception(f"❌ Error processing function call: {e}")
-                error_payload = {"function": function_name, "error": str(e), "success": False}
-                error_frame = FunctionCallResultFrame(
-                    function_name=function_name,
-                    call_id=getattr(frame, "call_id", None),
-                    result=error_payload
+                logger.error(f"❌ Error processing function call: {e}")
+                error_result = FunctionCallResultFrame(
+                    function_name=frame.function_name,
+                    call_id=frame.call_id,
+                    result={"error": str(e), "success": False}
                 )
-                await self.push_frame(error_frame)
+                await self.push_frame(error_result)
         else:
             await self.push_frame(frame)
-
 
 # -----------------------------------------------------
 # FastAPI Server Setup
@@ -451,7 +373,7 @@ async def run_pipeline(transport, session_id: str, handle_sigint: bool = False):
     # --- Audio Buffer (records all user audio) ---
     audiobuffer = AudioBufferProcessor(user_continuous_stream=True)
 
-    # --- Function call processor (robust) ---
+    # --- Function call processor ---
     function_processor = FunctionCallProcessor()
 
     # --- Define processing pipeline ---
@@ -489,20 +411,15 @@ async def run_pipeline(transport, session_id: str, handle_sigint: bool = False):
         logger.info(f"❌ Client disconnected - Session: {session_id}")
         await task.queue_frames([EndFrame()])
 
+        # Clean up session after some time (optional)
+        # You might want to keep it for reconnection purposes
+        # await asyncio.sleep(300)  # Keep for 5 minutes
+        # if session_id in conversation_sessions:
+        #     del conversation_sessions[session_id]
+
     # --- Run the pipeline ---
     runner = PipelineRunner(handle_sigint=handle_sigint, force_gc=True)
-    try:
-        await runner.run(task)
-    finally:
-        # Save context back to sessions store on pipeline end (graceful or disconnected)
-        try:
-            conversation_sessions[session_id] = messages
-            # Trim or summarize messages to keep the context bounded
-            trim_or_summarize_messages(session_id)
-            logger.info(f"💾 Saved conversation context for session {session_id} (size={len(conversation_sessions.get(session_id, []))})")
-        except Exception as e:
-            logger.exception(f"❌ Error saving session context for {session_id}: {e}")
-
+    await runner.run(task)
 
 # -----------------------------------------------------
 # WebSocket endpoint
@@ -538,15 +455,6 @@ async def websocket_endpoint(websocket: WebSocket):
         except Exception:
             pass
     finally:
-        # Save & clean up session context on disconnect
-        try:
-            # session messages already saved in run_pipeline finalizer, but ensure present
-            if session_id in conversation_sessions:
-                trim_or_summarize_messages(session_id)
-                logger.info(f"🧹 Final context size for session {session_id}: {len(conversation_sessions[session_id])}")
-            # Optional cleanup policy: remove or keep
-            # If you want to cleanup immediately uncomment:
-            # if session_id in conversation_sessions:
-            #     del conversation_sessions[session_id]
-        except Exception as e:
-            logger.exception(f"❌ Error during final cleanup for {session_id}: {e}")
+        # Optional: Clean up session after disconnect
+        # You might want to keep sessions for a while to handle reconnections
+        logger.info(f"🧹 Cleaning up session: {session_id}")
