@@ -117,7 +117,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             RTVIObserver(rtvi),
             DebugLogObserver(
                 frame_types={
-                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.DESTINATION),
+                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
                 }
             ),
         ],
