@@ -91,12 +91,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             transport.input(),  # Transport user input
             rtvi,
             stt,
-            transcript.user(),  # User transcripts
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS (HumeTTSService with word timestamps)
             transport.output(),  # Transport bot output
-            transcript.assistant(),  # Assistant transcripts with timestamps
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
@@ -122,13 +120,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         await rtvi.set_bot_ready()
-
-    @transcript.event_handler("on_transcript_update")
-    async def on_transcript_update(processor, frame):
-        """Log transcript updates to show timestamps in conversation."""
-        for msg in frame.messages:
-            timestamp_str = f"[{msg.timestamp}] " if msg.timestamp else ""
-            logger.info(f"📝 Transcript: {timestamp_str}{msg.role}: {msg.content}")
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
