@@ -464,7 +464,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             elif msg["type"] == "error":
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(error_msg=f"{self} error: {msg}", exception=e)
+                await self.push_error(error_msg=f"{self} error: {msg}")
                 self._context_id = None
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")

@@ -288,7 +288,7 @@ class AsyncAITTSService(InterruptibleTTSService):
                 logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(error_msg=f"{self} error: {msg['message']}", exception=e)
+                await self.push_error(error_msg=f"{self} error: {msg['message']}")
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 

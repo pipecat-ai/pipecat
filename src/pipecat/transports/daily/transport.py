@@ -2509,7 +2509,7 @@ class DailyTransport(BaseTransport):
         if self._input:
             await self._input.push_error(error_msg=error)
         elif self._output:
-            await self._input.push_error(error_msg=error)
+            await self._output.push_error(error_msg=error)
         else:
             logger.error("Both input and output are None while trying to push error")
             raise Exception("No valid input or output channel to push error")

@@ -317,7 +317,7 @@ class CartesiaSTTService(WebsocketSTTService):
 
             elif data["type"] == "error":
                 error_msg = data.get("message", "Unknown error")
-                await self.push_error(error_msg=error_msg, exception=e)
+                await self.push_error(error_msg=error_msg)
 
     @traced_stt
     async def _handle_transcription(
