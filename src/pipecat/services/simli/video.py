@@ -84,6 +84,10 @@ class SimliVideoService(FrameProcessor):
                     Please use 'api_key' and 'face_id' parameters instead.
 
             use_turn_server: Whether to use TURN server for connection. Defaults to False.
+
+                .. deprecated:: 0.0.95
+                    The 'use_turn_server' parameter is deprecated and will be removed in a future version.
+
             latency_interval: Latency interval setting for sending health checks to check
                 the latency to Simli Servers. Defaults to 0.
             simli_url: URL of the simli servers. Can be changed for custom deployments
@@ -135,14 +139,20 @@ class SimliVideoService(FrameProcessor):
 
             config = SimliConfig(**config_kwargs)
 
+        if use_turn_server:
+            warnings.warn(
+                "The 'use_turn_server' parameter is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._initialized = False
         # Add buffer time to session limits
         config.maxIdleTime += 5
         config.maxSessionLength += 5
         self._simli_client = SimliClient(
-            config,
-            use_turn_server,
-            latency_interval,
+            config=config,
+            latencyInterval=latency_interval,
             simliURL=simli_url,
         )
 

@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.95] - 2025-11-18
 
 ### Added
 
@@ -26,9 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- ⚠️ Breaking change: `LLMContext.create_image_message()` and
-  `LLMContext.create_audio_message()` are now async methods. This fixes and
-  issue where the asyncio event loop would be blocked while encoding audio or
+- ⚠️ Breaking change: `LLMContext.create_image_message()`,
+  `LLMContext.create_audio_message()`, `LLMContext.add_image_frame_message()`
+  and `LLMContext.add_audio_frames_message()` are now async methods. This fixes
+  an issue where the asyncio event loop would be blocked while encoding audio or
   images.
 
 - `ConsumerProcessor` now queues frames from the producer internally instead of
@@ -68,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `credentials` or `credentials_path` instead for Google Cloud authentication.
 
 ### Fixed
+
+- Fixed a `SimliVideoService` connection issue.
 
 - Fixed an issue in the `Runner` where, when using `SmallWebRTCTransport`, the
   `request_data` was not being passed to the `SmallWebRTCRunnerArguments` body.
