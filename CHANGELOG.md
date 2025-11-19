@@ -22,9 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `ElevenLabsRealtimeSTTService` which implements the Realtime STT
   service from ElevenLabs.
 
-- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
-  example wiring; leverages the enhancement model for robust detection with no
-  ONNX dependency or added processing complexity.
+- Added word-level timestamps support to Hume TTS service
 
 ### Changed
 
