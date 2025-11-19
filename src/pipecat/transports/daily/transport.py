@@ -2565,7 +2565,7 @@ class DailyTransport(BaseTransport):
             except asyncio.TimeoutError:
                 logger.error(f"Timeout handling dialin-ready event ({url})")
             except Exception as e:
-                logger.exception(f"Error handling dialin-ready event ({url}): {e}")
+                logger.error(f"Error handling dialin-ready event ({url}): {e}")
 
     async def _on_dialin_connected(self, data):
         """Handle dial-in connected events."""
