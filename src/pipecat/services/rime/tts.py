@@ -833,7 +833,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                 # Send bare text (not JSON)
                 await self._get_websocket().send(text)
                 await self.start_tts_usage_metrics(text)
-                await self.flush_audio() 
+                await self.flush_audio()
 
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
