@@ -802,12 +802,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             del self._function_calls_in_progress[frame.tool_call_id]
 
     def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
-        def iter_all():
-            yield from self._function_calls_context_messages
-            # In case on long-running function call, the function may already be added to the context
-            yield from self._context.get_messages()
-
-        for message in iter_all():
+        for message in self._function_calls_context_messages:
             if (
                 not isinstance(message, LLMSpecificMessage)
                 and message["role"] == "tool"
