@@ -1,0 +1,21 @@
+[project]
+name = "agentcore-pipecat"
+version = "0.1.0"
+description = "Example for building Pipecat bots deployable to Amazon Bedrock AgentCore"
+requires-python = ">=3.10"
+dependencies = [
+    "bedrock-agentcore",
+    "pipecat-ai[webrtc,daily,silero,deepgram,openai,cartesia,local-smart-turn-v3,runner]",
+]
+
+[dependency-groups]
+dev = [
+    "bedrock-agentcore-starter-toolkit",
+    "pyright>=1.1.404,<2",
+    "ruff>=0.12.11,<1",
+]
+
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+select = ["I"]
