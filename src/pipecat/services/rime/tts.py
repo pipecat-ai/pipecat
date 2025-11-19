@@ -746,7 +746,9 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             params = "&".join(f"{k}={v}" for k, v in self._settings.items() if v is not None)
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
-            self._websocket = await websocket_connect(url, additional_headers=headers, max_size=1024 * 1024 * 16)
+            self._websocket = await websocket_connect(
+                url, additional_headers=headers, max_size=1024 * 1024 * 16
+            )
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
