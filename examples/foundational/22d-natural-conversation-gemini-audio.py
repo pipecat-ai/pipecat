@@ -391,7 +391,7 @@ class AudioAccumulator(FrameProcessor):
             )
             self._user_speaking = False
             context = LLMContext()
-            context.add_audio_frames_message(audio_frames=self._audio_frames)
+            await context.add_audio_frames_message(audio_frames=self._audio_frames)
             await self.push_frame(LLMContextFrame(context=context))
         elif isinstance(frame, InputAudioRawFrame):
             # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest

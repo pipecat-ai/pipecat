@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.95] - 2025-11-18
 
 ### Added
 
@@ -22,15 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `ElevenLabsRealtimeSTTService` which implements the Realtime STT
   service from ElevenLabs.
 
-- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
-  example wiring; leverages the enhancement model for robust detection with no
-  ONNX dependency or added processing complexity.
+- Added word-level timestamps support to Hume TTS service
 
 ### Changed
 
-- ⚠️ Breaking change: `LLMContext.create_image_message()` and
-  `LLMContext.create_audio_message()` are now async methods. This fixes and
-  issue where the asyncio event loop would be blocked while encoding audio or
+- ⚠️ Breaking change: `LLMContext.create_image_message()`,
+  `LLMContext.create_audio_message()`, `LLMContext.add_image_frame_message()`
+  and `LLMContext.add_audio_frames_message()` are now async methods. This fixes
+  an issue where the asyncio event loop would be blocked while encoding audio or
   images.
 
 - `ConsumerProcessor` now queues frames from the producer internally instead of
@@ -71,10 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed a race condition where, if the LLM received instructions to both produce
-  text and invoke a function call at the same time, the context would not be 
-  updated before the function call result arrived, causing the bot to repeat 
-  itself.
+- Fixed a `SimliVideoService` connection issue.
 
 - Fixed an issue in the `Runner` where, when using `SmallWebRTCTransport`, the
   `request_data` was not being passed to the `SmallWebRTCRunnerArguments` body.
