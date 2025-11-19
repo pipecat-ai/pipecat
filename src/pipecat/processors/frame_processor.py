@@ -801,7 +801,10 @@ class FrameProcessor(BaseObject):
                 await self.__cancel_process_task()
                 self.__create_process_task()
         except Exception as e:
-            await self.push_error(error_msg=f"Uncaught exception in {self} when handling _start_interruption: {e}", exception=e)
+            await self.push_error(
+                error_msg=f"Uncaught exception in {self} when handling _start_interruption: {e}",
+                exception=e,
+            )
 
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
         """Internal method to push frames to adjacent processors.

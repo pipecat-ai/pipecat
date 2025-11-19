@@ -403,7 +403,9 @@ class SonioxSTTService(STTService):
                 if error_code or error_message:
                     # In case of error, still send the final transcript (if any remaining in the buffer).
                     await send_endpoint_transcript()
-                    await self.push_error(error_msg=f"{self} error: {error_code} (_receive_task_handler) - {error_message}")
+                    await self.push_error(
+                        error_msg=f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
+                    )
 
                 finished = content.get("finished")
                 if finished:

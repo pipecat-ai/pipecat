@@ -645,7 +645,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.debug("Connected to ElevenLabs Realtime STT")
         except Exception as e:
-            await self.push_error(error_msg=f"{self}: unable to connect to ElevenLabs Realtime STT: {e}", exception=e)
+            await self.push_error(
+                error_msg=f"{self}: unable to connect to ElevenLabs Realtime STT: {e}", exception=e
+            )
 
     async def _disconnect_websocket(self):
         """Disconnect from ElevenLabs Realtime STT WebSocket."""
