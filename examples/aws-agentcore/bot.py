@@ -162,10 +162,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     app.complete_async_task(task_id)
 
+    return {"status": "success"}
+
+
+async def bot(runner_args: RunnerArguments):
+    """Bot entry point for running locally and on Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
 
 @app.entrypoint
-async def bot(payload, context):
-    """Main bot entry point compatible with AWS Bedrock AgentCore Runtime."""
+async def agentcore_bot(payload, context):
+    """Bot entry point for running on Amazon Bedrock AgentCore Runtime."""
     room_url = payload.get("roomUrl")
     transport = await create_transport(
         DailyRunnerArguments(room_url=room_url),
