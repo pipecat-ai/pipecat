@@ -97,14 +97,14 @@ async def main():
     input = MockTTSProcessor(
         {
             "audio_sequence": [
-                ("./mock/assets/long_audio_16k.wav", 32 * time_scale),
-                ("./mock/assets/long_audio_16k.wav", 39 * time_scale),
+                ("./mock/assets/long_audio_16k.wav", 8 * time_scale),
+                # ("./mock/assets/long_audio_16k.wav", 39 * time_scale),
             ],
             "event_sequence": [
-                ("user_started_speaking", 30 * time_scale),
-                ("user_stopped_speaking", 31 * time_scale),
-                ("user_started_speaking", 37 * time_scale),
-                ("user_stopped_speaking", 38 * time_scale),
+                ("user_started_speaking", 6 * time_scale),
+                ("user_stopped_speaking", 7 * time_scale),
+                # ("user_started_speaking", 37 * time_scale),
+                # ("user_stopped_speaking", 38 * time_scale),
             ],
             "chunk_size": 600000,
             "chunk_delay": 0.2,
