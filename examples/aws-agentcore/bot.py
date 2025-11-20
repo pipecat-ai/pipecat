@@ -6,6 +6,7 @@
 
 import os
 
+import aiohttp
 from bedrock_agentcore import BedrockAgentCoreApp
 from dotenv import load_dotenv
 from loguru import logger
@@ -33,6 +34,22 @@ from pipecat.transports.daily.transport import DailyParams
 app = BedrockAgentCoreApp()
 
 load_dotenv(override=True)
+
+
+async def get_public_ip():
+    """Retrieve public IP from AWS metadata service or external service."""
+    try:
+        # Fallback to external service
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.ipify.org", timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                if response.status == 200:
+                    return await response.text()
+    except Exception:
+        pass
+
+    return None
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
@@ -64,6 +81,14 @@ transport_params = {
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
+
+    public_ip = await get_public_ip()
+    if public_ip:
+        logger.info(f"Public IP address: {public_ip}")
+    else:
+        logger.warning("Could not retrieve public IP address")
+
+    yield {"status": "initializing", "ip": public_ip}
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -162,13 +187,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     app.complete_async_task(task_id)
 
-    return {"status": "success"}
+    yield {"status": "completed"}
 
 
 async def bot(runner_args: RunnerArguments):
     """Bot entry point for running locally and on Pipecat Cloud."""
     transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport, runner_args)
+    async for result in run_bot(transport, runner_args):
+        pass  # Consume the stream
 
 
 @app.entrypoint
@@ -179,7 +205,8 @@ async def agentcore_bot(payload, context):
         DailyRunnerArguments(room_url=room_url),
         transport_params,
     )
-    await run_bot(transport, RunnerArguments())
+    async for result in run_bot(transport, RunnerArguments()):
+        yield result
 
 
 if __name__ == "__main__":
