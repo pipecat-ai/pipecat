@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added optional speaking rate control to `InworldTTSService`.
 
+### Added
+
+- Added `ResembleAITTSService` for Resemble AI Text-to-Speech Websocket integration.
+
 ### Changed
 
 - ⚠️ Breaking change: `LLMContext.create_image_message()`,
