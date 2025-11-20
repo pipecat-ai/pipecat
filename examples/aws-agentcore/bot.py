@@ -24,12 +24,14 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.server import WebsocketServerParams, WebsocketServerTransport
 
 app = BedrockAgentCoreApp()
 
@@ -147,14 +149,30 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages, tools)
     context_aggregator = LLMContextAggregatorPair(context)
 
+    # TODO: clean up. Hackily overrides transport created by bot() entrypoint...
+    ws_transport = WebsocketServerTransport(
+        # host=public_ip,
+        port=8080,  # This is the only port we're allowed to bind to...but the problem is it's already taken in order to support the /invoke HTTP entrypoint.
+        params=WebsocketServerParams(
+            serializer=ProtobufFrameSerializer(),
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            add_wav_header=False,
+            vad_analyzer=SileroVADAnalyzer(),
+            session_timeout=60 * 3,  # 3 minutes
+        ),
+    )
+
     pipeline = Pipeline(
         [
-            transport.input(),
+            # transport.input(),
+            ws_transport.input(),
             stt,
             context_aggregator.user(),
             llm,
             tts,
-            transport.output(),
+            # transport.output(),
+            ws_transport.output(),
             context_aggregator.assistant(),
         ]
     )
