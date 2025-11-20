@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added optional speaking rate control to `InworldTTSService`.
+
 ### Changed
 
 - Updated `daily-python` to 0.22.0.
+
+### Fixed
+
+- Fixed `InworldTTSService` audio config payload to use camelCase keys expected
+  by the Inworld API.
 
 ## [0.0.95] - 2025-11-18
 
@@ -29,8 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service from ElevenLabs.
 
 - Added word-level timestamps support to Hume TTS service
-
-- Added optional speaking rate control to `InworldTTSService`.
 
 ### Changed
 
@@ -96,9 +103,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `keyterm` or `tag` containing a space.
 
 - Prevented `HeyGenVideoService` from automatically disconnecting after 5 minutes.
-
-- Fixed `InworldTTSService` audio config payload to use camelCase keys expected
-  by the Inworld API.
 
 ## [0.0.94] - 2025-11-10
 
