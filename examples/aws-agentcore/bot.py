@@ -156,7 +156,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
+    task_id = app.add_async_task("voice_agent")
+
     await runner.run(task)
+
+    app.complete_async_task(task_id)
 
 
 @app.entrypoint
