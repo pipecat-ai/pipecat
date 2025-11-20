@@ -9,13 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for `include_timestamps` and `enable_logging` in
+  `ElevenLabsRealtimeSTTService`. When `include_timestamps` is enabled,
+  timestamp data is included in the `TranscriptionFrame`'s `result`
+  parameter.
+
 - Added optional speaking rate control to `InworldTTSService`.
 
 ### Changed
 
 - Updated `daily-python` to 0.22.0.
 
+- In `MiniMaxHttpTTSService`:
+  -- Added support for speech-2.6-hd and speech-2.6-turbo models
+  -- Added languages: Afrikaans, Bulgarian, Catalan, Danish, Persian, Filipino, Hebrew,
+  Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and Tamil
+  -- Added new emotions: calm and fluent
+
+### Deprecated
+
+- `english_normalization` input parameter for `MiniMaxHttpTTSService` is deprecated,
+  use `test_normalization` instead.
+
 ### Fixed
+
+- Fixed an issue in `ElevenLabsRealtimeSTTService` where setting the sample
+  rate would result in transcripts failing.
 
 - Fixed `InworldTTSService` audio config payload to use camelCase keys expected
   by the Inworld API.
@@ -78,19 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated language mappings for the Google and Gemini TTS services to match
   official documentation.
 
-- In `MiniMaxHttpTTSService`:
--- Added support for speech-2.6-hd and speech-2.6-turbo models
--- Added languages: Afrikaans, Bulgarian, Catalan, Danish, Persian, Filipino, Hebrew,
-Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and Tamil
--- Added new emotions: calm and fluent
-
 ### Deprecated
 
 - The `api_key` parameter in `GeminiTTSService` is deprecated. Use
   `credentials` or `credentials_path` instead for Google Cloud authentication.
-
-- `english_normalization` input parameter for `MiniMaxHttpTTSService` is deprecated,
-use `test_normalization` instead.
 
 ### Fixed
 
