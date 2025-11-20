@@ -99,7 +99,7 @@ class BaseTextAggregator(ABC):
           format.
 
         Args:
-            text: The text to be aggregated
+            text: The text to be aggregated.
 
         Returns:
             An Aggregation object if ready for processing, or None if more
