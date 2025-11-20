@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added word-level timestamps support to Hume TTS service
 
+- Added optional speaking rate control to `InworldTTSService`.
+
 ### Changed
 
 - ⚠️ Breaking change: `LLMContext.create_image_message()`,
@@ -88,6 +90,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `keyterm` or `tag` containing a space.
 
 - Prevented `HeyGenVideoService` from automatically disconnecting after 5 minutes.
+
+- Fixed `InworldTTSService` audio config payload to use camelCase keys expected
+  by the Inworld API.
 
 ## [0.0.94] - 2025-11-10
 
