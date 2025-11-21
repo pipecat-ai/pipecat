@@ -112,6 +112,7 @@ webrtc = [ "aiortc>=1.13.0,<2", "opencv-python>=4.11.0.86,<5" ]
 websocket = [ "pipecat-ai[websockets-base]", "fastapi>=0.115.6,<0.122.0" ]
 websockets-base = [ "websockets>=13.1,<16.0" ]
 whisper = [ "faster-whisper~=1.1.1" ]
+auth = [ "pyjwt>=2.10.1" ]
 
 [dependency-groups]
 dev = [
