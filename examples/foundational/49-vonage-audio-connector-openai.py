@@ -172,7 +172,7 @@ async def main() -> None:
         )
         sys.exit(1)
 
-    api_base = os.getenv("OPENTOK_API_URL", "https://api.dev.opentok.com")
+    api_base = os.getenv("OPENTOK_API_URL", "https://api.opentok.com")
 
     # Where the Audio Connector will connect:
     ws_uri = os.getenv("VONAGE_AUDIO_WS_URI")
