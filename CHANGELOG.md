@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DeepgramWebsocketTTSService` which uses Deepgram's TTS websocket API.
+
 - Added optional speaking rate control to `InworldTTSService`.
 
 - Introduced a new `AggregatedTextFrame` type to support passing text along with an
@@ -42,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Introduced new fields to `RTVIObserver` to support the new `bot-output` messaging:
     - `bot_output_enabled`: Defaults to True. Set to false to disable bot-output messages.
     - `skip_aggregator_types`: Defaults to `None`. Set to a list of strings that match
-        aggregation types that should not be included in bot-output messages. (Ex. `credit_card`)
+      aggregation types that should not be included in bot-output messages. (Ex. `credit_card`)
   - Introduced new methods, `add_text_transformer()` and `remove_text_transformer()`, to
     `RTVIObserver` to support providing (and subsequently removing) callbacks for various types of
     aggregations (or all aggregations with `*`) that can modify the text before being sent as a
@@ -57,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Modified the BaseTextAggregator type so that when text gets aggregated, metadata can
   be associated with it. Currently, that just means a `type`, so that the aggregation
   can be classified or described. Changes made to support this:
+
   - ⚠️ IMPORTANT: Aggregators are now expected to strip leading/trailing white space
     characters before returning their aggregation from `aggregation()` or `.text`. This
     way all aggregators have a consistent contract allowing downstream use to know how
@@ -68,47 +71,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     To update: `aggregated_text = myAggregator.text` -> `aggregated_text = myAggregator.text.text`
   - ⚠️ Breaking change: `BaseTextAggregator.aggregate()` now returns `Optional[Aggregation]`
     (instead of `Optional[str]`). To update:
-      ```
-      aggregation = myAggregator.aggregate(text)
-      if (aggregation):
-        print(f"successfully aggregated text: {aggregation.text}") // instead of {aggregation}
-      ```
+    ```
+    aggregation = myAggregator.aggregate(text)
+    if (aggregation):
+      print(f"successfully aggregated text: {aggregation.text}") // instead of {aggregation}
+    ```
   - `SimpleTextAggregator`, `SkipTagsAggregator`, `PatternPairAggregator` updated to
     produce/consume `Aggregation` objects.
   - All uses of the above Aggregators have been updated accordingly.
 
 - Augmented the `PatternPairAggregator` so that matched patterns can be treated as their own
   aggregation, taking advantage of the new. To that end:
+
   - Introduced a new, preferred version of `add_pattern` to support a new option for treating a
     match as a separate aggregation returned from `aggregate()`. This replaces the now
     deprecated `add_pattern_pair` method and you provide a `MatchAction` in lieu of the `remove_match` field.
     - `MatchAction` enum: `REMOVE`, `KEEP`, `AGGREGATE`, allowing customization for how
       a match should be handled.
       - `REMOVE`: The text along with its delimiters will be removed from the streaming text.
-                  Sentence aggregation will continue on as if this text did not exist.
+        Sentence aggregation will continue on as if this text did not exist.
       - `KEEP`: The delimiters will be removed, but the content between them will be kept.
-                Sentence aggregation will continue on with the internal text included.
+        Sentence aggregation will continue on with the internal text included.
       - `AGGREGATE`: The delimiters will be removed and the content between will be treated
-                as a separate aggregation. Any text before the start of the pattern will be
-                returned early, whether or not a complete sentence was found. Then the pattern
-                will be returned. Then the aggregation will continue on sentence matching after
-                the closing delimiter is found. The content between the delimiters is not
-                aggregated by sentence. It is aggregated as one single block of text.
+        as a separate aggregation. Any text before the start of the pattern will be
+        returned early, whether or not a complete sentence was found. Then the pattern
+        will be returned. Then the aggregation will continue on sentence matching after
+        the closing delimiter is found. The content between the delimiters is not
+        aggregated by sentence. It is aggregated as one single block of text.
       - `PatternMatch` now extends `Aggregation` and provides richer info to handlers.
   - ⚠️ Breaking change: The `PatternMatch` type returned to handlers registered via `on_pattern_match`
-     has been updated to subclass from the new `Aggregation` type, which means that `content`
-     has been replaced with `text` and `pattern_id` has been replaced with `type`:
-       ```
-       async dev on_match_tag(match: PatternMatch):
-          pattern = match.type # instead of match.pattern_id
-          text = match.text # instead of match.content
-       ```
+    has been updated to subclass from the new `Aggregation` type, which means that `content`
+    has been replaced with `text` and `pattern_id` has been replaced with `type`:
+    ```
+    async dev on_match_tag(match: PatternMatch):
+       pattern = match.type # instead of match.pattern_id
+       text = match.text # instead of match.content
+    ```
 
 - `TextFrame` now includes the field `append_to_context` to support setting whether or not the
   encompassing text should be added to the LLM context (by the LLM assistant aggregator). It
   defaults to `True`.
 
 - `TTSService` base class updates:
+
   - `TTSService`s now accept a new `skip_aggregator_types` to avoid speaking certain aggregation
     types (now determined/returned by the aggregator)
   - Introduced the ability to do a just-in-time transform of text before it gets sent to the
@@ -124,6 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     as possible.
 
 - Updated `CartesiaTTSService`:
+
   - Modified use of custom default text_aggregator to avoid deprecation warnings and push users
     towards use of transformers or the `LLMTextProcessor`
   - Added convenience methods for taking advantage of Cartesia's SSML tags: spell, emotion,
@@ -137,6 +143,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- Deprecated `DeepgramTTSService`. This service is replaced by
+  `DeepgramWebsocketTTSService` which has better performance and interruption
+  handling.
+
 - The TTS constructor field, `text_aggregator` is deprecated in favor of the new
   `LLMTextProcessor`. TTSServices still have an internal aggregator for support of default
   behavior, but if you want to override the aggregation behavior, you should use the new
@@ -149,7 +159,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecated `add_pattern_pair` in the `PatternPairAggregator` which takes a `pattern_id`
   and `remove_match` field in favor of the new `add_pattern` method which takes a `type` and an
   `action`
-
 
 ### Fixed
 
@@ -215,10 +224,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   official documentation.
 
 - In `MiniMaxHttpTTSService`:
--- Added support for speech-2.6-hd and speech-2.6-turbo models
--- Added languages: Afrikaans, Bulgarian, Catalan, Danish, Persian, Filipino, Hebrew,
-Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and Tamil
--- Added new emotions: calm and fluent
+  -- Added support for speech-2.6-hd and speech-2.6-turbo models
+  -- Added languages: Afrikaans, Bulgarian, Catalan, Danish, Persian, Filipino, Hebrew,
+  Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and Tamil
+  -- Added new emotions: calm and fluent
 
 ### Deprecated
 
@@ -226,7 +235,7 @@ Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian, Swedish, and 
   `credentials` or `credentials_path` instead for Google Cloud authentication.
 
 - `english_normalization` input parameter for `MiniMaxHttpTTSService` is deprecated,
-use `test_normalization` instead.
+  use `test_normalization` instead.
 
 ### Fixed
 

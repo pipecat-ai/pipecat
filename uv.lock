@@ -4461,6 +4461,7 @@ daily = [
 ]
 deepgram = [
     { name = "deepgram-sdk" },
+    { name = "websockets" },
 ]
 elevenlabs = [
     { name = "websockets" },
@@ -4701,6 +4702,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'asyncai'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'aws'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'cartesia'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'deepgram'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'elevenlabs'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'fish'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'gladia'" },
