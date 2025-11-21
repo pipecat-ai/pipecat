@@ -278,6 +278,13 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def _receive_messages(self):
         """Main message receiving loop for WebSocket messages."""
+
+        async def trigger_disconnect_if_needed():
+            # Trigger `on_client_disconnected` if the client actually disconnects,
+            # that is, we are not the ones disconnecting.
+            if not self._client.is_closing:
+                await self._client.trigger_client_disconnected()
+
         try:
             async for message in self._client.receive():
                 if not self._params.serializer:
@@ -294,11 +301,14 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                     await self.push_frame(frame)
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
-
-        # Trigger `on_client_disconnected` if the client actually disconnects,
-        # that is, we are not the ones disconnecting.
-        if not self._client.is_closing:
-            await self._client.trigger_client_disconnected()
+        finally:
+            # Use shield to prevent cancellation from stopping the disconnect callback
+            try:
+                await asyncio.shield(trigger_disconnect_if_needed())
+            except asyncio.CancelledError:
+                # Even if we're cancelled, try to trigger the disconnect
+                await trigger_disconnect_if_needed()
+                raise
 
     async def _monitor_websocket(self):
         """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
