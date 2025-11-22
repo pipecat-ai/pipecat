@@ -152,6 +152,9 @@ class AIService(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
         elif isinstance(frame, EndFrame):
+            # Push EndFrame before stop(), because stop() may wait on tasks to
+            # finish and downstream processors need to receive the EndFrame.
+            await self.push_frame(frame, direction)
             await self.stop(frame)
 
     async def process_generator(self, generator: AsyncGenerator[Frame | None, None]):
