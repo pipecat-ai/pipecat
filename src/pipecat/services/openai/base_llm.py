@@ -13,18 +13,13 @@ from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
 from loguru import logger
-from openai import (
-    NOT_GIVEN,
-    APITimeoutError,
-    AsyncOpenAI,
-    AsyncStream,
-    DefaultAsyncHttpxClient,
-)
+from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
 from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -460,8 +455,13 @@ class BaseOpenAILLMService(LLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(context)
+            except asyncio.CancelledError:
+                raise
             except httpx.TimeoutException:
                 await self._call_event_handler("on_completion_timeout")
+            except Exception as e:
+                logger.exception(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(f"{e}"))
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
