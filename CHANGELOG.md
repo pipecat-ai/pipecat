@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `DeepgramSageMakerSTTService` which connects to a SageMaker hosted
-  Deepgram STT model.
+  Deepgram STT model. Added `07c-interruptible-deepgram-sagemaker.py`
+  foundational example.
 
 - Added `SageMakerBidiClient` to connect to SageMaker hosted BiDi compatible
   services.
