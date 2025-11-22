@@ -246,8 +246,7 @@ class UltravoxSTTService(AIService):
 
             logger.info("Model warm-up completed successfully")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
     def _generate_silent_audio(self, sample_rate=16000, duration_sec=1.0):
         """Generate silent audio as a numpy array.

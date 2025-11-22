@@ -166,6 +166,6 @@ class AIService(FrameProcessor):
         async for f in generator:
             if f:
                 if isinstance(f, ErrorFrame):
-                    await self.push_error(f)
+                    await self.push_error_frame(f)
                 else:
                     await self.push_frame(f)

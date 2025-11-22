@@ -254,8 +254,7 @@ class SarvamHttpTTSService(TTSService):
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Sarvam API error: {error_text}")
-                    await self.push_error(ErrorFrame(error=f"Sarvam API error: {error_text}"))
+                    await self.push_error(error_msg=f"Sarvam API error: {error_text}")
                     return
 
                 response_data = await response.json()
@@ -264,8 +263,7 @@ class SarvamHttpTTSService(TTSService):
 
             # Decode base64 audio data
             if "audios" not in response_data or not response_data["audios"]:
-                logger.error("No audio data received from Sarvam API")
-                await self.push_error(ErrorFrame(error="No audio data received"))
+                await self.push_error(error_msg="No audio data received")
                 return
 
             # Get the first audio (there should be only one for single text input)
@@ -560,8 +558,7 @@ class SarvamTTSService(InterruptibleTTSService):
             await self._disconnect_websocket()
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
         finally:
             # Reset state only after everything is cleaned up
             self._started = False
@@ -602,8 +599,7 @@ class SarvamTTSService(InterruptibleTTSService):
             await self._websocket.send(json.dumps(config_message))
             logger.debug("Configuration sent successfully")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             raise
 
     async def _disconnect_websocket(self):

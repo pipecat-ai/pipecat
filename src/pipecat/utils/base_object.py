@@ -187,7 +187,7 @@ class BaseObject(ABC):
             else:
                 handler(self, *args, **kwargs)
         except Exception as e:
-            logger.exception(f"Exception in event handler {event_name}: {e}")
+            logger.error(f"Exception in event handler {event_name}: {e}")
 
     def _event_task_finished(self, task: asyncio.Task):
         """Clean up completed event handler tasks.

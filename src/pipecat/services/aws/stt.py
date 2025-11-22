@@ -140,8 +140,7 @@ class AWSTranscribeSTTService(STTService):
                     return
                 logger.warning("WebSocket connection not established after connect")
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(exception=e)
                 retry_count += 1
                 if retry_count < max_retries:
                     await asyncio.sleep(1)  # Wait before retrying
@@ -289,8 +288,7 @@ class AWSTranscribeSTTService(STTService):
 
                 await self._call_event_handler("on_connected")
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(exception=e)
                 await self._disconnect()
                 raise
 
@@ -310,8 +308,7 @@ class AWSTranscribeSTTService(STTService):
                 await self._ws_client.send(json.dumps(end_stream))
             await self._ws_client.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
         finally:
             self._ws_client = None
             await self._call_event_handler("on_disconnected")
@@ -538,6 +535,5 @@ class AWSTranscribeSTTService(STTService):
                 logger.error(f"{self} WebSocket connection closed in receive loop: {e}")
                 break
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(exception=e)
                 break

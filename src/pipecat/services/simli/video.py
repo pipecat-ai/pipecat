@@ -256,7 +256,7 @@ class SimliVideoService(FrameProcessor):
                         await self._simli_client.send(audioBytes)
                 return
             except Exception as e:
-                logger.exception(f"{self} exception: {e}")
+                logger.error(f"{self} exception: {e}")
         elif isinstance(frame, TTSStoppedFrame):
             try:
                 if self._previously_interrupted and len(self._audio_buffer) > 0:
@@ -264,7 +264,7 @@ class SimliVideoService(FrameProcessor):
                     self._previously_interrupted = False
                     self._audio_buffer = bytearray()
             except Exception as e:
-                logger.exception(f"{self} exception: {e}")
+                logger.error(f"{self} exception: {e}")
             return
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()

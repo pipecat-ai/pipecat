@@ -162,7 +162,7 @@ class TaskManager(BaseTaskManager):
                 # Re-raise the exception to ensure the task is cancelled.
                 raise
             except Exception as e:
-                logger.exception(f"{name}: unexpected exception: {e}")
+                logger.error(f"{name}: unexpected exception: {e}")
 
         if not self._params:
             raise Exception("TaskManager is not setup: unable to get event loop")
@@ -197,7 +197,7 @@ class TaskManager(BaseTaskManager):
             # Here are sure the task is cancelled properly.
             pass
         except Exception as e:
-            logger.exception(f"{name}: unexpected exception while cancelling task: {e}")
+            logger.error(f"{name}: unexpected exception while cancelling task: {e}")
         except BaseException as e:
             logger.critical(f"{name}: fatal base exception while cancelling task: {e}")
             raise

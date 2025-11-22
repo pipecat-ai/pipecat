@@ -227,5 +227,5 @@ class DeepgramHttpTTSService(TTSService):
             yield TTSStoppedFrame()
 
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")
             yield ErrorFrame(f"Error getting audio: {str(e)}")

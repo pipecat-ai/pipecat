@@ -781,7 +781,7 @@ class WebsocketTTSService(TTSService, WebsocketService):
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error(error)
+        await self.push_error_frame(error)
 
 
 class InterruptibleTTSService(WebsocketTTSService):
@@ -843,7 +843,7 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error(error)
+        await self.push_error_frame(error)
 
 
 class InterruptibleWordTTSService(WebsocketWordTTSService):

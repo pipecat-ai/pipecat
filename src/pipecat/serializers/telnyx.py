@@ -225,7 +225,7 @@ class TelnyxFrameSerializer(FrameSerializer):
                         )
 
         except Exception as e:
-            logger.exception(f"Failed to hang up Telnyx call: {e}")
+            logger.error(f"Failed to hang up Telnyx call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Telnyx WebSocket data to Pipecat frames.

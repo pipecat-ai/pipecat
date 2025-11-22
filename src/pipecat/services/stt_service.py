@@ -329,4 +329,4 @@ class WebsocketSTTService(STTService, WebsocketService):
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error(error)
+        await self.push_error_frame(error)

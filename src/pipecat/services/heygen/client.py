@@ -179,7 +179,7 @@ class HeyGenClient:
                 await self._task_manager.cancel_task(self._event_task)
                 self._event_task = None
         except Exception as e:
-            logger.exception(f"Exception during cleanup: {e}")
+            logger.error(f"Exception during cleanup: {e}")
 
     async def start(self, frame: StartFrame, audio_chunk_size: int) -> None:
         """Start the client and establish all necessary connections.
