@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed an issue in `ElevenLabsRealtimeSTTService` where dynamic language updates were not working.
+
 ### Added
 
 - Added optional speaking rate control to `InworldTTSService`.
