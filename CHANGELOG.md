@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `SageMakerBidiClient` to connect to SageMaker hosted BiDi compatible
+  services.
+
 - Added support for `include_timestamps` and `enable_logging` in
   `ElevenLabsRealtimeSTTService`. When `include_timestamps` is enabled,
   timestamp data is included in the `TranscriptionFrame`'s `result`
