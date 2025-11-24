@@ -212,20 +212,25 @@ class DograhSTTService(STTService):
                     elif msg_type == "error":
                         error_msg = msg.get("message", "Unknown error")
                         logger.error(f"Dograh STT error: {error_msg}")
-                        await self.push_error(ErrorFrame(f"STT error: {error_msg}"))
+                        
+                        # Raise an exception to be handled by _receive_task_handler
+                        raise Exception(f"STT error: {error_msg}")
 
                     elif msg_type == "ready":
                         logger.debug("Dograh STT service is ready")
 
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to decode message from Dograh: {e}")
+                    raise
                 except Exception as e:
                     logger.error(f"Error processing Dograh STT message: {e}")
+                    raise
 
         except websockets.ConnectionClosed:
             logger.info("Dograh STT WebSocket connection closed")
         except Exception as e:
             logger.error(f"Error in receive loop: {e}")
+            raise
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""

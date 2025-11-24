@@ -316,8 +316,10 @@ class DograhTTSService(AudioContextWordTTSService):
                     logger.error(f"Dograh TTS error: {error_msg}")
                     await self.push_frame(TTSStoppedFrame())
                     await self.stop_all_metrics()
-                    await self.push_error(ErrorFrame(f"Dograh TTS error: {error_msg}"))
                     self._context_id = None
+
+                    # Raise an exception to be handled by _receive_task_handler
+                    raise Exception(f"Dograh TTS error: {error_msg}")
 
                 elif msg_type == "final":
                     # Message indicating end of current synthesis
@@ -327,8 +329,10 @@ class DograhTTSService(AudioContextWordTTSService):
 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to decode message from Dograh: {e}")
+                raise
             except Exception as e:
                 logger.error(f"Error processing Dograh TTS message: {e}")
+                raise
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
