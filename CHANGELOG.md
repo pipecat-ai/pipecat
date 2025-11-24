@@ -88,6 +88,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Improved `TTSService` to properly handle buffered sentences at the end of LLM
+  responses. Previously, when an LLM response ended, any complete sentences
+  remaining in the aggregator's buffer would be sent to TTS as one large
+  chunk. Now `TTSService` continues processing aggregation by repeatedly calling
+  `aggregate("")` until all buffered text has been processed, ensuring each
+  sentence is sent to TTS individually for better interruption points.
+
 - Updated `daily-python` to 0.22.0.
 
 - `BaseTextAggregator` changes:

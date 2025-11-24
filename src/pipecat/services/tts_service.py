@@ -425,16 +425,25 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            pending_aggregation = self._text_aggregator.text
+            # Drain any remaining complete aggregation units from the aggregator
+            # by repeatedly calling aggregate("") until nothing is left
+            pending_aggregation = await self._text_aggregator.aggregate("")
+            while pending_aggregation:
+                await self._push_tts_frames(
+                    AggregatedTextFrame(pending_aggregation.text, pending_aggregation.type)
+                )
+                pending_aggregation = await self._text_aggregator.aggregate("")
+
+            # After draining all complete units, get any remaining partial text
+            remaining_text = self._text_aggregator.text
+            if remaining_text.text:
+                await self._push_tts_frames(
+                    AggregatedTextFrame(remaining_text.text, remaining_text.type)
+                )
 
             # Reset aggregator state
             await self._text_aggregator.reset()
             self._processing_text = False
-
-            if pending_aggregation.text:
-                await self._push_tts_frames(
-                    AggregatedTextFrame(pending_aggregation.text, pending_aggregation.type)
-                )
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
                     await self.push_frame(frame, direction)
