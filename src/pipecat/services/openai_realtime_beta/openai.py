@@ -17,6 +17,7 @@ from loguru import logger
 
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.frames.frames import (
+    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -652,7 +653,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
-            await self.push_frame(TTSTextFrame(evt.delta))
+            await self.push_frame(TTSTextFrame(evt.delta, aggregated_by=AggregationType.SENTENCE))
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()

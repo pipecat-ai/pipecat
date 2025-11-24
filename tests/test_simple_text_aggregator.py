@@ -15,15 +15,21 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_reset_aggregations(self):
         assert await self.aggregator.aggregate("Hello ") == None
-        assert self.aggregator.text == "Hello "
+        assert self.aggregator.text.text == "Hello"
         await self.aggregator.reset()
-        assert self.aggregator.text == ""
+        assert self.aggregator.text.text == ""
 
     async def test_simple_sentence(self):
         assert await self.aggregator.aggregate("Hello ") == None
-        assert await self.aggregator.aggregate("Pipecat!") == "Hello Pipecat!"
-        assert self.aggregator.text == ""
+        aggregate = await self.aggregator.aggregate("Pipecat!")
+        assert aggregate.text == "Hello Pipecat!"
+        assert aggregate.type == "sentence"
+        assert self.aggregator.text.text == ""
 
     async def test_multiple_sentences(self):
-        assert await self.aggregator.aggregate("Hello Pipecat! How are ") == "Hello Pipecat!"
-        assert await self.aggregator.aggregate("you?") == " How are you?"
+        aggregate = await self.aggregator.aggregate("Hello Pipecat! How are ")
+        assert aggregate.text == "Hello Pipecat!"
+        # Aggregators should strip leading/trailing spaces when returning text
+        assert self.aggregator.text.text == "How are"
+        aggregate = await self.aggregator.aggregate("you?")
+        assert aggregate.text == "How are you?"

@@ -459,6 +459,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._audio_format = ""  # initialized in start()
         self._receive_task = None
 
+        self._settings = {"language": params.language_code}
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
 
@@ -477,7 +479,13 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             Changing language requires reconnecting to the WebSocket.
         """
         logger.info(f"Switching STT language to: [{language}]")
-        self._params.language_code = language.value if isinstance(language, Language) else language
+        new_language = (
+            language_to_elevenlabs_language(language)
+            if isinstance(language, Language)
+            else language
+        )
+        self._params.language_code = new_language
+        self._settings["language"] = new_language
         # Reconnect with new settings
         await self._disconnect()
         await self._connect()

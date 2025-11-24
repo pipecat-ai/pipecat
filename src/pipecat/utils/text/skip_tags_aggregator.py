@@ -14,7 +14,7 @@ as a unit regardless of internal punctuation.
 from typing import Optional, Sequence
 
 from pipecat.utils.string import StartEndTags, match_endofsentence, parse_start_end_tags
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
+from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
 
 
 class SkipTagsAggregator(BaseTextAggregator):
@@ -43,15 +43,15 @@ class SkipTagsAggregator(BaseTextAggregator):
         self._current_tag_index: int = 0
 
     @property
-    def text(self) -> str:
+    def text(self) -> Aggregation:
         """Get the currently buffered text.
 
         Returns:
             The current text buffer content that hasn't been processed yet.
         """
-        return self._text
+        return Aggregation(text=self._text.strip(), type=AggregationType.SENTENCE)
 
-    async def aggregate(self, text: str) -> Optional[str]:
+    async def aggregate(self, text: str) -> Optional[Aggregation]:
         """Aggregate text while respecting tag boundaries.
 
         This method adds the new text to the buffer, processes any complete
@@ -63,8 +63,9 @@ class SkipTagsAggregator(BaseTextAggregator):
             text: New text to add to the buffer.
 
         Returns:
-            Processed text up to a sentence boundary (when not within tags),
-            or None if more text is needed to complete a sentence or close tags.
+            An Aggregation object containing text up to a sentence boundary and
+            marked as SENTENCE type or None if more text is needed to complete a
+            sentence or close tags.
         """
         # Add new text to buffer
         self._text += text
@@ -80,7 +81,7 @@ class SkipTagsAggregator(BaseTextAggregator):
                 # Extract text up to the sentence boundary
                 result = self._text[:eos_marker]
                 self._text = self._text[eos_marker:]
-                return result
+                return Aggregation(text=result.strip(), type=AggregationType.SENTENCE)
 
         # No complete sentence found yet
         return None

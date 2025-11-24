@@ -14,7 +14,7 @@ text processing scenarios.
 from typing import Optional
 
 from pipecat.utils.string import match_endofsentence
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
+from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
 
 
 class SimpleTextAggregator(BaseTextAggregator):
@@ -33,15 +33,15 @@ class SimpleTextAggregator(BaseTextAggregator):
         self._text = ""
 
     @property
-    def text(self) -> str:
+    def text(self) -> Aggregation:
         """Get the currently aggregated text.
 
         Returns:
             The text that has been accumulated in the buffer.
         """
-        return self._text
+        return Aggregation(text=self._text.strip(), type=AggregationType.SENTENCE)
 
-    async def aggregate(self, text: str) -> Optional[str]:
+    async def aggregate(self, text: str) -> Optional[Aggregation]:
         """Aggregate text and return completed sentences.
 
         Adds the new text to the buffer and checks for end-of-sentence markers.
@@ -64,7 +64,9 @@ class SimpleTextAggregator(BaseTextAggregator):
             result = self._text[:eos_end_marker]
             self._text = self._text[eos_end_marker:]
 
-        return result
+        if result:
+            return Aggregation(text=result.strip(), type=AggregationType.SENTENCE)
+        return None
 
     async def handle_interruption(self):
         """Handle interruptions by clearing the text buffer.
