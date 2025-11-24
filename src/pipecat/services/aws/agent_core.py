@@ -178,11 +178,7 @@ class AWSAgentCoreProcessor(FrameProcessor):
         """Push a text frame, managing output response bookends."""
         # Cancel any pending close task
         if self._close_task and not self._close_task.done():
-            self._close_task.cancel()
-            try:
-                await self._close_task
-            except asyncio.CancelledError:
-                pass
+            await self.cancel_task(self._close_task)
 
         # Open output response if needed
         if not self._output_response_open:
@@ -194,7 +190,7 @@ class AWSAgentCoreProcessor(FrameProcessor):
         self._last_text_frame_time = asyncio.get_event_loop().time()
 
         # Schedule closing the output response after timeout
-        self._close_task = asyncio.create_task(self._close_output_response_after_timeout())
+        self._close_task = self.create_task(self._close_output_response_after_timeout())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle LLM message frames.
@@ -255,11 +251,7 @@ class AWSAgentCoreProcessor(FrameProcessor):
                 # Final close if output response is still open after all parts processed
                 if self._output_response_open:
                     if self._close_task and not self._close_task.done():
-                        self._close_task.cancel()
-                        try:
-                            await self._close_task
-                        except asyncio.CancelledError:
-                            pass
+                        await self.cancel_task(self._close_task)
                     self._output_response_open = False
                     await self.push_frame(LLMFullResponseEndFrame())
         else:
