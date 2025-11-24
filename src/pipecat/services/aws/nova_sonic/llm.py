@@ -452,7 +452,7 @@ class AWSNovaSonicLLMService(LLMService):
             self._ready_to_send_context = True
             await self._finish_connecting_if_context_available()
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(exception=e)
             await self._disconnect()
 
     async def _process_completed_function_calls(self, send_new_results: bool):
@@ -576,7 +576,7 @@ class AWSNovaSonicLLMService(LLMService):
 
             logger.info("Finished disconnecting")
         except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
     def _create_client(self) -> BedrockRuntimeClient:
         config = Config(
@@ -884,7 +884,7 @@ class AWSNovaSonicLLMService(LLMService):
                 # Errors are kind of expected while disconnecting, so just
                 # ignore them and do nothing
                 return
-            logger.error(f"{self} error processing responses: {e}")
+            await self.push_error(exception=e)
             if self._wants_connection:
                 await self.reset_conversation()
 

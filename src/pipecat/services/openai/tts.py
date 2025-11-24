@@ -206,5 +206,4 @@ class OpenAITTSService(TTSService):
                         yield frame
                 yield TTSStoppedFrame()
         except BadRequestError as e:
-            logger.error(f"{self} error generating TTS: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            await self.push_error(exception=e)

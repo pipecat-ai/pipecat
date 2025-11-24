@@ -285,12 +285,11 @@ class AsyncAITTSService(InterruptibleTTSService):
                 )
                 await self.push_frame(frame)
             elif msg.get("error_code"):
-                logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"{self} error: {msg['message']}")
             else:
-                logger.error(f"{self} error, unknown message type: {msg}")
+                await self.push_error(error_msg=f"{self} error, unknown message type: {msg}")
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
@@ -333,16 +332,14 @@ class AsyncAITTSService(InterruptibleTTSService):
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                await self.push_error(exception=e)
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            await self.push_error(exception=e)
 
 
 class AsyncAIHttpTTSService(TTSService):

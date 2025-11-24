@@ -230,8 +230,7 @@ class LmntTTSService(InterruptibleTTSService):
                 # await self._websocket.send(json.dumps({"eof": True}))
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Error disconnecting from LMNT: {e}", exception=e)
         finally:
             self._started = False
             self._websocket = None
@@ -300,13 +299,11 @@ class LmntTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(json.dumps({"flush": True}))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                await self.push_error(exception=e)
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            await self.push_error(exception=e)

@@ -320,8 +320,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 flush_message = {"event": "flush"}
                 await self._get_websocket().send(ormsgpack.packb(flush_message))
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                await self.push_error(exception=e)
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -329,5 +328,4 @@ class FishAudioTTSService(InterruptibleTTSService):
             yield None
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            await self.push_error(exception=e)

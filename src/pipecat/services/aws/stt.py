@@ -181,8 +181,7 @@ class AWSTranscribeSTTService(STTService):
                 try:
                     await self._connect()
                 except Exception as e:
-                    logger.error(f"{self} exception: {e}")
-                    yield ErrorFrame(error=f"{self} error: {e}")
+                    await self.push_error(exception=e)
                     return
 
             # Format the audio data according to AWS event stream format
@@ -199,13 +198,11 @@ class AWSTranscribeSTTService(STTService):
                 await self._disconnect()
                 # Don't yield error here - we'll retry on next frame
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                await self.push_error(exception=e)
                 await self._disconnect()
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            await self.push_error(exception=e)
             await self._disconnect()
 
     async def _connect(self):
@@ -526,13 +523,14 @@ class AWSTranscribeSTTService(STTService):
                                     )
                 elif headers.get(":message-type") == "exception":
                     error_msg = payload.get("Message", "Unknown error")
-                    logger.error(f"{self} Exception from AWS: {error_msg}")
-                    await self.push_frame(ErrorFrame(f"AWS Transcribe error: {error_msg}"))
+                    await self.push_error(error_msg=f"AWS Transcribe error: {error_msg}")
                 else:
                     logger.debug(f"{self} Other message type received: {headers}")
                     logger.debug(f"{self} Payload: {payload}")
             except websockets.exceptions.ConnectionClosed as e:
-                logger.error(f"{self} WebSocket connection closed in receive loop: {e}")
+                await self.push_error(
+                    error_msg=f"WebSocket connection closed in receive loop", exception=e
+                )
                 break
             except Exception as e:
                 await self.push_error(exception=e)

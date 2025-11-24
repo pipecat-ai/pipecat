@@ -311,10 +311,8 @@ class AWSPollyTTSService(TTSService):
                         yield frame
 
                 yield TTSStoppedFrame()
-        except (BotoCoreError, ClientError) as error:
-            logger.error(f"{self} error generating TTS: {error}")
-            error_message = f"AWS Polly TTS error: {str(error)}"
-            yield ErrorFrame(error=error_message)
+        except (BotoCoreError, ClientError) as e:
+            await self.push_error(exception=e)
 
         finally:
             yield TTSStoppedFrame()

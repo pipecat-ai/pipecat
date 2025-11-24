@@ -737,9 +737,7 @@ class GoogleHttpTTSService(TTSService):
             yield TTSStoppedFrame()
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            error_message = f"TTS generation error: {str(e)}"
-            yield ErrorFrame(error=error_message)
+            await self.push_error(exception=e)
 
 
 class GoogleBaseTTSService(TTSService):
@@ -996,9 +994,7 @@ class GoogleTTSService(GoogleBaseTTSService):
                 yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            error_message = f"TTS generation error: {str(e)}"
-            yield ErrorFrame(error=error_message)
+            await self.push_error(exception=e)
 
 
 class GeminiTTSService(GoogleBaseTTSService):
@@ -1248,6 +1244,4 @@ class GeminiTTSService(GoogleBaseTTSService):
                 yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            error_message = f"Gemini TTS generation error: {str(e)}"
-            yield ErrorFrame(error=error_message)
+            await self.push_error(exception=e)

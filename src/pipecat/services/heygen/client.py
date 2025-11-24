@@ -161,7 +161,7 @@ class HeyGenClient:
                 f"{self}::event_callback_task",
             )
         except Exception as e:
-            logger.error(f"Failed to setup HeyGenClient: {e}")
+            await self.push_error(error_msg=f"Failed to setup HeyGenClient: {e}", exception=e)
             await self.cleanup()
 
     async def cleanup(self) -> None:
@@ -179,7 +179,7 @@ class HeyGenClient:
                 await self._task_manager.cancel_task(self._event_task)
                 self._event_task = None
         except Exception as e:
-            logger.error(f"Exception during cleanup: {e}")
+            await self.push_error(error_msg=f"Exception during cleanup: {e}", exception=e)
 
     async def start(self, frame: StartFrame, audio_chunk_size: int) -> None:
         """Start the client and establish all necessary connections.
@@ -229,7 +229,7 @@ class HeyGenClient:
                 self._ws_receive_task_handler(), name="HeyGenClient_Websocket"
             )
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"{self} initialization error: {e}", exception=e)
             self._websocket = None
 
     async def _ws_receive_task_handler(self):
@@ -242,7 +242,9 @@ class HeyGenClient:
             except ConnectionClosedOK:
                 break
             except Exception as e:
-                logger.error(f"Error processing WebSocket message: {e}")
+                await self.push_error(
+                    error_msg=f"Error processing WebSocket message: {e}", exception=e
+                )
                 break
 
     async def _handle_ws_server_event(self, event: dict) -> None:
@@ -260,7 +262,7 @@ class HeyGenClient:
             if self._websocket:
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} disconnect error: {e}")
+            await self.push_error(error_msg=f"{self} disconnect error: {e}", exception=e)
         finally:
             self._websocket = None
 
@@ -273,7 +275,9 @@ class HeyGenClient:
             if self._websocket:
                 await self._websocket.send(json.dumps(message))
         except Exception as e:
-            logger.error(f"Error sending message to HeyGen websocket: {e}")
+            await self.push_error(
+                error_msg=f"Error sending message to HeyGen websocket: {e}", exception=e
+            )
             raise e
 
     async def interrupt(self, event_id: str) -> None:
@@ -471,9 +475,11 @@ class HeyGenClient:
                         await self._audio_frame_callback(audio_frame)
 
                 except Exception as e:
-                    logger.error(f"Error processing audio frame: {e}")
+                    await self.push_error(
+                        error_msg=f"Error processing audio frame: {e}", exception=e
+                    )
         except Exception as e:
-            logger.error(f"Error processing audio frames: {e}")
+            await self.push_error(error_msg=f"Error processing audio frames: {e}", exception=e)
         finally:
             logger.debug(f"Audio frame processing ended.")
 
@@ -500,9 +506,11 @@ class HeyGenClient:
                     if self._transport_ready and self._video_frame_callback:
                         await self._video_frame_callback(image_frame)
                 except Exception as e:
-                    logger.error(f"Error processing individual video frame: {e}")
+                    await self.push_error(
+                        error_msg=f"Error processing individual video frame: {e}", exception=e
+                    )
         except Exception as e:
-            logger.error(f"Error processing video frames: {e}")
+            await self.push_error(error_msg=f"Error processing video frames: {e}", exception=e)
         finally:
             logger.debug(f"Video frame processing ended.")
 
@@ -595,7 +603,7 @@ class HeyGenClient:
                     )
 
         except Exception as e:
-            logger.error(f"LiveKit initialization error: {e}")
+            await self.push_error(error_msg=f"LiveKit initialization error: {e}", exception=e)
             self._livekit_room = None
 
     async def _livekit_disconnect(self):
@@ -616,7 +624,7 @@ class HeyGenClient:
                 self._livekit_room = None
                 logger.debug("Successfully disconnected from LiveKit room")
         except Exception as e:
-            logger.error(f"LiveKit disconnect error: {e}")
+            await self.push_error(error_msg=f"LiveKit disconnect error: {e}", exception=e)
 
     #
     # Queue callback handling

@@ -284,8 +284,7 @@ class SarvamHttpTTSService(TTSService):
             yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
@@ -582,8 +581,9 @@ class SarvamTTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(
+                error_msg=f"Error connecting to Sarvam TTS Websocket: {e}", exception=e
+            )
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -611,8 +611,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from Sarvam")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._started = False
             self._websocket = None
@@ -636,7 +635,7 @@ class SarvamTTSService(InterruptibleTTSService):
                     await self.push_frame(frame)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
-                    logger.error(f"TTS Error: {error_msg}")
+                    await self.push_error(error_msg=f"TTS Error: {error_msg}")
 
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
@@ -698,13 +697,11 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                await self.push_error(error_msg=f"Error sending text: {e}", exception=e)
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)

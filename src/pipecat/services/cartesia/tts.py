@@ -467,7 +467,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self.push_error(error_msg=f"{self} error: {msg}")
                 self._context_id = None
             else:
-                logger.error(f"{self} error, unknown message type: {msg}")
+                await self.push_error(error_msg=f"{self} error, unknown message type: {msg}")
 
     async def _receive_messages(self):
         while True:
@@ -505,16 +505,14 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                await self.push_error(exception=e)
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            await self.push_error(exception=e)
 
 
 class CartesiaHttpTTSService(TTSService):

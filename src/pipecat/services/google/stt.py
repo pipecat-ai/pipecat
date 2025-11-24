@@ -805,8 +805,7 @@ class GoogleSTTService(STTService):
                         break
 
                 except Exception as e:
-                    logger.error(f"{self} exception: {e}")
-                    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                    await self.push_error(exception=e)
 
                     await asyncio.sleep(1)  # Brief delay before reconnecting
                     self._stream_start_time = int(time.time() * 1000)
@@ -900,8 +899,7 @@ class GoogleSTTService(STTService):
             )
             raise
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
             # Re-raise the exception to let it propagate (e.g. in the case of a
             # timeout, propagate to _stream_audio to reconnect)
             raise

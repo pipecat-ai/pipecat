@@ -194,7 +194,7 @@ class SonioxSTTService(STTService):
         self._websocket = await websocket_connect(self._url)
 
         if not self._websocket:
-            logger.error(f"Unable to connect to Soniox API at {self._url}")
+            await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
 
         # If vad_force_turn_endpoint is not enabled, we need to enable endpoint detection.
         # Either one or the other is required.
@@ -419,5 +419,4 @@ class SonioxSTTService(STTService):
             # Expected when closing the connection.
             pass
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Error receiving message: {e}", exception=e)

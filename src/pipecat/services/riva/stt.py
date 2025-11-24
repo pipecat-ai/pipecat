@@ -655,12 +655,12 @@ class RivaSegmentedSTTService(SegmentedSTTService):
                     logger.debug("No transcription results found in Riva response")
 
             except AttributeError as ae:
-                logger.error(f"Unexpected response structure from Riva: {ae}")
-                yield ErrorFrame(f"Unexpected Riva response format: {str(ae)}")
+                await self.push_error(
+                    error_msg=f"Unexpected response structure from Riva: {ae}", exception=ae
+                )
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            await self.push_error(error_msg=f"Error generating STT: {e}", exception=e)
 
 
 class ParakeetSTTService(RivaSTTService):

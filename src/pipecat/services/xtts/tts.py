@@ -181,8 +181,9 @@ class XTTSService(TTSService):
         async with self._aiohttp_session.post(url, json=payload) as r:
             if r.status != 200:
                 text = await r.text()
-                logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
-                yield ErrorFrame(error=f"Error getting audio (status: {r.status}, error: {text})")
+                await self.push_error(
+                    error_msg=f"Error getting audio (status: {r.status}, error: {text})"
+                )
                 return
 
             await self.start_tts_usage_metrics(text)
