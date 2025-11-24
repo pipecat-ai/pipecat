@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for `include_timestamps` and `enable_logging` in
+  `ElevenLabsRealtimeSTTService`. When `include_timestamps` is enabled,
+  timestamp data is included in the `TranscriptionFrame`'s `result`
+  parameter.
+
 - Added optional speaking rate control to `InworldTTSService`.
 
 - Introduced a new `AggregatedTextFrame` type to support passing text along with
@@ -144,11 +149,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       for how a match should be handled.
 
       - `REMOVE`: The text along with its delimiters will be removed from the
-        streaming text.  Sentence aggregation will continue on as if this text
+        streaming text. Sentence aggregation will continue on as if this text
         did not exist.
 
       - `KEEP`: The delimiters will be removed, but the content between them
-        will be kept.  Sentence aggregation will continue on with the internal
+        will be kept. Sentence aggregation will continue on with the internal
         text included.
 
       - `AGGREGATE`: The delimiters will be removed and the content between will
@@ -163,15 +168,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       handlers.
 
   - ⚠️ Breaking change: The `PatternMatch` type returned to handlers registered
-     via `on_pattern_match` has been updated to subclass from the new
-     `Aggregation` type, which means that `content` has been replaced with
-     `text` and `pattern_id` has been replaced with `type`:
+    via `on_pattern_match` has been updated to subclass from the new
+    `Aggregation` type, which means that `content` has been replaced with
+    `text` and `pattern_id` has been replaced with `type`:
 
-     ```python
-     async dev on_match_tag(match: PatternMatch):
-        pattern = match.type # instead of match.pattern_id
-        text = match.text # instead of match.content
-     ```
+    ```python
+    async dev on_match_tag(match: PatternMatch):
+       pattern = match.type # instead of match.pattern_id
+       text = match.text # instead of match.content
+    ```
 
 - `TextFrame` now includes the field `append_to_context` to support setting
   whether or not the encompassing text should be added to the LLM context (by
@@ -235,6 +240,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue in `ElevenLabsRealtimeSTTService` where dynamic language
   updates were not working.
+
+- Fixed an issue in `ElevenLabsRealtimeSTTService` where setting the sample
+  rate would result in transcripts failing.
 
 - Fixed `InworldTTSService` audio config payload to use camelCase keys expected
   by the Inworld API.
