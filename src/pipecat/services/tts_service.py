@@ -12,6 +12,8 @@ from typing import (
     Any,
     AsyncGenerator,
     AsyncIterator,
+    Awaitable,
+    Callable,
     Dict,
     List,
     Mapping,
@@ -23,6 +25,8 @@ from typing import (
 from loguru import logger
 
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -101,6 +105,16 @@ class TTSService(AIService):
         sample_rate: Optional[int] = None,
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
         text_aggregator: Optional[BaseTextAggregator] = None,
+        # Types of text aggregations that should not be spoken.
+        skip_aggregator_types: Optional[List[str]] = [],
+        # A list of callables to transform text before just before sending it to TTS.
+        # Each callable takes the aggregated text and its type, and returns the transformed text.
+        # To register, provide a list of tuples of (aggregation_type | '*', transform_function).
+        text_transforms: Optional[
+            List[
+                Tuple[AggregationType | str, Callable[[str, str | AggregationType], Awaitable[str]]]
+            ]
+        ] = None,
         # Text filter executed after text has been aggregated.
         text_filters: Optional[Sequence[BaseTextFilter]] = None,
         text_filter: Optional[BaseTextFilter] = None,
@@ -120,6 +134,16 @@ class TTSService(AIService):
             pause_frame_processing: Whether to pause frame processing during audio generation.
             sample_rate: Output sample rate for generated audio.
             text_aggregator: Custom text aggregator for processing incoming text.
+
+                .. deprecated:: 0.0.95
+                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
+
+            skip_aggregator_types: List of aggregation types that should not be spoken.
+            text_transforms: A list of callables to transform text before just before sending it
+                to TTS. Each callable takes the aggregated text and its type, and returns the
+                transformed text. To register, provide a list of tuples of
+                (aggregation_type | '*', transform_function).
+
             text_filters: Sequence of text filters to apply after aggregation.
             text_filter: Single text filter (deprecated, use text_filters).
 
@@ -142,7 +166,21 @@ class TTSService(AIService):
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
-        self._aggregated_text_includes_inter_frame_spaces: bool = False
+        if text_aggregator:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'text_aggregator' is deprecated. Use an LLMTextProcessor before the TTSService for custom text aggregation.",
+                    DeprecationWarning,
+                )
+
+        self._skip_aggregator_types: List[str] = skip_aggregator_types or []
+        self._text_transforms: List[
+            Tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
+        ] = text_transforms or []
+        # TODO: Deprecate _text_filters when added to LLMTextProcessor
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
         self._tracing_enabled: bool = False
@@ -282,6 +320,39 @@ class TTSService(AIService):
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
 
+    def add_text_transformer(
+        self,
+        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        aggregation_type: AggregationType | str = "*",
+    ):
+        """Transform text for a specific aggregation type.
+
+        Args:
+            transform_function: The function to apply for transformation. This function should take
+                the text and aggregation type as input and return the transformed text.
+                Ex.: async def my_transform(text: str, aggregation_type: str) -> str:
+            aggregation_type: The type of aggregation to transform. This value defaults to "*" indicating
+                the function should handle all text before sending to TTS.
+        """
+        self._text_transforms.append((aggregation_type, transform_function))
+
+    def remove_text_transformer(
+        self,
+        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        aggregation_type: AggregationType | str = "*",
+    ):
+        """Remove a text transformer for a specific aggregation type.
+
+        Args:
+            transform_function: The function to remove.
+            aggregation_type: The type of aggregation to remove the transformer for.
+        """
+        self._text_transforms = [
+            (agg_type, func)
+            for agg_type, func in self._text_transforms
+            if not (agg_type == aggregation_type and func == transform_function)
+        ]
+
     async def _update_settings(self, settings: Mapping[str, Any]):
         for key, value in settings.items():
             if key in self._settings:
@@ -337,6 +408,8 @@ class TTSService(AIService):
             and frame.skip_tts
         ):
             await self.push_frame(frame, direction)
+        elif isinstance(frame, AggregatedTextFrame):
+            await self._push_tts_frames(frame)
         elif (
             isinstance(frame, TextFrame)
             and not isinstance(frame, InterimTranscriptionFrame)
@@ -352,17 +425,16 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            sentence = self._text_aggregator.text
-            includes_inter_frame_spaces = self._aggregated_text_includes_inter_frame_spaces
+            pending_aggregation = self._text_aggregator.text
 
             # Reset aggregator state
             await self._text_aggregator.reset()
             self._processing_text = False
-            self._aggregated_text_includes_inter_frame_spaces = False
 
-            await self._push_tts_frames(
-                sentence, includes_inter_frame_spaces=includes_inter_frame_spaces
-            )
+            if pending_aggregation.text:
+                await self._push_tts_frames(
+                    AggregatedTextFrame(pending_aggregation.text, pending_aggregation.type)
+                )
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
                     await self.push_frame(frame, direction)
@@ -372,7 +444,7 @@ class TTSService(AIService):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
-            await self._push_tts_frames(frame.text, includes_inter_frame_spaces=False)
+            await self._push_tts_frames(AggregatedTextFrame(frame.text, AggregationType.SENTENCE))
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
@@ -462,21 +534,35 @@ class TTSService(AIService):
 
     async def _process_text_frame(self, frame: TextFrame):
         text: Optional[str] = None
+        includes_inter_frame_spaces: bool = False
         if not self._aggregate_sentences:
             text = frame.text
+            includes_inter_frame_spaces = frame.includes_inter_frame_spaces
+            aggregated_by = "token"
         else:
-            text = await self._text_aggregator.aggregate(frame.text)
-            # Assumption: whether inter-frame spaces are included shouldn't
-            # change during aggregation, so we can just use the latest frame's
-            # value
-            self._aggregated_text_includes_inter_frame_spaces = frame.includes_inter_frame_spaces
+            aggregate = await self._text_aggregator.aggregate(frame.text)
+            if aggregate:
+                text = aggregate.text
+                aggregated_by = aggregate.type
 
         if text:
+            logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
             await self._push_tts_frames(
-                text, includes_inter_frame_spaces=frame.includes_inter_frame_spaces
+                AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
             )
 
-    async def _push_tts_frames(self, text: str, includes_inter_frame_spaces: bool):
+    async def _push_tts_frames(
+        self, src_frame: AggregatedTextFrame, includes_inter_frame_spaces: Optional[bool] = False
+    ):
+        type = src_frame.aggregated_by
+        text = src_frame.text
+
+        # Skip sending to TTS if the aggregation type is in the skip list. Simply
+        # push the original frame downstream.
+        if type in self._skip_aggregator_types:
+            await self.push_frame(src_frame)
+            return
+
         # Remove leading newlines only
         text = text.lstrip("\n")
 
@@ -492,20 +578,44 @@ class TTSService(AIService):
 
         await self.start_processing_metrics()
 
-        # Process all filter.
+        # Process all filters.
         for filter in self._text_filters:
             await filter.reset_interruption()
             text = await filter.filter(text)
 
-        if text:
-            await self.process_generator(self.run_tts(text))
+        if not text.strip():
+            await self.stop_processing_metrics()
+            return
+
+        # To support use cases that may want to know the text before it's spoken, we
+        # push the AggregatedTextFrame version before transforming and sending to TTS.
+        # However, we do not want to add this text to the assistant context until it
+        # is spoken, so we set append_to_context to False.
+        src_frame.append_to_context = False
+        await self.push_frame(src_frame)
+
+        # Note: Text transformations are meant to only affect the text sent to the TTS for
+        # TTS-specific purposes. This allows for explicit TTS modifications (e.g., inserting
+        # TTS supported tags for spelling or emotion or replacing an @ with "at"). For TTS
+        # services that support word-level timestamps, this CAN affect the resulting context
+        # since the TTSTextFrames are generated from the TTS output stream
+        transformed_text = text
+        for aggregation_type, transform in self._text_transforms:
+            if aggregation_type == type or aggregation_type == "*":
+                transformed_text = await transform(transformed_text, type)
+        await self.process_generator(self.run_tts(transformed_text))
 
         await self.stop_processing_metrics()
 
         if self._push_text_frames:
-            # We send the original text after the audio. This way, if we are
-            # interrupted, the text is not added to the assistant context.
-            frame = TTSTextFrame(text)
+            # In TTS services that support word timestamps, the TTSTextFrames
+            # are pushed as words are spoken. However, in the case where the TTS service
+            # does not support word timestamps (i.e. _push_text_frames is True), we send
+            # the original (non-transformed) text after the TTS generation has completed.
+            # This way, if we are interrupted, the text is not added to the assistant
+            # context and the context that IS added does not include TTS-specific tags
+            # or transformations.
+            frame = TTSTextFrame(text, aggregated_by=type)
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
             await self.push_frame(frame)
 
@@ -635,7 +745,7 @@ class WordTTSService(TTSService):
             else:
                 # Assumption: word-by-word text frames don't include spaces, so
                 # we can rely on the default includes_inter_frame_spaces=False
-                frame = TTSTextFrame(word)
+                frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
                 frame.pts = self._initial_word_timestamp + timestamp
             if frame:
                 last_pts = frame.pts

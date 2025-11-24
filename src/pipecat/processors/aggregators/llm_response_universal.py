@@ -811,7 +811,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started:
+        if not self._started or not frame.append_to_context:
             return
 
         # Make sure we really have text (spaces count, too!)
