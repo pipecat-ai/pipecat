@@ -166,16 +166,20 @@ class LLMService(AIService):
     # However, subclasses should override this with a more specific adapter when necessary.
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
-    def __init__(self, run_in_parallel: bool = True, **kwargs):
+    def __init__(self, run_in_parallel: bool = True, wait_for_all: bool = False, **kwargs):
         """Initialize the LLM service.
 
         Args:
             run_in_parallel: Whether to run function calls in parallel or sequentially.
                 Defaults to True.
+            wait_for_all: Whether to wait for all function calls (parallel or
+                sequential) to complete. Defaults to False.
             **kwargs: Additional arguments passed to the parent AIService.
+
         """
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
+        self._wait_for_all = wait_for_all
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
@@ -435,6 +439,7 @@ class LLMService(AIService):
 
         await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=function_calls)
 
+        runner_items = []
         for function_call in function_calls:
             if function_call.function_name in self._functions.keys():
                 item = self._functions[function_call.function_name]
@@ -446,28 +451,20 @@ class LLMService(AIService):
                 )
                 continue
 
-            runner_item = FunctionCallRunnerItem(
-                registry_item=item,
-                function_name=function_call.function_name,
-                tool_call_id=function_call.tool_call_id,
-                arguments=function_call.arguments,
-                context=function_call.context,
+            runner_items.append(
+                FunctionCallRunnerItem(
+                    registry_item=item,
+                    function_name=function_call.function_name,
+                    tool_call_id=function_call.tool_call_id,
+                    arguments=function_call.arguments,
+                    context=function_call.context,
+                )
             )
 
-            if self._run_in_parallel:
-                task = self.create_task(self._run_function_call(runner_item))
-                self._function_call_tasks[task] = runner_item
-                task.add_done_callback(self._function_call_task_finished)
-            else:
-                await self._sequential_runner_queue.put(runner_item)
-
-    async def _call_start_function(
-        self, context: OpenAILLMContext | LLMContext, function_name: str
-    ):
-        if function_name in self._start_callbacks.keys():
-            await self._start_callbacks[function_name](function_name, self, context)
-        elif None in self._start_callbacks.keys():
-            return await self._start_callbacks[None](function_name, self, context)
+        if self._run_in_parallel:
+            await self._run_parallel_function_calls(runner_items)
+        else:
+            await self._run_sequential_function_calls(runner_items)
 
     async def request_image_frame(
         self,
@@ -539,6 +536,35 @@ class LLMService(AIService):
             # task.add_done_callback(self._function_call_task_finished).
             await task
             del self._function_call_tasks[task]
+
+    async def _run_parallel_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
+        tasks = []
+        for runner_item in runner_items:
+            task = self.create_task(self._run_function_call(runner_item))
+            tasks.append(task)
+            self._function_call_tasks[task] = runner_item
+            task.add_done_callback(self._function_call_task_finished)
+
+        if self._wait_for_all:
+            await asyncio.gather(*tasks)
+
+    async def _run_sequential_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
+        if self._wait_for_all:
+            # Run each function call sequentially, waiting for each to complete.
+            for runner_item in runner_items:
+                await self._run_function_call(runner_item)
+        else:
+            # Enqueue all function calls for background execution.
+            for runner_item in runner_items:
+                await self._sequential_runner_queue.put(runner_item)
+
+    async def _call_start_function(
+        self, context: OpenAILLMContext | LLMContext, function_name: str
+    ):
+        if function_name in self._start_callbacks.keys():
+            await self._start_callbacks[function_name](function_name, self, context)
+        elif None in self._start_callbacks.keys():
+            return await self._start_callbacks[None](function_name, self, context)
 
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
         if runner_item.function_name in self._functions.keys():

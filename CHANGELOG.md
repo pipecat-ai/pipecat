@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `wait_for_all` argument to the base `LLMService`. When enabled, this
+  ensures all function calls complete before returning results to the LLM (i.e.,
+  before running a new inference with those results).
+
 - Added optional speaking rate control to `InworldTTSService`.
 
 - Introduced a new `AggregatedTextFrame` type to support passing text along with
