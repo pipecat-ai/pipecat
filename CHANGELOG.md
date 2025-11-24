@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DeepgramSageMakerSTTService` which connects to a SageMaker hosted
+  Deepgram STT model. Added `07c-interruptible-deepgram-sagemaker.py`
+  foundational example.
+
+- Added `SageMakerBidiClient` to connect to SageMaker hosted BiDi compatible
+  services.
+
 - Added support for `include_timestamps` and `enable_logging` in
   `ElevenLabsRealtimeSTTService`. When `include_timestamps` is enabled,
   timestamp data is included in the `TranscriptionFrame`'s `result`

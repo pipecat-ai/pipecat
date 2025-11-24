@@ -10,6 +10,7 @@ from pipecat.services import DeprecatedModuleProxy
 
 from .llm import *
 from .nova_sonic import *
+from .sagemaker import *
 from .stt import *
 from .tts import *
 
