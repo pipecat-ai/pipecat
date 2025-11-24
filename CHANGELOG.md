@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `LiveKitRESTHelper` utility class for managing LiveKit rooms via REST API.
+
 - Added optional speaking rate control to `InworldTTSService`.
 
 ### Changed
