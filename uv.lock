@@ -4619,7 +4619,7 @@ ultravox = [
     { name = "transformers" },
     { name = "vllm" },
 ]
-vonage = [
+vonage-audio-connector = [
     { name = "opentok" },
     { name = "websockets" },
 ]
@@ -4715,7 +4715,7 @@ requires-dist = [
     { name = "opentelemetry-api", marker = "extra == 'tracing'", specifier = ">=1.33.0" },
     { name = "opentelemetry-instrumentation", marker = "extra == 'tracing'", specifier = ">=0.54b0" },
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.33.0" },
-    { name = "opentok", marker = "extra == 'vonage'", specifier = ">=3.0.0" },
+    { name = "opentok", marker = "extra == 'vonage-audio-connector'", specifier = ">=3.0.0" },
     { name = "ormsgpack", marker = "extra == 'fish'", specifier = "~=1.7.0" },
     { name = "pillow", specifier = ">=11.1.0,<12" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'assemblyai'" },
@@ -4734,7 +4734,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'rime'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'sarvam'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'soniox'" },
-    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'vonage'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'vonage-audio-connector'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'websocket'" },
     { name = "pipecat-ai-krisp", marker = "extra == 'krisp'", specifier = "~=0.4.0" },
     { name = "pipecat-ai-small-webrtc-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.0" },
@@ -4767,7 +4767,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sarvam", "sentry", "local-smart-turn", "local-smart-turn-v3", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage", "webrtc", "websocket", "websockets-base", "whisper"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sarvam", "sentry", "local-smart-turn", "local-smart-turn-v3", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "vonage-audio-connector", "webrtc", "websocket", "websockets-base", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
