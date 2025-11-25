@@ -1960,7 +1960,7 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         error = await self._client.send_message(frame)
         if error:
-            logger.error(f"Unable to send message: {error}")
+            logger.error(f"Unable to send message: {error}", extra={"frame": frame})
 
     async def register_video_destination(self, destination: str):
         """Register a video output destination.
