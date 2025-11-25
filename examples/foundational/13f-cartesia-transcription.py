@@ -16,7 +16,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.stt import CartesiaSTTService
+from pipecat.services.cartesia.stt import CartesiaLiveOptions, CartesiaSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -30,6 +30,15 @@ class TranscriptionLogger(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             print(f"Transcription: {frame.text}")
+            # Access word-level timestamps if available
+            if frame.result and "words" in frame.result:
+                words = frame.result["words"]
+                print(f"  Word-level timestamps ({len(words)} words):")
+                for word_data in words:
+                    word = word_data.get("word", "")
+                    start = word_data.get("start", 0)
+                    end = word_data.get("end", 0)
+                    print(f"    '{word}' [{start:.3f}s - {end:.3f}s]")
 
         # Push all frames through
         await self.push_frame(frame, direction)
@@ -48,7 +57,16 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
+    # Configure Cartesia STT with word-level timestamps enabled (default is True)
+    live_options = CartesiaLiveOptions(
+        model="ink-whisper",
+        include_timestamps=True,  # Enable word-level timestamps
+    )
+
+    stt = CartesiaSTTService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        live_options=live_options,
+    )
 
     tl = TranscriptionLogger()
 

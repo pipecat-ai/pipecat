@@ -57,6 +57,7 @@ class CartesiaLiveOptions:
         language: str = Language.EN.value,
         encoding: str = "pcm_s16le",
         sample_rate: int = 16000,
+        include_timestamps: bool = True,
         **kwargs,
     ):
         """Initialize CartesiaLiveOptions with default or provided parameters.
@@ -66,12 +67,15 @@ class CartesiaLiveOptions:
             language: Target language for transcription. Defaults to English.
             encoding: Audio encoding format. Defaults to "pcm_s16le".
             sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            include_timestamps: Whether to include word-level timestamps in transcripts.
+                Defaults to True.
             **kwargs: Additional parameters for the transcription service.
         """
         self.model = model
         self.language = language
         self.encoding = encoding
         self.sample_rate = sample_rate
+        self.include_timestamps = include_timestamps
         self.additional_params = kwargs
 
     def to_dict(self):
@@ -85,6 +89,7 @@ class CartesiaLiveOptions:
             "language": self.language if isinstance(self.language, str) else self.language.value,
             "encoding": self.encoding,
             "sample_rate": str(self.sample_rate),
+            "include_timestamps": "true" if self.include_timestamps else "false",
         }
 
         return params
@@ -176,6 +181,7 @@ class CartesiaSTTService(WebsocketSTTService):
         self.set_model_name(merged_options.model)
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
+        self._include_timestamps = merged_options.include_timestamps
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
@@ -330,6 +336,20 @@ class CartesiaSTTService(WebsocketSTTService):
         pass
 
     async def _on_transcript(self, data):
+        """Handle transcript message from Cartesia API.
+
+        When include_timestamps is enabled, the result data includes:
+        - text: The transcribed text
+        - is_final: Whether this is a final or interim transcript
+        - language: Detected language (if available)
+        - words: Array of word objects with timing information (if timestamps enabled):
+            - word: The word text
+            - start: Start time in seconds
+            - end: End time in seconds
+
+        Args:
+            data: Transcript data from Cartesia API.
+        """
         if "text" not in data:
             return
 
@@ -343,26 +363,47 @@ class CartesiaSTTService(WebsocketSTTService):
             except (ValueError, KeyError):
                 pass
 
+        # Extract word-level timestamps if available and enabled
+        result = None
+        has_timestamps = False
+        if self._include_timestamps and "words" in data:
+            # Store the entire response data including word-level timestamps
+            result = data
+            has_timestamps = True
+
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
+                # Log with timestamp indicator
+                if has_timestamps:
+                    logger.debug(f"Committed transcript with word timestamps: [{transcript}]")
+                else:
+                    logger.debug(f"Committed transcript: [{transcript}]")
+
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,
                         self._user_id,
                         time_now_iso8601(),
                         language,
+                        result,
                     )
                 )
                 await self._handle_transcription(transcript, is_final, language)
                 await self.stop_processing_metrics()
             else:
                 # For interim transcriptions, just push the frame without tracing
+                if has_timestamps:
+                    logger.trace(f"Partial transcript with word timestamps: [{transcript}]")
+                else:
+                    logger.trace(f"Partial transcript: [{transcript}]")
+
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript,
                         self._user_id,
                         time_now_iso8601(),
                         language,
+                        result,
                     )
                 )
