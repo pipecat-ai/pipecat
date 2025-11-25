@@ -180,18 +180,19 @@ class NvidiaTTSService(TTSService):
                 yield frame
                 resp = await asyncio.wait_for(queue.get(), timeout=RIVA_TTS_TIMEOUT_SECS)
         except asyncio.TimeoutError:
-            yield ErrorFrame(error=f"Unknown error occurred: {e}")
+            logger.error(f"{self} timeout waiting for audio response")
+            yield ErrorFrame(error=f"{self} error: {e}")
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()
 
 
-class FastPitchTTSService(NvidiaTTSService):
+class RivaTTSService(NvidiaTTSService):
     """Deprecated FastPitch TTS service.
 
-    .. deprecated:: 0.0.66
+    .. deprecated:: 0.0.96
         This class is deprecated. Use NvidiaTTSService instead for new implementations.
-        Provides backward compatibility for existing FastPitch TTS integrations.
+        Provides backward compatibility for existing Riva TTS integrations.
     """
 
     def __init__(
@@ -208,7 +209,7 @@ class FastPitchTTSService(NvidiaTTSService):
         params: Optional[NvidiaTTSService.InputParams] = None,
         **kwargs,
     ):
-        """Initialize the deprecated FastPitch TTS service.
+        """Initialize the deprecated Riva TTS service.
 
         Args:
             api_key: NVIDIA API key for authentication.
@@ -233,6 +234,6 @@ class FastPitchTTSService(NvidiaTTSService):
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
-                "`FastPitchTTSService` is deprecated, use `NvidiaTTSService` instead.",
+                "`RivaTTSService` is deprecated, use `NvidiaTTSService` instead.",
                 DeprecationWarning,
             )
