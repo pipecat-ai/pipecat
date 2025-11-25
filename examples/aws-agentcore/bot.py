@@ -29,7 +29,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
 app = BedrockAgentCoreApp()
 
@@ -81,6 +81,19 @@ transport_params = {
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
+
+    daily_transport: DailyTransport = transport
+    daily_transport._client._client.set_ice_config(
+        {
+            "iceServers": [
+                {
+                    "urls": ["turn:turn.cloudflare.com:3478?transport=tcp"],
+                    "username": "YOUR_TURN_USERNAME",
+                    "credential": "YOUR_TURN_CREDENTIAL",
+                },
+            ]
+        }
+    )
 
     public_ip = await get_public_ip()
     if public_ip:
