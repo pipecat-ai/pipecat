@@ -280,3 +280,55 @@ def concatenate_aggregated_text(text_parts: List[TextPartForConcatenation]) -> s
     result = result.strip()
 
     return result
+
+
+def split_text_by_spaces(text: str) -> List[str]:
+    """Split text into individual words while preserving spacing.
+
+    Splits on spaces, preserving leading spaces on the first word and trailing
+    spaces on all words except the last. Words can be concatenated to reconstruct
+    the original text.
+
+    Args:
+        text: The text to split into words.
+
+    Returns:
+        A list of words with trailing spaces preserved (except the last word).
+        Leading spaces are preserved on the first word.
+
+    Example::
+
+        >>> split_text_by_spaces("Hello world!")
+        ["Hello ", "world!"]
+        >>> split_text_by_spaces(" Hello world!")
+        [" Hello ", "world!"]
+        >>> split_text_by_spaces("Hi ")
+        ["Hi "]
+        >>> split_text_by_spaces("End")
+        ["End"]
+    """
+    if not text:
+        return []
+
+    # Check if text starts with a space
+    has_leading_space = text.startswith(" ")
+
+    words = text.split(" ")
+    result = []
+
+    for i, word in enumerate(words):
+        if not word:  # Skip empty strings from consecutive/leading/trailing spaces
+            continue
+
+        # Add leading space to first non-empty word if original text had it
+        if has_leading_space and len(result) == 0:
+            word = " " + word
+
+        if i < len(words) - 1:
+            # If not the last word, then add the space back
+            result.append(word + " ")
+        else:
+            # If the last word, then preserve original spacing
+            result.append(word)
+
+    return result

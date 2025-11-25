@@ -6,7 +6,7 @@
 
 import unittest
 
-from pipecat.utils.string import match_endofsentence, parse_start_end_tags
+from pipecat.utils.string import match_endofsentence, parse_start_end_tags, split_text_by_spaces
 
 
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
@@ -232,3 +232,45 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             ("<a>", "</a>"),
             41,
         )
+
+    async def test_split_text_by_spaces(self):
+        """Test splitting text into words while preserving spacing."""
+        # Basic sentence
+        assert split_text_by_spaces("Hello world!") == ["Hello ", "world!"]
+
+        # Text with trailing space
+        assert split_text_by_spaces("Hello ") == ["Hello "]
+
+        # Single word
+        assert split_text_by_spaces("End") == ["End"]
+
+        # Multiple sentences (Gemini-like output)
+        assert split_text_by_spaces("Greetings! I am here.") == [
+            "Greetings! ",
+            "I ",
+            "am ",
+            "here.",
+        ]
+
+        # Leading space (subsequent chunks from Gemini) - CRITICAL TEST
+        assert split_text_by_spaces(" I am a model") == [" I ", "am ", "a ", "model"]
+
+        # Leading space with single word
+        assert split_text_by_spaces(" Hello") == [" Hello"]
+
+        # Empty string
+        assert split_text_by_spaces("") == []
+
+        # Multiple spaces (should skip empty strings but preserve first space)
+        assert split_text_by_spaces("Hello  world") == ["Hello ", "world"]
+
+        # Concatenation test - words should concatenate back to original (with normalized spaces)
+        words = split_text_by_spaces("Hello world! How are you?")
+        concatenated = "".join(words)
+        assert concatenated == "Hello world! How are you?"
+
+        # Concatenation test with leading space (Gemini pattern)
+        words1 = split_text_by_spaces("A")
+        words2 = split_text_by_spaces(" horse walks")
+        concatenated = "".join(words1 + words2)
+        assert concatenated == "A horse walks"

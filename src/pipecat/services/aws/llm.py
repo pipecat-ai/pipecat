@@ -57,6 +57,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.string import split_text_by_spaces
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -1078,7 +1079,10 @@ class AWSBedrockLLMService(LLMService):
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]
                         if "text" in delta:
-                            await self.push_frame(LLMTextFrame(delta["text"]))
+                            # Split text into individual words to normalize LLM output
+                            words = split_text_by_spaces(delta["text"])
+                            for word in words:
+                                await self.push_frame(LLMTextFrame(word))
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use

@@ -55,6 +55,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.utils.string import split_text_by_spaces
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -920,7 +921,10 @@ class GoogleLLMService(LLMService):
                         for part in candidate.content.parts:
                             if not part.thought and part.text:
                                 search_result += part.text
-                                await self.push_frame(LLMTextFrame(part.text))
+                                # Split text into individual words to normalize LLM output
+                                words = split_text_by_spaces(part.text)
+                                for word in words:
+                                    await self.push_frame(LLMTextFrame(word))
                             elif part.function_call:
                                 function_call = part.function_call
                                 id = function_call.id or str(uuid.uuid4())

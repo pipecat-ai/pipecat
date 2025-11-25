@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `split_text_by_spaces()` utility function to normalize LLM text output
+  into word-by-word tokens while preserving spacing. This ensures consistent
+  text aggregation behavior across different LLM services.
+
 - Added `LiveKitRESTHelper` utility class for managing LiveKit rooms via REST API.
 
 - Added `DeepgramSageMakerSTTService` which connects to a SageMaker hosted
@@ -89,6 +93,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added new emotions: calm and fluent
 
 ### Changed
+
+- Normalized LLM text output in `GoogleLLMService`, `AnthropicLLMService`, and
+  `AWSBedrockLLMService` to emit word-by-word `LLMTextFrame`s. This ensures the
+  TTS's `text_aggregator` and `LLMTextProcessor` can properly detect sentence
+  boundaries even when LLMs return multiple sentences in a single chunk,
+  improving interruptions for services like Google Gemini that output large
+  text chunks.
 
 - Updated `daily-python` to 0.22.0.
 

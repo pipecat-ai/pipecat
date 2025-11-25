@@ -57,6 +57,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.utils.string import split_text_by_spaces
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -373,7 +374,10 @@ class AnthropicLLMService(LLMService):
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
-                        await self.push_frame(LLMTextFrame(event.delta.text))
+                        # Split text into individual words to normalize LLM output
+                        words = split_text_by_spaces(event.delta.text)
+                        for word in words:
+                            await self.push_frame(LLMTextFrame(word))
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
                     elif hasattr(event.delta, "partial_json") and tool_use_block:
                         json_accumulator += event.delta.partial_json
