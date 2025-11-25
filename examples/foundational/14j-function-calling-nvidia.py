@@ -27,7 +27,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.nim.llm import NimLLMService
+from pipecat.services.nvidia.llm import NvidiaLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -75,11 +75,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # text_filters=[MarkdownTextFilter()],
     )
 
-    llm = NimLLMService(
+    llm = NvidiaLLMService(
         api_key=os.getenv("NVIDIA_API_KEY"),
         model="nvidia/llama-3.3-nemotron-super-49b-v1.5",
         # Recommended when turning thinking off
-        params=NimLLMService.InputParams(temperature=0.0),
+        params=NvidiaLLMService.InputParams(temperature=0.0),
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
