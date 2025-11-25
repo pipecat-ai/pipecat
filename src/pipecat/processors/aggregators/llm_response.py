@@ -14,8 +14,11 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 import asyncio
 import warnings
 from abc import abstractmethod
+from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Set
+import datetime
+import time
 
 from loguru import logger
 
@@ -85,11 +88,17 @@ class LLMUserAggregatorParams:
         enable_emulated_vad_interruptions: When True, allows emulated VAD events
             to interrupt the bot when it's speaking. When False, emulated speech
             is ignored while the bot is speaking.
+        frame_capture_interval: Capture every Nth InputImageRawFrame for the frame queue.
+            Default is 10, meaning every 10th frame is captured.
+        frame_queue_size: Maximum number of frames to keep in the frame queue.
+            Default is 3. When the queue is full, oldest frames are removed.
     """
 
     aggregation_timeout: float = 0.5
     turn_emulated_vad_timeout: float = 0.8
     enable_emulated_vad_interruptions: bool = False
+    frame_capture_interval: int = 10
+    frame_queue_size: int = 3
 
 
 @dataclass
@@ -494,6 +503,10 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._aggregation_task = None
 
         self.latest_cached_frame = None
+        
+        # Separate frame queue for capturing every Nth frame
+        self._frame_counter = 0
+        self._frame_queue = deque(maxlen=self._params.frame_queue_size)
 
 
     async def reset(self):
@@ -569,6 +582,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputImageRawFrame):
             self.latest_cached_frame = frame
+            
+            # Update frame counter and queue
+            self._frame_counter += 1
+            if self._frame_counter % self._params.frame_capture_interval == 0:
+                frame.metadata = {"timestamp": time.time()}  # Store as Unix timestamp (float)
+                self._frame_queue.append(frame)
         else:
             await self.push_frame(frame, direction)
 
