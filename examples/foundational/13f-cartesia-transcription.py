@@ -18,8 +18,8 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.stt import CartesiaSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
@@ -30,6 +30,9 @@ class TranscriptionLogger(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             print(f"Transcription: {frame.text}")
+
+        # Push all frames through
+        await self.push_frame(frame, direction)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -45,10 +48,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = CartesiaSTTService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        base_url=os.getenv("CARTESIA_BASE_URL"),
-    )
+    stt = CartesiaSTTService(api_key=os.getenv("CARTESIA_API_KEY"))
 
     tl = TranscriptionLogger()
 

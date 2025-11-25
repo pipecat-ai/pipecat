@@ -11,7 +11,6 @@ input processing, including VAD, turn analysis, and interruption management.
 """
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from loguru import logger
@@ -22,7 +21,6 @@ from pipecat.audio.turn.base_turn_analyzer import (
 )
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -36,9 +34,9 @@ from pipecat.frames.frames import (
     MetricsFrame,
     SpeechControlParamsFrame,
     StartFrame,
-    StartInterruptionFrame,
     StopFrame,
     SystemFrame,
+    UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
@@ -79,10 +77,6 @@ class BaseInputTransport(FrameProcessor):
 
         # Track user speaking state for interruption logic
         self._user_speaking = False
-
-        # We read audio from a single queue one at a time and we then run VAD in
-        # a thread. Therefore, only one thread should be necessary.
-        self._executor = ThreadPoolExecutor(max_workers=1)
 
         # Task to process incoming audio (VAD) and push audio frames downstream
         # if passthrough is enabled.
@@ -238,6 +232,9 @@ class BaseInputTransport(FrameProcessor):
         """
         # Cancel and wait for the audio input task to finish.
         await self._cancel_audio_task()
+        # Stop audio filter.
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.stop()
 
     async def set_transport_ready(self, frame: StartFrame):
         """Called when the transport is ready to stream.
@@ -288,8 +285,6 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, BotInterruptionFrame):
-            await self._handle_bot_interruption(frame)
         elif isinstance(frame, BotStartedSpeakingFrame):
             await self._handle_bot_started_speaking(frame)
             await self.push_frame(frame, direction)
@@ -298,10 +293,10 @@ class BaseInputTransport(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, EmulateUserStartedSpeakingFrame):
             logger.debug("Emulating user started speaking")
-            await self._handle_user_interruption(UserStartedSpeakingFrame(emulated=True))
+            await self._handle_user_interruption(VADState.SPEAKING, emulated=True)
         elif isinstance(frame, EmulateUserStoppedSpeakingFrame):
             logger.debug("Emulating user stopped speaking")
-            await self._handle_user_interruption(UserStoppedSpeakingFrame(emulated=True))
+            await self._handle_user_interruption(VADState.QUIET, emulated=True)
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
@@ -334,21 +329,15 @@ class BaseInputTransport(FrameProcessor):
     # Handle interruptions
     #
 
-    async def _handle_bot_interruption(self, frame: BotInterruptionFrame):
-        """Handle bot interruption frames."""
-        logger.debug("Bot interruption")
-        if self.interruptions_allowed:
-            await self._start_interruption()
-            await self.push_frame(StartInterruptionFrame())
-
-    async def _handle_user_interruption(self, frame: Frame):
+    async def _handle_user_interruption(self, vad_state: VADState, emulated: bool = False):
         """Handle user interruption events based on speaking state."""
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if vad_state == VADState.SPEAKING:
             logger.debug("User started speaking")
             self._user_speaking = True
-            await self.push_frame(frame)
 
-            # Only push StartInterruptionFrame if:
+            await self.broadcast_frame(UserStartedSpeakingFrame, emulated=emulated)
+
+            # Only push InterruptionFrame if:
             # 1. No interruption config is set, OR
             # 2. Interruption config is set but bot is not speaking
             should_push_immediate_interruption = (
@@ -357,22 +346,17 @@ class BaseInputTransport(FrameProcessor):
 
             # Make sure we notify about interruptions quickly out-of-band.
             if should_push_immediate_interruption and self.interruptions_allowed:
-                await self._start_interruption()
-                # Push an out-of-band frame (i.e. not using the ordered push
-                # frame task) to stop everything, specially at the output
-                # transport.
-                await self.push_frame(StartInterruptionFrame())
+                await self.push_interruption_task_frame_and_wait()
             elif self.interruption_strategies and self._bot_speaking:
                 logger.debug(
                     "User started speaking while bot is speaking with interruption config - "
                     "deferring interruption to aggregator"
                 )
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif vad_state == VADState.QUIET:
             logger.debug("User stopped speaking")
             self._user_speaking = False
-            await self.push_frame(frame)
-            if self.interruptions_allowed:
-                await self._stop_interruption()
+
+            await self.broadcast_frame(UserStoppedSpeakingFrame, emulated=emulated)
 
     #
     # Handle bot speaking state
@@ -406,12 +390,10 @@ class BaseInputTransport(FrameProcessor):
         """Analyze audio frame for voice activity."""
         state = VADState.QUIET
         if self.vad_analyzer:
-            state = await self.get_event_loop().run_in_executor(
-                self._executor, self.vad_analyzer.analyze_audio, audio_frame.audio
-            )
+            state = await self.vad_analyzer.analyze_audio(audio_frame.audio)
         return state
 
-    async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState):
+    async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState) -> VADState:
         """Handle Voice Activity Detection results and generate appropriate frames."""
         new_vad_state = await self._vad_analyze(audio_frame)
         if (
@@ -419,7 +401,8 @@ class BaseInputTransport(FrameProcessor):
             and new_vad_state != VADState.STARTING
             and new_vad_state != VADState.STOPPING
         ):
-            frame = None
+            interruption_state = None
+
             # If the turn analyser is enabled, this will prevent:
             # - Creating the UserStoppedSpeakingFrame
             # - Creating the UserStartedSpeakingFrame multiple times
@@ -430,14 +413,14 @@ class BaseInputTransport(FrameProcessor):
             if new_vad_state == VADState.SPEAKING:
                 await self.push_frame(VADUserStartedSpeakingFrame())
                 if can_create_user_frames:
-                    frame = UserStartedSpeakingFrame()
+                    interruption_state = VADState.SPEAKING
             elif new_vad_state == VADState.QUIET:
                 await self.push_frame(VADUserStoppedSpeakingFrame())
                 if can_create_user_frames:
-                    frame = UserStoppedSpeakingFrame()
+                    interruption_state = VADState.QUIET
 
-            if frame:
-                await self._handle_user_interruption(frame)
+            if interruption_state:
+                await self._handle_user_interruption(interruption_state)
 
             vad_state = new_vad_state
         return vad_state
@@ -452,7 +435,7 @@ class BaseInputTransport(FrameProcessor):
     async def _handle_end_of_turn_complete(self, state: EndOfTurnState):
         """Handle completion of end-of-turn analysis."""
         if state == EndOfTurnState.COMPLETE:
-            await self._handle_user_interruption(UserStoppedSpeakingFrame())
+            await self._handle_user_interruption(VADState.QUIET)
 
     async def _run_turn_analyzer(
         self, frame: InputAudioRawFrame, vad_state: VADState, previous_vad_state: VADState
@@ -489,6 +472,9 @@ class BaseInputTransport(FrameProcessor):
                 if self._params.turn_analyzer:
                     await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
 
+                if vad_state == VADState.SPEAKING:
+                    await self.broadcast_frame(UserSpeakingFrame)
+
                 # Push audio downstream if passthrough is set.
                 if self._params.audio_in_passthrough:
                     await self.push_frame(frame)
@@ -502,7 +488,7 @@ class BaseInputTransport(FrameProcessor):
                     vad_state = VADState.QUIET
                     if self._params.turn_analyzer:
                         self._params.turn_analyzer.clear()
-                    await self._handle_user_interruption(UserStoppedSpeakingFrame())
+                    await self._handle_user_interruption(VADState.QUIET)
 
     async def _handle_prediction_result(self, result: MetricsData):
         """Handle a prediction result event from the turn analyzer."""

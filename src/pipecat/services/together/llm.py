@@ -49,12 +49,3 @@ class TogetherLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating Together.ai client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
-
-    @property
-    def supports_universal_context(self) -> bool:
-        """Check if this service supports universal LLMContext.
-
-        Returns:
-            False, as TogetherLLMService does not yet support universal LLMContext.
-        """
-        return False

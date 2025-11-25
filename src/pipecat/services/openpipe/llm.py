@@ -108,12 +108,3 @@ class OpenPipeLLMService(OpenAILLMService):
         }
 
         return params
-
-    @property
-    def supports_universal_context(self) -> bool:
-        """Check if this service supports universal LLMContext.
-
-        Returns:
-            False, as OpenPipeLLMService does not yet support universal LLMContext.
-        """
-        return False

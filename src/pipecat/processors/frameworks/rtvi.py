@@ -13,6 +13,7 @@ and frame observation for the RTVI protocol.
 
 import asyncio
 import base64
+import time
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -23,14 +24,17 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Tuple,
     Union,
 )
 
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
+from pipecat.audio.utils import calculate_audio_volume
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
+    AggregatedTextFrame,
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -41,17 +45,20 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     InterimTranscriptionFrame,
+    LLMConfigureOutputFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMTextFrame,
     MetricsFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
-    TransportMessageUrgentFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
@@ -587,10 +594,35 @@ class RTVILLMFunctionCallMessage(BaseModel):
     data: RTVILLMFunctionCallMessageData
 
 
+class RTVISendTextOptions(BaseModel):
+    """Options for sending text input to the LLM.
+
+    Contains options for how the pipeline should process the text input.
+    """
+
+    run_immediately: bool = True
+    audio_response: bool = True
+
+
+class RTVISendTextData(BaseModel):
+    """Data format for sending text input to the LLM.
+
+    Contains the text content to send and any options for how the pipeline should process it.
+
+    """
+
+    content: str
+    options: Optional[RTVISendTextOptions] = None
+
+
 class RTVIAppendToContextData(BaseModel):
     """Data format for appending messages to the context.
 
     Contains the role, content, and whether to run the message immediately.
+
+    .. deprecated:: 0.0.85
+        The RTVI message, append-to-context, has been deprecated. Use send-text
+        or custom client and server messages instead.
     """
 
     role: Literal["user", "assistant"] | str
@@ -673,6 +705,29 @@ class RTVITextMessageData(BaseModel):
     """
 
     text: str
+
+
+class RTVIBotOutputMessageData(RTVITextMessageData):
+    """Data for bot output RTVI messages.
+
+    Extends RTVITextMessageData to include metadata about the output.
+    """
+
+    spoken: bool = False  # Indicates if the text has been spoken by TTS
+    aggregated_by: AggregationType | str
+    # Indicates what form the text is in (e.g., by word, sentence, etc.)
+
+
+class RTVIBotOutputMessage(BaseModel):
+    """Message containing bot output text.
+
+    An event meant to holistically represent what the bot is outputting,
+    along with metadata about the output and if it has been spoken.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["bot-output"] = "bot-output"
+    data: RTVIBotOutputMessageData
 
 
 class RTVIBotTranscriptionMessage(BaseModel):
@@ -814,6 +869,36 @@ class RTVIServerMessage(BaseModel):
     data: Any
 
 
+class RTVIAudioLevelMessageData(BaseModel):
+    """Data format for sending audio levels."""
+
+    value: float
+
+
+class RTVIUserAudioLevelMessage(BaseModel):
+    """Message indicating user audio level."""
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["user-audio-level"] = "user-audio-level"
+    data: RTVIAudioLevelMessageData
+
+
+class RTVIBotAudioLevelMessage(BaseModel):
+    """Message indicating bot audio level."""
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["bot-audio-level"] = "bot-audio-level"
+    data: RTVIAudioLevelMessageData
+
+
+class RTVISystemLogMessage(BaseModel):
+    """Message including a system log."""
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["system-log"] = "system-log"
+    data: RTVITextMessageData
+
+
 @dataclass
 class RTVIServerMessageFrame(SystemFrame):
     """A frame for sending server messages to the client.
@@ -833,25 +918,54 @@ class RTVIServerMessageFrame(SystemFrame):
 class RTVIObserverParams:
     """Parameters for configuring RTVI Observer behavior.
 
+    .. deprecated:: 0.0.87
+        Parameter `errors_enabled` is deprecated. Error messages are always enabled.
+
     Parameters:
+        bot_output_enabled: Indicates if bot output messages should be sent.
         bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
         bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
         bot_speaking_enabled: Indicates if the bot's started/stopped speaking messages should be sent.
+        bot_audio_level_enabled: Indicates if bot's audio level messages should be sent.
         user_llm_enabled: Indicates if the user's LLM input messages should be sent.
         user_speaking_enabled: Indicates if the user's started/stopped speaking messages should be sent.
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
+        user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
-        errors_enabled: Indicates if errors messages should be sent.
+        system_logs_enabled: Indicates if system logs should be sent.
+        errors_enabled: [Deprecated] Indicates if errors messages should be sent.
+        skip_aggregator_types: List of aggregation types to skip sending as tts/output messages.
+          Note: if using this to avoid sending secure information, be sure to also disable
+                bot_llm_enabled to avoid leaking through LLM messages.
+        bot_output_transforms: A list of callables to transform text before just before sending it
+            to TTS. Each callable takes the aggregated text and its type, and returns the
+            transformed text. To register, provide a list of tuples of
+            (aggregation_type | '*', transform_function).
+        audio_level_period_secs: How often audio levels should be sent if enabled.
     """
 
+    bot_output_enabled: bool = True
     bot_llm_enabled: bool = True
     bot_tts_enabled: bool = True
     bot_speaking_enabled: bool = True
+    bot_audio_level_enabled: bool = False
     user_llm_enabled: bool = True
     user_speaking_enabled: bool = True
     user_transcription_enabled: bool = True
+    user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
-    errors_enabled: bool = True
+    system_logs_enabled: bool = False
+    errors_enabled: Optional[bool] = None
+    skip_aggregator_types: Optional[List[AggregationType | str]] = None
+    bot_output_transforms: Optional[
+        List[
+            Tuple[
+                AggregationType | str,
+                Callable[[str, AggregationType | str], Awaitable[str]],
+            ]
+        ]
+    ] = None
+    audio_level_period_secs: float = 0.15
 
 
 class RTVIObserver(BaseObserver):
@@ -867,7 +981,11 @@ class RTVIObserver(BaseObserver):
     """
 
     def __init__(
-        self, rtvi: "RTVIProcessor", *, params: Optional[RTVIObserverParams] = None, **kwargs
+        self,
+        rtvi: Optional["RTVIProcessor"] = None,
+        *,
+        params: Optional[RTVIObserverParams] = None,
+        **kwargs,
     ):
         """Initialize the RTVI observer.
 
@@ -879,9 +997,87 @@ class RTVIObserver(BaseObserver):
         super().__init__(**kwargs)
         self._rtvi = rtvi
         self._params = params or RTVIObserverParams()
-        self._bot_transcription = ""
+
         self._frames_seen = set()
-        rtvi.set_errors_enabled(self._params.errors_enabled)
+
+        self._bot_transcription = ""
+        self._last_user_audio_level = 0
+        self._last_bot_audio_level = 0
+
+        if self._params.system_logs_enabled:
+            self._system_logger_id = logger.add(self._logger_sink)
+
+        if self._params.errors_enabled is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter `errors_enabled` is deprecated. Error messages are always enabled.",
+                    DeprecationWarning,
+                )
+
+        self._aggregation_transforms: List[
+            Tuple[AggregationType | str, Callable[[str, AggregationType | str], Awaitable[str]]]
+        ] = self._params.bot_output_transforms or []
+
+    def add_bot_output_transformer(
+        self,
+        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        aggregation_type: AggregationType | str = "*",
+    ):
+        """Transform text for a specific aggregation type before sending as Bot Output or TTS.
+
+        Args:
+            transform_function: The function to apply for transformation. This function should take
+                the text and aggregation type as input and return the transformed text.
+                Ex.: async def my_transform(text: str, aggregation_type: str) -> str:
+            aggregation_type: The type of aggregation to transform. This value defaults to "*" to
+                handle all text before sending to the client.
+        """
+        self._aggregation_transforms.append((aggregation_type, transform_function))
+
+    def remove_bot_output_transformer(
+        self,
+        transform_function: Callable[[str, AggregationType | str], Awaitable[str]],
+        aggregation_type: AggregationType | str = "*",
+    ):
+        """Remove a text transformer for a specific aggregation type.
+
+        Args:
+            transform_function: The function to remove.
+            aggregation_type: The type of aggregation to remove the transformer for.
+        """
+        self._aggregation_transforms = [
+            (agg_type, func)
+            for agg_type, func in self._aggregation_transforms
+            if not (agg_type == aggregation_type and func == transform_function)
+        ]
+
+    async def _logger_sink(self, message):
+        """Logger sink so we can send system logs to RTVI clients."""
+        message = RTVISystemLogMessage(data=RTVITextMessageData(text=message))
+        await self.send_rtvi_message(message)
+
+    async def cleanup(self):
+        """Cleanup RTVI observer resources."""
+        await super().cleanup()
+        if self._params.system_logs_enabled:
+            logger.remove(self._system_logger_id)
+
+    async def send_rtvi_message(self, model: BaseModel, exclude_none: bool = True):
+        """Send an RTVI message.
+
+        By default, we push a transport frame. But this function can be
+        overriden by subclass to send RTVI messages in different ways.
+
+        Args:
+            model: The message to send.
+            exclude_none: Whether to exclude None values from the model dump.
+
+        """
+        if self._rtvi:
+            await self._rtvi.push_transport_message(model, exclude_none)
 
     async def on_push_frame(self, data: FramePushed):
         """Process a frame being pushed through the pipeline.
@@ -903,6 +1099,7 @@ class RTVIObserver(BaseObserver):
 
         if (
             isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
+            and (direction == FrameDirection.DOWNSTREAM)
             and self._params.user_speaking_enabled
         ):
             await self._handle_interruptions(frame)
@@ -923,53 +1120,53 @@ class RTVIObserver(BaseObserver):
         ):
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
-            await self.push_transport_message_urgent(RTVIBotLLMStartedMessage())
+            await self.send_rtvi_message(RTVIBotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame) and self._params.bot_llm_enabled:
-            await self.push_transport_message_urgent(RTVIBotLLMStoppedMessage())
+            await self.send_rtvi_message(RTVIBotLLMStoppedMessage())
         elif isinstance(frame, LLMTextFrame) and self._params.bot_llm_enabled:
             await self._handle_llm_text_frame(frame)
         elif isinstance(frame, TTSStartedFrame) and self._params.bot_tts_enabled:
-            await self.push_transport_message_urgent(RTVIBotTTSStartedMessage())
+            await self.send_rtvi_message(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
-            await self.push_transport_message_urgent(RTVIBotTTSStoppedMessage())
-        elif isinstance(frame, TTSTextFrame) and self._params.bot_tts_enabled:
-            if isinstance(src, BaseOutputTransport):
-                message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-                await self.push_transport_message_urgent(message)
-            else:
+            await self.send_rtvi_message(RTVIBotTTSStoppedMessage())
+        elif isinstance(frame, AggregatedTextFrame) and (
+            self._params.bot_output_enabled or self._params.bot_tts_enabled
+        ):
+            if isinstance(frame, TTSTextFrame) and not isinstance(src, BaseOutputTransport):
+                # This check is to make sure we handle the frame when it has gone
+                # through the transport and has correct timing.
                 mark_as_seen = False
+            else:
+                await self._handle_aggregated_llm_text(frame)
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVIServerMessage(data=frame.data)
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerResponseFrame):
             if frame.error is not None:
                 await self._send_error_response(frame)
             else:
                 await self._send_server_response(frame)
+        elif isinstance(frame, InputAudioRawFrame) and self._params.user_audio_level_enabled:
+            curr_time = time.time()
+            diff_time = curr_time - self._last_user_audio_level
+            if diff_time > self._params.audio_level_period_secs:
+                level = calculate_audio_volume(frame.audio, frame.sample_rate)
+                message = RTVIUserAudioLevelMessage(data=RTVIAudioLevelMessageData(value=level))
+                await self.send_rtvi_message(message)
+                self._last_user_audio_level = curr_time
+        elif isinstance(frame, TTSAudioRawFrame) and self._params.bot_audio_level_enabled:
+            curr_time = time.time()
+            diff_time = curr_time - self._last_bot_audio_level
+            if diff_time > self._params.audio_level_period_secs:
+                level = calculate_audio_volume(frame.audio, frame.sample_rate)
+                message = RTVIBotAudioLevelMessage(data=RTVIAudioLevelMessageData(value=level))
+                await self.send_rtvi_message(message)
+                self._last_bot_audio_level = curr_time
 
         if mark_as_seen:
             self._frames_seen.add(frame.id)
-
-    async def push_transport_message_urgent(self, model: BaseModel, exclude_none: bool = True):
-        """Push an urgent transport message to the RTVI processor.
-
-        Args:
-            model: The message model to send.
-            exclude_none: Whether to exclude None values from the model dump.
-        """
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
-        await self._rtvi.push_frame(frame)
-
-    async def _push_bot_transcription(self):
-        """Push accumulated bot transcription as a message."""
-        if len(self._bot_transcription) > 0:
-            message = RTVIBotTranscriptionMessage(
-                data=RTVITextMessageData(text=self._bot_transcription)
-            )
-            await self.push_transport_message_urgent(message)
-            self._bot_transcription = ""
 
     async def _handle_interruptions(self, frame: Frame):
         """Handle user speaking interruption frames."""
@@ -980,7 +1177,7 @@ class RTVIObserver(BaseObserver):
             message = RTVIUserStoppedSpeakingMessage()
 
         if message:
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
 
     async def _handle_bot_speaking(self, frame: Frame):
         """Handle bot speaking event frames."""
@@ -991,16 +1188,47 @@ class RTVIObserver(BaseObserver):
             message = RTVIBotStoppedSpeakingMessage()
 
         if message:
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
+
+    async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
+        """Handle aggregated LLM text output frames."""
+        # Skip certain aggregator types if configured to do so.
+        if (
+            self._params.skip_aggregator_types
+            and frame.aggregated_by in self._params.skip_aggregator_types
+        ):
+            return
+
+        text = frame.text
+        type = frame.aggregated_by
+        for aggregation_type, transform in self._aggregation_transforms:
+            if aggregation_type == type or aggregation_type == "*":
+                text = await transform(text, type)
+
+        isTTS = isinstance(frame, TTSTextFrame)
+        if self._params.bot_output_enabled:
+            message = RTVIBotOutputMessage(
+                data=RTVIBotOutputMessageData(text=text, spoken=isTTS, aggregated_by=type)
+            )
+            await self.send_rtvi_message(message)
+
+        if isTTS and self._params.bot_tts_enabled:
+            tts_message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=text))
+            await self.send_rtvi_message(tts_message)
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
         message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self.push_transport_message_urgent(message)
+        await self.send_rtvi_message(message)
 
+        # TODO (mrkb): Remove all this logic when we fully deprecate bot-transcription messages.
         self._bot_transcription += frame.text
-        if match_endofsentence(self._bot_transcription):
-            await self._push_bot_transcription()
+
+        if match_endofsentence(self._bot_transcription) and len(self._bot_transcription) > 0:
+            await self.send_rtvi_message(
+                RTVIBotTranscriptionMessage(data=RTVITextMessageData(text=self._bot_transcription))
+            )
+            self._bot_transcription = ""
 
     async def _handle_user_transcriptions(self, frame: Frame):
         """Handle user transcription frames."""
@@ -1019,7 +1247,7 @@ class RTVIObserver(BaseObserver):
             )
 
         if message:
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
 
     async def _handle_context(self, frame: OpenAILLMContextFrame | LLMContextFrame):
         """Process LLM context frames to extract user messages for the RTVI client."""
@@ -1039,7 +1267,7 @@ class RTVIObserver(BaseObserver):
                 text = "".join(part.text for part in message.parts if hasattr(part, "text"))
                 if text:
                     rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
-                    await self.push_transport_message_urgent(rtvi_message)
+                    await self.send_rtvi_message(rtvi_message)
 
             # Handle OpenAI format (original implementation)
             elif isinstance(message, dict):
@@ -1050,7 +1278,7 @@ class RTVIObserver(BaseObserver):
                     else:
                         text = content
                     rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
-                    await self.push_transport_message_urgent(rtvi_message)
+                    await self.send_rtvi_message(rtvi_message)
 
         except Exception as e:
             logger.warning(f"Caught an error while trying to handle context: {e}")
@@ -1077,7 +1305,7 @@ class RTVIObserver(BaseObserver):
                 metrics["characters"].append(d.model_dump(exclude_none=True))
 
         message = RTVIMetricsMessage(data=metrics)
-        await self.push_transport_message_urgent(message)
+        await self.send_rtvi_message(message)
 
     async def _send_server_response(self, frame: RTVIServerResponseFrame):
         """Send a response to the client for a specific request."""
@@ -1085,15 +1313,14 @@ class RTVIObserver(BaseObserver):
             id=str(frame.client_msg.msg_id),
             data=RTVIRawServerResponseData(t=frame.client_msg.type, d=frame.data),
         )
-        await self.push_transport_message_urgent(message)
+        await self.send_rtvi_message(message)
 
     async def _send_error_response(self, frame: RTVIServerResponseFrame):
         """Send a response to the client for a specific request."""
-        if self._params.errors_enabled:
-            message = RTVIErrorResponse(
-                id=str(frame.client_msg.msg_id), data=RTVIErrorResponseData(error=frame.error)
-            )
-            await self.push_transport_message_urgent(message)
+        message = RTVIErrorResponse(
+            id=str(frame.client_msg.msg_id), data=RTVIErrorResponseData(error=frame.error)
+        )
+        await self.send_rtvi_message(message)
 
 
 class RTVIProcessor(FrameProcessor):
@@ -1127,7 +1354,7 @@ class RTVIProcessor(FrameProcessor):
         # Default to 0.3.0 which is the last version before actually having a
         # "client-version".
         self._client_version = [0, 3, 0]
-        self._errors_enabled = True
+        self._llm_skip_tts: bool = False  # Keep in sync with llm_service.py's configuration.
 
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
@@ -1193,20 +1420,16 @@ class RTVIProcessor(FrameProcessor):
     async def set_bot_ready(self):
         """Mark the bot as ready and send the bot-ready message."""
         self._bot_ready = True
-        await self._update_config(self._config, False)
+        # Only call the (deprecated) _update_config method if the we're using a
+        # config (which is deprecated). Otherwise we'd always print an
+        # unnecessary deprecation warning.
+        if self._config.config:
+            await self._update_config(self._config, False)
         await self._send_bot_ready()
-
-    def set_errors_enabled(self, enabled: bool):
-        """Enable or disable error message sending.
-
-        Args:
-            enabled: Whether to send error messages.
-        """
-        self._errors_enabled = enabled
 
     async def interrupt_bot(self):
         """Send a bot interruption frame upstream."""
-        await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+        await self.push_interruption_task_frame_and_wait()
 
     async def send_server_message(self, data: Any):
         """Send a server message to the client."""
@@ -1232,6 +1455,13 @@ class RTVIProcessor(FrameProcessor):
         """
         await self._send_error_frame(ErrorFrame(error=error))
 
+    async def push_transport_message(self, model: BaseModel, exclude_none: bool = True):
+        """Push a transport message frame."""
+        frame = OutputTransportMessageUrgentFrame(
+            message=model.model_dump(exclude_none=exclude_none)
+        )
+        await self.push_frame(frame)
+
     async def handle_message(self, message: RTVIMessage):
         """Handle an incoming RTVI message.
 
@@ -1252,7 +1482,7 @@ class RTVIProcessor(FrameProcessor):
             args=params.arguments,
         )
         message = RTVILLMFunctionCallMessage(data=fn)
-        await self._push_transport_message(message, exclude_none=False)
+        await self.push_transport_message(message, exclude_none=False)
 
     async def handle_function_call_start(
         self, function_name: str, llm: FrameProcessor, context: OpenAILLMContext
@@ -1279,7 +1509,7 @@ class RTVIProcessor(FrameProcessor):
 
         fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
         message = RTVILLMFunctionCallStartMessage(data=fn)
-        await self._push_transport_message(message, exclude_none=False)
+        await self.push_transport_message(message, exclude_none=False)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames through the RTVI processor.
@@ -1302,7 +1532,7 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, ErrorFrame):
             await self._send_error_frame(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, TransportMessageUrgentFrame):
+        elif isinstance(frame, InputTransportMessageFrame):
             await self._handle_transport_message(frame)
         # All other system frames
         elif isinstance(frame, SystemFrame):
@@ -1316,6 +1546,9 @@ class RTVIProcessor(FrameProcessor):
         # Data frames
         elif isinstance(frame, RTVIActionFrame):
             await self._action_queue.put(frame)
+        elif isinstance(frame, LLMConfigureOutputFrame):
+            self._llm_skip_tts = frame.skip_tts
+            await self.push_frame(frame, direction)
         # Other frames
         else:
             await self.push_frame(frame, direction)
@@ -1348,11 +1581,6 @@ class RTVIProcessor(FrameProcessor):
             await self.cancel_task(self._message_task)
             self._message_task = None
 
-    async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        """Push a transport message frame."""
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
-        await self.push_frame(frame)
-
     async def _action_task_handler(self):
         """Handle incoming action frames."""
         while True:
@@ -1367,7 +1595,7 @@ class RTVIProcessor(FrameProcessor):
             await self._handle_message(message)
             self._message_queue.task_done()
 
-    async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
+    async def _handle_transport_message(self, frame: InputTransportMessageFrame):
         """Handle an incoming transport message frame."""
         try:
             transport_message = frame.message
@@ -1415,7 +1643,13 @@ class RTVIProcessor(FrameProcessor):
                 case "llm-function-call-result":
                     data = RTVILLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
+                case "send-text":
+                    data = RTVISendTextData.model_validate(message.data)
+                    await self._handle_send_text(data)
                 case "append-to-context":
+                    logger.warning(
+                        f"The append-to-context message is deprecated, use send-text instead."
+                    )
                     data = RTVIAppendToContextData.model_validate(message.data)
                     await self._handle_update_context(data)
                 case "raw-audio" | "raw-audio-batch":
@@ -1483,7 +1717,7 @@ class RTVIProcessor(FrameProcessor):
 
         services = list(self._registered_services.values())
         message = RTVIDescribeConfig(id=request_id, data=RTVIDescribeConfigData(config=services))
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _handle_describe_actions(self, request_id: str):
         """Handle a describe-actions request."""
@@ -1498,7 +1732,7 @@ class RTVIProcessor(FrameProcessor):
 
         actions = list(self._registered_actions.values())
         message = RTVIDescribeActions(id=request_id, data=RTVIDescribeActionsData(actions=actions))
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _handle_get_config(self, request_id: str):
         """Handle a get-config request."""
@@ -1512,7 +1746,7 @@ class RTVIProcessor(FrameProcessor):
             )
 
         message = RTVIConfigResponse(id=request_id, data=self._config)
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     def _update_config_option(self, service: str, config: RTVIServiceOptionConfig):
         """Update a specific configuration option."""
@@ -1563,6 +1797,26 @@ class RTVIProcessor(FrameProcessor):
         """Handle an update-config request."""
         await self._update_config(RTVIConfig(config=data.config), data.interrupt)
         await self._handle_get_config(request_id)
+
+    async def _handle_send_text(self, data: RTVISendTextData):
+        """Handle a send-text message from the client."""
+        opts = data.options if data.options is not None else RTVISendTextOptions()
+        if opts.run_immediately:
+            await self.interrupt_bot()
+        cur_llm_skip_tts = self._llm_skip_tts
+        should_skip_tts = not opts.audio_response
+        toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
+            await self.push_frame(output_frame)
+        text_frame = LLMMessagesAppendFrame(
+            messages=[{"role": "user", "content": data.content}],
+            run_llm=opts.run_immediately,
+        )
+        await self.push_frame(text_frame)
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
+            await self.push_frame(output_frame)
 
     async def _handle_update_context(self, data: RTVIAppendToContextData):
         if data.run_immediately:
@@ -1617,7 +1871,7 @@ class RTVIProcessor(FrameProcessor):
         # action responses (such as webhooks) don't set a request_id
         if request_id:
             message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
-            await self._push_transport_message(message)
+            await self.push_transport_message(message)
 
     async def _send_bot_ready(self):
         """Send the bot-ready message to the client."""
@@ -1628,23 +1882,21 @@ class RTVIProcessor(FrameProcessor):
             id=self._client_ready_id,
             data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, config=config),
         )
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _send_server_message(self, message: RTVIServerMessage | RTVIServerResponse):
         """Send a message or response to the client."""
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _send_error_frame(self, frame: ErrorFrame):
         """Send an error frame as an RTVI error message."""
-        if self._errors_enabled:
-            message = RTVIError(data=RTVIErrorData(error=frame.error, fatal=frame.fatal))
-            await self._push_transport_message(message)
+        message = RTVIError(data=RTVIErrorData(error=frame.error, fatal=frame.fatal))
+        await self.push_transport_message(message)
 
     async def _send_error_response(self, id: str, error: str):
         """Send an error response message."""
-        if self._errors_enabled:
-            message = RTVIErrorResponse(id=id, data=RTVIErrorResponseData(error=error))
-            await self._push_transport_message(message)
+        message = RTVIErrorResponse(id=id, data=RTVIErrorResponseData(error=error))
+        await self.push_transport_message(message)
 
     def _action_id(self, service: str, action: str) -> str:
         """Generate an action ID from service and action names."""

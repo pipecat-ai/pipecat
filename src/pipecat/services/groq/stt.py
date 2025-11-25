@@ -58,7 +58,8 @@ class GroqSTTService(BaseWhisperSTTService):
         kwargs = {
             "file": ("audio.wav", audio, "audio/wav"),
             "model": self.model_name,
-            "response_format": "json",
+            # Use verbose_json to get probability metrics
+            "response_format": "verbose_json" if self._include_prob_metrics else "json",
             "language": self._language,
         }
 

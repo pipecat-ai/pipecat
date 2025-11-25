@@ -21,7 +21,6 @@ from typing import List, Optional
 from loguru import logger
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     EndFrame,
     Frame,
     LLMFullResponseEndFrame,
@@ -37,7 +36,8 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
 from pipecat.sync.base_notifier import BaseNotifier
@@ -360,7 +360,7 @@ class ClassificationProcessor(FrameProcessor):
             await self._voicemail_notifier.notify()  # Clear buffered TTS frames
 
             # Interrupt the current pipeline to stop any ongoing processing
-            await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+            await self.push_interruption_task_frame_and_wait()
 
             # Set the voicemail event to trigger the voicemail handler
             self._voicemail_event.clear()
@@ -615,8 +615,8 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         ]
 
         # Create the LLM context and aggregators for conversation management
-        self._context = OpenAILLMContext(self._messages)
-        self._context_aggregator = llm.create_context_aggregator(self._context)
+        self._context = LLMContext(self._messages)
+        self._context_aggregator = LLMContextAggregatorPair(self._context)
 
         # Create notification system for coordinating between components
         self._gate_notifier = EventNotifier()  # Signals classification completion

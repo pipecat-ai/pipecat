@@ -60,12 +60,3 @@ class AzureLLMService(OpenAILLMService):
             azure_endpoint=self._endpoint,
             api_version=self._api_version,
         )
-
-    @property
-    def supports_universal_context(self) -> bool:
-        """Check if this service supports universal LLMContext.
-
-        Returns:
-            False, as Azure service does yet not support universal LLMContext.
-        """
-        return False

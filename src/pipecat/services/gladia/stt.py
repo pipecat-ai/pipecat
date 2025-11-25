@@ -13,6 +13,7 @@ supporting multiple languages, custom vocabulary, and various audio processing o
 import asyncio
 import base64
 import json
+import warnings
 from typing import Any, AsyncGenerator, Dict, Literal, Optional
 
 import aiohttp
@@ -22,6 +23,7 @@ from pipecat import __version__ as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -30,7 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -53,7 +55,7 @@ def language_to_gladia_language(language: Language) -> Optional[str]:
     Returns:
         The Gladia language code string or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AF: "af",
         Language.AM: "am",
         Language.AR: "ar",
@@ -155,17 +157,7 @@ def language_to_gladia_language(language: Language) -> Optional[str]:
         Language.ZH: "zh",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 # Deprecation warning for nested InputParams
@@ -173,8 +165,6 @@ class _InputParamsDescriptor:
     """Descriptor for backward compatibility with deprecation warning."""
 
     def __get__(self, obj, objtype=None):
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
@@ -208,7 +198,7 @@ class GladiaSTTService(STTService):
         api_key: str,
         region: Literal["us-west", "eu-west"] | None = None,
         url: str = "https://api.gladia.io/v2/live",
-        confidence: float = 0.5,
+        confidence: Optional[float] = None,
         sample_rate: Optional[int] = None,
         model: str = "solaria-1",
         params: Optional[GladiaInputParams] = None,
@@ -224,6 +214,11 @@ class GladiaSTTService(STTService):
             region: Region used to process audio. eu-west or us-west. Defaults to eu-west.
             url: Gladia API URL. Defaults to "https://api.gladia.io/v2/live".
             confidence: Minimum confidence threshold for transcriptions (0.0-1.0).
+
+                .. deprecated:: 0.0.86
+                    The 'confidence' parameter is deprecated and will be removed in a future version.
+                    No confidence threshold is applied.
+
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             model: Model to use for transcription. Defaults to "solaria-1".
             params: Additional configuration parameters for Gladia service.
@@ -236,7 +231,6 @@ class GladiaSTTService(STTService):
 
         params = params or GladiaInputParams()
 
-        # Warn about deprecated language parameter if it's used
         if params.language is not None:
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
@@ -247,11 +241,20 @@ class GladiaSTTService(STTService):
                     stacklevel=2,
                 )
 
+        if confidence:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'confidence' parameter is deprecated and will be removed in a future version. "
+                    "No confidence threshold is applied.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
         self._api_key = api_key
         self._region = region
         self._url = url
         self.set_model_name(model)
-        self._confidence = confidence
         self._params = params
         self._websocket = None
         self._receive_task = None
@@ -465,7 +468,8 @@ class GladiaSTTService(STTService):
                             break
 
             except Exception as e:
-                logger.error(f"Error in connection handler: {e}")
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                 self._connection_active = False
 
                 if not self._should_reconnect:
@@ -555,7 +559,8 @@ class GladiaSTTService(STTService):
         except websockets.exceptions.ConnectionClosed:
             logger.debug("Connection closed during keepalive")
         except Exception as e:
-            logger.error(f"Error in Gladia keepalive task: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _receive_task_handler(self):
         try:
@@ -575,43 +580,40 @@ class GladiaSTTService(STTService):
 
                 elif content["type"] == "transcript":
                     utterance = content["data"]["utterance"]
-                    confidence = utterance.get("confidence", 0)
                     language = utterance["language"]
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
-                    if confidence >= self._confidence:
-                        if is_final:
-                            await self.push_frame(
-                                TranscriptionFrame(
-                                    transcript,
-                                    self._user_id,
-                                    time_now_iso8601(),
-                                    language,
-                                    result=content,
-                                )
+                    if is_final:
+                        await self.push_frame(
+                            TranscriptionFrame(
+                                transcript,
+                                self._user_id,
+                                time_now_iso8601(),
+                                language,
+                                result=content,
                             )
-                            await self._handle_transcription(
-                                transcript=transcript,
-                                is_final=is_final,
-                                language=language,
+                        )
+                        await self._handle_transcription(
+                            transcript=transcript,
+                            is_final=is_final,
+                            language=language,
+                        )
+                    else:
+                        await self.push_frame(
+                            InterimTranscriptionFrame(
+                                transcript,
+                                self._user_id,
+                                time_now_iso8601(),
+                                language,
+                                result=content,
                             )
-                        else:
-                            await self.push_frame(
-                                InterimTranscriptionFrame(
-                                    transcript,
-                                    self._user_id,
-                                    time_now_iso8601(),
-                                    language,
-                                    result=content,
-                                )
-                            )
+                        )
                 elif content["type"] == "translation":
                     translated_utterance = content["data"]["translated_utterance"]
                     original_language = content["data"]["original_language"]
                     translated_language = translated_utterance["language"]
-                    confidence = translated_utterance.get("confidence", 0)
                     translation = translated_utterance["text"]
-                    if translated_language != original_language and confidence >= self._confidence:
+                    if translated_language != original_language:
                         await self.push_frame(
                             TranslationFrame(
                                 translation, "", time_now_iso8601(), translated_language
@@ -621,7 +623,8 @@ class GladiaSTTService(STTService):
             # Expected when closing the connection
             pass
         except Exception as e:
-            logger.error(f"Error in Gladia WebSocket handler: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _maybe_reconnect(self) -> bool:
         """Handle exponential backoff reconnection logic."""

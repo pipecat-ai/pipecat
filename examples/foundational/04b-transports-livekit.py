@@ -12,23 +12,27 @@ import sys
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
-    TextFrame,
+    InterruptionFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.livekit import configure
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
+from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 
 load_dotenv(override=True)
 
@@ -46,7 +50,8 @@ async def main():
         params=LiveKitParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+            turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
         ),
     )
 
@@ -64,13 +69,13 @@ async def main():
             "role": "system",
             "content": "You are a helpful LLM in a WebRTC call. "
             "Your goal is to demonstrate your capabilities in a succinct way. "
-            "Your output will be converted to audio so don't include special characters in your answers. "
+            "Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. "
             "Respond to what the user said in a creative and helpful way.",
         },
     ]
 
-    context = OpenAILLMContext(messages)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
@@ -98,7 +103,7 @@ async def main():
     async def on_first_participant_joined(transport, participant_id):
         await asyncio.sleep(1)
         await task.queue_frame(
-            TextFrame(
+            TTSSpeakFrame(
                 "Hello there! How are you doing today? Would you like to talk about the weather?"
             )
         )
@@ -115,7 +120,7 @@ async def main():
 
         await task.queue_frames(
             [
-                BotInterruptionFrame(),
+                InterruptionFrame(),
                 UserStartedSpeakingFrame(),
                 TranscriptionFrame(
                     user_id=participant_id,

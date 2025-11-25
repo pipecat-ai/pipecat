@@ -9,6 +9,7 @@
 import base64
 import json
 import time
+import warnings
 from dataclasses import dataclass
 from typing import Optional
 
@@ -16,6 +17,7 @@ from loguru import logger
 
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.frames.frames import (
+    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -23,6 +25,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -31,7 +34,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
-    StartInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -92,6 +94,10 @@ class CurrentAudioResponse:
 class OpenAIRealtimeBetaLLMService(LLMService):
     """OpenAI Realtime Beta LLM service providing real-time audio and text communication.
 
+    .. deprecated:: 0.0.84
+        `OpenAIRealtimeBetaLLMService` is deprecated, use `OpenAIRealtimeLLMService` instead.
+        This class will be removed in version 1.0.0.
+
     Implements the OpenAI Realtime API Beta with WebSocket communication for low-latency
     bidirectional audio and text interactions. Supports function calling, conversation
     management, and real-time transcription.
@@ -124,6 +130,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             send_transcription_frames: Whether to emit transcription frames. Defaults to True.
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "OpenAIRealtimeBetaLLMService is deprecated and will be removed in version 1.0.0. "
+                "Use OpenAIRealtimeLLMService instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
 
@@ -350,7 +365,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
         elif isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
@@ -440,7 +455,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
             # treat a send-side error as fatal.
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}"))
 
     async def _update_settings(self):
         settings = self._session_properties
@@ -613,9 +628,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self._current_assistant_response = None
         # error handling
         if evt.response.status == "failed":
-            await self.push_error(
-                ErrorFrame(error=evt.response.status_details["error"]["message"], fatal=True)
-            )
+            await self.push_error(ErrorFrame(error=evt.response.status_details["error"]["message"]))
             return
         # response content
         for item in evt.response.output:
@@ -640,18 +653,16 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
-            await self.push_frame(TTSTextFrame(evt.delta))
+            await self.push_frame(TTSTextFrame(evt.delta, aggregated_by=AggregationType.SENTENCE))
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
-        await self._start_interruption()  # cancels this processor task
-        await self.push_frame(StartInterruptionFrame())  # cancels downstream tasks
+        await self.push_interruption_task_frame_and_wait()
         await self.push_frame(UserStartedSpeakingFrame())
 
     async def _handle_evt_speech_stopped(self, evt):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self._stop_interruption()
         await self.push_frame(UserStoppedSpeakingFrame())
 
     async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
@@ -675,7 +686,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
-        await self.push_error(ErrorFrame(error=f"Error: {evt}", fatal=True))
+        await self.push_error(ErrorFrame(error=f"Error: {evt}"))
 
     async def _handle_assistant_output(self, output):
         # We haven't seen intermixed audio and function_call items in the same response. But let's

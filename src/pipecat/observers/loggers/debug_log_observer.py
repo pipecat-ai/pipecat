@@ -54,7 +54,7 @@ class DebugLogObserver(BaseObserver):
 
         Log frames with specific source/destination filters::
 
-            from pipecat.frames.frames import StartInterruptionFrame, UserStartedSpeakingFrame, LLMTextFrame
+            from pipecat.frames.frames import InterruptionFrame, UserStartedSpeakingFrame, LLMTextFrame
             from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
             from pipecat.transports.base_output import BaseOutputTransport
             from pipecat.services.stt_service import STTService
@@ -62,8 +62,8 @@ class DebugLogObserver(BaseObserver):
             observers=[
                 DebugLogObserver(
                     frame_types={
-                        # Only log StartInterruptionFrame when source is BaseOutputTransport
-                        StartInterruptionFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
+                        # Only log InterruptionFrame when source is BaseOutputTransport
+                        InterruptionFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
                         # Only log UserStartedSpeakingFrame when destination is STTService
                         UserStartedSpeakingFrame: (STTService, FrameEndpoint.DESTINATION),
                         # Log LLMTextFrame regardless of source or destination type

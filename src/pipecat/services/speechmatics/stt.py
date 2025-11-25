@@ -19,7 +19,6 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -32,7 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
@@ -468,8 +467,8 @@ class SpeechmaticsSTTService(STTService):
                 await self._client.send_audio(audio)
             yield None
         except Exception as e:
-            logger.error(f"Speechmatics error: {e}")
-            yield ErrorFrame(f"Speechmatics error: {e}", fatal=False)
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")
             await self._disconnect()
 
     def update_params(
@@ -515,6 +514,8 @@ class SpeechmaticsSTTService(STTService):
                 self._client.send_message(payload), self.get_event_loop()
             )
         except Exception as e:
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             raise RuntimeError(f"error sending message to STT: {e}")
 
     async def _connect(self) -> None:
@@ -578,8 +579,10 @@ class SpeechmaticsSTTService(STTService):
                 ),
             )
             logger.debug(f"{self} Connected to Speechmatics STT service")
+            await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} Error connecting to Speechmatics: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._client = None
 
     async def _disconnect(self) -> None:
@@ -593,9 +596,11 @@ class SpeechmaticsSTTService(STTService):
         except asyncio.TimeoutError:
             logger.warning(f"{self} Timeout while closing Speechmatics client connection")
         except Exception as e:
-            logger.error(f"{self} Error closing Speechmatics client: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._client = None
+            await self._call_event_handler("on_disconnected")
 
     def _process_config(self) -> None:
         """Create a formatted STT transcription config.
@@ -603,11 +608,21 @@ class SpeechmaticsSTTService(STTService):
         Creates a transcription config object based on the service parameters. Aligns
         with the Speechmatics RT API transcription config.
         """
+        # Convert language if it's a Language enum
+        language = self._params.language
+        if isinstance(language, Language):
+            language = _language_to_speechmatics_language(language)
+
+        # Convert output locale if it's a Language enum
+        output_locale = self._params.output_locale
+        if isinstance(output_locale, Language):
+            output_locale = _locale_to_speechmatics_locale(language, output_locale)
+
         # Transcription config
         transcription_config = TranscriptionConfig(
-            language=self._params.language,
+            language=language,
             domain=self._params.domain,
-            output_locale=self._params.output_locale,
+            output_locale=output_locale,
             operating_point=self._params.operating_point,
             diarization="speaker" if self._params.enable_diarization else None,
             enable_partials=self._params.enable_partials,
@@ -619,7 +634,7 @@ class SpeechmaticsSTTService(STTService):
             transcription_config.additional_vocab = [
                 {
                     "content": e.content,
-                    "sounds_like": e.sounds_like,
+                    **({"sounds_like": e.sounds_like} if e.sounds_like else {}),
                 }
                 for e in self._params.additional_vocab
             ]
@@ -749,14 +764,13 @@ class SpeechmaticsSTTService(STTService):
             return
 
         # Frames to send
-        upstream_frames: list[Frame] = []
         downstream_frames: list[Frame] = []
 
         # If VAD is enabled, then send a speaking frame
         if self._params.enable_vad and not self._is_speaking:
             logger.debug("User started speaking")
             self._is_speaking = True
-            upstream_frames += [BotInterruptionFrame()]
+            await self.push_interruption_task_frame_and_wait()
             downstream_frames += [UserStartedSpeakingFrame()]
 
         # If final, then re-parse into TranscriptionFrame
@@ -793,10 +807,6 @@ class SpeechmaticsSTTService(STTService):
             logger.debug("User stopped speaking")
             self._is_speaking = False
             downstream_frames += [UserStoppedSpeakingFrame()]
-
-        # Send UPSTREAM frames
-        for frame in upstream_frames:
-            await self.push_frame(frame, FrameDirection.UPSTREAM)
 
         # Send the DOWNSTREAM frames
         for frame in downstream_frames:
@@ -991,10 +1001,10 @@ def _language_to_speechmatics_language(language: Language) -> str:
         language: The Language enum to convert.
 
     Returns:
-        str: The Speechmatics language code, if found.
+        str: The Speechmatics language code.
     """
     # List of supported input languages
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AR: "ar",
         Language.BA: "ba",
         Language.EU: "eu",
@@ -1051,15 +1061,7 @@ def _language_to_speechmatics_language(language: Language) -> str:
         Language.CY: "cy",
     }
 
-    # Get the language code
-    result = BASE_LANGUAGES.get(language)
-
-    # Fail if language is not supported
-    if not result:
-        raise ValueError(f"Unsupported language: {language}")
-
-    # Return the language code
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 def _locale_to_speechmatics_locale(language_code: str, locale: Language) -> str | None:

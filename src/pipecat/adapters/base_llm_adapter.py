@@ -16,7 +16,12 @@ from typing import Any, Dict, Generic, List, TypeVar
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+    NotGiven,
+)
 
 # Should be a TypedDict
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=dict[str, Any])
@@ -38,12 +43,23 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     Subclasses must implement provider-specific conversion logic.
     """
 
+    @property
     @abstractmethod
-    def get_llm_invocation_params(self, context: LLMContext) -> TLLMInvocationParams:
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for this LLM provider.
+
+        Returns:
+            The identifier string.
+        """
+        pass
+
+    @abstractmethod
+    def get_llm_invocation_params(self, context: LLMContext, **kwargs) -> TLLMInvocationParams:
         """Get provider-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            **kwargs: Additional provider-specific arguments that subclasses can use.
 
         Returns:
             Provider-specific parameters for invoking the LLM.
@@ -74,6 +90,28 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
             provider.
         """
         pass
+
+    def create_llm_specific_message(self, message: Any) -> LLMSpecificMessage:
+        """Create an LLM-specific message (as opposed to a standard message) for use in an LLMContext.
+
+        Args:
+            message: The message content.
+
+        Returns:
+            A LLMSpecificMessage instance.
+        """
+        return LLMSpecificMessage(llm=self.id_for_llm_specific_messages, message=message)
+
+    def get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
+        """Get messages from the LLM context, including standard and LLM-specific messages.
+
+        Args:
+            context: The LLM context containing messages.
+
+        Returns:
+            List of messages including standard and LLM-specific messages.
+        """
+        return context.get_messages(self.id_for_llm_specific_messages)
 
     def from_standard_tools(self, tools: Any) -> List[Any] | NotGiven:
         """Convert tools from standard format to provider format.

@@ -36,11 +36,12 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.stt_service import STTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 
 try:
     from google.api_core.client_options import ClientOptions
+    from google.api_core.exceptions import Aborted
     from google.auth import default
     from google.auth.exceptions import GoogleAuthError
     from google.cloud import speech_v2
@@ -64,7 +65,7 @@ def language_to_google_stt_language(language: Language) -> Optional[str]:
     Returns:
         Optional[str]: Google STT language code or None if not supported.
     """
-    language_map = {
+    LANGUAGE_MAP = {
         # Afrikaans
         Language.AF: "af-ZA",
         Language.AF_ZA: "af-ZA",
@@ -351,7 +352,7 @@ def language_to_google_stt_language(language: Language) -> Optional[str]:
         Language.ZU_ZA: "zu-ZA",
     }
 
-    return language_map.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class GoogleSTTService(STTService):
@@ -730,12 +731,16 @@ class GoogleSTTService(STTService):
         self._request_queue = asyncio.Queue()
         self._streaming_task = self.create_task(self._stream_audio())
 
+        await self._call_event_handler("on_connected")
+
     async def _disconnect(self):
         """Clean up streaming recognition resources."""
         if self._streaming_task:
             logger.debug("Disconnecting from Google Speech-to-Text")
             await self.cancel_task(self._streaming_task)
             self._streaming_task = None
+
+        await self._call_event_handler("on_disconnected")
 
     async def _request_generator(self):
         """Generates requests for the streaming recognize method."""
@@ -769,7 +774,8 @@ class GoogleSTTService(STTService):
                 yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
 
         except Exception as e:
-            logger.error(f"Error in request generator: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             raise
 
     async def _stream_audio(self):
@@ -800,14 +806,15 @@ class GoogleSTTService(STTService):
                         break
 
                 except Exception as e:
-                    logger.warning(f"{self} Reconnecting: {e}")
+                    logger.error(f"{self} exception: {e}")
+                    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
                     await asyncio.sleep(1)  # Brief delay before reconnecting
                     self._stream_start_time = int(time.time() * 1000)
 
         except Exception as e:
-            logger.error(f"Error in streaming task: {e}")
-            await self.push_frame(ErrorFrame(str(e)))
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process an audio chunk for STT transcription.
@@ -882,8 +889,21 @@ class GoogleSTTService(STTService):
                                 result=result,
                             )
                         )
+        except Aborted as e:
+            # Handle stream abort due to inactivity (409 error).
+            # This occurs when no audio is sent to the stream for 10+ seconds,
+            # which can happen when InputAudioRawFrames are blocked (e.g., by STTMuteFilter).
+            # Google's STT service automatically closes the stream in this case.
+            # We log at DEBUG level (not ERROR) since this is recoverable, then re-raise
+            # to trigger automatic reconnection in _stream_audio.
+            logger.debug(
+                f"{self} Stream aborted due to inactivity (no audio input). "
+                f"Reconnecting automatically..."
+            )
+            raise
         except Exception as e:
-            logger.error(f"Error processing Google STT responses: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             # Re-raise the exception to let it propagate (e.g. in the case of a
             # timeout, propagate to _stream_audio to reconnect)
             raise

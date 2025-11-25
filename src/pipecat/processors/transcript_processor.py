@@ -19,13 +19,14 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    StartInterruptionFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -86,7 +87,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
     transcript messages. Utterances are completed when:
 
     - The bot stops speaking (BotStoppedSpeakingFrame)
-    - The bot is interrupted (StartInterruptionFrame)
+    - The bot is interrupted (InterruptionFrame)
     - The pipeline ends (EndFrame)
     """
 
@@ -97,7 +98,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._current_text_parts: List[str] = []
+        self._current_text_parts: List[TextPartForConcatenation] = []
         self._aggregation_start_time: Optional[str] = None
 
     async def _emit_aggregated_text(self):
@@ -140,29 +141,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
                 Result: "Hello there how are you"
         """
         if self._current_text_parts and self._aggregation_start_time:
-            # Check specifically for space characters, previously isspace() was used
-            # but that includes all whitespace characters (e.g. \n), not just spaces.
-            has_leading_spaces = any(
-                part and part[0] == " " for part in self._current_text_parts[1:]
-            )
-            has_trailing_spaces = any(
-                part and part[-1] == " " for part in self._current_text_parts[:-1]
-            )
-
-            # If there are embedded spaces in the fragments, use direct concatenation
-            contains_spacing_between_fragments = has_leading_spaces or has_trailing_spaces
-
-            # Apply corresponding joining method
-            if contains_spacing_between_fragments:
-                # Fragments already have spacing - just concatenate
-                content = "".join(self._current_text_parts)
-            else:
-                # Word-by-word fragments - join with spaces
-                content = " ".join(self._current_text_parts)
-
-            # Clean up any excessive whitespace
-            content = content.strip()
-
+            content = concatenate_aggregated_text(self._current_text_parts)
             if content:
                 logger.trace(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(
@@ -185,7 +164,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
 
         - TTSTextFrame: Aggregates text for current utterance
         - BotStoppedSpeakingFrame: Completes current utterance
-        - StartInterruptionFrame: Completes current utterance due to interruption
+        - InterruptionFrame: Completes current utterance due to interruption
         - EndFrame: Completes current utterance at pipeline end
         - CancelFrame: Completes current utterance due to cancellation
 
@@ -195,7 +174,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (StartInterruptionFrame, CancelFrame)):
+        if isinstance(frame, (InterruptionFrame, CancelFrame)):
             # Push frame first otherwise our emitted transcription update frame
             # might get cleaned up.
             await self.push_frame(frame, direction)
@@ -206,7 +185,11 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             if not self._aggregation_start_time:
                 self._aggregation_start_time = time_now_iso8601()
 
-            self._current_text_parts.append(frame.text)
+            self._current_text_parts.append(
+                TextPartForConcatenation(
+                    frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                )
+            )
 
             # Push frame.
             await self.push_frame(frame, direction)

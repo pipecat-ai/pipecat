@@ -21,6 +21,7 @@ from pipecat import __version__ as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -174,11 +175,16 @@ class AssemblyAISTTService(STTService):
 
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
-        params = {
-            k: str(v).lower() if isinstance(v, bool) else v
-            for k, v in self._connection_params.model_dump().items()
-            if v is not None
-        }
+        params = {}
+        for k, v in self._connection_params.model_dump().items():
+            if v is not None:
+                if k == "keyterms_prompt":
+                    params[k] = json.dumps(v)
+                elif isinstance(v, bool):
+                    params[k] = str(v).lower()
+                else:
+                    params[k] = v
+
         if params:
             query_string = urlencode(params)
             return f"{self._api_endpoint_base_url}?{query_string}"
@@ -197,9 +203,12 @@ class AssemblyAISTTService(STTService):
             )
             self._connected = True
             self._receive_task = self.create_task(self._receive_task_handler())
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"Failed to connect to AssemblyAI: {e}")
+            logger.error(f"{self} exception: {e}")
             self._connected = False
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             raise
 
     async def _disconnect(self):
@@ -224,7 +233,8 @@ class AssemblyAISTTService(STTService):
                     logger.warning("Timed out waiting for termination message from server")
 
             except Exception as e:
-                logger.warning(f"Error during termination handshake: {e}")
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
             if self._receive_task:
                 await self.cancel_task(self._receive_task)
@@ -232,12 +242,14 @@ class AssemblyAISTTService(STTService):
             await self._websocket.close()
 
         except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
         finally:
             self._websocket = None
             self._connected = False
             self._receive_task = None
+            await self._call_event_handler("on_disconnected")
 
     async def _receive_task_handler(self):
         """Handle incoming WebSocket messages."""
@@ -250,11 +262,13 @@ class AssemblyAISTTService(STTService):
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:
-                    logger.error(f"Error processing WebSocket message: {e}")
+                    logger.error(f"{self} exception: {e}")
+                    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
                     break
 
         except Exception as e:
-            logger.error(f"Fatal error in receive handler: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     def _parse_message(self, message: Dict[str, Any]) -> BaseMessage:
         """Parse a raw message into the appropriate message type."""
@@ -283,7 +297,8 @@ class AssemblyAISTTService(STTService):
             elif isinstance(parsed_message, TerminationMessage):
                 await self._handle_termination(parsed_message)
         except Exception as e:
-            logger.error(f"Error handling message: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""

@@ -129,7 +129,7 @@ class TaskObserver(BaseObserver):
         for proxy in self._proxies:
             await proxy.cleanup()
 
-    async def on_process_frame(self, data: FramePushed):
+    async def on_process_frame(self, data: FrameProcessed):
         """Queue frame data for all managed observers.
 
         Args:
@@ -189,7 +189,7 @@ class TaskObserver(BaseObserver):
             if isinstance(data, FramePushed):
                 if on_push_frame_deprecated:
                     await observer.on_push_frame(
-                        data.src, data.dst, data.frame, data.direction, data.timestamp
+                        data.source, data.destination, data.frame, data.direction, data.timestamp
                     )
                 else:
                     await observer.on_push_frame(data)

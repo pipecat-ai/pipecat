@@ -12,9 +12,10 @@ including heartbeats, idle detection, and observer integration.
 """
 
 import asyncio
-import time
-from collections import deque
-from typing import Any, AsyncIterable, Deque, Dict, Iterable, List, Optional, Tuple, Type
+import importlib.util
+import os
+from pathlib import Path
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,19 +32,16 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
-    InputAudioRawFrame,
-    InterimTranscriptionFrame,
-    LLMFullResponseEndFrame,
+    InterruptionFrame,
+    InterruptionTaskFrame,
     MetricsFrame,
     StartFrame,
     StopFrame,
     StopTaskFrame,
-    TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    UserSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
@@ -59,6 +57,43 @@ HEARTBEAT_MONITOR_SECS = HEARTBEAT_SECS * 10
 IDLE_TIMEOUT_SECS = 300
 
 CANCEL_TIMEOUT_SECS = 20.0
+
+
+class IdleFrameObserver(BaseObserver):
+    """Idle timeout observer.
+
+    This observer waits for specific frames being generated in the pipeline. If
+    the frames are generated the given asyncio event is set. If the event is not
+    set it means the pipeline is probably idle.
+
+    """
+
+    def __init__(self, *, idle_event: asyncio.Event, idle_timeout_frames: Tuple[Type[Frame], ...]):
+        """Initialize the observer.
+
+        Args:
+            idle_event: The event to set if the idle timeout frames are being pushed.
+            idle_timeout_frames: A tuple with the frames that should set the event when received
+        """
+        super().__init__()
+        self._idle_event = idle_event
+        self._idle_timeout_frames = idle_timeout_frames
+        self._processed_frames = set()
+
+    async def on_push_frame(self, data: FramePushed):
+        """Callback executed when a frame is pushed in the pipeline.
+
+        Args:
+            data: The frame push event data.
+        """
+        # Skip already processed frames
+        if data.frame.id in self._processed_frames:
+            return
+
+        self._processed_frames.add(data.frame.id)
+
+        if isinstance(data.frame, StartFrame) or isinstance(data.frame, self._idle_timeout_frames):
+            self._idle_event.set()
 
 
 class PipelineParams(BaseModel):
@@ -117,9 +152,32 @@ class PipelineTask(BasePipelineTask):
     - on_frame_reached_downstream: Called when downstream frames reach the sink
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
     - on_pipeline_started: Called when pipeline starts with StartFrame
-    - on_pipeline_stopped: Called when pipeline stops with StopFrame
-    - on_pipeline_ended: Called when pipeline ends with EndFrame
-    - on_pipeline_cancelled: Called when pipeline is cancelled
+    - on_pipeline_stopped: [deprecated] Called when pipeline stops with StopFrame
+
+            .. deprecated:: 0.0.86
+                Use `on_pipeline_finished` instead.
+
+    - on_pipeline_ended: [deprecated] Called when pipeline ends with EndFrame
+
+            .. deprecated:: 0.0.86
+                Use `on_pipeline_finished` instead.
+
+    - on_pipeline_cancelled: [deprecated] Called when pipeline is cancelled with CancelFrame
+
+            .. deprecated:: 0.0.86
+                Use `on_pipeline_finished` instead.
+
+    - on_pipeline_finished: Called after the pipeline has reached any terminal state.
+          This includes:
+
+              - StopFrame: pipeline was stopped (processors keep connections open)
+              - EndFrame: pipeline ended normally
+              - CancelFrame: pipeline was cancelled
+
+          Use this event for cleanup, logging, or post-processing tasks. Users can inspect
+          the frame if they need to handle specific cases.
+
+    - on_pipeline_error: Called when an error occurs with ErrorFrame
 
     Example::
 
@@ -129,6 +187,18 @@ class PipelineTask(BasePipelineTask):
 
         @task.event_handler("on_idle_timeout")
         async def on_pipeline_idle_timeout(task):
+            ...
+
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame):
+            ...
+
+        @task.event_handler("on_pipeline_finished")
+        async def on_pipeline_finished(task, frame):
+            ...
+
+        @task.event_handler("on_pipeline_error")
+        async def on_pipeline_error(task, frame):
             ...
     """
 
@@ -145,14 +215,7 @@ class PipelineTask(BasePipelineTask):
         conversation_id: Optional[str] = None,
         enable_tracing: bool = False,
         enable_turn_tracking: bool = True,
-        idle_timeout_frames: Tuple[Type[Frame], ...] = (
-            BotSpeakingFrame,
-            InterimTranscriptionFrame,
-            LLMFullResponseEndFrame,
-            TranscriptionFrame,
-            UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
-        ),
+        idle_timeout_frames: Tuple[Type[Frame], ...] = (BotSpeakingFrame, UserSpeakingFrame),
         idle_timeout_secs: Optional[float] = IDLE_TIMEOUT_SECS,
         observers: Optional[List[BaseObserver]] = None,
         task_manager: Optional[BaseTaskManager] = None,
@@ -191,7 +254,6 @@ class PipelineTask(BasePipelineTask):
         self._conversation_id = conversation_id
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._enable_turn_tracking = enable_turn_tracking
-        self._idle_timeout_frames = idle_timeout_frames
         self._idle_timeout_secs = idle_timeout_secs
         if self._params.observers:
             import warnings
@@ -226,16 +288,24 @@ class PipelineTask(BasePipelineTask):
         # This queue is the queue used to push frames to the pipeline.
         self._push_queue = asyncio.Queue()
         self._process_push_task: Optional[asyncio.Task] = None
+
         # This is the heartbeat queue. When a heartbeat frame is received in the
         # down queue we add it to the heartbeat queue for processing.
         self._heartbeat_queue = asyncio.Queue()
         self._heartbeat_push_task: Optional[asyncio.Task] = None
         self._heartbeat_monitor_task: Optional[asyncio.Task] = None
-        # This is the idle queue. When frames are received downstream they are
-        # put in the queue. If no frame is received the pipeline is considered
-        # idle.
-        self._idle_queue = asyncio.Queue()
+
+        # This is the idle event. When selected frames are pushed from any
+        # processor we consider the pipeline is not idle. We use an observer
+        # which will be listening any part of the pipeline.
+        self._idle_event = asyncio.Event()
         self._idle_monitor_task: Optional[asyncio.Task] = None
+        if self._idle_timeout_secs:
+            idle_frame_observer = IdleFrameObserver(
+                idle_event=self._idle_event,
+                idle_timeout_frames=idle_timeout_frames,
+            )
+            observers.append(idle_frame_observer)
 
         # This event is used to indicate the StartFrame has been received at the
         # end of the pipeline.
@@ -244,6 +314,9 @@ class PipelineTask(BasePipelineTask):
         # This event is used to indicate a finalize frame (e.g. EndFrame,
         # StopFrame) has been received at the end of the pipeline.
         self._pipeline_end_event = asyncio.Event()
+
+        # This event is set when the pipeline truly finishes.
+        self._pipeline_finished_event = asyncio.Event()
 
         # This is the final pipeline. It is composed of a source processor,
         # followed by the user pipeline, and ending with a sink processor. The
@@ -273,6 +346,8 @@ class PipelineTask(BasePipelineTask):
         self._register_event_handler("on_pipeline_stopped")
         self._register_event_handler("on_pipeline_ended")
         self._register_event_handler("on_pipeline_cancelled")
+        self._register_event_handler("on_pipeline_finished")
+        self._register_event_handler("on_pipeline_error")
 
     @property
     def params(self) -> PipelineParams:
@@ -300,6 +375,27 @@ class PipelineTask(BasePipelineTask):
             The turn trace observer instance or None if not enabled.
         """
         return self._turn_trace_observer
+
+    def event_handler(self, event_name: str):
+        """Decorator for registering event handlers.
+
+        Args:
+            event_name: The name of the event to handle.
+
+        Returns:
+            The decorator function that registers the handler.
+        """
+        if event_name in ["on_pipeline_stopped", "on_pipeline_ended", "on_pipeline_cancelled"]:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    f"Event '{event_name}' is deprecated, use 'on_pipeline_finished' instead.",
+                    DeprecationWarning,
+                )
+
+        return super().event_handler(event_name)
 
     def add_observer(self, observer: BaseObserver):
         """Add an observer to monitor pipeline execution.
@@ -353,13 +449,14 @@ class PipelineTask(BasePipelineTask):
         logger.debug(f"Task {self} scheduled to stop when done")
         await self.queue_frame(EndFrame())
 
-    async def cancel(self):
-        """Immediately stop the running pipeline.
+    async def cancel(self, *, reason: Optional[str] = None):
+        """Request the running pipeline to cancel.
 
-        Cancels all running tasks and stops frame processing without
-        waiting for completion.
+        Args:
+            reason: Optional reason to indicate why the pipeline is being cancelled.
         """
-        await self._cancel()
+        if not self._finished:
+            await self._cancel(reason=reason)
 
     async def run(self, params: PipelineTaskParams):
         """Start and manage the pipeline execution until completion or cancellation.
@@ -369,51 +466,38 @@ class PipelineTask(BasePipelineTask):
         """
         if self.has_finished():
             return
-        cleanup_pipeline = True
+
+        # Setup processors.
+        await self._setup(params)
+
+        # Create all main tasks and wait for the main push task. This is the
+        # task that pushes frames to the very beginning of our pipeline (i.e. to
+        # our controlled source processor).
+        await self._create_tasks()
+
         try:
-            # Setup processors.
-            await self._setup(params)
-
-            # Create all main tasks and wait of the main push task. This is the
-            # task that pushes frames to the very beginning of our pipeline (our
-            # controlled source processor).
-            push_task = await self._create_tasks()
-            await push_task
-
-            # We have already cleaned up the pipeline inside the task.
-            cleanup_pipeline = False
-
-            # Pipeline has finished nicely.
-            self._finished = True
+            # Wait for pipeline to finish.
+            await self._wait_for_pipeline_finished()
         except asyncio.CancelledError:
-            # Raise exception back to the pipeline runner so it can cancel this
-            # task properly.
+            logger.debug(f"Pipeline task {self} got cancelled from outside...")
+            # We have been cancelled from outside, let's just cancel everything.
+            await self._cancel()
+            # Wait again for pipeline to finish. This time we have really
+            # cancelled, so it should really finish.
+            await self._wait_for_pipeline_finished()
+            # Re-raise in case there's more cleanup to do.
             raise
         finally:
             # We can reach this point for different reasons:
             #
-            # 1. The task has finished properly (e.g. `EndFrame`).
-            # 2. By calling `PipelineTask.cancel()`.
-            # 3. By asyncio task cancellation.
-            #
-            # Case (1) will execute the code below without issues because
-            # `self._finished` is true.
-            #
-            # Case (2) will execute the code below without issues because
-            # `self._cancelled` is true.
-            #
-            # Case (3) will raise the exception above (because we are cancelling
-            # the asyncio task). This will be then captured by the
-            # `PipelineRunner` which will call `PipelineTask.cancel()` and
-            # therefore becoming case (2).
-            if self._finished or self._cancelled:
-                logger.debug(f"Pipeline task {self} is finishing cleanup...")
-                await self._cancel_tasks()
-                await self._cleanup(cleanup_pipeline)
-                if self._check_dangling_tasks:
-                    self._print_dangling_tasks()
-                self._finished = True
-                logger.debug(f"Pipeline task {self} has finished")
+            # 1. The pipeline task has finished (try case).
+            # 2. By an asyncio task cancellation (except case).
+            logger.debug(f"Pipeline task {self} is finishing...")
+            await self._cancel_tasks()
+            if self._check_dangling_tasks:
+                self._print_dangling_tasks()
+            self._finished = True
+            logger.debug(f"Pipeline task {self} has finished")
 
     async def queue_frame(self, frame: Frame):
         """Queue a single frame to be pushed down the pipeline.
@@ -436,24 +520,16 @@ class PipelineTask(BasePipelineTask):
             for frame in frames:
                 await self.queue_frame(frame)
 
-    async def _cancel(self):
-        """Internal cancellation logic for the pipeline task."""
+    async def _cancel(self, *, reason: Optional[str] = None):
+        """Internal cancellation logic for the pipeline task.
+
+        Args:
+            reason: Optional reason to indicate why the pipeline is being cancelled.
+        """
         if not self._cancelled:
             logger.debug(f"Cancelling pipeline task {self}")
             self._cancelled = True
-            cancel_frame = CancelFrame()
-            # Make sure everything is cleaned up downstream. This is sent
-            # out-of-band from the main streaming task which is what we want since
-            # we want to cancel right away.
-            await self._pipeline.queue_frame(cancel_frame)
-            # Wait for CancelFrame to make it through the pipeline.
-            await self._wait_for_pipeline_end(cancel_frame)
-            # Only cancel the push task, we don't want to be able to process any
-            # other frame after cancel. Everything else will be cancelled in
-            # run().
-            if self._process_push_task:
-                await self._task_manager.cancel_task(self._process_push_task)
-                self._process_push_task = None
+            await self.queue_frame(CancelFrame(reason=reason))
 
     async def _create_tasks(self):
         """Create and start all pipeline processing tasks."""
@@ -508,7 +584,7 @@ class PipelineTask(BasePipelineTask):
 
     async def _maybe_cancel_idle_task(self):
         """Cancel idle monitoring task if it is running."""
-        if self._idle_timeout_secs and self._idle_monitor_task:
+        if self._idle_monitor_task:
             await self._task_manager.cancel_task(self._idle_monitor_task)
             self._idle_monitor_task = None
 
@@ -543,6 +619,7 @@ class PipelineTask(BasePipelineTask):
                 )
             finally:
                 await self._call_event_handler("on_pipeline_cancelled", frame)
+                await self._call_event_handler("on_pipeline_finished", frame)
 
         logger.debug(f"{self}: Closing. Waiting for {frame} to reach the end of the pipeline...")
 
@@ -554,8 +631,22 @@ class PipelineTask(BasePipelineTask):
 
         self._pipeline_end_event.clear()
 
+        # We are really done.
+        self._pipeline_finished_event.set()
+
+    async def _wait_for_pipeline_finished(self):
+        await self._pipeline_finished_event.wait()
+        self._pipeline_finished_event.clear()
+        # Make sure we wait for the main task to complete.
+        if self._process_push_task:
+            await self._process_push_task
+            self._process_push_task = None
+
     async def _setup(self, params: PipelineTaskParams):
         """Set up the pipeline task and all processors."""
+        # Load additional observers.
+        await self._load_observer_files()
+
         mgr_params = TaskManagerParams(loop=params.loop)
         self._task_manager.setup(mgr_params)
 
@@ -638,22 +729,31 @@ class PipelineTask(BasePipelineTask):
 
         if isinstance(frame, EndTaskFrame):
             # Tell the task we should end nicely.
-            await self.queue_frame(EndFrame())
+            logger.debug(f"{self}: received end task frame {frame}")
+            await self.queue_frame(EndFrame(reason=frame.reason))
         elif isinstance(frame, CancelTaskFrame):
             # Tell the task we should end right away.
-            await self.queue_frame(CancelFrame())
+            logger.debug(f"{self}: received cancel task frame {frame}")
+            await self.queue_frame(CancelFrame(reason=frame.reason))
         elif isinstance(frame, StopTaskFrame):
             # Tell the task we should stop nicely.
+            logger.debug(f"{self}: received stop task frame {frame}")
             await self.queue_frame(StopFrame())
+        elif isinstance(frame, InterruptionTaskFrame):
+            # Tell the task we should interrupt the pipeline. Note that we are
+            # bypassing the push queue and directly queue into the
+            # pipeline. This is in case the push task is blocked waiting for a
+            # pipeline-ending frame to finish traversing the pipeline.
+            logger.debug(f"{self}: received interruption task frame {frame}")
+            await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
+            await self._call_event_handler("on_pipeline_error", frame)
             if frame.fatal:
                 logger.error(f"A fatal error occurred: {frame}")
                 # Cancel all tasks downstream.
                 await self.queue_frame(CancelFrame())
-                # Tell the task we should stop.
-                await self.queue_frame(StopTaskFrame())
             else:
-                logger.warning(f"Something went wrong: {frame}")
+                logger.warning(f"{self}: Something went wrong: {frame}")
 
     async def _sink_push_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames coming downstream from the pipeline.
@@ -663,10 +763,6 @@ class PipelineTask(BasePipelineTask):
         processors have handled the EndFrame and therefore we can exit the task
         cleanly.
         """
-        # Queue received frame to the idle queue so we can monitor idle
-        # pipelines.
-        await self._idle_queue.put(frame)
-
         if isinstance(frame, self._reached_downstream_types):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
@@ -680,9 +776,11 @@ class PipelineTask(BasePipelineTask):
             self._pipeline_start_event.set()
         elif isinstance(frame, EndFrame):
             await self._call_event_handler("on_pipeline_ended", frame)
+            await self._call_event_handler("on_pipeline_finished", frame)
             self._pipeline_end_event.set()
         elif isinstance(frame, StopFrame):
             await self._call_event_handler("on_pipeline_stopped", frame)
+            await self._call_event_handler("on_pipeline_finished", frame)
             self._pipeline_end_event.set()
         elif isinstance(frame, CancelFrame):
             self._pipeline_end_event.set()
@@ -727,63 +825,51 @@ class PipelineTask(BasePipelineTask):
         Note: Heartbeats are excluded from idle detection.
         """
         running = True
-        last_frame_time = 0
-        frame_buffer = deque(maxlen=10)  # Store last 10 frames
-
         while running:
             try:
-                frame = await asyncio.wait_for(
-                    self._idle_queue.get(), timeout=self._idle_timeout_secs
-                )
-
-                if not isinstance(frame, InputAudioRawFrame):
-                    frame_buffer.append(frame)
-
-                if isinstance(frame, StartFrame) or isinstance(frame, self._idle_timeout_frames):
-                    # If we find a StartFrame or one of the frames that prevents a
-                    # time out we update the time.
-                    last_frame_time = time.time()
-                else:
-                    # If we find any other frame we check if the pipeline is
-                    # idle by checking the last time we received one of the
-                    # valid frames.
-                    diff_time = time.time() - last_frame_time
-                    if diff_time >= self._idle_timeout_secs:
-                        running = await self._idle_timeout_detected(frame_buffer)
-                        # Reset `last_frame_time` so we don't trigger another
-                        # immediate idle timeout if we are not cancelling. For
-                        # example, we might want to force the bot to say goodbye
-                        # and then clean nicely with an `EndFrame`.
-                        last_frame_time = time.time()
-
-                self._idle_queue.task_done()
-
+                await asyncio.wait_for(self._idle_event.wait(), timeout=self._idle_timeout_secs)
+                self._idle_event.clear()
             except asyncio.TimeoutError:
-                running = await self._idle_timeout_detected(frame_buffer)
+                running = await self._idle_timeout_detected()
 
-    async def _idle_timeout_detected(self, last_frames: Deque[Frame]) -> bool:
+    async def _idle_timeout_detected(self) -> bool:
         """Handle idle timeout detection and optional cancellation.
-
-        Args:
-            last_frames: Recent frames received before timeout for debugging.
 
         Returns:
             Whether the pipeline task should continue running.
         """
         # If we are cancelling, just exit the task.
         if self._cancelled:
-            return True
+            return False
 
-        logger.warning("Idle timeout detected. Last 10 frames received:")
-        for i, frame in enumerate(last_frames, 1):
-            logger.warning(f"Frame {i}: {frame}")
-
+        logger.warning("Idle timeout detected.")
         await self._call_event_handler("on_idle_timeout")
         if self._cancel_on_idle_timeout:
             logger.warning(f"Idle pipeline detected, cancelling pipeline task...")
             await self.cancel()
             return False
         return True
+
+    async def _load_observer_files(self):
+        observer_files = os.environ.get("PIPECAT_OBSERVER_FILES", "").split(":")
+        for f in observer_files:
+            try:
+                path = Path(f).resolve()
+                module_name = path.stem
+                spec = importlib.util.spec_from_file_location(module_name, str(path))
+                if spec:
+                    logger.debug(f"{self} loading observers from {path}")
+
+                    # Load module.
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+
+                    # Create observers.
+                    observers = await module.create_observers(self)
+                    for observer in observers:
+                        self.add_observer(observer)
+            except Exception as e:
+                logger.error(f"{self} error loading external observers from {f}: {e}")
 
     def _print_dangling_tasks(self):
         """Log any dangling tasks that haven't been properly cleaned up."""

@@ -38,7 +38,7 @@ Examples::
             model="inworld-tts-1",
             streaming=True,  # Default
             params=InworldTTSService.InputParams(
-                temperature=0.8,  # Optional: control synthesis variability (range: [0, 2])
+                temperature=1.1,  # Optional: control synthesis variability (range: [0, 2])
             ),
         )
 
@@ -50,7 +50,7 @@ Examples::
             model="inworld-tts-1",
             streaming=False,
             params=InworldTTSService.InputParams(
-                temperature=0.8,
+                temperature=1.1,
             ),
         )
 """
@@ -123,7 +123,7 @@ class InworldTTSService(TTSService):
                 model="inworld-tts-1",
                 streaming=True,  # Default behavior
                 params=InworldTTSService.InputParams(
-                    temperature=0.8,  # Add variability to speech synthesis (range: [0, 2])
+                    temperature=1.1,  # Add variability to speech synthesis (range: [0, 2])
                 ),
             )
 
@@ -135,7 +135,7 @@ class InworldTTSService(TTSService):
                 model="inworld-tts-1-max",
                 streaming=False,
                 params=InworldTTSService.InputParams(
-                    temperature=0.8,
+                    temperature=1.1,
                 ),
             )
     """
@@ -144,8 +144,10 @@ class InworldTTSService(TTSService):
         """Optional input parameters for Inworld TTS configuration.
 
         Parameters:
-            temperature: Voice temperature control for synthesis variability (e.g., 0.8).
+            temperature: Voice temperature control for synthesis variability (e.g., 1.1).
                         Valid range: [0, 2]. Higher values increase variability.
+            speaking_rate: Speaking speed control (range: [0.5, 1.5]). Defaults to 1.0 when
+                           unset.
 
         Note:
             Language is automatically inferred from the input text by Inworld's TTS models,
@@ -153,6 +155,7 @@ class InworldTTSService(TTSService):
         """
 
         temperature: Optional[float] = None  # optional temperature control (range: [0, 2])
+        speaking_rate: Optional[float] = None  # optional speaking rate control (range: [0.5, 1.5])
 
     def __init__(
         self,
@@ -197,7 +200,8 @@ class InworldTTSService(TTSService):
                      - "LINEAR16" (default) - Uncompressed PCM, best quality
                      - Other formats as supported by Inworld API
             params: Optional input parameters for additional configuration. Use this to specify:
-                   - temperature: Voice temperature control for variability (range: [0, 2], e.g., 0.8, optional)
+                   - temperature: Voice temperature control for variability (range: [0, 2], e.g., 1.1, optional)
+                   - speaking_rate: Set desired speaking speed (range: [0.5, 1.5], optional)
                    Language is automatically inferred from input text.
             **kwargs: Additional arguments passed to the parent TTSService class.
 
@@ -228,15 +232,18 @@ class InworldTTSService(TTSService):
         self._settings = {
             "voiceId": voice_id,  # Voice selection from direct parameter
             "modelId": model,  # TTS model selection from direct parameter
-            "audio_config": {  # Audio format configuration
-                "audio_encoding": encoding,  # Format: LINEAR16, MP3, etc.
-                "sample_rate_hertz": 0,  # Will be set in start() from parent service
+            "audioConfig": {  # Audio format configuration
+                "audioEncoding": encoding,  # Format: LINEAR16, MP3, etc.
+                "sampleRateHertz": 0,  # Will be set in start() from parent service
             },
         }
 
         # Add optional temperature parameter if provided (valid range: [0, 2])
         if params and params.temperature is not None:
             self._settings["temperature"] = params.temperature
+        # Add optional speaking rate if provided (valid range: [0.5, 1.5])
+        if params and params.speaking_rate is not None:
+            self._settings["audioConfig"]["speakingRate"] = params.speaking_rate
 
         # Register voice and model with parent service for metrics and tracking
         self.set_voice(voice_id)  # Used for logging and metrics
@@ -257,7 +264,7 @@ class InworldTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["audio_config"]["sample_rate_hertz"] = self.sample_rate
+        self._settings["audioConfig"]["sampleRateHertz"] = self.sample_rate
 
     async def stop(self, frame: EndFrame):
         """Stop the Inworld TTS service.
@@ -323,9 +330,7 @@ class InworldTTSService(TTSService):
             "text": text,  # Text to synthesize
             "voiceId": self._settings["voiceId"],  # Voice selection (Ashley, Hades, etc.)
             "modelId": self._settings["modelId"],  # TTS model (inworld-tts-1)
-            "audio_config": self._settings[
-                "audio_config"
-            ],  # Audio format settings (LINEAR16, 48kHz)
+            "audioConfig": self._settings["audioConfig"],  # Audio format settings (LINEAR16, 48kHz)
         }
 
         # Add optional temperature parameter if configured (valid range: [0, 2])
@@ -365,7 +370,7 @@ class InworldTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Inworld API error: {error_text}")
-                    await self.push_error(ErrorFrame(f"Inworld API error: {error_text}"))
+                    yield ErrorFrame(error=f"Inworld API error: {error_text}")
                     return
 
                 # ================================================================================
@@ -393,7 +398,7 @@ class InworldTTSService(TTSService):
             # ================================================================================
             # Log any unexpected errors and notify the pipeline
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             # ================================================================================
             # STEP 8: CLEANUP AND COMPLETION
@@ -508,7 +513,7 @@ class InworldTTSService(TTSService):
         # Extract the base64-encoded audio content from response
         if "audioContent" not in response_data:
             logger.error("No audioContent in Inworld API response")
-            await self.push_error(ErrorFrame("No audioContent in response"))
+            await self.push_error(ErrorFrame(error="No audioContent in response"))
             return
 
         # ================================================================================

@@ -1,5 +1,9 @@
 ## Contributing to Pipecat
 
+**Want to add a new service integration?**
+We encourage community-maintained integrations! Please see our [Community Integration Guide](COMMUNITY_INTEGRATIONS.md) for the process and requirements.
+
+**Want to contribute to Pipecat core?**
 We welcome contributions of all kinds! Your help is appreciated. Follow these steps to get involved:
 
 1. **Fork this repository**: Start by forking the Pipecat Documentation repository to your GitHub account.

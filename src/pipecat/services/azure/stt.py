@@ -18,7 +18,9 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
 )
@@ -110,13 +112,17 @@ class AzureSTTService(STTService):
             audio: Raw audio bytes to process.
 
         Yields:
-            None - actual transcription frames are pushed via callbacks.
+            Frame: Either None for successful processing or ErrorFrame on failure.
         """
-        await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
-        if self._audio_stream:
-            self._audio_stream.write(audio)
-        yield None
+        try:
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
+            if self._audio_stream:
+                self._audio_stream.write(audio)
+            yield None
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")
 
     async def start(self, frame: StartFrame):
         """Start the speech recognition service.
@@ -132,16 +138,21 @@ class AzureSTTService(STTService):
         if self._audio_stream:
             return
 
-        stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
-        self._audio_stream = PushAudioInputStream(stream_format)
+        try:
+            stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
+            self._audio_stream = PushAudioInputStream(stream_format)
 
-        audio_config = AudioConfig(stream=self._audio_stream)
+            audio_config = AudioConfig(stream=self._audio_stream)
 
-        self._speech_recognizer = SpeechRecognizer(
-            speech_config=self._speech_config, audio_config=audio_config
-        )
-        self._speech_recognizer.recognized.connect(self._on_handle_recognized)
-        self._speech_recognizer.start_continuous_recognition_async()
+            self._speech_recognizer = SpeechRecognizer(
+                speech_config=self._speech_config, audio_config=audio_config
+            )
+            self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
+            self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+            self._speech_recognizer.start_continuous_recognition_async()
+        except Exception as e:
+            logger.error(f"{self} exception during initialization: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def stop(self, frame: EndFrame):
         """Stop the speech recognition service.
@@ -195,5 +206,17 @@ class AzureSTTService(STTService):
             )
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()
+            )
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_recognizing(self, event):
+        if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
+            language = getattr(event.result, "language", None) or self._settings.get("language")
+            frame = InterimTranscriptionFrame(
+                event.result.text,
+                self._user_id,
+                time_now_iso8601(),
+                language,
+                result=event,
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())

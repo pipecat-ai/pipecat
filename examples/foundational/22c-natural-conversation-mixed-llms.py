@@ -9,8 +9,9 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     CancelFrame,
@@ -18,9 +19,10 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InterruptionFrame,
+    LLMContextFrame,
     LLMRunFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -32,10 +34,8 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.user_idle_processor import UserIdleProcessor
@@ -49,8 +49,8 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
@@ -258,7 +258,7 @@ Output: YES
 Output: NO
 """
 
-conversational_system_message = """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.
+conversational_system_message = """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.
 
 Please be very concise in your responses. Unless you are explicitly asked to do otherwise, give me the shortest complete answer possible without unnecessary elaboration. Generally you should answer with a single sentence.
 """
@@ -272,11 +272,11 @@ class StatementJudgeContextFilter(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        # We only want to handle OpenAILLMContextFrames, and only want to push through a simplified
+        # We only want to handle LLMContextFrames, and only want to push through a simplified
         # context frame that contains a system prompt and the most recent user messages,
-        if isinstance(frame, OpenAILLMContextFrame):
+        if isinstance(frame, LLMContextFrame):
             # Take text content from the most recent user messages.
-            messages = frame.context.messages
+            messages = frame.context.get_messages()
             user_text_messages = []
             last_assistant_message = None
             for message in reversed(messages):
@@ -303,7 +303,7 @@ class StatementJudgeContextFilter(FrameProcessor):
                 if last_assistant_message:
                     messages.append(last_assistant_message)
                 messages.append({"role": "user", "content": user_message})
-                await self.push_frame(OpenAILLMContextFrame(OpenAILLMContext(messages)))
+                await self.push_frame(LLMContextFrame(LLMContext(messages)))
 
 
 class CompletenessCheck(FrameProcessor):
@@ -347,7 +347,7 @@ class OutputGate(FrameProcessor):
                 await self._start()
             if isinstance(frame, (EndFrame, CancelFrame)):
                 await self._stop()
-            if isinstance(frame, StartInterruptionFrame):
+            if isinstance(frame, InterruptionFrame):
                 self._frames_buffer = []
                 self.close_gate()
             await self.push_frame(frame, direction)
@@ -425,11 +425,14 @@ class TurnDetectionLLM(Pipeline):
 
         async def pass_only_llm_trigger_frames(frame):
             return (
-                isinstance(frame, OpenAILLMContextFrame)
-                or isinstance(frame, StartInterruptionFrame)
+                isinstance(frame, LLMContextFrame)
+                or isinstance(frame, InterruptionFrame)
                 or isinstance(frame, FunctionCallInProgressFrame)
                 or isinstance(frame, FunctionCallResultFrame)
             )
+
+        async def filter_all(frame):
+            return False
 
         super().__init__(
             [
@@ -440,12 +443,13 @@ class TurnDetectionLLM(Pipeline):
                         FunctionFilter(filter=block_user_stopped_speaking),
                     ],
                     [
-                        # Ignore everything except an OpenAILLMContextFrame. Pass a specially constructed
+                        # Ignore everything except an LLMContextFrame. Pass a specially constructed
                         # simplified context frame to the statement classifier LLM. The only frame this
                         # sub-pipeline will output is a UserStoppedSpeakingFrame.
                         statement_judge_context_filter,
                         statement_llm,
                         completeness_check,
+                        FunctionFilter(filter=filter_all, direction=FrameDirection.UPSTREAM),
                     ],
                     [
                         # Block everything except frames that trigger LLM inference.
@@ -505,30 +509,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_function_calls_started(service, function_calls):
         await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
-    tools = [
-        ChatCompletionToolParam(
-            type="function",
-            function={
-                "name": "get_current_weather",
-                "description": "Get the current weather",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "The city and state, e.g. San Francisco, CA",
-                        },
-                        "format": {
-                            "type": "string",
-                            "enum": ["celsius", "fahrenheit"],
-                            "description": "The temperature unit to use. Infer this from the users location.",
-                        },
-                    },
-                    "required": ["location", "format"],
-                },
+    weather_function = FunctionSchema(
+        name="get_current_weather",
+        description="Get the current weather",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
             },
-        )
-    ]
+            "format": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the users location.",
+            },
+        },
+        required=["location", "format"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function])
 
     messages = [
         {
@@ -537,8 +534,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm_main.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     # LLM + turn detection (with an extra LLM as a judge)
     llm = TurnDetectionLLM(llm_main)
@@ -577,7 +574,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_app_message")
-    async def on_app_message(transport, message):
+    async def on_app_message(transport, message, sender):
         logger.debug(f"Received app message: {message}")
         if "message" not in message:
             return

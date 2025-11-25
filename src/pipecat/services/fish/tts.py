@@ -21,8 +21,8 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -225,8 +225,11 @@ class FishAudioTTSService(InterruptibleTTSService):
             start_message = {"event": "start", "request": {"text": "", **self._settings}}
             await self._websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start message to Fish Audio")
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"Fish Audio initialization error: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -240,11 +243,13 @@ class FishAudioTTSService(InterruptibleTTSService):
                 await self._websocket.send(ormsgpack.packb(stop_message))
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"Error closing websocket: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._request_id = None
             self._started = False
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def flush_audio(self):
         """Flush any buffered audio by sending a flush event to Fish Audio."""
@@ -259,7 +264,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
         self._request_id = None
@@ -281,7 +286,8 @@ class FishAudioTTSService(InterruptibleTTSService):
                                 continue
 
             except Exception as e:
-                logger.error(f"Error processing message: {e}")
+                logger.error(f"{self} exception: {e}")
+                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -317,7 +323,8 @@ class FishAudioTTSService(InterruptibleTTSService):
                 flush_message = {"event": "flush"}
                 await self._get_websocket().send(ormsgpack.packb(flush_message))
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                logger.error(f"{self} exception: {e}")
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -325,5 +332,5 @@ class FishAudioTTSService(InterruptibleTTSService):
             yield None
 
         except Exception as e:
-            logger.error(f"Error generating TTS: {e}")
-            yield ErrorFrame(f"Error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")

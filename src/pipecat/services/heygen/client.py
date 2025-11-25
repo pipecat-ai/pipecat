@@ -83,6 +83,7 @@ class HeyGenClient:
             version="v2",
         ),
         callbacks: HeyGenCallbacks,
+        connect_as_user: bool = False,
     ) -> None:
         """Initialize the HeyGen client.
 
@@ -92,6 +93,7 @@ class HeyGenClient:
             params: Transport configuration parameters
             session_request: Configuration for the HeyGen session (default: uses Shawn_Therapist_public avatar)
             callbacks: Callback handlers for HeyGen events
+            connect_as_user: Whether to connect using the user token or not (default: False)
         """
         self._api = HeyGenApi(api_key, session=session)
         self._heyGen_session: Optional[HeyGenSession] = None
@@ -119,6 +121,11 @@ class HeyGenClient:
         self._next_send_time = 0
         self._audio_seconds_sent = 0.0
         self._transport_ready = False
+        # HeyGen enforces a protection mechanism that will automatically disconnect the avatar if a user does not join within 5 minutes,
+        # regardless of whether the Pipecat agent remains present in the room.
+        # To prevent unexpected disconnections in HeyGenVideoService, we ensure that a user connection is established using the user's token.
+        # This keeps the avatar session active and avoids forced logouts due to inactivity from the user side.
+        self._connect_as_user = connect_as_user
 
     async def _initialize(self):
         self._heyGen_session = await self._api.new_session(self._session_request)
@@ -393,7 +400,9 @@ class HeyGenClient:
             participant_id: Identifier of the participant to capture audio from
             callback: Async function to handle received audio frames
         """
-        logger.debug(f"capture_participant_audio: {participant_id}")
+        logger.debug(
+            f"capture_participant_audio: {participant_id}, sample_rate: {self._in_sample_rate}"
+        )
         self._audio_frame_callback = callback
         if self._audio_task is not None:
             logger.warning(
@@ -407,7 +416,9 @@ class HeyGenClient:
             for track_pub in participant.track_publications.values():
                 if track_pub.kind == rtc.TrackKind.KIND_AUDIO and track_pub.track is not None:
                     logger.debug(f"Starting audio capture for existing track: {track_pub.sid}")
-                    audio_stream = rtc.AudioStream(track_pub.track)
+                    audio_stream = rtc.AudioStream(
+                        track=track_pub.track, sample_rate=self._in_sample_rate
+                    )
                     self._audio_task = self._task_manager.create_task(
                         self._process_audio_frames(audio_stream), name="HeyGenClient_Receive_Audio"
                     )
@@ -536,7 +547,7 @@ class HeyGenClient:
                     and self._audio_task is None
                 ):
                     logger.debug(f"Creating audio stream processor for track: {publication.sid}")
-                    audio_stream = rtc.AudioStream(track)
+                    audio_stream = rtc.AudioStream(track=track, sample_rate=self._in_sample_rate)
                     self._audio_task = self._task_manager.create_task(
                         self._process_audio_frames(audio_stream), name="HeyGenClient_Receive_Audio"
                     )
@@ -558,9 +569,12 @@ class HeyGenClient:
                     self._callbacks.on_participant_disconnected, participant.identity
                 )
 
-            await self._livekit_room.connect(
-                self._heyGen_session.url, self._heyGen_session.access_token
+            access_token = (
+                self._heyGen_session.livekit_agent_token
+                if not self._connect_as_user
+                else self._heyGen_session.access_token
             )
+            await self._livekit_room.connect(self._heyGen_session.url, access_token)
             logger.debug(f"Successfully connected to LiveKit room: {self._livekit_room.name}")
             logger.debug(f"Local participant SID: {self._livekit_room.local_participant.sid}")
             logger.debug(

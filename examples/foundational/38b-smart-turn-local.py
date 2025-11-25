@@ -11,41 +11,26 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v2 import LocalSmartTurnAnalyzerV2
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
-
-# To use this locally, set the environment variable LOCAL_SMART_TURN_MODEL_PATH
-# to the path where the smart-turn repo is cloned.
-#
-# Example setup:
-#
-#   # Git LFS (Large File Storage)
-#   brew install git-lfs
-#   # Hugging Face uses LFS to store large model files, including .mlpackage
-#   git lfs install
-#   # Clone the repo with the smart_turn_classifier.mlpackage
-#   git clone https://huggingface.co/pipecat-ai/smart-turn-v2
-#
-# Then set the env variable:
-#   export LOCAL_SMART_TURN_MODEL_PATH=./smart-turn
-# or add it to your .env file
-smart_turn_model_path = os.getenv("LOCAL_SMART_TURN_MODEL_PATH")
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -55,25 +40,19 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV2(
-            smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
-        ),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV2(
-            smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
-        ),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV2(
-            smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
-        ),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -93,16 +72,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
-    context = OpenAILLMContext(messages)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(context)
+
+    rtvi = RTVIProcessor()
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
+            rtvi,
             stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
@@ -118,15 +100,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[RTVIObserver(rtvi)],
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
+
+    @rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        await rtvi.set_bot_ready()
+        # Kick off the conversation
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

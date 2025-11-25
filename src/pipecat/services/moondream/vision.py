@@ -11,17 +11,22 @@ for image analysis and description generation.
 """
 
 import asyncio
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from PIL import Image
 
-from pipecat.frames.frames import ErrorFrame, Frame, TextFrame, VisionImageRawFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    TextFrame,
+    UserImageRawFrame,
+)
 from pipecat.services.vision_service import VisionService
 
 try:
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Moondream, you need to `pip install pipecat-ai[moondream]`.")
@@ -89,16 +94,16 @@ class MoondreamService(VisionService):
             trust_remote_code=True,
             revision=revision,
             device_map={"": device},
-            torch_dtype=dtype,
+            dtype=dtype,
         ).eval()
 
         logger.debug("Loaded Moondream model")
 
-    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+    async def run_vision(self, frame: UserImageRawFrame) -> AsyncGenerator[Frame, None]:
         """Analyze an image and generate a description.
 
         Args:
-            frame: Vision frame containing the image data and optional question text.
+            frame: The image frame to process.
 
         Yields:
             Frame: TextFrame containing the generated image description, or ErrorFrame
@@ -109,22 +114,14 @@ class MoondreamService(VisionService):
             yield ErrorFrame("Moondream model not available")
             return
 
-        logger.debug(f"Analyzing image: {frame}")
+        logger.debug(f"Analyzing image (bytes length: {len(frame.image)})")
 
-        def get_image_description(frame: VisionImageRawFrame):
-            """Generate description for the given image frame.
-
-            Args:
-                frame: Vision frame containing image data and question.
-
-            Returns:
-                str: Generated description of the image.
-            """
-            image = Image.frombytes(frame.format, frame.size, frame.image)
+        def get_image_description(image_bytes: bytes, text: Optional[str]) -> str:
+            image = Image.frombytes(frame.format, frame.size, image_bytes)
             image_embeds = self._model.encode_image(image)
-            description = self._model.query(image_embeds, frame.text)["answer"]
+            description = self._model.query(image_embeds, text)["answer"]
             return description
 
-        description = await asyncio.to_thread(get_image_description, frame)
+        description = await asyncio.to_thread(get_image_description, frame.image, frame.text)
 
         yield TextFrame(text=description)

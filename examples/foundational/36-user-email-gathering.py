@@ -9,24 +9,28 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.rime.tts import RimeHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
@@ -42,17 +46,20 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -84,38 +91,32 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("store_user_emails", store_user_emails)
 
-    tools = [
-        ChatCompletionToolParam(
-            type="function",
-            function={
-                "name": "store_user_emails",
-                "description": "Store user emails when confirmed",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "emails": {
-                            "type": "array",
-                            "description": "The list of user emails",
-                            "items": {"type": "string"},
-                        },
-                    },
-                    "required": ["emails"],
-                },
+    store_emails_function = FunctionSchema(
+        name="store_user_emails",
+        description="Store user emails when confirmed",
+        properties={
+            "emails": {
+                "type": "array",
+                "description": "The list of user emails",
+                "items": {"type": "string"},
             },
-        )
-    ]
+        },
+        required=["emails"],
+    )
+    tools = ToolsSchema(standard_tools=[store_emails_function])
+
     messages = [
         {
             "role": "system",
             # Cartesia <spell></spell>
-            "content": "You need to gather a valid email or emails from the user. Your output will be converted to audio so don't include special characters in your answers. If the user provides one or more email addresses confirm them with the user. Enclose all emails with <spell> tags, for example <spell>a@a.com</spell>.",
+            "content": "You need to gather a valid email or emails from the user. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. If the user provides one or more email addresses confirm them with the user. Enclose all emails with <spell> tags, for example <spell>a@a.com</spell>.",
             # Rime spell()
-            # "content": "You need to gather a valid email or emails from the user. Your output will be converted to audio so don't include special characters in your answers. If the user provides one or more email addresses confirm them with the user. Enclose all emails with spell(), for example spell(a@a.com).",
+            # "content": "You need to gather a valid email or emails from the user. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. If the user provides one or more email addresses confirm them with the user. Enclose all emails with spell(), for example spell(a@a.com).",
         },
     ]
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

@@ -20,10 +20,10 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
+    InterruptionFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    StartInterruptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -98,7 +98,7 @@ class ExotelFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -121,7 +121,7 @@ class ExotelFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
-        elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             return json.dumps(frame.message)
 
         return None

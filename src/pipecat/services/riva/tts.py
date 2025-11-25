@@ -23,6 +23,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -66,7 +67,7 @@ class RivaTTSService(TTSService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str = "Magpie-Multilingual.EN-US.Ray",
+        voice_id: str = "Magpie-Multilingual.EN-US.Aria",
         sample_rate: Optional[int] = None,
         model_function_map: Mapping[str, str] = {
             "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
@@ -180,6 +181,7 @@ class RivaTTSService(TTSService):
                 resp = await asyncio.wait_for(queue.get(), timeout=RIVA_TTS_TIMEOUT_SECS)
         except asyncio.TimeoutError:
             logger.error(f"{self} timeout waiting for audio response")
+            yield ErrorFrame(error=f"{self} error: {e}")
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()

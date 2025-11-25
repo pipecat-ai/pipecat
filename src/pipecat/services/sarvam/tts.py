@@ -20,16 +20,16 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -64,7 +64,7 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
         Language.TE: "te-IN",  # Telugu
     }
 
-    return LANGUAGE_MAP.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class SarvamHttpTTSService(TTSService):
@@ -76,15 +76,27 @@ class SarvamHttpTTSService(TTSService):
 
     Example::
 
-        tts = SarvamTTSService(
+        tts = SarvamHttpTTSService(
             api_key="your-api-key",
             voice_id="anushka",
             model="bulbul:v2",
             aiohttp_session=session,
-            params=SarvamTTSService.InputParams(
+            params=SarvamHttpTTSService.InputParams(
                 language=Language.HI,
                 pitch=0.1,
                 pace=1.2
+            )
+        )
+
+        # For bulbul v3 beta with any speaker:
+        tts_v3 = SarvamHttpTTSService(
+            api_key="your-api-key",
+            voice_id="speaker_name",
+            model="bulbul:v3,
+            aiohttp_session=session,
+            params=SarvamHttpTTSService.InputParams(
+                language=Language.HI,
+                temperature=0.8
             )
         )
     """
@@ -105,6 +117,14 @@ class SarvamHttpTTSService(TTSService):
         pace: Optional[float] = Field(default=1.0, ge=0.3, le=3.0)
         loudness: Optional[float] = Field(default=1.0, ge=0.1, le=3.0)
         enable_preprocessing: Optional[bool] = False
+        temperature: Optional[float] = Field(
+            default=0.6,
+            ge=0.01,
+            le=1.0,
+            description="Controls the randomness of the output for bulbul v3 beta. "
+            "Lower values make the output more focused and deterministic, while "
+            "higher values make it more random. Range: 0.01 to 1.0. Default: 0.6.",
+        )
 
     def __init__(
         self,
@@ -124,7 +144,7 @@ class SarvamHttpTTSService(TTSService):
             api_key: Sarvam AI API subscription key.
             aiohttp_session: Shared aiohttp session for making requests.
             voice_id: Speaker voice ID (e.g., "anushka", "meera"). Defaults to "anushka".
-            model: TTS model to use ("bulbul:v1" or "bulbul:v2"). Defaults to "bulbul:v2".
+            model: TTS model to use ("bulbul:v2" or "bulbul:v3-beta" or "bulbul:v3"). Defaults to "bulbul:v2".
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
             sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000). If None, uses default.
             params: Additional voice and preprocessing parameters. If None, uses defaults.
@@ -138,15 +158,31 @@ class SarvamHttpTTSService(TTSService):
         self._base_url = base_url
         self._session = aiohttp_session
 
+        # Build base settings common to all models
         self._settings = {
             "language": (
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
-            "pitch": params.pitch,
-            "pace": params.pace,
-            "loudness": params.loudness,
             "enable_preprocessing": params.enable_preprocessing,
         }
+
+        # Add model-specific parameters
+        if model in ("bulbul:v3-beta", "bulbul:v3"):
+            self._settings.update(
+                {
+                    "temperature": getattr(params, "temperature", 0.6),
+                    "model": model,
+                }
+            )
+        else:
+            self._settings.update(
+                {
+                    "pitch": params.pitch,
+                    "pace": params.pace,
+                    "loudness": params.loudness,
+                    "model": model,
+                }
+            )
 
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -219,7 +255,7 @@ class SarvamHttpTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Sarvam API error: {error_text}")
-                    await self.push_error(ErrorFrame(f"Sarvam API error: {error_text}"))
+                    await self.push_error(ErrorFrame(error=f"Sarvam API error: {error_text}"))
                     return
 
                 response_data = await response.json()
@@ -229,7 +265,7 @@ class SarvamHttpTTSService(TTSService):
             # Decode base64 audio data
             if "audios" not in response_data or not response_data["audios"]:
                 logger.error("No audio data received from Sarvam API")
-                await self.push_error(ErrorFrame("No audio data received"))
+                await self.push_error(ErrorFrame(error="No audio data received"))
                 return
 
             # Get the first audio (there should be only one for single text input)
@@ -251,7 +287,7 @@ class SarvamHttpTTSService(TTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
@@ -273,6 +309,18 @@ class SarvamTTSService(InterruptibleTTSService):
                 language=Language.HI,
                 pitch=0.1,
                 pace=1.2
+            )
+        )
+
+        # For bulbul v3 beta with any speaker and temperature:
+        # Note: pace and loudness are not supported for bulbul v3 and bulbul v3 beta
+        tts_v3 = SarvamTTSService(
+            api_key="your-api-key",
+            voice_id="speaker_name",
+            model="bulbul:v3",
+            params=SarvamTTSService.InputParams(
+                language=Language.HI,
+                temperature=0.8
             )
         )
     """
@@ -310,6 +358,14 @@ class SarvamTTSService(InterruptibleTTSService):
         output_audio_codec: Optional[str] = "linear16"
         output_audio_bitrate: Optional[str] = "128k"
         language: Optional[Language] = Language.EN
+        temperature: Optional[float] = Field(
+            default=0.6,
+            ge=0.01,
+            le=1.0,
+            description="Controls the randomness of the output for bulbul v3 beta. "
+            "Lower values make the output more focused and deterministic, while "
+            "higher values make it more random. Range: 0.01 to 1.0. Default: 0.6.",
+        )
 
     def __init__(
         self,
@@ -318,7 +374,6 @@ class SarvamTTSService(InterruptibleTTSService):
         model: str = "bulbul:v2",
         voice_id: str = "anushka",
         url: str = "wss://api.sarvam.ai/text-to-speech/ws",
-        aiohttp_session: Optional[aiohttp.ClientSession] = None,
         aggregate_sentences: Optional[bool] = True,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -329,13 +384,9 @@ class SarvamTTSService(InterruptibleTTSService):
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
             model: Identifier of the Sarvam speech model (default "bulbul:v2").
+                Supports "bulbul:v2", "bulbul:v3-beta" and "bulbul:v3".
             voice_id: Voice identifier for synthesis (default "anushka").
             url: WebSocket URL for connecting to the TTS backend (default production URL).
-            aiohttp_session: Optional shared aiohttp session. To maintain backward compatibility.
-
-                .. deprecated:: 0.0.81
-                    aiohttp_session is no longer used. This parameter will be removed in a future version.
-
             aggregate_sentences: Whether to merge multiple sentences into one audio chunk (default True).
             sample_rate: Desired sample rate for the output audio in Hz (overrides default if set).
             params: Optional input parameters to override global configuration.
@@ -356,30 +407,18 @@ class SarvamTTSService(InterruptibleTTSService):
             **kwargs,
         )
         params = params or SarvamTTSService.InputParams()
-        if aiohttp_session is not None:
-            import warnings
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The 'aiohttp_session' parameter is deprecated and will be removed in a future version. ",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
         # WebSocket endpoint URL
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
         self.set_model_name(model)
         self.set_voice(voice_id)
-        # Configuration parameters
+        # Build base settings common to all models
         self._settings = {
             "target_language_code": (
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
-            "pitch": params.pitch,
-            "pace": params.pace,
             "speaker": voice_id,
-            "loudness": params.loudness,
             "speech_sample_rate": 0,
             "enable_preprocessing": params.enable_preprocessing,
             "min_buffer_size": params.min_buffer_size,
@@ -387,6 +426,24 @@ class SarvamTTSService(InterruptibleTTSService):
             "output_audio_codec": params.output_audio_codec,
             "output_audio_bitrate": params.output_audio_bitrate,
         }
+
+        # Add model-specific parameters
+        if model in ("bulbul:v3-beta", "bulbul:v3"):
+            self._settings.update(
+                {
+                    "temperature": getattr(params, "temperature", 0.6),
+                    "model": model,
+                }
+            )
+        else:
+            self._settings.update(
+                {
+                    "pitch": params.pitch,
+                    "pace": params.pace,
+                    "loudness": params.loudness,
+                    "model": model,
+                }
+            )
         self._started = False
 
         self._receive_task = None
@@ -455,7 +512,7 @@ class SarvamTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -503,7 +560,8 @@ class SarvamTTSService(InterruptibleTTSService):
             await self._disconnect_websocket()
 
         except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             # Reset state only after everything is cleaned up
             self._started = False
@@ -525,8 +583,10 @@ class SarvamTTSService(InterruptibleTTSService):
             logger.debug("Connected to Sarvam TTS Websocket")
             await self._send_config()
 
+            await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -542,8 +602,8 @@ class SarvamTTSService(InterruptibleTTSService):
             await self._websocket.send(json.dumps(config_message))
             logger.debug("Configuration sent successfully")
         except Exception as e:
-            logger.error(f"Failed to send config: {str(e)}")
-            await self.push_frame(ErrorFrame(f"Failed to send config: {str(e)}"))
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             raise
 
     async def _disconnect_websocket(self):
@@ -556,6 +616,11 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+        finally:
+            self._started = False
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
@@ -581,7 +646,7 @@ class SarvamTTSService(InterruptibleTTSService):
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
 
-                    await self.push_frame(ErrorFrame(f"TTS Error: {error_msg}"))
+                    await self.push_frame(ErrorFrame(error=f"TTS Error: {error_msg}"))
 
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
@@ -637,7 +702,8 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                logger.error(f"{self} exception: {e}")
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -645,3 +711,4 @@ class SarvamTTSService(InterruptibleTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")

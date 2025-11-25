@@ -13,7 +13,8 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 
 import asyncio
 import json
-from dataclasses import dataclass
+import warnings
+from abc import abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Set
 
 from loguru import logger
@@ -23,7 +24,6 @@ from pipecat.audio.interruptions.base_interruption_strategy import BaseInterrupt
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -48,7 +49,6 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
     SpeechControlParamsFrame,
     StartFrame,
-    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserImageRawFrame,
@@ -66,6 +66,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -89,7 +90,7 @@ class LLMContextAggregator(FrameProcessor):
         self._context = context
         self._role = role
 
-        self._aggregation: str = ""
+        self._aggregation: List[TextPartForConcatenation] = []
 
     @property
     def messages(self) -> List[LLMContextMessage]:
@@ -169,7 +170,20 @@ class LLMContextAggregator(FrameProcessor):
 
     async def reset(self):
         """Reset the aggregation state."""
-        self._aggregation = ""
+        self._aggregation = []
+
+    @abstractmethod
+    async def push_aggregation(self):
+        """Push the current aggregation downstream."""
+        pass
+
+    def aggregation_string(self) -> str:
+        """Get the current aggregation as a string.
+
+        Returns:
+            The concatenated aggregation string.
+        """
+        return concatenate_aggregated_text(self._aggregation)
 
 
 class LLMUserAggregator(LLMContextAggregator):
@@ -208,8 +222,6 @@ class LLMUserAggregator(LLMContextAggregator):
         self._turn_params: Optional[SmartTurnParams] = None
 
         if "aggregation_timeout" in kwargs:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -286,6 +298,12 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
+            # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
+            # services (like OpenAI Realtime) may need to know about tool
+            # changes; unlike text-based LLM services they won't just "pick up
+            # the change" on the next LLM run, as the LLM is continuously
+            # running.
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, SpeechControlParamsFrame):
@@ -297,13 +315,13 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _process_aggregation(self):
         """Process the current aggregation and push it downstream."""
-        aggregation = self._aggregation
+        aggregation = self.aggregation_string()
         await self.reset()
         self._context.add_message({"role": self.role, "content": aggregation})
         frame = LLMContextFrame(self._context)
         await self.push_frame(frame)
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         """Push the current aggregation based on interruption strategies and conditions."""
         if len(self._aggregation) > 0:
             if self.interruption_strategies and self._bot_speaking:
@@ -311,9 +329,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
                 if should_interrupt:
                     logger.debug(
-                        "Interruption conditions met - pushing BotInterruptionFrame and aggregation"
+                        "Interruption conditions met - pushing interruption and aggregation"
                     )
-                    await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+                    await self.push_interruption_task_frame_and_wait()
                     await self._process_aggregation()
                 else:
                     logger.debug("Interruption conditions not met - not pushing aggregation")
@@ -345,7 +363,7 @@ class LLMUserAggregator(LLMContextAggregator):
         """
 
         async def should_interrupt(strategy: BaseInterruptionStrategy):
-            await strategy.append_text(self._aggregation)
+            await strategy.append_text(self.aggregation_string())
             return await strategy.should_interrupt()
 
         return any([await should_interrupt(s) for s in self._interruption_strategies])
@@ -394,7 +412,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # pushing the aggregation as we will probably get a final transcription.
         if len(self._aggregation) > 0:
             if not self._seen_interim_results:
-                await self._push_aggregation()
+                await self.push_aggregation()
         # Handles the case where both the user and the bot are not speaking,
         # and the bot was previously speaking before the user interruption.
         # So in this case we are resetting the aggregation timer
@@ -415,7 +433,12 @@ class LLMUserAggregator(LLMContextAggregator):
         if not text.strip():
             return
 
-        self._aggregation += f" {text}" if self._aggregation else text
+        # Transcriptions never include inter-part spaces (so far).
+        self._aggregation.append(
+            TextPartForConcatenation(
+                text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
         # Reset aggregation timer.
@@ -473,7 +496,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
-                    await self._push_aggregation()
+                    await self.push_aggregation()
 
                 # If we are emulating VAD we still need to send the user stopped
                 # speaking frame.
@@ -540,22 +563,30 @@ class LLMAssistantAggregator(LLMContextAggregator):
         Args:
             context: The OpenAI LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
-            **kwargs: Additional arguments. Supports deprecated 'expect_stripped_words'.
+            **kwargs: Additional arguments.
         """
         super().__init__(context=context, role="assistant", **kwargs)
         self._params = params or LLMAssistantAggregatorParams()
 
         if "expect_stripped_words" in kwargs:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
-                    "Parameter 'expect_stripped_words' is deprecated, use 'params' instead.",
+                    "Parameter 'expect_stripped_words' is deprecated. "
+                    "LLMAssistantAggregator now handles word spacing automatically.",
                     DeprecationWarning,
                 )
 
             self._params.expect_stripped_words = kwargs["expect_stripped_words"]
+
+        if params and not params.expect_stripped_words:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "params.expect_stripped_words is deprecated. "
+                    "LLMAssistantAggregator now handles word spacing automatically.",
+                    DeprecationWarning,
+                )
 
         self._started = 0
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
@@ -579,7 +610,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
@@ -606,20 +637,20 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_function_call_result(frame)
         elif isinstance(frame, FunctionCallCancelFrame):
             await self._handle_function_call_cancel(frame)
-        elif isinstance(frame, UserImageRawFrame) and frame.request and frame.request.tool_call_id:
+        elif isinstance(frame, UserImageRawFrame):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._push_aggregation()
+            await self.push_aggregation()
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         """Push the current assistant aggregation with timestamp."""
         if not self._aggregation:
             return
 
-        aggregation = self._aggregation.strip()
+        aggregation = self.aggregation_string()
         await self.reset()
 
         if aggregation:
@@ -645,8 +676,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if frame.run_llm:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
-    async def _handle_interruptions(self, frame: StartInterruptionFrame):
-        await self._push_aggregation()
+    async def _handle_interruptions(self, frame: InterruptionFrame):
+        await self.push_aggregation()
         self._started = 0
         await self.reset()
 
@@ -757,30 +788,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 message["content"] = result
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
-        logger.debug(
-            f"{self} UserImageRawFrame: [{frame.request.function_name}:{frame.request.tool_call_id}]"
-        )
-
-        if frame.request.tool_call_id not in self._function_calls_in_progress:
-            logger.warning(
-                f"UserImageRawFrame tool_call_id [{frame.request.tool_call_id}] is not running"
-            )
+        if not frame.append_to_context:
             return
 
-        del self._function_calls_in_progress[frame.request.tool_call_id]
+        logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
 
-        # Update context with the image frame
-        self._update_function_call_result(
-            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
-        )
-        self._context.add_image_frame_message(
+        await self._context.add_image_frame_message(
             format=frame.format,
             size=frame.size,
             image=frame.image,
-            text=frame.request.context,
+            text=frame.text,
         )
 
-        await self._push_aggregation()
+        await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
@@ -788,16 +808,21 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
         self._started -= 1
-        await self._push_aggregation()
+        await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started:
+        if not self._started or not frame.append_to_context:
             return
 
-        if self._params.expect_stripped_words:
-            self._aggregation += f" {frame.text}" if self._aggregation else frame.text
-        else:
-            self._aggregation += frame.text
+        # Make sure we really have text (spaces count, too!)
+        if len(frame.text) == 0:
+            return
+
+        self._aggregation.append(
+            TextPartForConcatenation(
+                frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
 
     def _context_updated_task_finished(self, task: asyncio.Task):
         self._context_updated_tasks.discard(task)

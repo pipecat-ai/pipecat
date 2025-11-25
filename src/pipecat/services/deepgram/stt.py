@@ -6,6 +6,7 @@
 
 """Deepgram speech-to-text service implementation."""
 
+import asyncio
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -235,8 +236,16 @@ class DeepgramSTTService(STTService):
             logger.error(f"{self}: unable to connect to Deepgram")
 
     async def _disconnect(self):
-        if self._connection.is_connected:
+        if await self._connection.is_connected():
             logger.debug("Disconnecting from Deepgram")
+            # Deepgram swallows asyncio.CancelledError internally which prevents
+            # proper cancellation propagation. This issue was found with
+            # parallel pipelines where `CancelFrame` was not awaited for to
+            # finish in all branches and it was pushed downstream reaching the
+            # end of the pipeline, which caused `cleanup()` to be called while
+            # Deepgram disconnection was still finishing and therefore
+            # preventing the task cancellation that occurs during `cleanup()`.
+            # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
             await self._connection.finish()
 
     async def start_metrics(self):
@@ -247,7 +256,7 @@ class DeepgramSTTService(STTService):
     async def _on_error(self, *args, **kwargs):
         error: ErrorResponse = kwargs["error"]
         logger.warning(f"{self} connection error, will retry: {error}")
-        await self.push_error(ErrorFrame(f"{error}"))
+        await self.push_error(ErrorFrame(error=f"{error}"))
         await self.stop_all_metrics()
         # NOTE(aleix): we don't disconnect (i.e. call finish on the connection)
         # because this triggers more errors internally in the Deepgram SDK. So,
