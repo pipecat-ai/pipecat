@@ -10,7 +10,6 @@ from pipecat.services import DeprecatedModuleProxy
 
 from .flux import *
 from .stt import *
-from .stt_sagemaker import *
 from .tts import *
 
 sys.modules[__name__] = DeprecatedModuleProxy(globals(), "deepgram", "deepgram.[stt,tts]")
