@@ -15,7 +15,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.riva.tts import FastPitchTTSService
+from pipecat.services.nvidia.tts import NvidiaTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -36,7 +36,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    tts = FastPitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
+    tts = NvidiaTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
 
     task = PipelineTask(
         Pipeline([tts, transport.output()]),
