@@ -284,9 +284,11 @@ class MCPClient(BaseObject):
                 logger.error("Error applying output filter")
                 response = ""
 
-        if response and isinstance(response, str):
+        if response and len(response) and isinstance(response, str):
             logger.info(f"Tool '{function_name}' completed successfully")
             logger.debug(f"Final response: {response}")
+        else:
+            response = "Sorry, could not call the mcp tool"
 
         await result_callback(response)
 
