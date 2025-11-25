@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import split_text_by_characters
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
@@ -83,14 +84,19 @@ class LLMTextProcessor(FrameProcessor):
         await self._text_aggregator.reset()
 
     async def _handle_llm_text(self, in_frame: LLMTextFrame):
-        aggregation = await self._text_aggregator.aggregate(in_frame.text)
-        if aggregation:
-            out_frame = AggregatedTextFrame(
-                text=aggregation.text,
-                aggregated_by=aggregation.type,
-            )
-            out_frame.skip_tts = in_frame.skip_tts
-            await self.push_frame(out_frame)
+        # Split text by characters to normalize LLM output into individual characters
+        # This ensures consistent aggregation behavior regardless of LLM chunk size
+        characters = split_text_by_characters(in_frame.text)
+
+        for character in characters:
+            aggregation = await self._text_aggregator.aggregate(character)
+            if aggregation:
+                out_frame = AggregatedTextFrame(
+                    text=aggregation.text,
+                    aggregated_by=aggregation.type,
+                )
+                out_frame.skip_tts = in_frame.skip_tts
+                await self.push_frame(out_frame)
 
     async def _handle_llm_end(self, skip_tts: Optional[bool] = None):
         # Flush any remaining aggregated text at the end of the LLM response

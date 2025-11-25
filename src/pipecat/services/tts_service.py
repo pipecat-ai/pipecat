@@ -51,6 +51,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.string import split_text_by_characters
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
@@ -539,17 +540,26 @@ class TTSService(AIService):
             text = frame.text
             includes_inter_frame_spaces = frame.includes_inter_frame_spaces
             aggregated_by = "token"
-        else:
-            aggregate = await self._text_aggregator.aggregate(frame.text)
-            if aggregate:
-                text = aggregate.text
-                aggregated_by = aggregate.type
 
-        if text:
-            logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
-            await self._push_tts_frames(
-                AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
-            )
+            if text:
+                logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
+                await self._push_tts_frames(
+                    AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
+                )
+        else:
+            # Split text by characters to normalize input into individual characters
+            # This ensures consistent aggregation behavior regardless of input chunk size
+            characters = split_text_by_characters(frame.text)
+
+            for character in characters:
+                aggregate = await self._text_aggregator.aggregate(character)
+                if aggregate:
+                    text = aggregate.text
+                    aggregated_by = aggregate.type
+                    logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
+                    await self._push_tts_frames(
+                        AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
+                    )
 
     async def _push_tts_frames(
         self, src_frame: AggregatedTextFrame, includes_inter_frame_spaces: Optional[bool] = False

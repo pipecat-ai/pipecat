@@ -6,7 +6,7 @@
 
 import unittest
 
-from pipecat.utils.string import match_endofsentence, parse_start_end_tags
+from pipecat.utils.string import match_endofsentence, parse_start_end_tags, split_text_by_characters
 
 
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
@@ -232,3 +232,35 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             ("<a>", "</a>"),
             41,
         )
+
+    async def test_split_text_by_characters(self):
+        """Test splitting text into individual characters."""
+        # Basic sentence
+        assert split_text_by_characters("Hello world!") == [
+            "H",
+            "e",
+            "l",
+            "l",
+            "o",
+            " ",
+            "w",
+            "o",
+            "r",
+            "l",
+            "d",
+            "!",
+        ]
+
+        # Single word
+        assert split_text_by_characters("Hi") == ["H", "i"]
+
+        # Empty string
+        assert split_text_by_characters("") == []
+
+        # With spaces
+        assert split_text_by_characters("A B") == ["A", " ", "B"]
+
+        # Concatenation test - characters should concatenate back to original
+        characters = split_text_by_characters("Hello world!")
+        concatenated = "".join(characters)
+        assert concatenated == "Hello world!"

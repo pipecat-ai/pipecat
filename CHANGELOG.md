@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `LLMTextProcessor` and `TTSService` to normalize text input by
+  splitting into individual characters before aggregation. This ensures proper
+  sentence boundary detection when LLMs return multiple sentences in a single
+  chunk (e.g., Google Gemini).
+
 - Updated `AICFilter` to use Quail STT as the default model
   (`AICModelType.QUAIL_STT`). Quail STT is optimized for human-to-machine
   interaction (e.g., voice agents, speech-to-text) and operates at a native
