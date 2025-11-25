@@ -663,12 +663,12 @@ class RivaSegmentedSTTService(SegmentedSTTService):
             yield ErrorFrame(error=f"{self} error: {e}")
 
 
-class ParakeetSTTService(NvidiaSTTService):
+class RivaSTTService(NvidiaSTTService):
     """Deprecated speech-to-text service using NVIDIA Parakeet models.
 
-    .. deprecated:: 0.0.66
+    .. deprecated:: 0.0.96
         This class is deprecated. Use `NvidiaSTTService` instead for equivalent functionality
-        with Parakeet models by specifying the appropriate model_function_map.
+        with Riva models by specifying the appropriate model_function_map.
     """
 
     def __init__(
@@ -684,7 +684,7 @@ class ParakeetSTTService(NvidiaSTTService):
         params: Optional[NvidiaSTTService.InputParams] = None,  # Use parent class's type
         **kwargs,
     ):
-        """Initialize the Parakeet STT service.
+        """Initialize the Riva STT service.
 
         Args:
             api_key: NVIDIA API key for authentication.
@@ -707,6 +707,6 @@ class ParakeetSTTService(NvidiaSTTService):
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
-                "`ParakeetSTTService` is deprecated, use `NvidiaSTTService` instead.",
+                "`RivaSTTService` is deprecated, use `NvidiaSTTService` instead.",
                 DeprecationWarning,
             )
