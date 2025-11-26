@@ -183,6 +183,14 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
         await self._connect_websocket()
 
+        # Creating the receiver task (only created once during initial connection)
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+        # Creating the watchdog task (only created once during initial connection)
+        if not self._watchdog_task:
+            self._watchdog_task = self.create_task(self._watchdog_task_handler())
+
     async def _disconnect(self):
         """Disconnect from WebSocket and clean up tasks.
 
@@ -234,16 +242,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 self._websocket_url,
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
-
-            # Creating the receiver task
-            if not self._receive_task:
-                self._receive_task = self.create_task(
-                    self._receive_task_handler(self._report_error)
-                )
-
-            # Creating the watchdog task
-            if not self._watchdog_task:
-                self._watchdog_task = self.create_task(self._watchdog_task_handler())
 
             # Now wait for the connection established event
             logger.debug("WebSocket connected, waiting for server confirmation...")
