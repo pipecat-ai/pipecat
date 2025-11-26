@@ -315,6 +315,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `english_normalization` input parameter for `MiniMaxHttpTTSService` is
   deprecated, use `test_normalization` instead.
 
+- NVIDIA Services name changes (all functionality is unchanged):
+
+  - `NimLLMService` is now deprecated, use `NvidiaLLMService` instead.
+  - `RivaSTTService` is now deprecated, use `NvidiaSTTService` instead.
+  - `RivaTTSService` is now deprecated, use `NvidiaTTSService` instead.
+  - Use `uv pip install pipecat-ai[nvidia]` instead of
+    `uv pip install pipecat-ai[nim]` or `uv pip install pipecat-ai[riva]`
+
 ### Fixed
 
 - Fixed an issue in `AWSBedrockLLMService` where the `aws_region` arg was
