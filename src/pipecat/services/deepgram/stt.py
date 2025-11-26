@@ -233,7 +233,7 @@ class DeepgramSTTService(STTService):
             )
 
         if not await self._connection.start(options=self._settings, addons=self._addons):
-            logger.error(f"{self}: unable to connect to Deepgram")
+            await self.push_error(error_msg=f"Unable to connect to Deepgram")
 
     async def _disconnect(self):
         if await self._connection.is_connected():

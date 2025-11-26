@@ -1251,11 +1251,11 @@ class GeminiLiveLLMService(LLMService):
         )
 
         if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-            logger.error(
+            error_msg = (
                 f"Max consecutive failures ({MAX_CONSECUTIVE_FAILURES}) reached, "
                 "treating as fatal error"
             )
-            await self.push_error(ErrorFrame(error=f"{self} Error in receive loop: {error}"))
+            await self.push_error(error_msg=error_msg, exception=error, fatal=True)
             return False
         else:
             logger.info(
@@ -1283,7 +1283,7 @@ class GeminiLiveLLMService(LLMService):
             self._completed_tool_calls = set()
             self._disconnecting = False
         except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
     async def _send_user_audio(self, frame):
         """Send user audio frame to Gemini Live API."""

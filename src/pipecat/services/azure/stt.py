@@ -121,7 +121,6 @@ class AzureSTTService(STTService):
                 self._audio_stream.write(audio)
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"{self} error: {e}")
 
     async def start(self, frame: StartFrame):

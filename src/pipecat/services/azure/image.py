@@ -91,7 +91,6 @@ class AzureImageGenServiceREST(ImageGenService):
             while status != "succeeded":
                 attempts_left -= 1
                 if attempts_left == 0:
-                    logger.error(f"{self} error: image generation timed out")
                     yield ErrorFrame("Image generation timed out")
                     return
 
@@ -104,7 +103,6 @@ class AzureImageGenServiceREST(ImageGenService):
 
             image_url = json_response["result"]["data"][0]["url"] if json_response else None
             if not image_url:
-                logger.error(f"{self} error: image generation failed")
                 yield ErrorFrame("Image generation failed")
                 return
 

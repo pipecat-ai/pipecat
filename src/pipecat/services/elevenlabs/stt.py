@@ -351,7 +351,6 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 )
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"{self} error: {e}")
 
 
@@ -586,7 +585,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 }
                 await self._websocket.send(json.dumps(message))
             except Exception as e:
-                logger.error(f"Error sending audio: {e}")
                 yield ErrorFrame(f"ElevenLabs Realtime STT error: {str(e)}")
 
         yield None
@@ -656,7 +654,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 logger.debug("Disconnecting from ElevenLabs Realtime STT")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")

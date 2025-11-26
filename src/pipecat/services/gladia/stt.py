@@ -558,8 +558,7 @@ class GladiaSTTService(STTService):
         except websockets.exceptions.ConnectionClosed:
             logger.debug("Connection closed during keepalive")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(exception=e)
 
     async def _receive_task_handler(self):
         try:
@@ -630,7 +629,10 @@ class GladiaSTTService(STTService):
             return False
         self._reconnection_attempts += 1
         if self._reconnection_attempts > self._max_reconnection_attempts:
-            logger.error(f"Max reconnection attempts ({self._max_reconnection_attempts}) reached")
+            await self.push_error(
+                error_msg=f"Max reconnection attempts ({self._max_reconnection_attempts}) reached",
+                fatal=True,
+            )
             self._should_reconnect = False
             return False
         delay = self._reconnection_delay * (2 ** (self._reconnection_attempts - 1))

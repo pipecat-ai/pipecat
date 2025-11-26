@@ -983,7 +983,7 @@ class GoogleLLMService(LLMService):
         except DeadlineExceeded:
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            await self.push_error(exception=e)
         finally:
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(

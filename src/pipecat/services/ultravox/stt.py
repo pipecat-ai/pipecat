@@ -436,17 +436,11 @@ class UltravoxSTTService(AIService):
                     yield LLMFullResponseEndFrame()
 
                 except Exception as e:
-                    logger.error(f"{self} exception: {e}")
                     yield ErrorFrame(error=f"{self} error: {e}")
             else:
-                logger.error("No model available for text generation")
                 yield ErrorFrame("No model available for text generation")
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
             yield ErrorFrame(f"Error processing audio: {str(e)}")
         finally:
             self._buffer.is_processing = False

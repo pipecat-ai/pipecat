@@ -259,7 +259,7 @@ class RimeTTSService(AudioContextWordTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            await self.push_error(exception=e)
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -271,8 +271,7 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self._websocket.send(json.dumps(self._build_eos_msg()))
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
             self._context_id = None
             self._websocket = None
@@ -409,7 +408,6 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
                 yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
@@ -417,7 +415,6 @@ class RimeTTSService(AudioContextWordTTSService):
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"{self} error: {e}")
 
 
@@ -549,7 +546,6 @@ class RimeHttpTTSService(TTSService):
             ) as response:
                 if response.status != 200:
                     error_message = f"Rime TTS error: HTTP {response.status}"
-                    logger.error(error_message)
                     yield ErrorFrame(error=error_message)
                     return
 
@@ -567,7 +563,6 @@ class RimeHttpTTSService(TTSService):
                     yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()

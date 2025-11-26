@@ -348,7 +348,9 @@ class SarvamSTTService(STTService):
                 # Exit the async context manager
                 await self._websocket_context.__aexit__(None, None, None)
             except Exception as e:
-                logger.error(f"Error closing WebSocket connection: {e}")
+                await self.push_error(
+                    error_msg=f"Error closing WebSocket connection: {e}", exception=e
+                )
             finally:
                 logger.debug("Disconnected from Sarvam WebSocket")
                 self._socket_client = None
@@ -368,8 +370,7 @@ class SarvamSTTService(STTService):
             # Messages will be handled via the _message_handler callback
             await self._socket_client.start_listening()
         except Exception as e:
-            logger.error(f"Error in Sarvam receive task: {e}")
-            await self.push_error(ErrorFrame(f"Sarvam receive task error: {e}"))
+            await self.push_error(error_msg=f"Sarvam receive task error: {e}", exception=e)
 
     async def _handle_message(self, message):
         """Handle incoming WebSocket message from Sarvam SDK.

@@ -180,7 +180,6 @@ class RivaTTSService(TTSService):
                 yield frame
                 resp = await asyncio.wait_for(queue.get(), timeout=RIVA_TTS_TIMEOUT_SECS)
         except asyncio.TimeoutError:
-            logger.error(f"{self} timeout waiting for audio response")
             yield ErrorFrame(error=f"{self} error: {e}")
 
         await self.start_tts_usage_metrics(text)

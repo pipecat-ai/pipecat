@@ -88,9 +88,6 @@ class PiperTTSService(TTSService):
             ) as response:
                 if response.status != 200:
                     error = await response.text()
-                    logger.error(
-                        f"{self} error getting audio (status: {response.status}, error: {error})"
-                    )
                     yield ErrorFrame(
                         error=f"Error getting audio (status: {response.status}, error: {error})"
                     )

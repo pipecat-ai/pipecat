@@ -424,7 +424,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
 
     async def _disconnect(self):
@@ -440,7 +440,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 self._receive_task = None
             self._disconnecting = False
         except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
     async def _ws_send(self, realtime_message):
         try:
@@ -449,7 +449,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         except Exception as e:
             if self._disconnecting:
                 return
-            logger.error(f"Error sending message to websocket: {e}")
             # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just

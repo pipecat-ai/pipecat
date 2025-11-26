@@ -176,7 +176,6 @@ class MCPClient(BaseObject):
         except Exception as e:
             error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
             logger.error(error_msg)
-            logger.exception("Full exception details:")
             await params.result_callback(error_msg)
 
     async def _stdio_list_tools(self) -> ToolsSchema:
@@ -207,7 +206,6 @@ class MCPClient(BaseObject):
         except Exception as e:
             error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
             logger.error(error_msg)
-            logger.exception("Full exception details:")
             await params.result_callback(error_msg)
 
     async def _streamable_http_list_tools(self) -> ToolsSchema:
@@ -246,7 +244,6 @@ class MCPClient(BaseObject):
         except Exception as e:
             error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
             logger.error(error_msg)
-            logger.exception("Full exception details:")
             await params.result_callback(error_msg)
 
     async def _call_tool(self, session, function_name, arguments, result_callback):
@@ -302,7 +299,6 @@ class MCPClient(BaseObject):
 
             except Exception as e:
                 logger.error(f"Failed to read tool '{tool_name}': {str(e)}")
-                logger.exception("Full exception details:")
                 continue
 
         logger.debug(f"Completed reading {len(tool_schemas)} tools")
