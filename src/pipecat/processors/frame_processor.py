@@ -665,7 +665,6 @@ class FrameProcessor(BaseObject):
             ```
         """
         error_message = error_msg or f"{self} exception: {exception}"
-        logger.error(error_message)
         error_frame = ErrorFrame(
             error=error_message, fatal=fatal, exception=exception, processor=self
         )
@@ -680,6 +679,7 @@ class FrameProcessor(BaseObject):
         if not error.processor:
             error.processor = self
         await self._call_event_handler("on_error", error)
+        logger.error(error.error)
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
