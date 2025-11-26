@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for `VideoSDKTransport` in `src/pipecat/transports/videosdk`, enabling Pipecat bots to join VideoSDK.live meetings with bidirectional audio and handle participant chat messages via VideoSDK PubSub.
+- Added `videosdk>=0.2.7` dependency to `pyproject.toml`.
+- Added `VIDEOSDK_AUTH_TOKEN` and `VIDEOSDK_MEETING_ID` fields to `env.example`.
+- Added new example `examples/foundational/04c-transports-videosdk.py` demonstrating usage of `VideoSDKTransport`.
+
 - Added `cache_read_input_tokens`, `cache_creation_input_tokens` and 
   `reasoning_tokens` to OTel spans for LLM call
 
