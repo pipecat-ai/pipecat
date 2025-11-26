@@ -346,11 +346,17 @@ class BaseOpenAILLMService(LLMService):
                     if chunk.usage.prompt_tokens_details
                     else None
                 )
+                reasoning_tokens = (
+                    chunk.usage.completion_tokens_details.reasoning_tokens
+                    if chunk.usage.completion_tokens_details
+                    else None
+                )
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
                     completion_tokens=chunk.usage.completion_tokens,
                     total_tokens=chunk.usage.total_tokens,
                     cache_read_input_tokens=cached_tokens,
+                    reasoning_tokens=reasoning_tokens,
                 )
                 await self.start_llm_usage_metrics(tokens)
 

@@ -123,6 +123,8 @@ class GrokLLMService(OpenAILLMService):
         self._prompt_tokens = 0
         self._completion_tokens = 0
         self._total_tokens = 0
+        self._cache_read_input_tokens = None
+        self._reasoning_tokens = None
         self._has_reported_prompt_tokens = False
         self._is_processing = True
 
@@ -137,6 +139,8 @@ class GrokLLMService(OpenAILLMService):
                     prompt_tokens=self._prompt_tokens,
                     completion_tokens=self._completion_tokens,
                     total_tokens=self._total_tokens,
+                    cache_read_input_tokens=self._cache_read_input_tokens,
+                    reasoning_tokens=self._reasoning_tokens,
                 )
                 await super().start_llm_usage_metrics(tokens)
 
@@ -149,7 +153,7 @@ class GrokLLMService(OpenAILLMService):
 
         Args:
             tokens: The token usage metrics for the current chunk of processing,
-                containing prompt_tokens and completion_tokens counts.
+                containing prompt_tokens, completion_tokens, and optional cached/reasoning tokens.
         """
         # Only accumulate metrics during active processing
         if not self._is_processing:
@@ -163,6 +167,13 @@ class GrokLLMService(OpenAILLMService):
         # Update completion tokens count if it has increased
         if tokens.completion_tokens > self._completion_tokens:
             self._completion_tokens = tokens.completion_tokens
+
+        # Capture cached & reasoning tokens (these typically only appear once per request)
+        if tokens.cache_read_input_tokens is not None:
+            self._cache_read_input_tokens = tokens.cache_read_input_tokens
+
+        if tokens.reasoning_tokens is not None:
+            self._reasoning_tokens = tokens.reasoning_tokens
 
     def create_context_aggregator(
         self,
