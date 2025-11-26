@@ -527,12 +527,6 @@ class TurnAwareTranscriptProcessor(BaseTranscriptProcessor):
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, InterruptionFrame):
-            # Handle interruption
-            # Give a brief moment for any pending TTSTextFrames to process
-            import asyncio
-
-            await asyncio.sleep(0.001)
-
             # Emit assistant transcript message with what was spoken before interruption
             if self._current_turn_assistant_parts:
                 assistant_content = concatenate_aggregated_text(self._current_turn_assistant_parts)
