@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Enhanced error handling across the framework:
+  - Added `on_error` callback to `FrameProcessor` for centralized error handling.
+  - Renamed `push_error(error: ErrorFrame)` to `push_error_frame(error: ErrorFrame)`
+    for clarity.
+  - Added new `push_error` method for simplified error reporting:
+    ```
+    push_error(error_msg: str, exception: Optional[Exception] = None, fatal: bool = False)
+    ```
+  - Standardized error logging by replacing `logger.exception` calls with 
+    `logger.error` throughout the codebase.
+
 - Added `cache_read_input_tokens`, `cache_creation_input_tokens` and
   `reasoning_tokens` to OTel spans for LLM call
 

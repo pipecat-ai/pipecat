@@ -142,6 +142,7 @@ class FrameProcessor(BaseObject):
     - on_after_process_frame: Called after a frame is processed
     - on_before_push_frame: Called before a frame is pushed
     - on_after_push_frame: Called after a frame is pushed
+    - on_error: Called when an error is raised in the frame processing.
     """
 
     def __init__(
@@ -234,6 +235,7 @@ class FrameProcessor(BaseObject):
         self._register_event_handler("on_after_process_frame", sync=True)
         self._register_event_handler("on_before_push_frame", sync=True)
         self._register_event_handler("on_after_push_frame", sync=True)
+        self._register_event_handler("on_error", sync=True)
 
     @property
     def id(self) -> int:
@@ -630,7 +632,43 @@ class FrameProcessor(BaseObject):
         elif isinstance(frame, (FrameProcessorResumeFrame, FrameProcessorResumeUrgentFrame)):
             await self.__resume(frame)
 
-    async def push_error(self, error: ErrorFrame):
+    async def push_error(
+        self,
+        error_msg: str,
+        exception: Optional[Exception] = None,
+        fatal: bool = False,
+    ):
+        """Creates and pushes an ErrorFrame upstream.
+
+        Creates and pushes an ErrorFrame upstream to notify other processors in the
+        pipeline about an error condition. The error frame will include context about
+        which processor generated the error.
+
+        Args:
+            error_msg: Descriptive message explaining the error condition.
+            exception: Optional exception object that caused the error, if available.
+                This provides additional context for debugging and error handling.
+            fatal: Whether this error should be considered fatal to the pipeline.
+                Fatal errors typically cause the entire pipeline to stop processing.
+                Defaults to False for non-fatal errors.
+
+        Example::
+
+            ```python
+            # Non-fatal error
+            await self.push_error("Failed to process audio chunk, skipping")
+
+            # Fatal error with exception context
+            try:
+                result = some_critical_operation()
+            except Exception as e:
+                await self.push_error("Critical operation failed", exception=e, fatal=True)
+            ```
+        """
+        error_frame = ErrorFrame(error=error_msg, fatal=fatal, exception=exception, processor=self)
+        await self.push_error_frame(error=error_frame)
+
+    async def push_error_frame(self, error: ErrorFrame):
         """Push an error frame upstream.
 
         Args:
@@ -638,6 +676,8 @@ class FrameProcessor(BaseObject):
         """
         if not error.processor:
             error.processor = self
+        await self._call_event_handler("on_error", error)
+        logger.error(f"{error.processor} error: {error.error}")
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -759,8 +799,10 @@ class FrameProcessor(BaseObject):
                 await self.__cancel_process_task()
                 self.__create_process_task()
         except Exception as e:
-            logger.exception(f"Uncaught exception in {self} when handling _start_interruption: {e}")
-            await self.push_error(ErrorFrame(str(e)))
+            await self.push_error(
+                error_msg=f"Uncaught exception handling _start_interruption: {e}",
+                exception=e,
+            )
 
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
         """Internal method to push frames to adjacent processors.
@@ -797,8 +839,7 @@ class FrameProcessor(BaseObject):
                     await self._observer.on_push_frame(data)
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
-            logger.exception(f"Uncaught exception in {self}: {e}")
-            await self.push_error(ErrorFrame(str(e)))
+            await self.push_error(error_msg=f"Uncaught exception: {e}", exception=e)
 
     def _check_started(self, frame: Frame):
         """Check if the processor has been started.
@@ -874,8 +915,7 @@ class FrameProcessor(BaseObject):
 
             await self._call_event_handler("on_after_process_frame", frame)
         except Exception as e:
-            logger.exception(f"{self}: error processing frame: {e}")
-            await self.push_error(ErrorFrame(str(e)))
+            await self.push_error(error_msg=f"Error processing frame: {e}", exception=e)
 
     async def __input_frame_task_handler(self):
         """Handle frames from the input queue.

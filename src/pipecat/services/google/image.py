@@ -110,7 +110,6 @@ class GoogleImageGenService(ImageGenService):
             await self.stop_ttfb_metrics()
 
             if not response or not response.generated_images:
-                logger.error(f"{self} error: image generation failed")
                 yield ErrorFrame("Image generation failed")
                 return
 
@@ -128,5 +127,4 @@ class GoogleImageGenService(ImageGenService):
                 yield frame
 
         except Exception as e:
-            logger.error(f"{self} error generating image: {e}")
             yield ErrorFrame(f"Image generation error: {str(e)}")

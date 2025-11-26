@@ -178,7 +178,7 @@ class SimliVideoService(FrameProcessor):
             self._audio_task = self.create_task(self._consume_and_process_audio())
             self._video_task = self.create_task(self._consume_and_process_video())
         except Exception as e:
-            logger.error(f"{self}: unable to start connection: {e}")
+            await self.push_error(error_msg=f"Unable to start connection: {e}", exception=e)
 
     async def _consume_and_process_audio(self):
         """Consume audio frames from Simli and push them downstream."""
@@ -256,7 +256,7 @@ class SimliVideoService(FrameProcessor):
                         await self._simli_client.send(audioBytes)
                 return
             except Exception as e:
-                logger.exception(f"{self} exception: {e}")
+                await self.push_error(error_msg=f"Error sending audio: {e}", exception=e)
         elif isinstance(frame, TTSStoppedFrame):
             try:
                 if self._previously_interrupted and len(self._audio_buffer) > 0:
@@ -264,7 +264,7 @@ class SimliVideoService(FrameProcessor):
                     self._previously_interrupted = False
                     self._audio_buffer = bytearray()
             except Exception as e:
-                logger.exception(f"{self} exception: {e}")
+                await self.push_error(error_msg=f"Error stopping TTS: {e}", exception=e)
             return
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()

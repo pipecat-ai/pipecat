@@ -192,8 +192,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         try:
             await self._disconnect_websocket()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             # Reset state only after everything is cleaned up
             self._websocket = None
@@ -251,8 +250,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             logger.debug("Connected to Deepgram Flux Websocket")
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -280,8 +278,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 logger.debug("Disconnecting from Deepgram Flux Websocket")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
@@ -381,7 +378,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 are issues sending the audio data.
         """
         if not self._websocket:
-            logger.error("Not connected to Deepgram Flux.")
             yield ErrorFrame("Not connected to Deepgram Flux.")
             return
 
@@ -389,8 +385,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             self._last_stt_time = time.monotonic()
             await self.send_with_retry(audio, self._report_error)
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
             return
 
         yield None
@@ -467,8 +462,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                     # Skip malformed messages
                     continue
                 except Exception as e:
-                    logger.error(f"{self} exception: {e}")
-                    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                    await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
                     # Error will be handled inside WebsocketService->_receive_task_handler
                     raise
             else:
