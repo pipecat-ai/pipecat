@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `cache_read_input_tokens`, `cache_creation_input_tokens` and 
+- Added `cache_read_input_tokens`, `cache_creation_input_tokens` and
   `reasoning_tokens` to OTel spans for LLM call
 
 - Added `LiveKitRESTHelper` utility class for managing LiveKit rooms via REST API.
@@ -94,6 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated `FishAudioTTSService` default model to `s1`.
+
+- Updated `DeepgramTTSService` to use Deepgram's TTS websocket API. ⚠️ This is
+  a potential breaking change, which only affects you if you're self-hosting
+  `DeepgramTTSService`. The new service uses Websockets and improves TTFB
+  latency.
 
 - Updated `daily-python` to 0.22.0.
 
