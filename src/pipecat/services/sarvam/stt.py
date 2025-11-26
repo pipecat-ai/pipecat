@@ -275,7 +275,7 @@ class SarvamSTTService(STTService):
                 await self._socket_client.translate(**method_kwargs)
 
         except Exception as e:
-            await self.push_error(error_msg=f"Error sending audio to Sarvam: {e}", exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
         yield None
 

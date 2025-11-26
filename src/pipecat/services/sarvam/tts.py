@@ -254,7 +254,7 @@ class SarvamHttpTTSService(TTSService):
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    await self.push_error(error_msg=f"Sarvam API error: {error_text}")
+                    yield ErrorFrame(error=f"Sarvam API error: {error_text}")
                     return
 
                 response_data = await response.json()
@@ -263,7 +263,7 @@ class SarvamHttpTTSService(TTSService):
 
             # Decode base64 audio data
             if "audios" not in response_data or not response_data["audios"]:
-                await self.push_error(error_msg="No audio data received")
+                yield ErrorFrame(error="No audio data received")
                 return
 
             # Get the first audio (there should be only one for single text input)
@@ -284,7 +284,7 @@ class SarvamHttpTTSService(TTSService):
             yield frame
 
         except Exception as e:
-            await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

@@ -995,7 +995,7 @@ class GoogleTTSService(GoogleBaseTTSService):
                 yield frame
 
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class GeminiTTSService(GoogleBaseTTSService):

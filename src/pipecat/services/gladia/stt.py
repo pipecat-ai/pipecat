@@ -630,8 +630,7 @@ class GladiaSTTService(STTService):
         self._reconnection_attempts += 1
         if self._reconnection_attempts > self._max_reconnection_attempts:
             await self.push_error(
-                error_msg=f"Max reconnection attempts ({self._max_reconnection_attempts}) reached",
-                fatal=True,
+                error_msg=f"Max reconnection attempts ({self._max_reconnection_attempts}) reached"
             )
             self._should_reconnect = False
             return False

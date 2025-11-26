@@ -287,7 +287,7 @@ class HumeTTSService(WordTTSService):
                 self._cumulative_time = utterance_duration
 
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             # Ensure TTFB timer is stopped even on early failures
             await self.stop_ttfb_metrics()

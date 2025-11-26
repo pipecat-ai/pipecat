@@ -1255,7 +1255,7 @@ class GeminiLiveLLMService(LLMService):
                 f"Max consecutive failures ({MAX_CONSECUTIVE_FAILURES}) reached, "
                 "treating as fatal error"
             )
-            await self.push_error(error_msg=error_msg, exception=error, fatal=True)
+            await self.push_error(error_msg=error_msg, exception=error)
             return False
         else:
             logger.info(
@@ -1742,7 +1742,7 @@ class GeminiLiveLLMService(LLMService):
         # state management, and that exponential backoff for retries can have
         # cost/stability implications for a service cluster, let's just treat a
         # send-side error as fatal.
-        await self.push_error(ErrorFrame(error=f"{self} Send error: {error}", fatal=True))
+        await self.push_error(ErrorFrame(error=f"{self} Send error: {error}"))
 
     def create_context_aggregator(
         self,
