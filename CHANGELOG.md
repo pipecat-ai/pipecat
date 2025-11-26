@@ -5,19 +5,27 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.96] - 2025-11-28 🦃 "Happy Thanksgiving!" 🦃
 
 ### Added
 
 - Enhanced error handling across the framework:
-  - Added `on_error` callback to `FrameProcessor` for centralized error handling.
+
+  - Added `on_error` callback to `FrameProcessor` for centralized error
+    handling.
+
   - Renamed `push_error(error: ErrorFrame)` to `push_error_frame(error: ErrorFrame)`
     for clarity.
+
   - Added new `push_error` method for simplified error reporting:
+
+    ```python
+    async def push_error(error_msg: str,
+                         exception: Optional[Exception] = None,
+                         fatal: bool = False)
     ```
-    push_error(error_msg: str, exception: Optional[Exception] = None, fatal: bool = False)
-    ```
-  - Standardized error logging by replacing `logger.exception` calls with 
+
+  - Standardized error logging by replacing `logger.exception` calls with
     `logger.error` throughout the codebase.
 
 - Added `cache_read_input_tokens`, `cache_creation_input_tokens` and
