@@ -313,13 +313,46 @@ class DograhTTSService(AudioContextWordTTSService):
 
                 elif msg_type == "error":
                     error_msg = msg.get("message", "Unknown error")
-                    logger.error(f"Dograh TTS error: {error_msg}")
                     await self.push_frame(TTSStoppedFrame())
                     await self.stop_all_metrics()
                     self._context_id = None
 
-                    # Raise an exception to be handled by _receive_task_handler
-                    raise Exception(f"Dograh TTS error: {error_msg}")
+                    # Check if this is a quota error
+                    is_quota_error = (
+                        "quota" in error_msg.lower() and "exceeded" in error_msg.lower()
+                    )
+
+                    # For quota errors, push a fatal error frame to trigger pipeline shutdown
+                    if is_quota_error:
+                        logger.info(f"TTS quota exceeded: {error_msg}")
+
+                        # Push the error frame to trigger pipeline shutdown
+                        await self.push_frame(
+                            ErrorFrame(
+                                error=f"TTS service quota exceeded: {error_msg}", fatal=True
+                            ),
+                            direction=FrameDirection.UPSTREAM,
+                        )
+
+                        # Close the websocket gracefully
+                        logger.info("Closing websocket connection gracefully due to quota exceeded")
+                        try:
+                            if self._websocket:
+                                await self._websocket.close(
+                                    code=1000, reason="Quota exceeded - closing gracefully"
+                                )
+                                self._websocket = None
+                        except Exception as close_error:
+                            logger.debug(f"Error while closing websocket: {close_error}")
+
+                        # Raise CancelledError to cleanly cancel the receive task
+                        # This will cancel the _receive_task without any error logs
+                        raise asyncio.CancelledError("Quota exceeded - cancelling receive task")
+                    else:
+                        # Lets not raise an exception in case of quota error so that
+                        # we dont retry connection. Instead rely on ErrorFrame to terminate
+                        # the task
+                        raise Exception(f"Dograh TTS error: {error_msg}")
 
                 elif msg_type == "final":
                     # Message indicating end of current synthesis

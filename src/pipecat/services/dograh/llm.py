@@ -10,7 +10,7 @@ from typing import Dict, Optional
 
 from loguru import logger
 
-from pipecat.frames.frames import Frame, StartFrame
+from pipecat.frames.frames import ErrorFrame, Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.base_llm import OpenAILLMInvocationParams
 from pipecat.services.openai.llm import OpenAILLMService
@@ -91,3 +91,38 @@ class DograhLLMService(OpenAILLMService):
             params["metadata"]["correlation_id"] = str(self._start_metadata["workflow_run_id"])
 
         return params
+
+    async def get_chat_completions(self, params: Dict) -> Optional:
+        """Override to handle Dograh-specific quota errors.
+
+        Args:
+            params: Parameters for the chat completion request
+
+        Returns:
+            The chat completion response
+
+        Raises:
+            Pushes a fatal ErrorFrame for quota errors
+        """
+        try:
+            return await super().get_chat_completions(params)
+        except Exception as e:
+            # Check if this is a quota error (PermissionDeniedError with quota_exceeded)
+            error_str = str(e)
+            if "quota_exceeded" in error_str and "403" in error_str:
+                # Extract the meaningful error message
+                error_msg = (
+                    "Dograh Service quota exceeded"
+                )
+
+                # Push a fatal error frame to trigger pipeline shutdown
+                await self.push_frame(
+                    ErrorFrame(error=error_msg, fatal=True), direction=FrameDirection.UPSTREAM
+                )
+
+                # Return from here and do not reraise the error. Let
+                # ErrorFrae terminate the Pipeline
+                return
+
+            # Re-raise the exception for normal error handling
+            raise

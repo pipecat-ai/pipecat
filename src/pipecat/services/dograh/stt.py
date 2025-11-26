@@ -9,7 +9,7 @@
 import asyncio
 import json
 import time
-from typing import AsyncGenerator, Dict, Optional
+from typing import AsyncGenerator, Awaitable, Callable, Dict, Optional
 
 from loguru import logger
 
@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import STTUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -42,7 +43,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class DograhSTTService(STTService):
+class DograhSTTService(STTService, WebsocketService):
     """Dograh speech-to-text service using WebSocket streaming.
 
     This service provides real-time speech recognition using Dograh's unified WebSocket API.
@@ -74,9 +75,10 @@ class DograhSTTService(STTService):
             sample_rate: Audio sample rate in Hz. Defaults to None.
             interim_results: Whether to receive interim transcription results.
             vad_events: Whether to receive voice activity detection events.
-            **kwargs: Additional arguments passed to the parent STTService.
+            **kwargs: Additional arguments passed to the parent services.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        STTService.__init__(self, sample_rate=sample_rate, **kwargs)
+        WebsocketService.__init__(self, reconnect_on_error=True, **kwargs)
 
         self._api_key = api_key
         self._base_url = base_url
@@ -88,8 +90,6 @@ class DograhSTTService(STTService):
 
         self.set_model_name(model)
 
-        # WebSocket connection
-        self._websocket = None
         self._receive_task = None
         self._keepalive_task = None
 
@@ -128,8 +128,8 @@ class DograhSTTService(STTService):
         """
         self._language = language
 
-    async def _connect(self):
-        """Establish WebSocket connection to Dograh STT service."""
+    async def _connect_websocket(self):
+        """Connect to the WebSocket endpoint."""
         try:
             url = f"{self._base_url}{self._ws_path}"
             headers = {
@@ -156,29 +156,15 @@ class DograhSTTService(STTService):
 
             await self._websocket.send(json.dumps(config_msg))
 
-            # Start background tasks
-            self._receive_task = asyncio.create_task(self._receive_messages())
-            self._keepalive_task = asyncio.create_task(self._keepalive_task_handler())
-
             logger.info("Connected to Dograh STT service")
 
         except Exception as e:
             logger.error(f"Failed to connect to Dograh STT service: {e}")
             raise
 
-    async def _disconnect(self):
-        """Disconnect from Dograh STT service."""
+    async def _disconnect_websocket(self):
+        """Disconnect from the WebSocket endpoint."""
         try:
-            if self._keepalive_task:
-                self._keepalive_task.cancel()
-                await asyncio.gather(self._keepalive_task, return_exceptions=True)
-                self._keepalive_task = None
-
-            if self._receive_task:
-                self._receive_task.cancel()
-                await asyncio.gather(self._receive_task, return_exceptions=True)
-                self._receive_task = None
-
             if self._websocket:
                 # Send end of stream signal
                 end_msg = {"type": "end_of_stream"}
@@ -192,45 +178,127 @@ class DograhSTTService(STTService):
         except Exception as e:
             logger.error(f"Error disconnecting from Dograh STT service: {e}")
 
+    async def _reconnect_websocket(self, retry_count: int) -> bool:
+        """Reconnect to the WebSocket.
+
+        Args:
+            retry_count: Current retry attempt number.
+
+        Returns:
+            True if reconnection successful, False otherwise.
+        """
+        logger.debug(f"Reconnecting to Dograh STT (attempt {retry_count})")
+        await self._disconnect_websocket()
+        try:
+            await self._connect_websocket()
+            return True
+        except Exception as e:
+            logger.error(f"Reconnection failed: {e}")
+            return False
+
+    async def _connect(self):
+        """Connect to the service."""
+        await self._connect_websocket()
+
+        # Start receive task handler from WebsocketService base class
+        if self._websocket and not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+        # Start keepalive task
+        if self._websocket and not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+
+    async def _disconnect(self):
+        """Disconnect from the service."""
+        logger.debug(f"{self}: disconnecting")
+
+        # Cancel receive task
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+
+        # Cancel keepalive task
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
+        await self._disconnect_websocket()
+
+    async def _report_error(self, frame: ErrorFrame):
+        """Report an error to the pipeline.
+
+        Args:
+            frame: The error frame to push upstream.
+        """
+        await self.push_frame(frame, FrameDirection.UPSTREAM)
+
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from Dograh."""
-        try:
-            async for message in self._websocket:
-                try:
-                    msg = json.loads(message)
-                    msg_type = msg.get("type")
+        # If websocket was closed (e.g., due to quota exceeded), just return
+        if not self._websocket:
+            return
 
-                    if msg_type == "transcription":
-                        await self._handle_transcription(msg)
+        async for message in self._websocket:
+            try:
+                msg = json.loads(message)
+                msg_type = msg.get("type")
 
-                    elif msg_type == "speech_started":
-                        await self._handle_speech_started(msg)
+                if msg_type == "transcription":
+                    await self._handle_transcription(msg)
 
-                    elif msg_type == "speech_ended":
-                        await self._handle_speech_ended(msg)
+                elif msg_type == "speech_started":
+                    await self._handle_speech_started(msg)
 
-                    elif msg_type == "error":
-                        error_msg = msg.get("message", "Unknown error")
-                        logger.error(f"Dograh STT error: {error_msg}")
-                        
-                        # Raise an exception to be handled by _receive_task_handler
-                        raise Exception(f"STT error: {error_msg}")
+                elif msg_type == "speech_ended":
+                    await self._handle_speech_ended(msg)
 
-                    elif msg_type == "ready":
-                        logger.debug("Dograh STT service is ready")
+                elif msg_type == "error":
+                    error_msg = msg.get("message", "Unknown error")
 
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to decode message from Dograh: {e}")
-                    raise
-                except Exception as e:
-                    logger.error(f"Error processing Dograh STT message: {e}")
-                    raise
+                    # Check if this is a quota error
+                    is_quota_error = (
+                        "quota" in error_msg.lower() and "exceeded" in error_msg.lower()
+                    )
 
-        except websockets.ConnectionClosed:
-            logger.info("Dograh STT WebSocket connection closed")
-        except Exception as e:
-            logger.error(f"Error in receive loop: {e}")
-            raise
+                    # For quota errors, handle gracefully without error logs
+                    if is_quota_error:
+                        logger.info(f"STT quota exceeded: {error_msg}")
+
+                        # Push the error frame to trigger pipeline shutdown
+                        await self.push_frame(
+                            ErrorFrame(
+                                error=f"STT service quota exceeded: {error_msg}", fatal=True
+                            ),
+                            direction=FrameDirection.UPSTREAM,
+                        )
+
+                        # Close the websocket gracefully
+                        logger.info("Closing websocket connection gracefully due to quota exceeded")
+                        try:
+                            if self._websocket:
+                                await self._websocket.close(
+                                    code=1000, reason="Quota exceeded - closing gracefully"
+                                )
+                                self._websocket = None
+                        except Exception as close_error:
+                            logger.debug(f"Error while closing websocket: {close_error}")
+
+                        # Raise CancelledError to cleanly cancel the receive task
+                        # This will cancel the _receive_task without any error logs
+                        raise asyncio.CancelledError("Quota exceeded - cancelling receive task")
+                    else:
+                        # For non-quota errors, raise exception to trigger retry logic
+                        raise Exception(f"Dograh STT error: {error_msg}")
+
+                elif msg_type == "ready":
+                    logger.debug("Dograh STT service is ready")
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to decode message from Dograh: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Error processing Dograh STT message: {e}")
+                raise
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
@@ -243,7 +311,7 @@ class DograhSTTService(STTService):
                     await self._websocket.send(json.dumps(keepalive_msg))
                     logger.trace("Sent STT keepalive")
             except websockets.ConnectionClosed:
-                logger.warning("Dograh STT keepalive connection closed")
+                logger.debug("Dograh STT keepalive connection closed")
                 break
             except Exception as e:
                 logger.error(f"Unexpected STT keepalive error: {e}")

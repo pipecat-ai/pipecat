@@ -749,7 +749,7 @@ class PipelineTask(BasePipelineTask):
         elif isinstance(frame, ErrorFrame):
             await self._call_event_handler("on_pipeline_error", frame)
             if frame.fatal:
-                logger.error(f"A fatal error occurred: {frame}")
+                logger.warning(f"A fatal error occurred: {frame}")
                 # Cancel all tasks downstream.
                 await self.queue_frame(CancelFrame())
             else:
