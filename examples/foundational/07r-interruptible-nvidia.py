@@ -22,9 +22,9 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.nim.llm import NimLLMService
-from pipecat.services.riva.stt import RivaSTTService
-from pipecat.services.riva.tts import RivaTTSService
+from pipecat.services.nim.llm import NvidiaLLMService
+from pipecat.services.nvidia.stt import NvidiaSTTService
+from pipecat.services.nvidia.tts import NvidiaTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -59,11 +59,13 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = RivaSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
+    stt = NvidiaSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
 
-    llm = NimLLMService(api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct")
+    llm = NvidiaLLMService(
+        api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct"
+    )
 
-    tts = RivaTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
+    tts = NvidiaTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
 
     messages = [
         {
