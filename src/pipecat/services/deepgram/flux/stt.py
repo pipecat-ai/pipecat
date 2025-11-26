@@ -150,7 +150,17 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                     params=params
                 )
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # Note: For DeepgramFluxSTTService, differently from other processes, we need to create
+        # the _receive_task inside _connect_websocket, because the websocket should only be
+        # considered connected and ready to send audio once we receive from Flux the message
+        # which confirms the connection has been established.
+        # If we try to keep the logic reconnect_on_error, when receiving a message, the
+        # _receive_task_handler would try to reconnect in case of error, invoking the
+        # _connect_websocket again and leading to a case where the first _receive_task_handler
+        # was never destroyed.
+        # So we can keep it here as false, because inside the method send_with_retry, it will
+        # already try to reconnect if needed.
+        super().__init__(sample_rate=sample_rate, reconnect_on_error=False, **kwargs)
 
         self._api_key = api_key
         self._url = url
@@ -288,10 +298,13 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         This signals to the server that no more audio data will be sent.
         """
-        if self._websocket:
-            logger.debug("Sending CloseStream message to Deepgram Flux")
-            message = {"type": "CloseStream"}
-            await self._websocket.send(json.dumps(message))
+        try:
+            if self._websocket:
+                logger.debug("Sending CloseStream message to Deepgram Flux")
+                message = {"type": "CloseStream"}
+                await self._websocket.send(json.dumps(message))
+        except Exception as e:
+            await self.push_error(error_msg=f"Error sending closeStream: {e}", exception=e)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -378,7 +391,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 are issues sending the audio data.
         """
         if not self._websocket:
-            yield ErrorFrame("Not connected to Deepgram Flux.")
             return
 
         try:

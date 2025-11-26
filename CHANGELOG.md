@@ -268,6 +268,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `DeepgramFluxSTTService` where it sometimes failed to reconnect.
+
 - Fixed an issue in `ElevenLabsRealtimeSTTService` where dynamic language
   updates were not working.
 
