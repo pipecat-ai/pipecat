@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `cache_read_input_tokens`, `cache_creation_input_tokens` and 
+  `reasoning_tokens` to OTel spans for LLM call
+
 - Added `LiveKitRESTHelper` utility class for managing LiveKit rooms via REST API.
 
 - Added `DeepgramSageMakerSTTService` which connects to a SageMaker hosted

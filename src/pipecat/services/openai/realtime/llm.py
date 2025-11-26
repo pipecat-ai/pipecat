@@ -57,7 +57,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -657,10 +656,17 @@ class OpenAIRealtimeLLMService(LLMService):
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
         # usage metrics
+        cached_tokens = (
+            evt.response.usage.input_token_details.cached_tokens
+            if hasattr(evt.response.usage, "input_token_details")
+            and evt.response.usage.input_token_details
+            else None
+        )
         tokens = LLMTokenUsage(
             prompt_tokens=evt.response.usage.input_tokens,
             completion_tokens=evt.response.usage.output_tokens,
             total_tokens=evt.response.usage.total_tokens,
+            cache_read_input_tokens=cached_tokens,
         )
         await self.start_llm_usage_metrics(tokens)
         await self.stop_processing_metrics()
@@ -810,7 +816,7 @@ class OpenAIRealtimeLLMService(LLMService):
             # We're done configuring the LLM for this session
             self._llm_needs_conversation_setup = False
 
-        logger.debug(f"Creating response")
+        logger.debug("Creating response")
 
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()
