@@ -6,7 +6,10 @@
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
+
+from pipecat.frames.frames import OutputTransportMessageFrame
+from pipecat.transports.daily.transport import DailyTransportClient
 
 
 class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
@@ -14,8 +17,6 @@ class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_message_waits_for_join(self):
         """Test that send_message() waits for join to complete instead of rejecting immediately."""
-        from pipecat.frames.frames import OutputTransportMessageFrame
-        from pipecat.transports.daily.transport import DailyTransportClient
 
         # Create a mock transport object with just the attributes we need
         transport = MagicMock(spec=DailyTransportClient)
@@ -36,9 +37,6 @@ class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
             transport._joined = True
             transport._joined_event.set()
 
-        # Bind the real send_message method to our mock
-        from pipecat.transports.daily.transport import DailyTransportClient
-
         send_message = DailyTransportClient.send_message
 
         # Schedule the event setter
@@ -55,8 +53,6 @@ class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_message_timeout_if_join_slow(self):
         """Test that send_message() times out if join takes longer than 10 seconds."""
-        from pipecat.frames.frames import OutputTransportMessageFrame
-        from pipecat.transports.daily.transport import DailyTransportClient
 
         # Create a mock transport that never joins
         transport = MagicMock(spec=DailyTransportClient)
@@ -66,7 +62,6 @@ class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
         transport._get_event_loop = MagicMock(return_value=asyncio.get_event_loop())
 
         # Bind the real send_message method
-        from pipecat.transports.daily.transport import DailyTransportClient
 
         send_message = DailyTransportClient.send_message
 
@@ -84,8 +79,6 @@ class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_message_already_joined(self):
         """Test that send_message() returns immediately if already joined."""
-        from pipecat.frames.frames import OutputTransportMessageFrame
-        from pipecat.transports.daily.transport import DailyTransportClient
 
         # Create a mock transport that's already joined
         transport = MagicMock(spec=DailyTransportClient)
@@ -102,7 +95,6 @@ class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
         transport._client.send_app_message = mock_send
 
         # Bind the real send_message method
-        from pipecat.transports.daily.transport import DailyTransportClient
 
         send_message = DailyTransportClient.send_message
 
@@ -119,8 +111,6 @@ class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_message_disconnects_during_wait(self):
         """Test that send_message() handles disconnect during wait."""
-        from pipecat.frames.frames import OutputTransportMessageFrame
-        from pipecat.transports.daily.transport import DailyTransportClient
 
         transport = MagicMock(spec=DailyTransportClient)
         transport._joined = False
@@ -135,7 +125,6 @@ class TestDailyTransportRaceCondition(unittest.IsolatedAsyncioTestCase):
             transport._joined_event.set()
 
         # Bind the real method
-        from pipecat.transports.daily.transport import DailyTransportClient
 
         send_message = DailyTransportClient.send_message
 
