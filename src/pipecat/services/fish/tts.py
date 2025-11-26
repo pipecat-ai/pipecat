@@ -76,7 +76,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         api_key: str,
         reference_id: Optional[str] = None,  # This is the voice ID
         model: Optional[str] = None,  # Deprecated
-        model_id: str = "speech-1.5",
+        model_id: str = "s1",
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -93,7 +93,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 The `model` parameter is deprecated and will be removed in version 0.1.0.
                 Use `reference_id` instead to specify the voice model.
 
-            model_id: Specify which Fish Audio TTS model to use (e.g. "speech-1.5")
+            model_id: Specify which Fish Audio TTS model to use (e.g. "s1")
             output_format: Audio output format. Defaults to "pcm".
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
