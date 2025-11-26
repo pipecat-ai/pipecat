@@ -15,6 +15,7 @@ from typing import List, Optional
 from loguru import logger
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     TranscriptionMessage,
     TranscriptionUpdateFrame,
     TTSTextFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
@@ -306,3 +308,273 @@ class TranscriptProcessor:
             return handler
 
         return decorator
+
+
+class TurnAwareTranscriptProcessor(BaseTranscriptProcessor):
+    """Processes transcripts with turn boundary awareness.
+
+    This processor combines user and assistant transcript tracking with turn
+    detection, emitting events when turns start and end. It correctly handles
+    interruptions by only capturing what was actually spoken.
+
+    Turn boundaries are detected based on:
+    - User started speaking (UserStartedSpeakingFrame)
+    - Bot stopped speaking (BotStoppedSpeakingFrame)
+    - Interruptions (InterruptionFrame)
+
+    Events:
+        on_turn_started: Emitted when a new turn begins.
+            Handler signature: async def handler(processor, turn_number)
+
+        on_turn_ended: Emitted when a turn ends.
+            Handler signature: async def handler(processor, turn_number,
+                                                user_transcript, assistant_transcript,
+                                                was_interrupted)
+
+        on_transcript_update: Inherited from BaseTranscriptProcessor, emitted for
+            individual transcript messages.
+
+    Example::
+
+        turn_processor = TurnAwareTranscriptProcessor()
+
+        @turn_processor.event_handler("on_turn_started")
+        async def handle_turn_started(processor, turn_number):
+            print(f"Turn {turn_number} started")
+
+        @turn_processor.event_handler("on_turn_ended")
+        async def handle_turn_ended(processor, turn_number, user_text, assistant_text, interrupted):
+            print(f"Turn {turn_number} ended")
+            print(f"User said: {user_text}")
+            print(f"Assistant said: {assistant_text}")
+            print(f"Was interrupted: {interrupted}")
+
+        pipeline = Pipeline([
+            transport.input(),
+            stt,
+            turn_processor,
+            context_aggregator.user(),
+            llm,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
+        ])
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize the turn-aware transcript processor.
+
+        Args:
+            **kwargs: Additional arguments passed to parent class.
+        """
+        super().__init__(**kwargs)
+
+        # Turn tracking state
+        self._turn_number = 0
+        self._turn_active = False
+        self._turn_start_time: Optional[str] = None
+
+        # Accumulate text for current turn
+        self._current_turn_user_parts: List[TextPartForConcatenation] = []
+        self._current_turn_assistant_parts: List[TextPartForConcatenation] = []
+
+        # Track bot speaking state
+        self._bot_is_speaking = False
+
+        # Register turn events
+        self._register_event_handler("on_turn_started")
+        self._register_event_handler("on_turn_ended")
+
+    async def _start_turn(self):
+        """Start a new turn."""
+        if not self._turn_active:
+            self._turn_number += 1
+            self._turn_active = True
+            self._turn_start_time = time_now_iso8601()
+            self._current_turn_user_parts = []
+            self._current_turn_assistant_parts = []
+
+            logger.debug(f"Turn {self._turn_number} started")
+            await self._call_event_handler("on_turn_started", self._turn_number)
+
+    async def _end_turn(self, was_interrupted: bool = False):
+        """End the current turn and emit aggregated transcripts.
+
+        Args:
+            was_interrupted: Whether the turn ended due to an interruption.
+        """
+        if not self._turn_active:
+            return
+
+        # Aggregate user text
+        user_transcript = ""
+        if self._current_turn_user_parts:
+            user_transcript = concatenate_aggregated_text(self._current_turn_user_parts)
+
+        # Aggregate assistant text
+        assistant_transcript = ""
+        if self._current_turn_assistant_parts:
+            assistant_transcript = concatenate_aggregated_text(self._current_turn_assistant_parts)
+
+        # Emit turn ended event
+        logger.debug(
+            f"Turn {self._turn_number} ended (interrupted={was_interrupted}). "
+            f"User: '{user_transcript}', Assistant: '{assistant_transcript}'"
+        )
+        await self._call_event_handler(
+            "on_turn_ended",
+            self._turn_number,
+            user_transcript,
+            assistant_transcript,
+            was_interrupted,
+        )
+
+        # Reset turn state
+        self._turn_active = False
+        self._current_turn_user_parts = []
+        self._current_turn_assistant_parts = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames for turn-aware transcript tracking.
+
+        Handles:
+        - UserStartedSpeakingFrame: Start new turn
+        - TranscriptionFrame: Accumulate user speech and emit transcript message
+        - BotStartedSpeakingFrame: Track bot speaking state
+        - TTSTextFrame: Accumulate assistant speech
+        - BotStoppedSpeakingFrame: End turn if no interruption pending
+        - InterruptionFrame: End turn immediately as interrupted
+        - EndFrame/CancelFrame: End any active turn
+
+        Args:
+            frame: Input frame to process.
+            direction: Frame processing direction.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            # User started speaking
+            if self._bot_is_speaking:
+                # This is an interruption - end the current turn with what was spoken
+                if self._current_turn_assistant_parts:
+                    assistant_content = concatenate_aggregated_text(
+                        self._current_turn_assistant_parts
+                    )
+                    if assistant_content:
+                        message = TranscriptionMessage(
+                            role="assistant",
+                            content=assistant_content,
+                            timestamp=self._turn_start_time or time_now_iso8601(),
+                        )
+                        await self._emit_update([message])
+                await self._end_turn(was_interrupted=True)
+                self._bot_is_speaking = False
+            elif self._turn_active:
+                # Previous turn is ending normally (bot finished speaking)
+                if self._current_turn_assistant_parts:
+                    assistant_content = concatenate_aggregated_text(
+                        self._current_turn_assistant_parts
+                    )
+                    if assistant_content:
+                        message = TranscriptionMessage(
+                            role="assistant",
+                            content=assistant_content,
+                            timestamp=self._turn_start_time or time_now_iso8601(),
+                        )
+                        await self._emit_update([message])
+                await self._end_turn(was_interrupted=False)
+
+            # Start a new turn
+            await self._start_turn()
+            await self.push_frame(frame, direction)
+
+        elif isinstance(frame, TranscriptionFrame):
+            # Accumulate user speech for the current turn
+            if self._turn_active:
+                self._current_turn_user_parts.append(
+                    TextPartForConcatenation(frame.text, includes_inter_part_spaces=True)
+                )
+
+            # Also emit individual transcript message
+            message = TranscriptionMessage(
+                role="user",
+                user_id=frame.user_id,
+                content=frame.text,
+                timestamp=frame.timestamp,
+            )
+            await self._emit_update([message])
+            await self.push_frame(frame, direction)
+
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            # Bot started speaking
+            self._bot_is_speaking = True
+            await self.push_frame(frame, direction)
+
+        elif isinstance(frame, TTSTextFrame):
+            # Accumulate assistant speech for the current turn
+            if self._turn_active:
+                self._current_turn_assistant_parts.append(
+                    TextPartForConcatenation(
+                        frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                    )
+                )
+            await self.push_frame(frame, direction)
+
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            # Bot stopped speaking - just mark it, don't end turn yet
+            # Turn will end when next user speaks or pipeline ends
+            self._bot_is_speaking = False
+            await self.push_frame(frame, direction)
+
+        elif isinstance(frame, InterruptionFrame):
+            # Handle interruption
+            # Give a brief moment for any pending TTSTextFrames to process
+            import asyncio
+
+            await asyncio.sleep(0.001)
+
+            # Emit assistant transcript message with what was spoken before interruption
+            if self._current_turn_assistant_parts:
+                assistant_content = concatenate_aggregated_text(self._current_turn_assistant_parts)
+                if assistant_content:
+                    message = TranscriptionMessage(
+                        role="assistant",
+                        content=assistant_content,
+                        timestamp=self._turn_start_time or time_now_iso8601(),
+                    )
+                    await self._emit_update([message])
+
+            # Push frame first to ensure proper cleanup
+            await self.push_frame(frame, direction)
+
+            # End turn as interrupted
+            await self._end_turn(was_interrupted=True)
+            self._bot_is_speaking = False
+
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            # Pipeline ending - finalize any active turn
+            if self._turn_active:
+                # Emit any pending assistant transcript (allow time for TTSTextFrames to be processed)
+                # Give a brief moment for any pending frames to process
+                import asyncio
+
+                await asyncio.sleep(0.001)
+
+                if self._current_turn_assistant_parts:
+                    assistant_content = concatenate_aggregated_text(
+                        self._current_turn_assistant_parts
+                    )
+                    if assistant_content:
+                        message = TranscriptionMessage(
+                            role="assistant",
+                            content=assistant_content,
+                            timestamp=self._turn_start_time or time_now_iso8601(),
+                        )
+                        await self._emit_update([message])
+
+                await self._end_turn(was_interrupted=isinstance(frame, CancelFrame))
+
+            await self.push_frame(frame, direction)
+
+        else:
+            await self.push_frame(frame, direction)
