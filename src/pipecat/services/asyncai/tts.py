@@ -228,8 +228,7 @@ class AsyncAITTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -241,8 +240,7 @@ class AsyncAITTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from Async")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._websocket = None
             self._started = False
@@ -287,12 +285,11 @@ class AsyncAITTSService(InterruptibleTTSService):
                 )
                 await self.push_frame(frame)
             elif msg.get("error_code"):
-                logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(error=f"{self} error: {msg['message']}"))
+                await self.push_error(error_msg=f"Error: {msg['message']}")
             else:
-                logger.error(f"{self} error, unknown message type: {msg}")
+                await self.push_error(error_msg=f"Unknown message type: {msg}")
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
@@ -335,16 +332,14 @@ class AsyncAITTSService(InterruptibleTTSService):
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class AsyncAIHttpTTSService(TTSService):
@@ -477,8 +472,7 @@ class AsyncAIHttpTTSService(TTSService):
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Async API error: {error_text}")
-                    await self.push_error(ErrorFrame(error=f"Async API error: {error_text}"))
+                    await self.push_error(error_msg=f"Async API error: {error_text}")
                     raise Exception(f"Async API returned status {response.status}: {error_text}")
 
                 audio_data = await response.read()
@@ -494,8 +488,7 @@ class AsyncAIHttpTTSService(TTSService):
             yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

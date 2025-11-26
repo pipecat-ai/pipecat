@@ -206,9 +206,8 @@ class AssemblyAISTTService(STTService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
             self._connected = False
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             raise
 
     async def _disconnect(self):
@@ -233,8 +232,7 @@ class AssemblyAISTTService(STTService):
                     logger.warning("Timed out waiting for termination message from server")
 
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
             if self._receive_task:
                 await self.cancel_task(self._receive_task)
@@ -242,8 +240,7 @@ class AssemblyAISTTService(STTService):
             await self._websocket.close()
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
         finally:
             self._websocket = None
@@ -262,13 +259,11 @@ class AssemblyAISTTService(STTService):
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:
-                    logger.error(f"{self} exception: {e}")
-                    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                    await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
                     break
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     def _parse_message(self, message: Dict[str, Any]) -> BaseMessage:
         """Parse a raw message into the appropriate message type."""
@@ -297,8 +292,7 @@ class AssemblyAISTTService(STTService):
             elif isinstance(parsed_message, TerminationMessage):
                 await self._handle_termination(parsed_message)
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""

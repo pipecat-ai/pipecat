@@ -290,8 +290,7 @@ class DeepgramTTSService(WebsocketTTSService):
             yield None
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class DeepgramHttpTTSService(TTSService):
@@ -401,5 +400,4 @@ class DeepgramHttpTTSService(TTSService):
             yield TTSStoppedFrame()
 
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
             yield ErrorFrame(f"Error getting audio: {str(e)}")

@@ -351,8 +351,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 )
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 def audio_format_from_sample_rate(sample_rate: int) -> str:
@@ -598,7 +597,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 }
                 await self._websocket.send(json.dumps(message))
             except Exception as e:
-                logger.error(f"Error sending audio: {e}")
                 yield ErrorFrame(f"ElevenLabs Realtime STT error: {str(e)}")
 
         yield None
@@ -663,8 +661,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             await self._call_event_handler("on_connected")
             logger.debug("Connected to ElevenLabs Realtime STT")
         except Exception as e:
-            logger.error(f"{self}: unable to connect to ElevenLabs Realtime STT: {e}")
-            await self.push_error(ErrorFrame(f"Connection error: {str(e)}"))
+            await self.push_error(
+                error_msg=f"Unable to connect to ElevenLabs Realtime STT: {e}", exception=e
+            )
 
     async def _disconnect_websocket(self):
         """Disconnect from ElevenLabs Realtime STT WebSocket."""
@@ -673,7 +672,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 logger.debug("Disconnecting from ElevenLabs Realtime STT")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
@@ -733,17 +732,17 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         elif message_type == "error":
             error_msg = data.get("error", "Unknown error")
             logger.error(f"ElevenLabs error: {error_msg}")
-            await self.push_error(ErrorFrame(f"Error: {error_msg}"))
+            await self.push_error(error_msg=f"Error: {error_msg}")
 
         elif message_type == "auth_error":
             error_msg = data.get("error", "Authentication error")
             logger.error(f"ElevenLabs auth error: {error_msg}")
-            await self.push_error(ErrorFrame(f"Auth error: {error_msg}"))
+            await self.push_error(error_msg=f"Auth error: {error_msg}")
 
         elif message_type == "quota_exceeded_error":
             error_msg = data.get("error", "Quota exceeded")
             logger.error(f"ElevenLabs quota exceeded: {error_msg}")
-            await self.push_error(ErrorFrame(f"Quota exceeded: {error_msg}"))
+            await self.push_error(error_msg=f"Quota exceeded: {error_msg}")
 
         else:
             logger.debug(f"Unknown message type: {message_type}")

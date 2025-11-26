@@ -443,7 +443,7 @@ class OpenAIRealtimeLLMService(LLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
 
     async def _disconnect(self):
@@ -460,7 +460,7 @@ class OpenAIRealtimeLLMService(LLMService):
             self._completed_tool_calls = set()
             self._disconnecting = False
         except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
     async def _ws_send(self, realtime_message):
         try:
@@ -473,12 +473,11 @@ class OpenAIRealtimeLLMService(LLMService):
                 # somehow *started* the websocket send attempt while we still
                 # had a connection)
                 return
-            logger.error(f"Error sending message to websocket: {e}")
             # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
             # treat a send-side error as fatal.
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}"))
+            await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
     async def _update_settings(self):
         settings = self._session_properties
@@ -674,7 +673,7 @@ class OpenAIRealtimeLLMService(LLMService):
         self._current_assistant_response = None
         # error handling
         if evt.response.status == "failed":
-            await self.push_error(ErrorFrame(error=evt.response.status_details["error"]["message"]))
+            await self.push_error(error_msg=evt.response.status_details["error"]["message"])
             return
         # response content
         for item in evt.response.output:
@@ -766,7 +765,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
-        await self.push_error(ErrorFrame(error=f"Error: {evt}"))
+        await self.push_error(error_msg=f"Error: {evt}")
 
     #
     # state and client events for the current conversation
