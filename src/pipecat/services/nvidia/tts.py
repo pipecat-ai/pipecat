@@ -40,7 +40,7 @@ except ModuleNotFoundError as e:
     logger.error("In order to use NVIDIA Riva TTS, you need to `pip install pipecat-ai[nvidia]`.")
     raise Exception(f"Missing module: {e}")
 
-RIVA_TTS_TIMEOUT_SECS = 5
+NVIDIA_TTS_TIMEOUT_SECS = 5
 
 
 class NvidiaTTSService(TTSService):
@@ -185,55 +185,3 @@ class NvidiaTTSService(TTSService):
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()
-
-
-class RivaTTSService(NvidiaTTSService):
-    """Deprecated FastPitch TTS service.
-
-    .. deprecated:: 0.0.96
-        This class is deprecated. Use NvidiaTTSService instead for new implementations.
-        Provides backward compatibility for existing Riva TTS integrations.
-    """
-
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str = "English-US.Female-1",
-        sample_rate: Optional[int] = None,
-        model_function_map: Mapping[str, str] = {
-            "function_id": "0149dedb-2be8-4195-b9a0-e57e0e14f972",
-            "model_name": "fastpitch-hifigan-tts",
-        },
-        params: Optional[NvidiaTTSService.InputParams] = None,
-        **kwargs,
-    ):
-        """Initialize the deprecated Riva TTS service.
-
-        Args:
-            api_key: NVIDIA API key for authentication.
-            server: gRPC server endpoint. Defaults to NVIDIA's cloud endpoint.
-            voice_id: Voice model identifier. Defaults to Female-1 voice.
-            sample_rate: Audio sample rate. If None, uses service default.
-            model_function_map: Dictionary containing function_id and model_name for FastPitch model.
-            params: Additional configuration parameters for TTS synthesis.
-            **kwargs: Additional arguments passed to parent NvidiaTTSService.
-        """
-        super().__init__(
-            api_key=api_key,
-            server=server,
-            voice_id=voice_id,
-            sample_rate=sample_rate,
-            model_function_map=model_function_map,
-            params=params,
-            **kwargs,
-        )
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`RivaTTSService` is deprecated, use `NvidiaTTSService` instead.",
-                DeprecationWarning,
-            )
