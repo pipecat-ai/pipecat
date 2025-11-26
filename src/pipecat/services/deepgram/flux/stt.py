@@ -378,14 +378,14 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 are issues sending the audio data.
         """
         if not self._websocket:
-            await self.push_error(error_msg=f"Websocket not connected")
+            yield ErrorFrame("Not connected to Deepgram Flux.")
             return
 
         try:
             self._last_stt_time = time.monotonic()
             await self.send_with_retry(audio, self._report_error)
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
             return
 
         yield None

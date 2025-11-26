@@ -697,11 +697,11 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                await self.push_error(error_msg=f"Error sending text: {e}", exception=e)
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")

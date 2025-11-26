@@ -736,13 +736,13 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 else:
                     await self._send_text(text)
             except Exception as e:
-                await self.push_error(exception=e)
                 yield TTSStoppedFrame()
+                yield ErrorFrame(error=f"{self} error: {e}")
                 self._started = False
                 return
             yield None
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class ElevenLabsHttpTTSService(WordTTSService):
@@ -1037,7 +1037,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    await self.push_error(error_msg=f"ElevenLabs API error: {error_text}")
+                    yield ErrorFrame(error=f"ElevenLabs API error: {error_text}")
                     return
 
                 await self.start_tts_usage_metrics(text)
@@ -1084,7 +1084,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         logger.warning(f"Failed to parse JSON from stream: {e}")
                         continue
                     except Exception as e:
-                        await self.push_error(exception=e)
+                        yield ErrorFrame(error=f"{self} error: {e}")
                         continue
 
                 # After processing all chunks, emit any remaining partial word
@@ -1108,7 +1108,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                     self._previous_text = text
 
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             # Let the parent class handle TTSStoppedFrame

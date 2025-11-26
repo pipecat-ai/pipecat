@@ -181,7 +181,7 @@ class AWSTranscribeSTTService(STTService):
                 try:
                     await self._connect()
                 except Exception as e:
-                    await self.push_error(exception=e)
+                    yield ErrorFrame(error=f"{self} error: {e}")
                     return
 
             # Format the audio data according to AWS event stream format
@@ -198,11 +198,11 @@ class AWSTranscribeSTTService(STTService):
                 await self._disconnect()
                 # Don't yield error here - we'll retry on next frame
             except Exception as e:
-                await self.push_error(exception=e)
+                yield ErrorFrame(error=f"{self} error: {e}")
                 await self._disconnect()
 
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
             await self._disconnect()
 
     async def _connect(self):

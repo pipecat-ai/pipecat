@@ -146,6 +146,6 @@ class GroqTTSService(TTSService):
                     bytes = w.readframes(num_frames)
                     yield TTSAudioRawFrame(bytes, frame_rate, channels)
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
         yield TTSStoppedFrame()

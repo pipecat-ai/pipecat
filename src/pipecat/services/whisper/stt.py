@@ -285,7 +285,7 @@ class WhisperSTTService(SegmentedSTTService):
             The service will normalize it to float32 in the range [-1, 1].
         """
         if not self._model:
-            await self.push_error(error_msg="Whisper model not available")
+            yield ErrorFrame("Whisper model not available")
             return
 
         await self.start_processing_metrics()
@@ -427,4 +427,4 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 )
 
         except Exception as e:
-            await self.push_error(error_msg=f"Error processing audio: {e}", exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")

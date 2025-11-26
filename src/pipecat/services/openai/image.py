@@ -76,7 +76,7 @@ class OpenAIImageGenService(ImageGenService):
         image_url = image.data[0].url
 
         if not image_url:
-            await self.push_error(error_msg="Image generation failed")
+            yield ErrorFrame("Image generation failed")
             return
 
         # Load the image from the url

@@ -363,14 +363,14 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                await self.push_error(exception=e)
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class NeuphonicHttpTTSService(TTSService):
@@ -563,7 +563,7 @@ class NeuphonicHttpTTSService(TTSService):
                             yield TTSAudioRawFrame(audio_bytes, self.sample_rate, 1)
 
                     except Exception as e:
-                        await self.push_error(exception=e)
+                        yield ErrorFrame(error=f"{self} error: {e}")
                         # Don't yield error frame for individual message failures
                         continue
 
@@ -571,7 +571,7 @@ class NeuphonicHttpTTSService(TTSService):
             logger.debug("TTS generation cancelled")
             raise
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

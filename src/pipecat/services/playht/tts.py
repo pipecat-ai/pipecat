@@ -391,7 +391,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(json.dumps(tts_command))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -401,7 +401,7 @@ class PlayHTTTSService(InterruptibleTTSService):
             yield None
 
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class PlayHTHttpTTSService(TTSService):
@@ -621,7 +621,7 @@ class PlayHTHttpTTSService(TTSService):
                             yield frame
 
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

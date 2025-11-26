@@ -290,4 +290,4 @@ class FalSTTService(SegmentedSTTService):
                     )
 
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")

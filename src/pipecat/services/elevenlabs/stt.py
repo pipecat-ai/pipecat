@@ -351,7 +351,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
                 )
 
         except Exception as e:
-            await self.push_error(exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 def audio_format_from_sample_rate(sample_rate: int) -> str:
@@ -585,7 +585,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 }
                 await self._websocket.send(json.dumps(message))
             except Exception as e:
-                await self.push_error(exception=e)
+                yield ErrorFrame(f"ElevenLabs Realtime STT error: {str(e)}")
 
         yield None
 

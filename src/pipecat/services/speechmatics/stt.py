@@ -467,7 +467,7 @@ class SpeechmaticsSTTService(STTService):
                 await self._client.send_audio(audio)
             yield None
         except Exception as e:
-            await self.push_error(error_msg=f"Error sending audio: {e}", exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
             await self._disconnect()
 
     def update_params(

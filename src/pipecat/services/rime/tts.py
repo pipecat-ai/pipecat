@@ -408,14 +408,14 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class RimeHttpTTSService(TTSService):
@@ -546,7 +546,7 @@ class RimeHttpTTSService(TTSService):
             ) as response:
                 if response.status != 200:
                     error_message = f"Rime TTS error: HTTP {response.status}"
-                    await self.push_error(error_msg=error_message)
+                    yield ErrorFrame(error=error_message)
                     return
 
                 await self.start_tts_usage_metrics(text)
@@ -563,7 +563,7 @@ class RimeHttpTTSService(TTSService):
                     yield frame
 
         except Exception as e:
-            await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
+            yield ErrorFrame(error=f"{self} error: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

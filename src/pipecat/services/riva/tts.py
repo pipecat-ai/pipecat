@@ -180,13 +180,7 @@ class RivaTTSService(TTSService):
                 yield frame
                 resp = await asyncio.wait_for(queue.get(), timeout=RIVA_TTS_TIMEOUT_SECS)
         except asyncio.TimeoutError:
-            await self.push_error(error_msg=f"Timeout generating TTS: {text}")
-            yield TTSStoppedFrame()
-            return
-        except Exception as e:
-            await self.push_error(error_msg=f"Error generating TTS: {e}", exception=e)
-            yield TTSStoppedFrame()
-            return
+            yield ErrorFrame(error=f"{self} error: {e}")
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()

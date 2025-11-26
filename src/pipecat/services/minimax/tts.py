@@ -264,7 +264,7 @@ class MiniMaxHttpTTSService(TTSService):
             ) as response:
                 if response.status != 200:
                     error_message = f"MiniMax TTS error: HTTP {response.status}"
-                    await self.push_error(error_msg=error_message)
+                    yield ErrorFrame(error=error_message)
                     return
 
                 await self.start_tts_usage_metrics(text)
