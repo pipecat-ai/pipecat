@@ -246,7 +246,8 @@ class UltravoxSTTService(AIService):
 
             logger.info("Model warm-up completed successfully")
         except Exception as e:
-            logger.warning(f"Model warm-up failed: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     def _generate_silent_audio(self, sample_rate=16000, duration_sec=1.0):
         """Generate silent audio as a numpy array.
@@ -376,7 +377,7 @@ class UltravoxSTTService(AIService):
                             if arr.size > 0:  # Check if array is not empty
                                 audio_arrays.append(arr)
                         except Exception as e:
-                            logger.error(f"Error processing bytes audio frame: {e}")
+                            yield ErrorFrame(error=f"{self} error: {e}")
                     # Handle numpy array data
                     elif isinstance(f.audio, np.ndarray):
                         if f.audio.size > 0:  # Check if array is not empty
@@ -436,14 +437,14 @@ class UltravoxSTTService(AIService):
                     yield LLMFullResponseEndFrame()
 
                 except Exception as e:
-                    logger.error(f"Error generating text from model: {e}")
-                    yield ErrorFrame(f"Error generating text: {str(e)}")
+                    logger.error(f"{self} exception: {e}")
+                    yield ErrorFrame(error=f"{self} error: {e}")
             else:
-                logger.warning("No model available for text generation")
+                logger.error("No model available for text generation")
                 yield ErrorFrame("No model available for text generation")
 
         except Exception as e:
-            logger.error(f"Error processing audio buffer: {e}")
+            logger.error(f"{self} exception: {e}")
             import traceback
 
             logger.error(traceback.format_exc())

@@ -19,13 +19,13 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -68,8 +68,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash")
-
     try:
         # Github MCP docs: https://github.com/github/github-mcp-server
         # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
@@ -87,7 +85,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tools = {}
     try:
-        tools = await mcp.register_tools(llm)
+        tools = await mcp.get_tools_schema()
     except Exception as e:
         logger.error(f"error registering tools")
         logger.exception("error trace:")
@@ -96,23 +94,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     You are a helpful LLM in a WebRTC call.
     Your goal is to answer questions about the user's GitHub repositories and account.
     You have access to a number of tools provided by Github. Use any and all tools to help users.
-    Your output will be converted to audio so don't include special characters in your answers.
+    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
     Don't overexplain what you are doing.
     Just respond with short sentences when you are carrying out tool calls.
     """
 
-    messages = [{"role": "system", "content": system}]
+    llm = GeminiLiveLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        system_instruction=system,
+        tools=tools,
+    )
 
-    context = LLMContext(messages, tools)
+    await mcp.register_tools_schema(tools, llm)
+
+    context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
     context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
             context_aggregator.user(),  # User spoken responses
             llm,  # LLM
-            tts,  # TTS
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses and tool context
         ]

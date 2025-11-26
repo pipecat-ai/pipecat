@@ -428,5 +428,5 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 )
 
         except Exception as e:
-            logger.exception(f"MLX Whisper transcription error: {e}")
-            yield ErrorFrame(f"MLX Whisper transcription error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")

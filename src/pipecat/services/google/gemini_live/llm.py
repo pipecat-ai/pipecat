@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -1174,7 +1175,7 @@ class GeminiLiveLLMService(LLMService):
             self._connection_task = self.create_task(self._connection_task_handler(config=config))
 
         except Exception as e:
-            await self.push_error(ErrorFrame(error=f"{self} Initialization error: {e}", fatal=True))
+            await self.push_error(ErrorFrame(error=f"{self} Initialization error: {e}"))
 
     async def _connection_task_handler(self, config: LiveConnectConfig):
         async with self._client.aio.live.connect(model=self._model_name, config=config) as session:
@@ -1255,9 +1256,7 @@ class GeminiLiveLLMService(LLMService):
                 f"Max consecutive failures ({MAX_CONSECUTIVE_FAILURES}) reached, "
                 "treating as fatal error"
             )
-            await self.push_error(
-                ErrorFrame(error=f"{self} Error in receive loop: {error}", fatal=True)
-            )
+            await self.push_error(ErrorFrame(error=f"{self} Error in receive loop: {error}"))
             return False
         else:
             logger.info(
@@ -1453,7 +1452,8 @@ class GeminiLiveLLMService(LLMService):
 
             self._bot_text_buffer += text
             self._search_result_buffer += text  # Also accumulate for grounding
-            await self.push_frame(LLMTextFrame(text=text))
+            frame = LLMTextFrame(text=text)
+            await self.push_frame(frame)
 
         # Check for grounding metadata in server content
         if msg.server_content and msg.server_content.grounding_metadata:
@@ -1645,7 +1645,11 @@ class GeminiLiveLLMService(LLMService):
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
-        await self.push_frame(TTSTextFrame(text=text))
+        frame = TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
+        # Gemini Live text already includes any necessary inter-chunk spaces
+        frame.includes_inter_frame_spaces = True
+
+        await self.push_frame(frame)
 
     async def _handle_msg_grounding_metadata(self, message: LiveServerMessage):
         """Handle dedicated grounding metadata messages."""

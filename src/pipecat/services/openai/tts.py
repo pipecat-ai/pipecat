@@ -190,7 +190,7 @@ class OpenAITTSService(TTSService):
                         f"{self} error getting audio (status: {r.status_code}, error: {error})"
                     )
                     yield ErrorFrame(
-                        f"Error getting audio (status: {r.status_code}, error: {error})"
+                        error=f"Error getting audio (status: {r.status_code}, error: {error})"
                     )
                     return
 
@@ -207,3 +207,4 @@ class OpenAITTSService(TTSService):
                 yield TTSStoppedFrame()
         except BadRequestError as e:
             logger.exception(f"{self} error generating TTS: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")

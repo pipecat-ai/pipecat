@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import List, Tuple, cast
 
 from pipecat.frames.frames import (
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -130,11 +131,11 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),  # Wait for StartedSpeaking to process
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world!"),
-            TTSTextFrame(text="How"),
-            TTSTextFrame(text="are"),
-            TTSTextFrame(text="you?"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="world!", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="How", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="are", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="you?", aggregated_by=AggregationType.WORD),
             SleepFrame(),  # Wait for text frames to queue
             BotStoppedSpeakingFrame(),
         ]
@@ -195,9 +196,9 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text=""),  # Empty text
-            TTSTextFrame(text="   "),  # Just whitespace
-            TTSTextFrame(text="\n"),  # Just newline
+            TTSTextFrame(text="", aggregated_by=AggregationType.WORD),  # Empty text
+            TTSTextFrame(text="   ", aggregated_by=AggregationType.WORD),  # Just whitespace
+            TTSTextFrame(text="\n", aggregated_by=AggregationType.WORD),  # Just newline
             BotStoppedSpeakingFrame(),
             # Pipeline ends here; run_test will automatically send EndFrame
         ]
@@ -235,14 +236,14 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world!"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="world!", aggregated_by=AggregationType.WORD),
             SleepFrame(),
             InterruptionFrame(),  # User interrupts here
             SleepFrame(),
             BotStartedSpeakingFrame(),
-            TTSTextFrame(text="New"),
-            TTSTextFrame(text="response"),
+            TTSTextFrame(text="New", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="response", aggregated_by=AggregationType.WORD),
             SleepFrame(),
             BotStoppedSpeakingFrame(),
         ]
@@ -299,8 +300,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="world", aggregated_by=AggregationType.WORD),
             # Pipeline ends here; run_test will automatically send EndFrame
         ]
 
@@ -338,8 +339,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world"),
+            TTSTextFrame(text="Hello", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="world", aggregated_by=AggregationType.WORD),
             SleepFrame(),  # Ensure messages are processed
             CancelFrame(),
         ]
@@ -401,8 +402,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Assistant"),
-            TTSTextFrame(text="message"),
+            TTSTextFrame(text="Assistant", aggregated_by=AggregationType.WORD),
+            TTSTextFrame(text="message", aggregated_by=AggregationType.WORD),
             BotStoppedSpeakingFrame(),
         ]
 
@@ -438,17 +439,22 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             received_updates.append(frame)
 
         # Test the specific pattern shared
+        def make_tts_text_frame(text: str) -> TTSTextFrame:
+            frame = TTSTextFrame(text=text, aggregated_by=AggregationType.WORD)
+            frame.includes_inter_frame_spaces = True
+            return frame
+
         frames_to_send = [
             BotStartedSpeakingFrame(),
             SleepFrame(),
-            TTSTextFrame(text="Hello"),
-            TTSTextFrame(text=" there"),
-            TTSTextFrame(text="!"),
-            TTSTextFrame(text=" How"),
-            TTSTextFrame(text="'s"),
-            TTSTextFrame(text=" it"),
-            TTSTextFrame(text=" going"),
-            TTSTextFrame(text="?"),
+            make_tts_text_frame("Hello"),
+            make_tts_text_frame(" there"),
+            make_tts_text_frame("!"),
+            make_tts_text_frame(" How"),
+            make_tts_text_frame("'s"),
+            make_tts_text_frame(" it"),
+            make_tts_text_frame(" going"),
+            make_tts_text_frame("?"),
             BotStoppedSpeakingFrame(),
         ]
 
@@ -479,103 +485,3 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.role, "assistant")
         # Should be properly joined without extra spaces
         self.assertEqual(message.content, "Hello there! How's it going?")
-
-    async def test_openai_realtime_syllable_fragments(self):
-        """Test OpenAI Realtime syllable-by-syllable output with standalone punctuation
-
-        OpenAI Realtime can output single words as syllable fragments with punctuation
-        as a separate fragment. Example: ["Met", "am", "orph", "osis", "."]
-        This should be concatenated without spaces to form "Metamorphosis."
-        """
-        processor = AssistantTranscriptProcessor()
-
-        received_updates = []
-
-        @processor.event_handler("on_transcript_update")
-        async def handle_update(proc, frame: TranscriptionUpdateFrame):
-            received_updates.append(frame)
-
-        # Simulate OpenAI Realtime syllable-by-syllable output
-        frames_to_send = [
-            BotStartedSpeakingFrame(),
-            SleepFrame(),
-            TTSTextFrame(text="Met"),
-            TTSTextFrame(text="am"),
-            TTSTextFrame(text="orph"),
-            TTSTextFrame(text="osis"),
-            TTSTextFrame(text="."),  # Standalone punctuation fragment
-            BotStoppedSpeakingFrame(),
-        ]
-
-        expected_down_frames = [
-            BotStartedSpeakingFrame,
-            BotStoppedSpeakingFrame,
-            TTSTextFrame,
-            TTSTextFrame,
-            TTSTextFrame,
-            TTSTextFrame,
-            TTSTextFrame,
-            TranscriptionUpdateFrame,
-        ]
-
-        await run_test(
-            processor,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
-        )
-
-        # Verify syllables are concatenated without spaces
-        self.assertEqual(len(received_updates), 1)
-        message = received_updates[0].messages[0]
-        self.assertEqual(message.role, "assistant")
-        self.assertEqual(message.content, "Metamorphosis.")
-
-    async def test_gemini_live_syllable_fragments_with_newline(self):
-        """Test Gemini Live syllable-by-syllable output with trailing newline
-
-        Gemini Live can output syllable fragments where the last fragment contains
-        trailing whitespace like newlines. Example: ["Met", "amo", "rph", "osi", "s.\\n"]
-        This should be concatenated without spaces to form "Metamorphosis."
-        """
-        processor = AssistantTranscriptProcessor()
-
-        received_updates = []
-
-        @processor.event_handler("on_transcript_update")
-        async def handle_update(proc, frame: TranscriptionUpdateFrame):
-            received_updates.append(frame)
-
-        # Simulate Gemini Live syllable-by-syllable output with trailing newline
-        frames_to_send = [
-            BotStartedSpeakingFrame(),
-            SleepFrame(),
-            TTSTextFrame(text="Met"),
-            TTSTextFrame(text="amo"),
-            TTSTextFrame(text="rph"),
-            TTSTextFrame(text="osi"),
-            TTSTextFrame(text="s.\n"),  # Last fragment with trailing newline
-            BotStoppedSpeakingFrame(),
-        ]
-
-        expected_down_frames = [
-            BotStartedSpeakingFrame,
-            BotStoppedSpeakingFrame,
-            TTSTextFrame,
-            TTSTextFrame,
-            TTSTextFrame,
-            TTSTextFrame,
-            TTSTextFrame,
-            TranscriptionUpdateFrame,
-        ]
-
-        await run_test(
-            processor,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
-        )
-
-        # Verify syllables are concatenated without spaces and newline is stripped
-        self.assertEqual(len(received_updates), 1)
-        message = received_updates[0].messages[0]
-        self.assertEqual(message.role, "assistant")
-        self.assertEqual(message.content, "Metamorphosis.")

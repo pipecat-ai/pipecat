@@ -7,6 +7,7 @@
 
 import asyncio
 import io
+import json
 import os
 import re
 import shutil
@@ -15,7 +16,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from mcp import StdioServerParameters
-from mcp.client.session_group import SseServerParameters
+from mcp.client.session_group import StreamableHttpParameters
 from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -66,10 +67,12 @@ class UrlToImageProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     def extract_url(self, text: str):
-        pattern = r"!\[[^\]]*\]\((https?://[^)]+\.(png|jpg|jpeg|PNG|JPG|JPEG|gif))\)"
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
+        data = json.loads(text)
+        if "artObject" in data:
+            return data["artObject"]["webImage"]["url"]
+        if "artworks" in data and len(data["artworks"]):
+            return data["artworks"][0]["webImage"]["url"]
+
         return None
 
     async def run_image_process(self, image_url: str):
@@ -132,11 +135,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         system = f"""
         You are a helpful LLM in a WebRTC call.
         Your goal is to demonstrate your capabilities in a succinct way.
-        You have access to tools to search the Rijksmuseum collection.
-        Offer, for example, to show the earliest Rembrandt work from the museum. Use the `search_artwork` tool.
+        You have access to tools to search the Rijksmuseum collection and the user's GitHub repositories and account.
+        Offer, for example, to show a floral still life, use the `search_artwork` tool.
         The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
         Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
-        Your output will be converted to audio so don't include special characters in your answers.
+        You can also offer to answer users questions about their GitHub repositories and account.
+        Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
         Respond to what the user said in a creative and helpful way.
         Don't overexplain what you are doing.
         Just respond with short sentences when you are carrying out tool calls.
@@ -145,11 +149,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages = [{"role": "system", "content": system}]
 
         try:
-            mcp = MCPClient(
+            rijksmuseum_mcp = MCPClient(
                 server_params=StdioServerParameters(
                     command=shutil.which("npx"),
                     # https://github.com/r-huijts/rijksmuseum-mcp
-                    args=["-y", "mcp-server-error setting up mcp"],
+                    args=["-y", "mcp-server-rijksmuseum"],
                     env={"RIJKSMUSEUM_API_KEY": os.getenv("RIJKSMUSEUM_API_KEY")},
                 )
             )
@@ -157,24 +161,32 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             logger.error(f"error setting up rijksmuseum mcp")
             logger.exception("error trace:")
         try:
-            # https://docs.mcp.run/integrating/tutorials/mcp-run-sse-openai-agents/
-            # ie. "https://www.mcp.run/api/mcp/sse?..."
-            # ensure the profile has a tool or few installed
-            mcp_run = MCPClient(server_params=SseServerParameters(url=os.getenv("MCP_RUN_SSE_URL")))
+            # Github MCP docs: https://github.com/github/github-mcp-server
+            # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
+            # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
+            # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
+            github_mcp = MCPClient(
+                server_params=StreamableHttpParameters(
+                    url="https://api.githubcopilot.com/mcp/",
+                    headers={
+                        "Authorization": f"Bearer {os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')}"
+                    },
+                )
+            )
         except Exception as e:
             logger.error(f"error setting up mcp.run")
             logger.exception("error trace:")
 
-        tools = {}
-        run_tools = {}
+        rijksmuseum_tools = {}
+        github_tools = {}
         try:
-            tools = await mcp.register_tools(llm)
-            run_tools = await mcp_run.register_tools(llm)
+            rijksmuseum_tools = await rijksmuseum_mcp.register_tools(llm)
+            github_tools = await github_mcp.register_tools(llm)
         except Exception as e:
             logger.error(f"error registering tools")
             logger.exception("error trace:")
 
-        all_standard_tools = run_tools.standard_tools + tools.standard_tools
+        all_standard_tools = rijksmuseum_tools.standard_tools + github_tools.standard_tools
         all_tools = ToolsSchema(standard_tools=all_standard_tools)
 
         context = LLMContext(messages, all_tools)
@@ -226,9 +238,9 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
-    if not os.getenv("RIJKSMUSEUM_API_KEY") or not os.getenv("MCP_RUN_SSE_URL"):
+    if not os.getenv("RIJKSMUSEUM_API_KEY") or not os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN"):
         logger.error(
-            f"Please set RIJKSMUSEUM_API_KEY and MCP_RUN_SSE_URL environment variables. See https://github.com/r-huijts/rijksmuseum-mcp and https://mcp.run"
+            f"Please set `RIJKSMUSEUM_API_KEY` and `GITHUB_PERSONAL_ACCESS_TOKEN` environment variables. See https://github.com/r-huijts/rijksmuseum-mcp."
         )
         import sys
 

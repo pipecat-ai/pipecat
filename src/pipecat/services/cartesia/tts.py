@@ -10,7 +10,8 @@ import base64
 import json
 import uuid
 import warnings
-from typing import AsyncGenerator, List, Literal, Optional, Union
+from enum import Enum
+from typing import AsyncGenerator, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -125,6 +126,72 @@ def language_to_cartesia_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+class CartesiaEmotion(str, Enum):
+    """Predefined Emotions supported by Cartesia."""
+
+    # Primary emotions supported by Cartesia
+    NEUTRAL = "neutral"
+    ANGRY = "angry"
+    EXCITED = "excited"
+    CONTENT = "content"
+    SAD = "sad"
+    SCARED = "scared"
+    # Additional emotions supported by Cartesia
+    HAPPY = "happy"
+    ENTHUSIASTIC = "enthusiastic"
+    ELATED = "elated"
+    EUPHORIC = "euphoric"
+    TRIUMPHANT = "triumphant"
+    AMAZED = "amazed"
+    SURPRISED = "surprised"
+    FLIRTATIOUS = "flirtatious"
+    JOKING_COMEDIC = "joking/comedic"
+    CURIOUS = "curious"
+    PEACEFUL = "peaceful"
+    SERENE = "serene"
+    CALM = "calm"
+    GRATEFUL = "grateful"
+    AFFECTIONATE = "affectionate"
+    TRUST = "trust"
+    SYMPATHETIC = "sympathetic"
+    ANTICIPATION = "anticipation"
+    MYSTERIOUS = "mysterious"
+    MAD = "mad"
+    OUTRAGED = "outraged"
+    FRUSTRATED = "frustrated"
+    AGITATED = "agitated"
+    THREATENED = "threatened"
+    DISGUSTED = "disgusted"
+    CONTEMPT = "contempt"
+    ENVIOUS = "envious"
+    SARCASTIC = "sarcastic"
+    IRONIC = "ironic"
+    DEJECTED = "dejected"
+    MELANCHOLIC = "melancholic"
+    DISAPPOINTED = "disappointed"
+    HURT = "hurt"
+    GUILTY = "guilty"
+    BORED = "bored"
+    TIRED = "tired"
+    REJECTED = "rejected"
+    NOSTALGIC = "nostalgic"
+    WISTFUL = "wistful"
+    APOLOGETIC = "apologetic"
+    HESITANT = "hesitant"
+    INSECURE = "insecure"
+    CONFUSED = "confused"
+    RESIGNED = "resigned"
+    ANXIOUS = "anxious"
+    PANICKED = "panicked"
+    ALARMED = "alarmed"
+    PROUD = "proud"
+    CONFIDENT = "confident"
+    DISTANT = "distant"
+    SKEPTICAL = "skeptical"
+    CONTEMPLATIVE = "contemplative"
+    DETERMINED = "determined"
+
+
 class CartesiaTTSService(AudioContextWordTTSService):
     """Cartesia TTS service with WebSocket streaming and word timestamps.
 
@@ -182,6 +249,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
             container: Audio container format.
             params: Additional input parameters for voice customization.
             text_aggregator: Custom text aggregator for processing input text.
+
+                .. deprecated:: 0.0.95
+                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
+
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -200,9 +271,17 @@ class CartesiaTTSService(AudioContextWordTTSService):
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            text_aggregator=text_aggregator or SkipTagsAggregator([("<spell>", "</spell>")]),
+            text_aggregator=text_aggregator,
             **kwargs,
         )
+
+        if not text_aggregator:
+            # Always skip tags added for spelled-out text
+            # Note: This is primarily to support backwards compatibility.
+            #    The preferred way of taking advantage of Cartesia SSML Tags is
+            #    to use an LLMTextProcessor and/or a text_transformer to identify
+            #    and insert these tags for the purpose of the TTS service alone.
+            self._text_aggregator = SkipTagsAggregator([("<spell>", "</spell>")])
 
         params = params or CartesiaTTSService.InputParams()
 
@@ -256,6 +335,27 @@ class CartesiaTTSService(AudioContextWordTTSService):
             The Cartesia-specific language code, or None if not supported.
         """
         return language_to_cartesia_language(language)
+
+    # A set of Cartesia-specific helpers for text transformations
+    def SPELL(text: str) -> str:
+        """Wrap text in Cartesia spell tag."""
+        return f"<spell>{text}</spell>"
+
+    def EMOTION_TAG(emotion: CartesiaEmotion) -> str:
+        """Convenience method to create an emotion tag."""
+        return f'<emotion value="{emotion}" />'
+
+    def PAUSE_TAG(seconds: float) -> str:
+        """Convenience method to create a pause tag."""
+        return f'<break time="{seconds}s" />'
+
+    def VOLUME_TAG(volume: float) -> str:
+        """Convenience method to create a volume tag."""
+        return f'<volume ratio="{volume}" />'
+
+    def SPEED_TAG(speed: float) -> str:
+        """Convenience method to create a speed tag."""
+        return f'<speed ratio="{speed}" />'
 
     def _is_cjk_language(self, language: str) -> bool:
         """Check if the given language is CJK (Chinese, Japanese, Korean).
@@ -397,7 +497,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
             )
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -409,7 +510,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 logger.debug("Disconnecting from Cartesia")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._context_id = None
             self._websocket = None
@@ -465,7 +567,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
+                await self.push_error(ErrorFrame(error=f"{self} error: {msg['error']}"))
                 self._context_id = None
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
@@ -506,7 +608,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                logger.error(f"{self} exception: {e}")
+                yield ErrorFrame(error=f"{self} error: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -514,6 +617,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")
 
 
 class CartesiaHttpTTSService(TTSService):
@@ -705,7 +809,7 @@ class CartesiaHttpTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Cartesia API error: {error_text}")
-                    await self.push_error(ErrorFrame(f"Cartesia API error: {error_text}"))
+                    await self.push_error(ErrorFrame(error=f"Cartesia API error: {error_text}"))
                     raise Exception(f"Cartesia API returned status {response.status}: {error_text}")
 
                 audio_data = await response.read()
@@ -722,7 +826,7 @@ class CartesiaHttpTTSService(TTSService):
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

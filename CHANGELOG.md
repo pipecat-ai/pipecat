@@ -5,6 +5,362 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `LiveKitRESTHelper` utility class for managing LiveKit rooms via REST API.
+
+- Added `DeepgramSageMakerSTTService` which connects to a SageMaker hosted
+  Deepgram STT model. Added `07c-interruptible-deepgram-sagemaker.py`
+  foundational example.
+
+- Added `SageMakerBidiClient` to connect to SageMaker hosted BiDi compatible
+  services.
+
+- Added support for `include_timestamps` and `enable_logging` in
+  `ElevenLabsRealtimeSTTService`. When `include_timestamps` is enabled,
+  timestamp data is included in the `TranscriptionFrame`'s `result`
+  parameter.
+
+- Added optional speaking rate control to `InworldTTSService`.
+
+- Introduced a new `AggregatedTextFrame` type to support passing text along with
+  an `aggregated_by` field to describe the type of text
+  included. `TTSTextFrame`s now inherit from `AggregatedTextFrame`. With this
+  inheritance, an observer can watch for `AggregatedTextFrame`s to accumlate the
+  perceived output and determine whether or not the text was spoken based on if
+  that frame is also a `TTSTextFrame`.
+
+  With this frame, the llm token stream can be transformed into custom
+  composable chunks, allowing for aggregation outside the TTS service. This
+  makes it possible to listen for or handle those aggregations and sets the
+  stage for doing things like composing a best effort of the perceived llm
+  output in a more digestable form and to do so whether or not it is processed
+  by a TTS or if even a TTS exists.
+
+- Introduced `LLMTextProcessor`: A new processor meant to allow customization
+  for how LLMTextFrames should be aggregated and considered. It's purpose is to
+  turn `LLMTextFrame`s into `AggregatedTextFrame`s. By default, a TTSService
+  will still aggregate `LLMTextFrame`s by sentence for the service to
+  consume. However, if you wish to override how the llm text is aggregated, you
+  should no longer override the TTS's internal text_aggregator, but instead,
+  insert this processor between your LLM and TTS in the pipeline.
+
+- New `bot-output` RTVI message to represent what the bot actually "says".
+
+  - The `RTVIObserver` now emits `bot-output` messages based off the new
+    `AggregatedTextFrame`s (`bot-tts-text` and `bot-llm-text` are still
+    supported and generated, but `bot-transcript` is now deprecated in lieu of
+    this new, more thorough, message).
+
+  - The new `RTVIBotOutputMessage` includes the fields:
+
+    - `spoken`: A boolean indicating whether the text was spoken by TTS
+
+    - `aggregated_by`: A string representing how the text was aggregated
+      ("sentence", "word", "my custom aggregation")
+
+  - Introduced new fields to `RTVIObserver` to support the new `bot-output`
+    messaging:
+
+    - `bot_output_enabled`: Defaults to True. Set to false to disable bot-output
+      messages.
+
+    - `skip_aggregator_types`: Defaults to `None`. Set to a list of strings that
+      match aggregation types that should not be included in bot-output
+      messages. (Ex. `credit_card`)
+
+  - Introduced new methods, `add_text_transformer()` and
+    `remove_text_transformer()`, to `RTVIObserver` to support providing (and
+    subsequently removing) callbacks for various types of aggregations (or all
+    aggregations with `*`) that can modify the text before being sent as a
+    `bot-output` or `tts-text` message. (Think obscuring the credit card or
+    inserting extra detail the client might want that the context doesn't need.)
+
+- In `MiniMaxHttpTTSService`:
+
+  - Added support for speech-2.6-hd and speech-2.6-turbo models
+
+  - Added languages: Afrikaans, Bulgarian, Catalan, Danish, Persian, Filipino,
+    Hebrew, Croatian, Hungarian, Malay, Norwegian, Nynorsk, Slovak, Slovenian,
+    Swedish, and Tamil
+
+  - Added new emotions: calm and fluent
+
+### Changed
+
+- Updated `daily-python` to 0.22.0.
+
+- `BaseTextAggregator` changes:
+
+  Modified the BaseTextAggregator type so that when text gets aggregated,
+  metadata can be associated with it. Currently, that just means a `type`, so
+  that the aggregation can be classified or described. Changes made to support
+  this:
+
+  - ⚠️ IMPORTANT: Aggregators are now expected to strip leading/trailing white
+    space characters before returning their aggregation from `aggregation()` or
+    `.text`. This way all aggregators have a consistent contract allowing
+    downstream use to know how to stitch aggregations back together.
+
+  - Introduced a new `Aggregation` dataclass to represent both the aggregated
+    `text` and a string identifying the `type` of aggregation (ex. "sentence",
+    "word", "my custom aggregation")
+
+  - ⚠️ Breaking change: `BaseTextAggregator.text` now returns an `Aggregation`
+    (instead of `str`).
+
+    Before:
+
+    ```python
+    aggregated_text = myAggregator.text
+    ```
+
+    Now:
+
+    ```python
+    aggregated_text = myAggregator.text.text
+    ```
+
+  - ⚠️ Breaking change: `BaseTextAggregator.aggregate()` now returns
+    `Optional[Aggregation]` (instead of `Optional[str]`).
+
+    Before:
+
+    ```python
+    aggregation = myAggregator.aggregate(text)
+    print(f"successfully aggregated text: {aggregation}")
+    ```
+
+    Now:
+
+    ```python
+    aggregation = myAggregator.aggregate(text)
+    if aggregation:
+      print(f"successfully aggregated text: {aggregation.text}")
+    ```
+
+  - `SimpleTextAggregator`, `SkipTagsAggregator`, `PatternPairAggregator`
+    updated to produce/consume `Aggregation` objects.
+
+  - All uses of the above Aggregators have been updated accordingly.
+
+- Augmented the `PatternPairAggregator` so that matched patterns can be treated
+  as their own aggregation, taking advantage of the new. To that end:
+
+  - Introduced a new, preferred version of `add_pattern` to support a new option
+    for treating a match as a separate aggregation returned from
+    `aggregate()`. This replaces the now deprecated `add_pattern_pair` method
+    and you provide a `MatchAction` in lieu of the `remove_match` field.
+
+    - `MatchAction` enum: `REMOVE`, `KEEP`, `AGGREGATE`, allowing customization
+      for how a match should be handled.
+
+      - `REMOVE`: The text along with its delimiters will be removed from the
+        streaming text. Sentence aggregation will continue on as if this text
+        did not exist.
+
+      - `KEEP`: The delimiters will be removed, but the content between them
+        will be kept. Sentence aggregation will continue on with the internal
+        text included.
+
+      - `AGGREGATE`: The delimiters will be removed and the content between will
+        be treated as a separate aggregation. Any text before the start of the
+        pattern will be returned early, whether or not a complete sentence was
+        found. Then the pattern will be returned. Then the aggregation will
+        continue on sentence matching after the closing delimiter is found. The
+        content between the delimiters is not aggregated by sentence. It is
+        aggregated as one single block of text.
+
+    - `PatternMatch` now extends `Aggregation` and provides richer info to
+      handlers.
+
+  - ⚠️ Breaking change: The `PatternMatch` type returned to handlers registered
+    via `on_pattern_match` has been updated to subclass from the new
+    `Aggregation` type, which means that `content` has been replaced with
+    `text` and `pattern_id` has been replaced with `type`:
+
+    ```python
+    async dev on_match_tag(match: PatternMatch):
+       pattern = match.type # instead of match.pattern_id
+       text = match.text # instead of match.content
+    ```
+
+- `TextFrame` now includes the field `append_to_context` to support setting
+  whether or not the encompassing text should be added to the LLM context (by
+  the LLM assistant aggregator). It defaults to `True`.
+
+- `TTSService` base class updates:
+
+  - `TTSService`s now accept a new `skip_aggregator_types` to avoid speaking
+    certain aggregation types (now determined/returned by the aggregator)
+
+  - Introduced the ability to do a just-in-time transform of text before it gets
+    sent to the TTS service via callbacks you can set up via a new init field,
+    `text_transforms` or a new method `add_text_transformer()`. This makes it
+    possible to do things like introduce TTS-specific tags for spelling or
+    emotion or change the pronunciation of something on the
+    fly. `remove_text_transformer` has also been added to support removing a
+    registered transform callback.
+
+  - TTS services push `AggregatedTextFrame` in addition to `TTSTextFrame`s when
+    either an aggregation occurs that should not be spoken or when the TTS
+    service supports word-by-word timestamping. In the latter case, the
+    `TTSService` preliminarily generates an `AggregatedTextFrame`, aggregated by
+    sentence to generate the full sentence content as early as possible.
+
+- Updated `CartesiaTTSService`:
+
+  - Modified use of custom default text_aggregator to avoid deprecation warnings
+    and push users towards use of transformers or the `LLMTextProcessor`
+
+  - Added convenience methods for taking advantage of Cartesia's SSML tags:
+    spell, emotion, pauses, volume, and speed.
+
+- Updated `RimeTTSService`:
+
+  - Modified use of custom default text_aggregator to avoid deprecation warnings
+    and push users towards use of transformers or the `LLMTextProcessor`
+
+  - Added convenience methods for taking advantage of Rime's customization
+    options: spell, pauses, pronunciations, and inline speed control.
+
+### Deprecated
+
+- The TTS constructor field, `text_aggregator` is deprecated in favor of the new
+  `LLMTextProcessor`. TTSServices still have an internal aggregator for support
+  of default behavior, but if you want to override the aggregation behavior, you
+  should use the new processor.
+
+- The RTVI `bot-transcription` event is deprecated in favor of the new
+  `bot-output` message which is the canonical representation of bot output
+  (spoken or not). The code still emits a transcription message for backwards
+  compatibility while transition occurs.
+
+- Deprecated `add_pattern_pair` in the `PatternPairAggregator` which takes a
+  `pattern_id` and `remove_match` field in favor of the new `add_pattern` method
+  which takes a `type` and an `action`
+
+- `english_normalization` input parameter for `MiniMaxHttpTTSService` is
+  deprecated, use `test_normalization` instead.
+
+### Fixed
+
+- Fixed an issue in `ElevenLabsRealtimeSTTService` where dynamic language
+  updates were not working.
+
+- Fixed an issue in `ElevenLabsRealtimeSTTService` where setting the sample
+  rate would result in transcripts failing.
+
+- Fixed `InworldTTSService` audio config payload to use camelCase keys expected
+  by the Inworld API.
+
+## [0.0.95] - 2025-11-18
+
+### Added
+
+- Added ai-coustics integrated VAD (`AICVADAnalyzer`) with `AICFilter` factory and
+  example wiring; leverages the enhancement model for robust detection with no
+  ONNX dependency or added processing complexity.
+
+- Added a watchdog to `DeepgramFluxSTTService` to prevent dangling tasks in case the
+  user was speaking and we stop receiving audio.
+
+- Introduced a minimum confidence parameter in `DeepgramFluxSTTService` to avoid
+  generating transcriptions below a defined threshold.
+
+- Added `ElevenLabsRealtimeSTTService` which implements the Realtime STT
+  service from ElevenLabs.
+
+- Added word-level timestamps support to Hume TTS service
+
+### Changed
+
+- ⚠️ Breaking change: `LLMContext.create_image_message()`,
+  `LLMContext.create_audio_message()`, `LLMContext.add_image_frame_message()`
+  and `LLMContext.add_audio_frames_message()` are now async methods. This fixes
+  an issue where the asyncio event loop would be blocked while encoding audio or
+  images.
+
+- `ConsumerProcessor` now queues frames from the producer internally instead of
+  pushing them directly. This allows us to subclass consumer processors and
+  manipulate frames before they are pushed.
+
+- `BaseTextFilter` only require subclasses to implement the `filter()` method.
+
+- Extracted the logic for retrying connections, and create a new `send_with_retry`
+  method inside `WebSocketService`.
+
+- Refactored `DeepgramFluxSTTService` to automatically reconnect if sending a
+  message fails.
+
+- Updated all STT and TTS services to use consistent error handling pattern with
+  `push_error()` method for better pipeline error event integration.
+
+- Added support for `maybe_capture_participant_camera()` and
+  `maybe_capture_participant_screen()` for `SmallWebRTCTransport` in the runner
+  utils.
+
+- Added Hindi support for Rime TTS services.
+
+- Updated `GeminiTTSService` to use Google Cloud Text-to-Speech streaming API
+  instead of the deprecated Gemini API. Now uses `credentials` /
+  `credentials_path` for authentication. The `api_key` parameter is deprecated.
+  Also, added support for `prompt` parameter for style instructions and
+  expressive markup tags. Significantly improved latency with streaming
+  synthesis.
+
+- Updated language mappings for the Google and Gemini TTS services to match
+  official documentation.
+
+### Deprecated
+
+- The `api_key` parameter in `GeminiTTSService` is deprecated. Use
+  `credentials` or `credentials_path` instead for Google Cloud authentication.
+
+### Fixed
+
+- Fixed a `SimliVideoService` connection issue.
+
+- Fixed an issue in the `Runner` where, when using `SmallWebRTCTransport`, the
+  `request_data` was not being passed to the `SmallWebRTCRunnerArguments` body.
+
+- Fixed subtle issue of assistant context messages ending up with double spaces
+  between words or sentences.
+
+- Fixed an issue where `NeuphonicTTSService` wasn't pushing `TTSTextFrame`s,
+  meaning assistant messages weren't being written to context.
+
+- Fixed an issue with OpenTelemetry where tracing wasn't correctly displaying
+  LLM completions and tools when using the universal `LLMContext`.
+
+- Fixed issue where `DeepgramFluxSTTService` failed to connect if passing a
+  `keyterm` or `tag` containing a space.
+
+- Prevented `HeyGenVideoService` from automatically disconnecting after 5 minutes.
+
+## [0.0.94] - 2025-11-10
+
+### Changed
+
+- Added support for retrying `SpeechmaticsTTSService` when it returns a 503
+  error. Default values in `InputParams`.
+
+### Deprecated
+
+- The `KrispFilter` is deprecated and will be removed in a future version. Use
+  the `KrispVivaFilter` instead.
+
+### Removed
+
+- `LivekitFrameSerializer` has been removed. Use `LiveKitTransport` instead.
+
+### Fixed
+
+- Fixed a bug related to `LLMAssistantAggregator` where spaces were sometimes
+  missing from assistant messages in context.
+
 ## [0.0.93] - 2025-11-07
 
 ### Added
@@ -89,10 +445,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated `simli-ai` to 0.1.25.
-
-- Improved `concatenate_aggregated_text()` to one word outputs from OpenAI
-  Realtime and Gemini Live. Text fragments are now correctly concatenated
-  without spaces when these patterns are detected.
 
 - `STTMuteFilter` no longer sends `STTMuteFrame` to the STT service. The filter
   now blocks frames locally without instructing the STT service to stop

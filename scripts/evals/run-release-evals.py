@@ -30,8 +30,8 @@ EVAL_SIMPLE_MATH = EvalConfig(
 )
 
 EVAL_WEATHER = EvalConfig(
-    prompt="What's the weather in San Francisco?",
-    eval="The user says something specific about the current weather in San Francisco, including the degrees.",
+    prompt="What's the weather in San Francisco (in farhenheit or celsius)?",
+    eval="The user says something specific about the current weather in San Francisco, including the degrees (in farhenheit or celsius).",
 )
 
 EVAL_ONLINE_SEARCH = EvalConfig(
@@ -70,7 +70,7 @@ EVAL_VOICEMAIL = EvalConfig(
 
 EVAL_CONVERSATION = EvalConfig(
     prompt="Hello, this is Mark.",
-    eval="The user replies with a greeting.",
+    eval="The user acknowledges the greeting.",
     eval_speaks_first=True,
 )
 

@@ -66,7 +66,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.string import concatenate_aggregated_text
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -90,7 +90,7 @@ class LLMContextAggregator(FrameProcessor):
         self._context = context
         self._role = role
 
-        self._aggregation: List[str] = []
+        self._aggregation: List[TextPartForConcatenation] = []
 
     @property
     def messages(self) -> List[LLMContextMessage]:
@@ -433,7 +433,12 @@ class LLMUserAggregator(LLMContextAggregator):
         if not text.strip():
             return
 
-        self._aggregation.append(text)
+        # Transcriptions never include inter-part spaces (so far).
+        self._aggregation.append(
+            TextPartForConcatenation(
+                text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
         # Reset aggregation timer.
@@ -788,7 +793,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
 
-        self._context.add_image_frame_message(
+        await self._context.add_image_frame_message(
             format=frame.format,
             size=frame.size,
             image=frame.image,
@@ -806,14 +811,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started:
+        if not self._started or not frame.append_to_context:
             return
 
         # Make sure we really have text (spaces count, too!)
         if len(frame.text) == 0:
             return
 
-        self._aggregation.append(frame.text)
+        self._aggregation.append(
+            TextPartForConcatenation(
+                frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
 
     def _context_updated_task_finished(self, task: asyncio.Task):
         self._context_updated_tasks.discard(task)

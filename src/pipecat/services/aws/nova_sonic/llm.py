@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
+    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -1027,7 +1028,9 @@ class AWSNovaSonicLLMService(LLMService):
         logger.debug(f"Assistant response text added: {text}")
 
         # Report the text of the assistant response.
-        await self.push_frame(TTSTextFrame(text))
+        frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        frame.includes_inter_frame_spaces = True
+        await self.push_frame(frame)
 
         # HACK: here we're also buffering the assistant text ourselves as a
         # backup rather than relying solely on the assistant context aggregator
@@ -1060,7 +1063,11 @@ class AWSNovaSonicLLMService(LLMService):
                 # TTSTextFrame would be ignored otherwise (the interruption frame
                 # would have cleared the assistant aggregator state).
                 await self.push_frame(LLMFullResponseStartFrame())
-                await self.push_frame(TTSTextFrame(self._assistant_text_buffer))
+                frame = TTSTextFrame(
+                    self._assistant_text_buffer, aggregated_by=AggregationType.SENTENCE
+                )
+                frame.includes_inter_frame_spaces = True
+                await self.push_frame(frame)
             self._may_need_repush_assistant_text = False
 
         # Report the end of the assistant response.

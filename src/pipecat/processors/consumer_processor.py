@@ -83,4 +83,4 @@ class ConsumerProcessor(FrameProcessor):
         while True:
             frame = await self._queue.get()
             new_frame = await self._transformer(frame)
-            await self.push_frame(new_frame, self._direction)
+            await self.queue_frame(new_frame, self._direction)

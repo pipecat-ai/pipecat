@@ -290,5 +290,5 @@ class FalSTTService(SegmentedSTTService):
                     )
 
         except Exception as e:
-            logger.error(f"Fal Wizper error: {e}")
-            yield ErrorFrame(f"Fal Wizper error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"{self} error: {e}")

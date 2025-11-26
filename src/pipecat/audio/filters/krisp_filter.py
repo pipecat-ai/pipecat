@@ -61,6 +61,10 @@ class KrispFilter(BaseAudioFilter):
     Provides real-time noise reduction for audio streams using Krisp's
     proprietary noise suppression algorithms. Requires a Krisp model file
     for operation.
+
+    .. deprecated:: 0.0.94
+        The KrispFilter is deprecated and will be removed in a future version.
+        Use KrispVivaFilter instead.
     """
 
     def __init__(
@@ -78,6 +82,17 @@ class KrispFilter(BaseAudioFilter):
             ValueError: If model_path is not provided and KRISP_MODEL_PATH is not set.
         """
         super().__init__()
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "KrispFilter is deprecated and will be removed in a future version. "
+                "Use KrispVivaFilter instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         # Set model path, checking environment if not specified
         self._model_path = model_path or os.getenv("KRISP_MODEL_PATH")

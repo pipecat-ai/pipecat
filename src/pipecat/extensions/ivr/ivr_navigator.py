@@ -31,7 +31,11 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
-from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
+from pipecat.utils.text.pattern_pair_aggregator import (
+    MatchAction,
+    PatternMatch,
+    PatternPairAggregator,
+)
 
 
 class IVRStatus(Enum):
@@ -114,15 +118,15 @@ class IVRProcessor(FrameProcessor):
     def _setup_xml_patterns(self):
         """Set up XML pattern detection and handlers."""
         # Register DTMF pattern
-        self._aggregator.add_pattern_pair("dtmf", "<dtmf>", "</dtmf>", remove_match=True)
+        self._aggregator.add_pattern("dtmf", "<dtmf>", "</dtmf>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("dtmf", self._handle_dtmf_action)
 
         # Register mode pattern
-        self._aggregator.add_pattern_pair("mode", "<mode>", "</mode>", remove_match=True)
+        self._aggregator.add_pattern("mode", "<mode>", "</mode>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("mode", self._handle_mode_action)
 
         # Register IVR pattern
-        self._aggregator.add_pattern_pair("ivr", "<ivr>", "</ivr>", remove_match=True)
+        self._aggregator.add_pattern("ivr", "<ivr>", "</ivr>", action=MatchAction.REMOVE)
         self._aggregator.on_pattern_match("ivr", self._handle_ivr_action)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -148,7 +152,7 @@ class IVRProcessor(FrameProcessor):
             result = await self._aggregator.aggregate(frame.text)
             if result:
                 # Push aggregated text that doesn't contain XML patterns
-                await self.push_frame(LLMTextFrame(result), direction)
+                await self.push_frame(LLMTextFrame(result.text), direction)
 
         else:
             await self.push_frame(frame, direction)
@@ -159,7 +163,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing DTMF content.
         """
-        value = match.content
+        value = match.text
         logger.debug(f"DTMF detected: {value}")
 
         try:
@@ -180,7 +184,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing IVR status content.
         """
-        status = match.content
+        status = match.text
         logger.trace(f"IVR status detected: {status}")
 
         # Convert string to enum, with validation
@@ -211,7 +215,7 @@ class IVRProcessor(FrameProcessor):
         Args:
             match: The pattern match containing mode content.
         """
-        mode = match.content
+        mode = match.text
         logger.debug(f"Mode detected: {mode}")
         if mode == "conversation":
             await self._handle_conversation()

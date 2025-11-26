@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.string import concatenate_aggregated_text
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -98,7 +98,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._current_text_parts: List[str] = []
+        self._current_text_parts: List[TextPartForConcatenation] = []
         self._aggregation_start_time: Optional[str] = None
 
     async def _emit_aggregated_text(self):
@@ -185,7 +185,11 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             if not self._aggregation_start_time:
                 self._aggregation_start_time = time_now_iso8601()
 
-            self._current_text_parts.append(frame.text)
+            self._current_text_parts.append(
+                TextPartForConcatenation(
+                    frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                )
+            )
 
             # Push frame.
             await self.push_frame(frame, direction)

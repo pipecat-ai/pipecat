@@ -327,8 +327,8 @@ class SonioxSTTService(STTService):
             # Expected when closing the connection
             logger.debug("WebSocket connection closed, keepalive task stopped.")
         except Exception as e:
-            logger.error(f"{self} error (_keepalive_task_handler): {e}")
-            await self.push_error(ErrorFrame(f"{self} error (_keepalive_task_handler): {e}"))
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _receive_task_handler(self):
         if not self._websocket:
@@ -409,7 +409,7 @@ class SonioxSTTService(STTService):
                     )
                     await self.push_error(
                         ErrorFrame(
-                            f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
+                            error=f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
                         )
                     )
 
@@ -425,5 +425,5 @@ class SonioxSTTService(STTService):
             # Expected when closing the connection.
             pass
         except Exception as e:
-            logger.error(f"{self} error: {e}")
-            await self.push_error(ErrorFrame(f"{self} error: {e}"))
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))

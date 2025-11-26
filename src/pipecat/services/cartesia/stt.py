@@ -20,6 +20,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -275,7 +276,8 @@ class CartesiaSTTService(WebsocketSTTService):
             self._websocket = await websocket_connect(ws_url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self}: unable to connect to Cartesia: {e}")
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _disconnect_websocket(self):
         try:
@@ -284,6 +286,7 @@ class CartesiaSTTService(WebsocketSTTService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
@@ -315,7 +318,9 @@ class CartesiaSTTService(WebsocketSTTService):
                 await self._on_transcript(data)
 
             elif data["type"] == "error":
-                logger.error(f"Cartesia error: {data.get('message', 'Unknown error')}")
+                error_msg = data.get("message", "Unknown error")
+                logger.error(f"Cartesia error: {error_msg}")
+                await self.push_error(ErrorFrame(error=error_msg))
 
     @traced_stt
     async def _handle_transcription(

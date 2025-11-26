@@ -18,6 +18,7 @@ Dependencies:
 """
 
 import re
+from dataclasses import dataclass
 from typing import FrozenSet, List, Optional, Sequence, Tuple
 
 import nltk
@@ -198,7 +199,24 @@ def parse_start_end_tags(
     return (None, current_tag_index)
 
 
-def concatenate_aggregated_text(text_parts: List[str]) -> str:
+@dataclass
+class TextPartForConcatenation:
+    """Class representing a part of text for concatenation with concatenate_aggregated_text.
+
+    Attributes:
+        text: The text content.
+        includes_inter_part_spaces: Whether any necessary inter-frame
+            (leading/trailing) spaces are already included in the text.
+    """
+
+    text: str
+    includes_inter_part_spaces: bool
+
+    def __str__(self):
+        return f"{self.name}(text: [{self.text}], includes_inter_part_spaces: {self.includes_inter_part_spaces})"
+
+
+def concatenate_aggregated_text(text_parts: List[TextPartForConcatenation]) -> str:
     """Concatenate a list of text parts into a single string.
 
     This function joins the provided list of text parts into a single string,
@@ -208,54 +226,55 @@ def concatenate_aggregated_text(text_parts: List[str]) -> str:
     transcription services.
 
     Args:
-        text_parts: A list of strings representing parts of text to concatenate.
+        text_parts: A list of text parts to concatenate.
 
     Returns:
         A single concatenated string.
     """
-    # Check specifically for space characters, previously isspace() was used
-    # but that includes all whitespace characters (e.g. \n), not just spaces.
-    has_leading_spaces = any(part and part[0] == " " for part in text_parts[1:])
-    has_trailing_spaces = any(part and part[-1] == " " for part in text_parts[:-1])
+    result = ""
+    last_includes_inter_part_spaces = False
 
-    # Check for trailing non-space whitespace (e.g., \n, \r, \t) which indicates
-    # syllable-by-syllable output with line breaks.
-    # Example: Gemini Live: ["Met", "amo", "rph", "osi", "s.\n"]
-    has_trailing_whitespace = any(
-        part and part[-1] != " " and part[-1].isspace() for part in text_parts
-    )
+    if not text_parts:
+        return result
 
-    # Check if we have punctuation-only fragments, which indicates syllable-by-syllable
-    # output where punctuation arrives as a separate fragment.
-    # Example: OpenAI Realtime single word: ["Met", "am", "orph", "osis", "."]
-    punctuation_chars = ".,!?;:—-'\"…"
-    has_punctuation_only = any(
-        part and len(part.strip()) == 0 or all(c in punctuation_chars for c in part)
-        for part in text_parts
-    )
+    def append_part(part: TextPartForConcatenation):
+        nonlocal result
+        nonlocal last_includes_inter_part_spaces
+        result += part.text
+        last_includes_inter_part_spaces = part.includes_inter_part_spaces
 
-    # If there are embedded spaces or other whitespace in the fragments, use direct concatenation
-    contains_spacing_between_fragments = (
-        has_leading_spaces or has_trailing_spaces or has_trailing_whitespace
-    )
+    for part in text_parts:
+        # Part is empty.
+        # Skip.
+        if not part.text:
+            continue
 
-    # Apply corresponding joining method based on detected spacing patterns:
+        # Result is as yet empty.
+        # Just append.
+        if not result:
+            append_part(part)
+            continue
 
-    if has_punctuation_only and not contains_spacing_between_fragments:
-        # Syllable-by-syllable output with standalone punctuation fragment. Examples:
-        # - OpenAI Realtime: ["Met", "am", "orph", "osis", "."] → "Metamorphosis."
-        result = "".join(text_parts)
-    elif contains_spacing_between_fragments:
-        # Fragments already have embedded spacing or trailing whitespace - concatenate directly. Examples:
-        # - OpenAI Realtime: ['Hey', ' there', '!', ' Great', ' to', ' meet', ' you', '!']
-        # - Gemini Live (spaces): ['Hel', 'lo.', ' Wo', 'u', 'ld ', 'you', ' li', 'ke ', 'to ', 'he', 'ar a joke?\n']
-        # - Gemini Live (newline): ["Met", "amo", "rph", "osi", "s.\n"] → "Metamorphosis."
-        # - Sentence level TTS services: ['Hello!', ' How can I assist you today?']
-        result = "".join(text_parts)
-    else:
-        # Word-by-word fragments without spacing - join with spaces. Examples:
-        # - Word level TTS services: ["Hello", "there.", "How", "are", "you?"] → "Hello there. How are you?"
-        result = " ".join(text_parts)
+        if part.includes_inter_part_spaces and last_includes_inter_part_spaces:
+            # This part is part of an ongoing run that has spaces already included.
+            # Just append.
+            append_part(part)
+        elif not part.includes_inter_part_spaces and not last_includes_inter_part_spaces:
+            # This part is part of an ongoing run that has no spaces included.
+            # Add a space before appending.
+            result += " "
+            append_part(part)
+        else:
+            # This part represents a transition to a new run (spaces -> no spaces, or vice versa).
+            # Add a space if needed, before appending.
+            if not result[-1].isspace() and not part.text[0].isspace():
+                result += " "
+            append_part(part)
+
+    # NOTE: the above logic assumes that runs of text parts with
+    # includes_inter_part_spaces=True are well-formed, i.e. they're not
+    # actually multiple separate runs with a space-less boundary, like
+    # "hello ", "world.", "goodnight ", "moon."
 
     # Clean up any excessive whitespace
     result = result.strip()

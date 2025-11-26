@@ -38,7 +38,7 @@ class STTService(AIService):
 
     Event handlers:
         on_connected: Called when connected to the STT service.
-        on_connected: Called when disconnected from the STT service.
+        on_disconnected: Called when disconnected from the STT service.
         on_connection_error: Called when a connection to the STT service error occurs.
 
     Example::
