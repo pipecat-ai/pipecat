@@ -302,7 +302,7 @@ def _setup_webrtc_routes(
         result: StartBotResult = {"sessionId": session_id}
         if request_data.get("enableDefaultIceServers"):
             result["iceConfig"] = IceConfig(
-                iceServers=[IceServer(urls="stun:stun.l.google.com:19302")]
+                iceServers=[IceServer(urls=["stun:stun.l.google.com:19302"])]
             )
 
         return result
