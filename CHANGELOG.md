@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.96] - 2025-11-26 🦃 "Happy Thanksgiving!" 🦃
 
 ### Added
 
@@ -14,7 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `VIDEOSDK_AUTH_TOKEN` and `VIDEOSDK_MEETING_ID` fields to `env.example`.
 - Added new example `examples/foundational/04c-transports-videosdk.py` demonstrating usage of `VideoSDKTransport`.
 
-- Added `cache_read_input_tokens`, `cache_creation_input_tokens` and 
+- Enhanced error handling across the framework:
+
+  - Added `on_error` callback to `FrameProcessor` for centralized error
+    handling.
+
+  - Renamed `push_error(error: ErrorFrame)` to `push_error_frame(error: ErrorFrame)`
+    for clarity.
+
+  - Added new `push_error` method for simplified error reporting:
+
+    ```python
+    async def push_error(error_msg: str,
+                         exception: Optional[Exception] = None,
+                         fatal: bool = False)
+    ```
+
+  - Standardized error logging by replacing `logger.exception` calls with
+    `logger.error` throughout the codebase.
+
+- Added `cache_read_input_tokens`, `cache_creation_input_tokens` and
   `reasoning_tokens` to OTel spans for LLM call
 
 - Added `LiveKitRESTHelper` utility class for managing LiveKit rooms via REST API.
@@ -96,7 +115,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   - Added new emotions: calm and fluent
 
+- Added `enable_logging` to `SimliVideoService` input parameters. It's disabled
+  by default.
+
 ### Changed
+
+- Updated `FishAudioTTSService` default model to `s1`.
+
+- Updated `DeepgramTTSService` to use Deepgram's TTS websocket API. ⚠️ This is
+  a potential breaking change, which only affects you if you're self-hosting
+  `DeepgramTTSService`. The new service uses Websockets and improves TTFB
+  latency.
 
 - Updated `daily-python` to 0.22.0.
 
@@ -254,6 +283,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deprecated, use `test_normalization` instead.
 
 ### Fixed
+
+- Fixed an issue in `AWSBedrockLLMService` where the `aws_region` arg was
+  always set to `us-east-1`.
+
+- Fixed an issue with `DeepgramFluxSTTService` where it sometimes failed to reconnect.
 
 - Fixed an issue in `ElevenLabsRealtimeSTTService` where dynamic language
   updates were not working.

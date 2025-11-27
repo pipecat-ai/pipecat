@@ -210,8 +210,7 @@ class DeepgramSageMakerSTTService(STTService):
             try:
                 await self._client.send_audio_chunk(audio)
             except Exception as e:
-                logger.error(f"Error sending audio to SageMaker: {e}")
-                await self.push_error(ErrorFrame(error=f"SageMaker STT error: {e}"))
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
         yield None
 
     async def _connect(self):
@@ -260,8 +259,7 @@ class DeepgramSageMakerSTTService(STTService):
             await self._call_event_handler("on_connected")
 
         except Exception as e:
-            logger.error(f"Failed to connect to SageMaker: {e}")
-            await self.push_error(ErrorFrame(error=f"SageMaker connection error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             await self._call_event_handler("on_connection_error", str(e))
 
     async def _disconnect(self):
@@ -342,8 +340,7 @@ class DeepgramSageMakerSTTService(STTService):
         except asyncio.CancelledError:
             logger.debug("Response processor cancelled")
         except Exception as e:
-            logger.error(f"Error processing responses: {e}", exc_info=True)
-            await self.push_error(ErrorFrame(error=f"SageMaker response error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             logger.debug("Response processor stopped")
 

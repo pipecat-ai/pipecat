@@ -734,7 +734,7 @@ class AWSBedrockLLMService(LLMService):
         aws_access_key: Optional[str] = None,
         aws_secret_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
-        aws_region: str = "us-east-1",
+        aws_region: Optional[str] = None,
         params: Optional[InputParams] = None,
         client_config: Optional[Config] = None,
         retry_timeout_secs: Optional[float] = 5.0,
@@ -1136,7 +1136,7 @@ class AWSBedrockLLMService(LLMService):
         except (ReadTimeoutError, asyncio.TimeoutError):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())

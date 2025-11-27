@@ -121,8 +121,7 @@ class AzureSTTService(STTService):
                 self._audio_stream.write(audio)
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
     async def start(self, frame: StartFrame):
         """Start the speech recognition service.
@@ -151,8 +150,9 @@ class AzureSTTService(STTService):
             self._speech_recognizer.recognized.connect(self._on_handle_recognized)
             self._speech_recognizer.start_continuous_recognition_async()
         except Exception as e:
-            logger.error(f"{self} exception during initialization: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(
+                error_msg=f"Uncaught exception during initialization: {e}", exception=e
+            )
 
     async def stop(self, frame: EndFrame):
         """Stop the speech recognition service.
