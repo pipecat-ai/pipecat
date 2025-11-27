@@ -17,11 +17,11 @@ def test_udp():
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(3)
 
-        print("Trying to contact STUN server...")
+        print("Testing UDP connectivity to STUN server...")
         sock.sendto(msg, stun_server)
 
-        data, addr = sock.recvfrom(1024)
-        print("STUN response received:", data)
+        _, _ = sock.recvfrom(1024)
+        print("STUN response received")
         return True
 
     except Exception as e:
@@ -33,14 +33,16 @@ def test_udp():
             sock.close()
 
 
-async def _async_turn_test(turn_server, turn_port, username, password):
+async def _async_turn_test(turn_server, turn_port, username, password, turn_transport):
     """Internal async TURN test using aioice."""
+    print(f"Testing TURN server: {turn_server}:{turn_port}:{turn_transport}")
+
     connection = aioice.Connection(
         ice_controlling=True,
         turn_server=(turn_server, turn_port),
         turn_username=username,
         turn_password=password,
-        turn_transport="udp",
+        turn_transport=turn_transport,
     )
     try:
         print(f"Gathering ICE candidates via TURN {turn_server}:{turn_port} ...")
@@ -63,17 +65,9 @@ async def _async_turn_test(turn_server, turn_port, username, password):
     finally:
         await connection.close()
 
-def test_turn_with_auth(server, port, username, password):
+def test_turn_with_auth(server, port, username, password, transport):
     """Sync wrapper for aioice TURN test."""
-    print(f"\nTesting TURN server with auth: {server}:{port}")
-    print(f"Username: {username}")
-
-    # Clean "turn:example.com:3478?transport=udp" → "example.com"
-    clean_host = server.replace("turn:", "").replace("stun:", "")
-    clean_host = clean_host.split("?")[0]
-    clean_host = clean_host.split(":")[0]  # remove :port
-
-    return asyncio.run(_async_turn_test(clean_host, port, username, password))
+    return asyncio.run(_async_turn_test(server, port, username, password, transport))
 
 
 def comprehensive_network_test():
@@ -90,13 +84,14 @@ def comprehensive_network_test():
             3478,
             "g001676bf83775dd93ddd77c69c80da1d13027af179ef51b4af7e3567a5028fd",
             "a77444990e4fe3b82fd0fbe795f7499409edfbc3b170cea4b28155021ab6623c",
+            "udp"
         ),
     ]
 
     results['turn_tests'] = []
 
-    for host, port, username, password in turn_servers:
-        success = test_turn_with_auth(host, port, username, password)
+    for host, port, username, password, transport in turn_servers:
+        success = test_turn_with_auth(host, port, username, password, transport)
         results['turn_tests'].append({
             "server": f"{host}:{port}",
             "success": success
