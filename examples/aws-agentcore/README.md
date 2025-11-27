@@ -59,6 +59,9 @@ Deploy your configured bot to Amazon Bedrock AgentCore Runtime for production ho
 
 ```bash
 agentcore launch --env OPENAI_API_KEY=... --env DEEPGRAM_API_KEY=... --env CARTESIA_API_KEY=... # -a <agent_name> (if multiple agents configured)
+
+# or just use this script, which will read and send all environment variables
+./scripts/launch.sh
 ```
 
 You should see commands related to tailing logs printed to the console. Copy and save them for later use.
@@ -87,6 +90,12 @@ Paste the log tailing command you received when deploying your bot to AgentCore 
 ```bash
 # Replace with your actual command
 aws logs tail /aws/bedrock-agentcore/runtimes/bot1-0uJkkT7QHC-DEFAULT --log-stream-name-prefix "2025/11/19/[runtime-logs]" --follow
+```
+
+## Removing your local agent
+
+```bash
+agentcore destroy
 ```
 
 ## Running Locally
