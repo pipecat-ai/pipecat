@@ -5,6 +5,13 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed an issue in `AWSTranscribeSTTService` where the `region` arg was
+  always set to `us-east-1` when providing an AWS_REGION env var.
+
 ## [0.0.96] - 2025-11-26 🦃 "Happy Thanksgiving!" 🦃
 
 ### Added
@@ -280,7 +287,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed an issue in `AWSBedrockLLMService` where the `aws_region` arg was
-  always set to `us-east-1`.
+  always set to `us-east-1` when providing an AWS_REGION env var.
 
 - Fixed an issue with `DeepgramFluxSTTService` where it sometimes failed to reconnect.
 
