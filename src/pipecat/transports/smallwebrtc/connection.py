@@ -316,7 +316,7 @@ class SmallWebRTCConnection(BaseObject):
                                 logger.debug("Client not connected. Queuing app-message.")
                                 self._pending_app_messages.append(json_message)
                 except Exception as e:
-                    logger.exception(f"Error parsing JSON message {message}, {e}")
+                    logger.error(f"Error parsing JSON message {message}, {e}")
 
         # Despite the fact that aiortc provides this listener, they don't have a status for "disconnected"
         # So, in case we loose connection, this event will not be triggered

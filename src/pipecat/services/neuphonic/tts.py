@@ -285,8 +285,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -299,8 +298,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from Neuphonic")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._started = False
             self._websocket = None
@@ -365,16 +363,14 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class NeuphonicHttpTTSService(TTSService):
@@ -538,7 +534,6 @@ class NeuphonicHttpTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     error_message = f"Neuphonic API error: HTTP {response.status} - {error_text}"
-                    logger.error(error_message)
                     yield ErrorFrame(error=error_message)
                     return
 
@@ -568,8 +563,7 @@ class NeuphonicHttpTTSService(TTSService):
                             yield TTSAudioRawFrame(audio_bytes, self.sample_rate, 1)
 
                     except Exception as e:
-                        logger.error(f"{self} exception: {e}")
-                        yield ErrorFrame(error=f"{self} error: {e}")
+                        yield ErrorFrame(error=f"Unknown error occurred: {e}")
                         # Don't yield error frame for individual message failures
                         continue
 
@@ -577,8 +571,7 @@ class NeuphonicHttpTTSService(TTSService):
             logger.debug("TTS generation cancelled")
             raise
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

@@ -246,8 +246,7 @@ class UltravoxSTTService(AIService):
 
             logger.info("Model warm-up completed successfully")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     def _generate_silent_audio(self, sample_rate=16000, duration_sec=1.0):
         """Generate silent audio as a numpy array.
@@ -377,7 +376,7 @@ class UltravoxSTTService(AIService):
                             if arr.size > 0:  # Check if array is not empty
                                 audio_arrays.append(arr)
                         except Exception as e:
-                            yield ErrorFrame(error=f"{self} error: {e}")
+                            yield ErrorFrame(error=f"Unknown error occurred: {e}")
                     # Handle numpy array data
                     elif isinstance(f.audio, np.ndarray):
                         if f.audio.size > 0:  # Check if array is not empty
@@ -437,17 +436,11 @@ class UltravoxSTTService(AIService):
                     yield LLMFullResponseEndFrame()
 
                 except Exception as e:
-                    logger.error(f"{self} exception: {e}")
-                    yield ErrorFrame(error=f"{self} error: {e}")
+                    yield ErrorFrame(error=f"Unknown error occurred: {e}")
             else:
-                logger.error("No model available for text generation")
                 yield ErrorFrame("No model available for text generation")
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
             yield ErrorFrame(f"Error processing audio: {str(e)}")
         finally:
             self._buffer.is_processing = False

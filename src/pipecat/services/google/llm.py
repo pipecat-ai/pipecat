@@ -793,7 +793,7 @@ class GoogleLLMService(LLMService):
                 return
             generation_params.setdefault("thinking_config", {})["thinking_budget"] = 0
         except Exception as e:
-            logger.exception(f"Failed to unset thinking budget: {e}")
+            logger.error(f"Failed to unset thinking budget: {e}")
 
     async def _stream_content(
         self, params_from_context: GeminiLLMInvocationParams
@@ -983,7 +983,7 @@ class GoogleLLMService(LLMService):
         except DeadlineExceeded:
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(

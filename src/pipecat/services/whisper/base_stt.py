@@ -226,8 +226,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
                 logger.warning("Received empty transcription from API")
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
     async def _transcribe(self, audio: bytes) -> Transcription:
         """Transcribe audio data to text.

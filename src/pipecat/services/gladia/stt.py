@@ -473,8 +473,7 @@ class GladiaSTTService(STTService):
                             break
 
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
                 self._connection_active = False
 
                 if not self._should_reconnect:
@@ -564,8 +563,7 @@ class GladiaSTTService(STTService):
         except websockets.exceptions.ConnectionClosed:
             logger.debug(f"{self} Connection closed during keepalive")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _receive_task_handler(self):
         try:
@@ -628,8 +626,7 @@ class GladiaSTTService(STTService):
             # Expected when closing the connection
             pass
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _maybe_reconnect(self) -> bool:
         """Handle exponential backoff reconnection logic."""
@@ -637,8 +634,8 @@ class GladiaSTTService(STTService):
             return False
         self._reconnection_attempts += 1
         if self._reconnection_attempts > self._max_reconnection_attempts:
-            logger.error(
-                f"{self} Max reconnection attempts ({self._max_reconnection_attempts}) reached"
+            await self.push_error(
+                error_msg=f"{self} Max reconnection attempts ({self._max_reconnection_attempts}) reached",
             )
             self._should_reconnect = False
             return False

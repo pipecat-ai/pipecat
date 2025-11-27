@@ -458,8 +458,7 @@ class AnthropicLLMService(LLMService):
         except httpx.TimeoutException:
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"{e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
