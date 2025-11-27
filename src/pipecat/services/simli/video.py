@@ -48,12 +48,14 @@ class SimliVideoService(FrameProcessor):
         """Input parameters for Simli video configuration.
 
         Parameters:
+            enable_logging: Whether to enable Simli logging.
             max_session_length: Absolute maximum session duration in seconds.
                 Avatar will disconnect after this time even if it's speaking.
             max_idle_time: Maximum duration in seconds the avatar is not speaking
                 before the avatar disconnects.
         """
 
+        enable_logging: Optional[bool] = None
         max_session_length: Optional[int] = None
         max_idle_time: Optional[int] = None
 
@@ -154,6 +156,7 @@ class SimliVideoService(FrameProcessor):
             config=config,
             latencyInterval=latency_interval,
             simliURL=simli_url,
+            enable_logging=params.enable_logging or False,
         )
 
         self._pipecat_resampler: AudioResampler = None

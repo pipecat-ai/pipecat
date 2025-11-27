@@ -110,6 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   - Added new emotions: calm and fluent
 
+- Added `enable_logging` to `SimliVideoService` input parameters. It's disabled
+  by default.
+
 ### Changed
 
 - Updated `FishAudioTTSService` default model to `s1`.
