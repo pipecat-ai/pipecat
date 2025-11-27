@@ -33,7 +33,7 @@ def test_udp():
             sock.close()
 
 
-async def _async_turn_test(turn_server, turn_port, username, password, turn_transport):
+async def _async_turn_test(turn_server, turn_port, username, password, turn_transport, turn_ssl):
     """Internal async TURN test using aioice."""
     print(f"Testing TURN server: {turn_server}:{turn_port}:{turn_transport}")
 
@@ -42,6 +42,7 @@ async def _async_turn_test(turn_server, turn_port, username, password, turn_tran
         turn_server=(turn_server, turn_port),
         turn_username=username,
         turn_password=password,
+        turn_ssl=turn_ssl,
         turn_transport=turn_transport,
     )
     try:
@@ -66,9 +67,9 @@ async def _async_turn_test(turn_server, turn_port, username, password, turn_tran
         await connection.close()
 
 
-def test_turn_with_auth(server, port, username, password, transport):
+def test_turn_with_auth(server, port, username, password, transport, turn_ssl=False):
     """Sync wrapper for aioice TURN test."""
-    return asyncio.run(_async_turn_test(server, port, username, password, transport))
+    return asyncio.run(_async_turn_test(server, port, username, password, transport, turn_ssl))
 
 
 def comprehensive_network_test():
@@ -86,6 +87,7 @@ def comprehensive_network_test():
             "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
             "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
             "udp",
+            False,
         ),
         (
             "turn.cloudflare.com",  # cleaned
@@ -93,6 +95,7 @@ def comprehensive_network_test():
             "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
             "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
             "tcp",
+            True,
         ),
         (
             "turn.cloudflare.com",  # cleaned
@@ -100,6 +103,7 @@ def comprehensive_network_test():
             "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
             "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
             "tcp",
+            True,
         ),
         (
             "turn.cloudflare.com",  # cleaned
@@ -107,6 +111,7 @@ def comprehensive_network_test():
             "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
             "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
             "tcp",
+            False,
         ),
         (
             "turn.cloudflare.com",  # cleaned
@@ -114,13 +119,14 @@ def comprehensive_network_test():
             "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
             "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
             "tcp",
+            False,
         ),
     ]
 
     results["turn_tests"] = []
 
-    for host, port, username, password, transport in turn_servers:
-        success = test_turn_with_auth(host, port, username, password, transport)
+    for host, port, username, password, transport, tls in turn_servers:
+        success = test_turn_with_auth(host, port, username, password, transport, tls)
         results["turn_tests"].append({"server": f"{host}:{port}", "success": success})
 
     return results
@@ -174,6 +180,6 @@ def my_agent(payload):
 
 
 if __name__ == "__main__":
-    #
-    results = comprehensive_network_test()
-    print(results)
+    app.run()
+    #results = comprehensive_network_test()
+    #print(results)
