@@ -21,6 +21,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },
+    { name = "aioice" },
     { name = "bedrock-agentcore" },
     { name = "pipecat-ai", extra = ["cartesia", "daily", "deepgram", "local-smart-turn-v3", "openai", "runner", "silero", "webrtc"] },
 ]
@@ -35,6 +36,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp" },
+    { name = "aioice" },
     { name = "bedrock-agentcore" },
     { name = "pipecat-ai", extras = ["webrtc", "daily", "silero", "deepgram", "openai", "cartesia", "local-smart-turn-v3", "runner"] },
 ]

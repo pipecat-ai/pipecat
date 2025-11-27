@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Example for building Pipecat bots deployable to Amazon Bedrock AgentCore"
 requires-python = ">=3.10"
 dependencies = [
+    "aioice",
     "aiohttp",
     "bedrock-agentcore",
     "pipecat-ai[webrtc,daily,silero,deepgram,openai,cartesia,local-smart-turn-v3,runner]",
