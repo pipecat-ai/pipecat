@@ -142,6 +142,7 @@ class OjinPersonaService(FrameProcessor):
         # Idle animation frames (cached during initialization)
         self._idle_frames: list[IdleFrame] = []
         self._is_mirrored_loop: bool = True
+        self.last_idle_frame_index = -1
 
         # Speech frames queue (video + audio bundled)
         self._speech_frames: deque[VideoFrame] = deque()
@@ -294,10 +295,17 @@ class OjinPersonaService(FrameProcessor):
                     image_bytes=message.video_frame_bytes,
                 )
 
+                self.last_idle_frame_index += 1
+                if frame_idx != self.last_idle_frame_index:
+                    logger.error(
+                        f"Received wrong idle frame index: {frame_idx} expected: {self.last_idle_frame_index}"
+                    )
+
                 # Ensure list is large enough
                 if len(self._idle_frames) <= frame_idx:
                     self._idle_frames.extend([None] * (frame_idx - len(self._idle_frames) + 1))
 
+                logger.debug(f"Cached idle frame {idle_frame.frame_idx}")
                 self._idle_frames[idle_frame.frame_idx] = idle_frame
 
                 if self._state == PersonaState.INITIALIZING:
@@ -318,7 +326,10 @@ class OjinPersonaService(FrameProcessor):
                 if self._state == PersonaState.IDLE:
                     return
 
-                if self._first_frame_received_timestamp is None:
+                if (
+                    self._first_frame_received_timestamp is None
+                    and not self._tts_started_timestamp is None
+                ):
                     self._first_frame_received_timestamp = time.perf_counter()
                     self._time_to_first_frame_measurements.append(
                         self._first_frame_received_timestamp - self._tts_started_timestamp
@@ -484,7 +495,9 @@ class OjinPersonaService(FrameProcessor):
 
             else:
                 if self._num_speech_frames_played > 0:
-                    logger.debug(f"frame missed: {self._current_frame_idx}")
+                    logger.debug(
+                        f"frame missed: {self._current_frame_idx} at {time.perf_counter()}"
+                    )
                     self._current_frame_idx -= 1
                     await asyncio.sleep(0.005)
                     continue
@@ -492,8 +505,10 @@ class OjinPersonaService(FrameProcessor):
                 # Play idle frame
                 self._played_frame_idx += 1
                 idle_frame = self._get_idle_frame_for_index(self._played_frame_idx)
-                if idle_frame is None:
-                    await asyncio.sleep(0.1)
+                if idle_frame is None or idle_frame.image_bytes is None:
+                    logger.error(f"Idle frame {self._played_frame_idx} is None")
+                    self._played_frame_idx -= 1
+                    await asyncio.sleep(0.02)
 
                 image_bytes = idle_frame.image_bytes
                 # audio_bytes is already set to silence
@@ -553,6 +568,8 @@ class OjinPersonaService(FrameProcessor):
         Client just needs to clear buffers.
         """
         logger.info("Interrupting speech")
+        if self._state != PersonaState.SPEAKING:
+            return
 
         # Send cancel to server
         if self._client is not None:

@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.services.ojin.video import OjinPersonaInitializedFrame
 from pipecat.pipeline.task import FrameProcessor
 from pipecat.processors.frame_processor import FrameDirection
 
@@ -44,6 +45,7 @@ class MockTTSProcessor(FrameProcessor):
         self._start_time = 0
         self._last_chunk_time = 0
         self._resampler = create_default_resampler()
+        self._persona_initialized = asyncio.Event()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -55,16 +57,26 @@ class MockTTSProcessor(FrameProcessor):
         elif isinstance(frame, StartFrame):
             await self.start(frame)
 
+        elif isinstance(frame, OjinPersonaInitializedFrame):
+            logger.debug("MockTTSProcessor received OjinPersonaInitializedFrame, starting timeline")
+            self._persona_initialized.set()
+
         await self.push_frame(frame, direction)
 
     async def start(self, frame: StartFrame):
         self._running = True
+        self._current_sequence_idx = 0
+        self._task = self.create_task(self._wait_and_start())
+        logger.debug("MockTTSProcessor waiting for OjinPersonaInitializedFrame")
+
+    async def _wait_and_start(self):
+        """Wait for persona initialization before starting the timeline."""
+        await self._persona_initialized.wait()
         self._start_time = time.monotonic()
         self._last_chunk_time = self._start_time
-        self._current_sequence_idx = 0
-        self._task = self.create_task(self._simulate_audio())
+        logger.debug(f"MockTTSProcessor timeline started at time {self._start_time}")
+        self._audio_task = self.create_task(self._simulate_audio())
         self._events_task = self.create_task(self._simulate_events())
-        logger.debug(f"MockTTSProcessor started at time {self._start_time}")
 
     async def stop(self, frame: EndFrame):
         logger.debug("MockTTSProcessor stopping")
