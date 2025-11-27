@@ -734,7 +734,7 @@ class AWSBedrockLLMService(LLMService):
         aws_access_key: Optional[str] = None,
         aws_secret_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
-        aws_region: str = "us-east-1",
+        aws_region: Optional[str] = None,
         params: Optional[InputParams] = None,
         client_config: Optional[Config] = None,
         retry_timeout_secs: Optional[float] = 5.0,
