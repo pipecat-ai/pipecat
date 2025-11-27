@@ -51,6 +51,13 @@ class TTSTextTransformer:
     DATE_THE_LONG_PATTERN = r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+the\s+([0-9]{1,2})\b'
     DATE_THE_SHORT_PATTERN = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(\.?)\s+the\s+([0-9]{1,2})\b'
     
+    # Attached date patterns with "the" (no space between "the" and day number)
+    DATE_THE_LONG_ATTACHED_PATTERN = r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+the([0-9]{1,2})(st|nd|rd|th)?\b'
+    DATE_THE_SHORT_ATTACHED_PATTERN = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(\.?)\s+the([0-9]{1,2})(st|nd|rd|th)?\b'
+
+    # Day-of-week with "the" attached to date (e.g., "Friday the28th")
+    DAY_THE_ATTACHED_PATTERN = r'\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+the([0-9]{1,2})(st|nd|rd|th)?\b'
+
     # Attached date patterns (no space between month and day)
     DATE_LONG_ATTACHED_PATTERN = r'\b(January|February|March|April|May|June|July|August|September|October|November|December)([0-9]{1,2})\b'
     DATE_SHORT_ATTACHED_PATTERN = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(\.?)([0-9]{1,2})\b'
@@ -786,7 +793,33 @@ class TTSTextTransformer:
             ordinal = self.number_to_ordinal(day_num)
             return f"{month}{period} the {ordinal}"
         
-        # Handle dates with "the" first (more specific)
+        # Handle attached dates with "the" (most specific - must come first)
+        def replace_date_with_the_attached(match):
+            month = match.group(1)
+            day_num = int(match.group(2))
+            ordinal = self.number_to_ordinal(day_num)
+            return f"{month} the {ordinal}"
+
+        def replace_short_date_with_the_attached(match):
+            month = match.group(1)
+            period = match.group(2)
+            day_num = int(match.group(3))
+            ordinal = self.number_to_ordinal(day_num)
+            return f"{month}{period} the {ordinal}"
+
+        result = re.sub(self.DATE_THE_LONG_ATTACHED_PATTERN, replace_date_with_the_attached, result, flags=re.IGNORECASE)
+        result = re.sub(self.DATE_THE_SHORT_ATTACHED_PATTERN, replace_short_date_with_the_attached, result, flags=re.IGNORECASE)
+
+        # Handle day-of-week with "the" attached to date
+        def replace_day_the_attached(match):
+            day_of_week = match.group(1)
+            day_num = int(match.group(2))
+            ordinal = self.number_to_ordinal(day_num)
+            return f"{day_of_week} the {ordinal}"
+
+        result = re.sub(self.DAY_THE_ATTACHED_PATTERN, replace_day_the_attached, result, flags=re.IGNORECASE)
+
+        # Handle dates with "the" (with spaces)
         result = re.sub(self.DATE_THE_LONG_PATTERN, replace_date_with_the, result, flags=re.IGNORECASE)
         result = re.sub(self.DATE_THE_SHORT_PATTERN, replace_short_date_with_the, result, flags=re.IGNORECASE)
         
