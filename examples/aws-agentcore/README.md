@@ -73,6 +73,13 @@ Run your bot on AgentCore Runtime.
 agentcore invoke '{"roomUrl": "https://<your-domain>.daily.co/<room-name>"}' # -a <agent_name> (if multiple agents configured)
 ```
 
+In case we wish to define the session-id, to create a new session each time we invoke:
+```bash
+aws-agentcore % agentcore invoke \
+  --session-id user-123456-conversation-12345679 \
+  '{"roomUrl": "https://<your-domain>.daily.co/<room-name>"}'
+```
+
 ## Observation
 
 Paste the log tailing command you received when deploying your bot to AgentCore Runtime. It should look something like:
