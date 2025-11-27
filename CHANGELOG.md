@@ -279,6 +279,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `AWSBedrockLLMService` where the `aws_region` arg was
+  always set to `us-east-1`.
+
 - Fixed an issue with `DeepgramFluxSTTService` where it sometimes failed to reconnect.
 
 - Fixed an issue in `ElevenLabsRealtimeSTTService` where dynamic language
