@@ -101,6 +101,20 @@ def comprehensive_network_test():
             "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
             "tcp",
         ),
+        (
+            "turn.cloudflare.com",  # cleaned
+            80,
+            "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
+            "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
+            "tcp",
+        ),
+        (
+            "turn.cloudflare.com",  # cleaned
+            3478,
+            "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
+            "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
+            "tcp",
+        ),
     ]
 
     results["turn_tests"] = []
