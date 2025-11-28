@@ -72,80 +72,52 @@ async def offer(request: Request):
         raise HTTPException(500, "Bedrock response stream missing")
 
     answer_sdp = None
-    buffer = ""  # Storage for incomplete lines across chunks
 
-    # Flag to break the outer chunk loop once the answer is found
-    answer_found = False
+    # --- Start Streaming Loop using iter_lines() ---
+    for line in streaming_body.iter_lines():
+        print(f"Not decoded line: {line}")
 
-    # --- Start Streaming Loop ---
-    for chunk in streaming_body.iter_chunks():
-        if answer_found:
-            # If we found the answer, break the chunk loop immediately.
-            break
+        # iter_lines yields bytes, so we must decode it to a string.
+        try:
+            decoded_line = line.decode("utf-8")
+        except UnicodeDecodeError:
+            print("Warning: Could not decode line from stream.")
+            continue
 
-        decoded_chunk = chunk.decode("utf-8")
-        buffer += decoded_chunk
+        # 1. Clean up and strip whitespace
+        processed_line = decoded_line.strip()
 
-        # Use splitlines(keepends=True) for reliable line-by-line processing
-        lines = buffer.splitlines(keepends=True)
-        buffer = ""  # Reset buffer
+        print(f"Processing line: {processed_line}")
 
-        # Process all complete lines
-        for i, line in enumerate(lines):
-            print(f"Processing line {i}: {line}")
+        if not processed_line:
+            continue
 
-            # Check for incomplete line (last item in lines list without a newline)
-            if i == len(lines) - 1 and not line.endswith("\n"):
-                buffer = line
-                continue
+        # 2. Check for the SSE 'data:' prefix (now comparing string to string)
+        if processed_line.startswith("data:"):
+            # Extract the content *after* "data: "
+            sse_data = processed_line[len("data:") :].strip()
+            print("Extracted SSE Data payload:", sse_data)
 
-            # 1. Clean up and strip whitespace
-            processed_line = line.strip()
+            # 3. Parse the extracted payload as JSON
+            try:
+                event = json.loads(sse_data)
+                print("Received event:", event)
 
-            if not processed_line:
-                continue
+                # 4. Check for the 'answer' key
+                if "answer" in event:
+                    payload = event["answer"]
 
-            print("Raw line received:", processed_line)
+                    if payload.get("type") == "answer":
+                        answer_sdp = payload
+                        print("WebRTC answer found. Stopping stream processing.")
+                        # Break the line loop immediately
+                        break
 
-            # 2. Check for the SSE 'data:' prefix
-            if processed_line.startswith("data:"):
-                # Extract the content *after* "data: "
-                sse_data = processed_line[len("data:") :].strip()
-                print("Extracted SSE Data payload:", sse_data)
-
-                # 3. Parse the extracted payload as JSON
-                try:
-                    event = json.loads(sse_data)
-                    print("Received event:", event)
-
-                    # 4. Check for the 'answer' key
-                    if "answer" in event:
-                        payload = event["answer"]
-
-                        if payload.get("type") == "answer":
-                            answer_sdp = payload
-                            answer_found = True  # Set flag
-                            print("WebRTC answer found. Stopping stream processing.")
-                            # Break the inner line loop
-                            break
-
-                except json.JSONDecodeError:
-                    print(f"Failed to parse extracted SSE payload as JSON: {sse_data}")
-                    pass
+            except json.JSONDecodeError:
+                print(f"Failed to parse extracted SSE payload as JSON: {sse_data}")
+                pass
 
     # --- End Streaming Loop ---
-
-    # After the loop, the `StreamingBody` should be exhausted.
-    if answer_sdp is None:
-        # Check buffer only if answer wasn't found (for maximum safety)
-        if buffer.strip().startswith("data:"):
-            try:
-                sse_data = buffer.strip()[len("data:") :].strip()
-                event = json.loads(sse_data)
-                if "answer" in event and event["answer"].get("type") == "answer":
-                    answer_sdp = event["answer"]
-            except Exception:
-                pass
 
     if answer_sdp is None:
         raise HTTPException(500, "Did not find WebRTC answer in agent output")
