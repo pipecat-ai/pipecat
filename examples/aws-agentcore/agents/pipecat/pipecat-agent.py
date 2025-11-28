@@ -136,7 +136,7 @@ async def agentcore_bot(payload, context):
         webrtc_connection=pipecat_connection, body=request.request_data
     )
     transport = await create_transport(runner_args, transport_params)
-    async for result in run_bot(transport, RunnerArguments()):
+    async for result in run_bot(transport, runner_args):
         yield result
 
 
