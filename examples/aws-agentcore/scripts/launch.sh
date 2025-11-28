@@ -10,7 +10,7 @@ if [ ! -f ".env" ]; then
 fi
 
 # Start building the agentcore launch command
-LAUNCH_CMD="agentcore launch"
+LAUNCH_CMD="agentcore launch --auto-update-on-conflict"
 
 echo "Loading environment variables from .env file..."
 
