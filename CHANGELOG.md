@@ -279,6 +279,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where `LLMTextFrame` with `skip_tts=True` would have its value
+  overwritten to `False` when passing through LLM services (e.g., `LLMSwitcher`).
+  The fix preserves frames that already have `skip_tts=True` set.
+
 - Fixed an issue in `AWSBedrockLLMService` where the `aws_region` arg was
   always set to `us-east-1`.
 
