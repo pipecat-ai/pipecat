@@ -136,7 +136,9 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+                await self.push_frame(
+                    LLMTextFrame(chunk.choices[0].delta.content, skip_tts=self._get_skip_tts())
+                )
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to

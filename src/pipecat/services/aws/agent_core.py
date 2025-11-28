@@ -172,7 +172,7 @@ class AWSAgentCoreProcessor(FrameProcessor):
         await asyncio.sleep(self._output_response_timeout)
         if self._output_response_open:
             self._output_response_open = False
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
 
     async def _push_text_frame(self, text: str):
         """Push a text frame, managing output response bookends."""
@@ -182,11 +182,11 @@ class AWSAgentCoreProcessor(FrameProcessor):
 
         # Open output response if needed
         if not self._output_response_open:
-            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
             self._output_response_open = True
 
         # Push the text frame
-        await self.push_frame(LLMTextFrame(text))
+        await self.push_frame(LLMTextFrame(text, skip_tts=self._get_skip_tts()))
         self._last_text_frame_time = asyncio.get_event_loop().time()
 
         # Schedule closing the output response after timeout
@@ -253,6 +253,6 @@ class AWSAgentCoreProcessor(FrameProcessor):
                     if self._close_task and not self._close_task.done():
                         await self.cancel_task(self._close_task)
                     self._output_response_open = False
-                    await self.push_frame(LLMFullResponseEndFrame())
+                    await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
         else:
             await self.push_frame(frame, direction)

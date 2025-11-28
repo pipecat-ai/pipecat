@@ -327,7 +327,7 @@ class AnthropicLLMService(LLMService):
         cache_read_input_tokens = 0
 
         try:
-            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
             await self.start_processing_metrics()
 
             params_from_context = self._get_llm_invocation_params(context)
@@ -373,7 +373,9 @@ class AnthropicLLMService(LLMService):
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
-                        await self.push_frame(LLMTextFrame(event.delta.text))
+                        await self.push_frame(
+                            LLMTextFrame(event.delta.text, skip_tts=self._get_skip_tts())
+                        )
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
                     elif hasattr(event.delta, "partial_json") and tool_use_block:
                         json_accumulator += event.delta.partial_json
@@ -461,7 +463,7 @@ class AnthropicLLMService(LLMService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
             comp_tokens = (
                 completion_tokens
                 if not use_completion_tokens_estimate

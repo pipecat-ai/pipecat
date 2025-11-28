@@ -13,13 +13,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
 from loguru import logger
-from openai import (
-    NOT_GIVEN,
-    APITimeoutError,
-    AsyncOpenAI,
-    AsyncStream,
-    DefaultAsyncHttpxClient,
-)
+from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient
 from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 from pydantic import BaseModel, Field
 
@@ -396,14 +390,20 @@ class BaseOpenAILLMService(LLMService):
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+                await self.push_frame(
+                    LLMTextFrame(chunk.choices[0].delta.content, skip_tts=self._get_skip_tts())
+                )
 
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript
             elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
                 "transcript"
             ):
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
+                await self.push_frame(
+                    LLMTextFrame(
+                        chunk.choices[0].delta.audio["transcript"], skip_tts=self._get_skip_tts()
+                    )
+                )
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
@@ -463,11 +463,11 @@ class BaseOpenAILLMService(LLMService):
 
         if context:
             try:
-                await self.push_frame(LLMFullResponseStartFrame())
+                await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
                 await self.start_processing_metrics()
                 await self._process_context(context)
             except httpx.TimeoutException:
                 await self._call_event_handler("on_completion_timeout")
             finally:
                 await self.stop_processing_metrics()
-                await self.push_frame(LLMFullResponseEndFrame())
+                await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
