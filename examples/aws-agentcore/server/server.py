@@ -66,7 +66,6 @@ async def offer(request: Request):
 
     if "text/event-stream" in response.get("contentType", ""):
         # Handle streaming response
-        content = []
         streaming_body: StreamingBody = response["response"]
         for line in streaming_body.iter_lines(chunk_size=1):
             if line:
@@ -74,9 +73,23 @@ async def offer(request: Request):
                 if line.startswith("data: "):
                     line = line[6:]
                     print(f"Received line: {line}")
-                    content.append(line)
+                    try:
+                        event = json.loads(line)
+                        print("Received event:", event)
 
-        print("\nComplete response:", "\n".join(content))
+                        # 4. Check for the 'answer' key
+                        if "answer" in event:
+                            payload = event["answer"]
+
+                            if payload.get("type") == "answer":
+                                answer_sdp = payload
+                                print("WebRTC answer found. Stopping stream processing.")
+                                # Break the line loop immediately
+                                break
+
+                    except json.JSONDecodeError:
+                        print(f"Failed to parse extracted SSE payload as JSON: {sse_data}")
+                        pass
 
     if answer_sdp is None:
         raise HTTPException(500, "Did not find WebRTC answer in agent output")
