@@ -59,7 +59,7 @@ async def offer(request: Request):
         agentRuntimeArn=AGENT_RUNTIME_ARN,
         contentType="application/json",
         accept="application/json",
-        payload=json.dumps({"input": data}),
+        payload=json.dumps(data),
         # TODO: create a custom randon id
         runtimeSessionId="user-123456-conversation-111115555",
     )

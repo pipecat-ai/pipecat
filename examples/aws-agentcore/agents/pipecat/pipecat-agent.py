@@ -16,13 +16,17 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
+from pipecat.runner.types import RunnerArguments, SmallWebRTCRunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyLogLevel, DailyParams, DailyTransport
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.request_handler import (
+    SmallWebRTCRequest,
+)
 
 app = BedrockAgentCoreApp()
 
@@ -50,6 +54,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     yield {"status": "initializing bot!"}
+    # Returning the answer
+    if isinstance(runner_args, SmallWebRTCRunnerArguments):
+        yield {"status": "Will return smallwebrtc answer."}
+        yield runner_args.webrtc_connection.get_answer()
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -116,31 +124,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 @app.entrypoint
 async def agentcore_bot(payload, context):
     """Bot entry point for running on Amazon Bedrock AgentCore Runtime."""
-    room_url = payload.get("roomUrl")
-    transport = await create_transport(
-        DailyRunnerArguments(room_url=room_url),
-        transport_params,
-    )
-    if isinstance(transport, DailyTransport):
-        transport.set_log_level(DailyLogLevel.Info)
-        turn_username = os.getenv("TURN_USERNAME")
-        turn_credential = os.getenv("TURN_CREDENTIAL")
-        transport._client._client.set_ice_config(
-            {
-                "placement": "replace",
-                "iceServers": [
-                    {
-                        "urls": [
-                            "turn:turn.cloudflare.com:80?transport=tcp",
-                            "turns:turn.cloudflare.com:443?transport=tcp",
-                        ],
-                        "username": turn_username,
-                        "credential": turn_credential,
-                    },
-                ],
-            }
-        )
+    request = SmallWebRTCRequest.from_dict(payload)
 
+    # TODO: need to implement this
+    # ice_servers=self._ice_servers
+    pipecat_connection = SmallWebRTCConnection()
+    await pipecat_connection.initialize(sdp=request.sdp, type=request.type)
+
+    # Prepare runner arguments with the callback to run your bot
+    runner_args = SmallWebRTCRunnerArguments(
+        webrtc_connection=pipecat_connection, body=request.request_data
+    )
+    transport = await create_transport(runner_args, transport_params)
     async for result in run_bot(transport, RunnerArguments()):
         yield result
 

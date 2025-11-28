@@ -1,4 +1,5 @@
 .bedrock_agentcore.yaml
 .dockerignore
 .bedrock_agentcore
+.bkp
 logs
