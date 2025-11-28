@@ -57,7 +57,6 @@ async def offer(request: Request):
     response = bedrock.invoke_agent_runtime(
         agentRuntimeArn=AGENT_RUNTIME_ARN,
         contentType="application/json",
-        accept="application/json",
         payload=json.dumps(data),
         # TODO: create a custom randon id
         runtimeSessionId="user-123456-conversation-111115555",

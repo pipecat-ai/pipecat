@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
+import json
 import os
 
 from bedrock_agentcore import BedrockAgentCoreApp
@@ -24,10 +26,10 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequest,
 )
+from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
 app = BedrockAgentCoreApp()
 
@@ -57,8 +59,29 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     yield {"status": "initializing bot!"}
     # Returning the answer
     if isinstance(transport, SmallWebRTCTransport):
-        yield {"status": "Will return smallwebrtc answer."}
-        yield {"answer": transport._client._webrtc_connection.get_answer()}
+        yield {"status": "ANSWER:START"}
+        answer_dict = transport._client._webrtc_connection.get_answer()
+        answer_json_str = json.dumps(answer_dict)
+        answer_bytes = answer_json_str.encode("utf-8")
+        encoded_answer = base64.b64encode(answer_bytes).decode("ascii")
+
+        # Break encoded_answer into multiple messages
+        chunk_size = 1000  # Adjust this size based on your needs
+        total_chunks = (
+            len(encoded_answer) + chunk_size - 1
+        ) // chunk_size  # Calculate total chunks
+
+        for i in range(0, len(encoded_answer), chunk_size):
+            chunk = encoded_answer[i : i + chunk_size]
+            chunk_index = i // chunk_size
+            yield {
+                "answer_chunk": chunk,
+                "chunk_index": chunk_index,
+                "total_chunks": total_chunks,
+                "is_last_chunk": chunk_index == total_chunks - 1,
+            }
+
+        yield {"status": "ANSWER:END"}
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
