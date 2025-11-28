@@ -7,6 +7,7 @@ dependencies = [
     "aioice",
     "aiohttp",
     "bedrock-agentcore",
+    "python-dotenv",
     "pipecat-ai[webrtc,daily,silero,deepgram,openai,cartesia,local-smart-turn-v3,runner]",
 ]
 
