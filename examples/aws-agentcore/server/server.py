@@ -18,6 +18,7 @@ import uvicorn
 from botocore.response import StreamingBody
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from loguru import logger
 from pipecat.transports.smallwebrtc.request_handler import (
@@ -25,14 +26,20 @@ from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCPatchRequest,
     SmallWebRTCRequest,
 )
-from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
 load_dotenv(override=True)
 
 app = FastAPI()
 
-# Mount the frontend at /
-app.mount("/client", SmallWebRTCPrebuiltUI)
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Add your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # In-memory store of active sessions: session_id -> session info
 active_sessions: Dict[str, Dict[str, Any]] = {}
@@ -96,15 +103,6 @@ async def offer(request: Request):
 
     return answer_sdp
 
-
-@app.patch("/api/offer")
-async def ice_candidate(request: SmallWebRTCPatchRequest):
-    """Handle WebRTC new ice candidate requests."""
-    logger.debug(f"Received patch request: {request}")
-    # TODO need to send this to agentcore
-    return {"status": "success"}
-
-
 @app.post("/start")
 async def rtvi_start(request: Request):
     """Mimic Pipecat Cloud's /start endpoint."""
@@ -153,24 +151,9 @@ async def proxy_request(
         return Response(content="Invalid or not-yet-ready session_id", status_code=404)
 
     if path.endswith("api/offer"):
-        # Parse the request body and convert to SmallWebRTCRequest
         try:
-            request_data = await request.json()
-            if request.method == HTTPMethod.POST.value:
-                webrtc_request = SmallWebRTCRequest(
-                    sdp=request_data["sdp"],
-                    type=request_data["type"],
-                    pc_id=request_data.get("pc_id"),
-                    restart_pc=request_data.get("restart_pc"),
-                    request_data=request_data,
-                )
-                return await offer(webrtc_request, background_tasks)
-            elif request.method == HTTPMethod.PATCH.value:
-                patch_request = SmallWebRTCPatchRequest(
-                    pc_id=request_data["pc_id"],
-                    candidates=[IceCandidate(**c) for c in request_data.get("candidates", [])],
-                )
-                return await ice_candidate(patch_request)
+             if request.method == HTTPMethod.POST.value:
+                return await offer(request)
         except Exception as e:
             logger.error(f"Failed to parse WebRTC request: {e}")
             return Response(content="Invalid WebRTC request", status_code=400)

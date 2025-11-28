@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC demo</title>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Status Bar -->
+      <div class="status-bar">
+        <div class="status">
+          Status: <span id="connection-status">Disconnected</span>
+        </div>
+        <div class="controls">
+          <button id="connect-btn">Connect</button>
+          <button id="disconnect-btn" disabled>Disconnect</button>
+        </div>
+      </div>
+
+      <!-- Main Content -->
+      <div class="main-content">
+        <div class="bot-container">
+          <audio id="bot-audio" autoplay></audio>
+        </div>
+        <!-- Debug Panel -->
+        <div class="debug-panel">
+          <div id="debug-log"></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/app.ts"></script>
+    <link rel="stylesheet" href="/src/style.css" />
+  </body>
+</html>
