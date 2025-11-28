@@ -1,3 +1,4 @@
 .bedrock_agentcore.yaml
 .dockerignore
 .bedrock_agentcore
+logs
