@@ -5,12 +5,14 @@
 #
 
 import argparse
+import json
 import sys
 import uuid
 from contextlib import asynccontextmanager
 from http import HTTPMethod
 from typing import Any, Dict, List, Optional, TypedDict, Union
 
+import boto3
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
@@ -30,6 +32,9 @@ app.mount("/client", SmallWebRTCPrebuiltUI)
 # In-memory store of active sessions: session_id -> session info
 active_sessions: Dict[str, Dict[str, Any]] = {}
 
+# Initialize Bedrock client
+bedrock = boto3.client("bedrock-agent-runtime")
+
 
 @app.get("/", include_in_schema=False)
 async def root_redirect():
@@ -37,12 +42,23 @@ async def root_redirect():
 
 
 @app.post("/api/offer")
-async def offer(request: SmallWebRTCRequest):
+async def offer(request: Request):
     """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
-    print(f"Received offer:{request}")
-    # TODO need to send this to agentcore
-    answer = None
-    return answer
+    # Parse JSON body (expecting something like {"input": "..."} )
+    data = await request.json()
+    print(f"Received offer: {data}")
+
+    response = bedrock.invoke_agent(
+        # TODO: create a custom randon id, maybe based on the pc_id
+        agentId="network_test-11111111",
+        agentAliasId="Network Test Agent",
+        sessionId="user-123456-conversation-11111",
+        inputText=json.dumps({"input": data}),
+    )
+
+    result = response["body"].read().decode("utf-8")
+
+    return {"result": result}
 
 
 @app.patch("/api/offer")
