@@ -64,8 +64,10 @@ async def offer(request: Request):
         runtimeSessionId="user-123456-conversation-111115555",
     )
 
-    print(f"Received response: {response}")
-    return response
+    # Extract the body from StreamingBody
+    body = response["response"].read().decode("utf-8")
+    print("Decoded body:", body)
+    return json.loads(body)
 
 
 @app.patch("/api/offer")
