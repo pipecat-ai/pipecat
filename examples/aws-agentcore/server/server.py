@@ -62,61 +62,21 @@ async def offer(request: Request):
         runtimeSessionId="user-123456-conversation-111115555",
     )
 
-    print(f"Response {response}")
-
-    # 1. Get the StreamingBody object from the 'response' key
-    streaming_body: StreamingBody = response["response"]
-
-    if streaming_body is None:
-        raise HTTPException(500, "Bedrock response stream missing")
-
     answer_sdp = None
 
-    # --- Start Streaming Loop using iter_lines() ---
-    for line in streaming_body.iter_lines(chunk_size=10):
-        print(f"Not decoded line: {line}")
+    if "text/event-stream" in response.get("contentType", ""):
+        # Handle streaming response
+        content = []
+        streaming_body: StreamingBody = response["response"]
+        for line in streaming_body.iter_lines(chunk_size=1):
+            if line:
+                line = line.decode("utf-8")
+                if line.startswith("data: "):
+                    line = line[6:]
+                    print(f"Received line: {line}")
+                    content.append(line)
 
-        # iter_lines yields bytes, so we must decode it to a string.
-        try:
-            decoded_line = line.decode("utf-8")
-        except UnicodeDecodeError:
-            print("Warning: Could not decode line from stream.")
-            continue
-
-        # 1. Clean up and strip whitespace
-        processed_line = decoded_line.strip()
-
-        print(f"Processing line: {processed_line}")
-
-        if not processed_line:
-            continue
-
-        # 2. Check for the SSE 'data:' prefix (now comparing string to string)
-        if processed_line.startswith("data:"):
-            # Extract the content *after* "data: "
-            sse_data = processed_line[len("data:") :].strip()
-            print("Extracted SSE Data payload:", sse_data)
-
-            # 3. Parse the extracted payload as JSON
-            try:
-                event = json.loads(sse_data)
-                print("Received event:", event)
-
-                # 4. Check for the 'answer' key
-                if "answer" in event:
-                    payload = event["answer"]
-
-                    if payload.get("type") == "answer":
-                        answer_sdp = payload
-                        print("WebRTC answer found. Stopping stream processing.")
-                        # Break the line loop immediately
-                        break
-
-            except json.JSONDecodeError:
-                print(f"Failed to parse extracted SSE payload as JSON: {sse_data}")
-                pass
-
-    # --- End Streaming Loop ---
+        print("\nComplete response:", "\n".join(content))
 
     if answer_sdp is None:
         raise HTTPException(500, "Did not find WebRTC answer in agent output")
