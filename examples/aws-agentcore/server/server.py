@@ -74,7 +74,7 @@ async def offer(request: Request):
     answer_sdp = None
 
     # --- Start Streaming Loop using iter_lines() ---
-    for line in streaming_body.iter_lines():
+    for line in streaming_body.iter_lines(chunk_size=10):
         print(f"Not decoded line: {line}")
 
         # iter_lines yields bytes, so we must decode it to a string.
