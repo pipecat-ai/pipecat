@@ -88,7 +88,7 @@ async def offer(request: Request):
                                 break
 
                     except json.JSONDecodeError:
-                        print(f"Failed to parse extracted SSE payload as JSON: {sse_data}")
+                        print(f"Failed to parse extracted SSE payload as JSON: {line}")
                         pass
 
     if answer_sdp is None:
