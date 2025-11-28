@@ -24,6 +24,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequest,
 )
@@ -55,9 +56,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     yield {"status": "initializing bot!"}
     # Returning the answer
-    if isinstance(runner_args, SmallWebRTCRunnerArguments):
+    if isinstance(transport, SmallWebRTCTransport):
         yield {"status": "Will return smallwebrtc answer."}
-        yield runner_args.webrtc_connection.get_answer()
+        yield {"answer": transport._client._webrtc_connection.get_answer()}
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
