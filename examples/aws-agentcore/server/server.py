@@ -15,8 +15,9 @@ from typing import Any, Dict, List, Optional, TypedDict, Union
 
 import boto3
 import uvicorn
+from botocore.response import StreamingBody
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, Request, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from loguru import logger
 from pipecat.transports.smallwebrtc.request_handler import (
@@ -51,10 +52,8 @@ async def root_redirect():
 @app.post("/api/offer")
 async def offer(request: Request):
     """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
-    # Parse JSON body (expecting something like {"input": "..."} )
-    data = await request.json()
-    print(f"Received offer: {data}")
 
+    data = await request.json()
     response = bedrock.invoke_agent_runtime(
         agentRuntimeArn=AGENT_RUNTIME_ARN,
         contentType="application/json",
@@ -64,10 +63,76 @@ async def offer(request: Request):
         runtimeSessionId="user-123456-conversation-111115555",
     )
 
-    # Extract the body from StreamingBody
-    body = response["response"].read().decode("utf-8")
-    print("Decoded body:", body)
-    return json.loads(body)
+    print(f"Response {response}")
+
+    # 1. Get the StreamingBody object from the 'response' key
+    streaming_body: StreamingBody = response["response"]
+
+    # Storage for the answer you want
+    answer_sdp = None
+
+    # Storage for incomplete lines across chunks
+    buffer = ""
+
+    # 1. Iterate over the chunks from the streaming body
+    for chunk in streaming_body.iter_chunks():
+        decoded_chunk = chunk.decode("utf-8")
+
+        # Add the new chunk to the buffer
+        buffer += decoded_chunk
+
+        # Split the buffer into lines. -1 ensures we keep a potentially incomplete line at the end
+        lines = buffer.splitlines(keepends=True)
+
+        # Clear the buffer
+        buffer = ""
+
+        # 2. Process all complete lines
+        for i, line in enumerate(lines):
+            # If the last line of the list does not end with a newline, it's an incomplete line.
+            # We keep it in the buffer for the next chunk.
+            if i == len(lines) - 1 and not line.endswith("\n"):
+                buffer = line
+                continue
+
+            # Remove trailing newline and strip whitespace
+            processed_line = line.strip()
+
+            if not processed_line:
+                continue
+
+            print("Received line:", processed_line)
+
+            # 3. Parse the line as a JSON event
+            try:
+                event = json.loads(processed_line)
+                print("Received event:", event)
+
+                # 4. Check for the 'answer' key which contains the WebRTC SDP
+                if "answer" in event:
+                    # The value of "answer" is the JSON payload from the agent
+                    payload = event["answer"]
+
+                    # Verify it's the WebRTC answer you are looking for
+                    if payload.get("type") == "answer":
+                        answer_sdp = payload
+                        # Break out of both loops once the answer is found
+                        raise StopIteration
+
+            except json.JSONDecodeError:
+                print(f"Failed to parse line as JSON: {processed_line}")
+                pass
+
+    try:
+        # Check if we were stopped by the StopIteration (meaning we found the answer)
+        pass
+    except StopIteration:
+        pass
+
+    if answer_sdp is None:
+        raise HTTPException(500, "Did not find WebRTC answer in agent output")
+
+    return answer_sdp
 
 
 @app.patch("/api/offer")
