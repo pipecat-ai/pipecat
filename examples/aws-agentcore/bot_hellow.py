@@ -1,8 +1,12 @@
 import asyncio
+import os
 import socket
 
 import aioice
 from bedrock_agentcore import BedrockAgentCoreApp
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 app = BedrockAgentCoreApp()
 
@@ -79,45 +83,48 @@ def comprehensive_network_test():
     # Test basic UDP connectivity
     results["udp_stun"] = test_udp()
 
+    turn_username = os.getenv("TURN_USERNAME")
+    turn_credential = os.getenv("TURN_CREDENTIAL")
+
     # TURN test list
     turn_servers = [
         (
             "turn.cloudflare.com",  # cleaned
             3478,
-            "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
-            "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
+            turn_username,
+            turn_credential,
             "udp",
             False,
         ),
         (
             "turn.cloudflare.com",  # cleaned
             5349,
-            "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
-            "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
+            turn_username,
+            turn_credential,
             "tcp",
             True,
         ),
         (
             "turn.cloudflare.com",  # cleaned
             443,
-            "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
-            "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
+            turn_username,
+            turn_credential,
             "tcp",
             True,
         ),
         (
             "turn.cloudflare.com",  # cleaned
             80,
-            "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
-            "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
+            turn_username,
+            turn_credential,
             "tcp",
             False,
         ),
         (
             "turn.cloudflare.com",  # cleaned
             3478,
-            "g0c069ee067cb5585f7a4799950312a355f2cb9c20e23d21bd1ecb1f93c1e8b0",
-            "d40a0992b4d08175af51f32f46a3732725a69045422f96b388420c98dd13ced3",
+            turn_username,
+            turn_credential,
             "tcp",
             False,
         ),
@@ -180,6 +187,10 @@ def my_agent(payload):
 
 
 if __name__ == "__main__":
-    app.run()
-    #results = comprehensive_network_test()
-    #print(results)
+    if os.getenv("PIPECAT_LOCAL_DEV") == "1":
+        # Running locally
+        results = comprehensive_network_test()
+        print(results)
+    else:
+        # Running on AgentCore Runtime
+        app.run()

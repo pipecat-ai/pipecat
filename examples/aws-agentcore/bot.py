@@ -29,7 +29,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams, DailyTransport
+from pipecat.transports.daily.transport import DailyLogLevel, DailyParams, DailyTransport
 
 app = BedrockAgentCoreApp()
 
@@ -81,19 +81,6 @@ transport_params = {
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
-
-    daily_transport: DailyTransport = transport
-    daily_transport._client._client.set_ice_config(
-        {
-            "iceServers": [
-                {
-                    "urls": ["turn:turn.cloudflare.com:3478?transport=tcp"],
-                    "username": "YOUR_TURN_USERNAME",
-                    "credential": "YOUR_TURN_CREDENTIAL",
-                },
-            ]
-        }
-    )
 
     public_ip = await get_public_ip()
     if public_ip:
@@ -218,6 +205,26 @@ async def agentcore_bot(payload, context):
         DailyRunnerArguments(room_url=room_url),
         transport_params,
     )
+    if isinstance(transport, DailyTransport):
+        transport.set_log_level(DailyLogLevel.Info)
+        turn_username = os.getenv("TURN_USERNAME")
+        turn_credential = os.getenv("TURN_CREDENTIAL")
+        transport._client._client.set_ice_config(
+            {
+                "placement": "replace",
+                "iceServers": [
+                    {
+                        "urls": [
+                            "turn:turn.cloudflare.com:80?transport=tcp",
+                            "turns:turn.cloudflare.com:443?transport=tcp",
+                        ],
+                        "username": turn_username,
+                        "credential": turn_credential,
+                    },
+                ],
+            }
+        )
+
     async for result in run_bot(transport, RunnerArguments()):
         yield result
 
