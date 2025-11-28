@@ -6,17 +6,11 @@
 
 import os
 
-import aiohttp
 from bedrock_agentcore import BedrockAgentCoreApp
 from dotenv import load_dotenv
 from loguru import logger
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -26,7 +20,6 @@ from pipecat.runner.types import DailyRunnerArguments, RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyLogLevel, DailyParams, DailyTransport
@@ -36,30 +29,6 @@ app = BedrockAgentCoreApp()
 load_dotenv(override=True)
 
 
-async def get_public_ip():
-    """Retrieve public IP from AWS metadata service or external service."""
-    try:
-        # Fallback to external service
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://api.ipify.org", timeout=aiohttp.ClientTimeout(total=5)
-            ) as response:
-                if response.status == 200:
-                    return await response.text()
-    except Exception:
-        pass
-
-    return None
-
-
-async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.result_callback({"conditions": "nice", "temperature": "75"})
-
-
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
-    await params.result_callback({"name": "The Golden Dragon"})
-
-
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
 # selected.
@@ -67,14 +36,12 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
+        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -82,13 +49,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    public_ip = await get_public_ip()
-    if public_ip:
-        logger.info(f"Public IP address: {public_ip}")
-    else:
-        logger.warning("Could not retrieve public IP address")
-
-    yield {"status": "initializing", "ip": public_ip}
+    yield {"status": "initializing bot!"}
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -99,44 +60,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    # You can also register a function_name of None to get all functions
-    # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-
-    @llm.event_handler("on_function_calls_started")
-    async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
-
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-    restaurant_function = FunctionSchema(
-        name="get_restaurant_recommendation",
-        description="Get a restaurant recommendation",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-        },
-        required=["location"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
-
     messages = [
         {
             "role": "system",
@@ -144,7 +67,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = LLMContext(messages, tools)
+    context = LLMContext(messages)
     context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
@@ -190,13 +113,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     yield {"status": "completed"}
 
 
-async def bot(runner_args: RunnerArguments):
-    """Bot entry point for running locally and on Pipecat Cloud."""
-    transport = await create_transport(runner_args, transport_params)
-    async for result in run_bot(transport, runner_args):
-        pass  # Consume the stream
-
-
 @app.entrypoint
 async def agentcore_bot(payload, context):
     """Bot entry point for running on Amazon Bedrock AgentCore Runtime."""
@@ -227,6 +143,14 @@ async def agentcore_bot(payload, context):
 
     async for result in run_bot(transport, RunnerArguments()):
         yield result
+
+
+# Used for local development
+async def bot(runner_args: RunnerArguments):
+    """Bot entry point for running locally and on Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    async for result in run_bot(transport, runner_args):
+        pass  # Consume the stream
 
 
 if __name__ == "__main__":
