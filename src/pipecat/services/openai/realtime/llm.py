@@ -15,9 +15,7 @@ from typing import Optional
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_realtime_adapter import (
-    OpenAIRealtimeLLMAdapter,
-)
+from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.frames.frames import (
     AggregationType,
     BotStoppedSpeakingFrame,
@@ -284,7 +282,7 @@ class OpenAIRealtimeLLMService(LLMService):
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
         if self._current_assistant_response:
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
             # Only push TTSStoppedFrame if audio modality is enabled
             if self._is_modality_enabled("audio"):
                 await self.push_frame(TTSStoppedFrame())
@@ -608,7 +606,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
         if evt.item.role == "assistant":
             self._current_assistant_response = evt.item
-            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
 
     async def _handle_evt_conversation_item_done(self, evt):
         """Handle conversation.item.done event - item is fully completed."""
@@ -669,7 +667,7 @@ class OpenAIRealtimeLLMService(LLMService):
         )
         await self.start_llm_usage_metrics(tokens)
         await self.stop_processing_metrics()
-        await self.push_frame(LLMFullResponseEndFrame())
+        await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
         self._current_assistant_response = None
         # error handling
         if evt.response.status == "failed":
@@ -683,7 +681,7 @@ class OpenAIRealtimeLLMService(LLMService):
         # We receive text deltas (as opposed to audio transcript deltas) when
         # the output modality is "text"
         if evt.delta:
-            frame = LLMTextFrame(evt.delta)
+            frame = LLMTextFrame(evt.delta, skip_tts=self._get_skip_tts())
             await self.push_frame(frame)
 
     async def _handle_evt_audio_transcript_delta(self, evt):
@@ -817,7 +815,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
         logger.debug("Creating response")
 
-        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
         await self.send_client_event(

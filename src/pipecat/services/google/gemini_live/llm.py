@@ -1448,11 +1448,11 @@ class GeminiLiveLLMService(LLMService):
                 # Update bot responding state and send service start frame
                 # (AUDIO modality case)
                 await self._set_bot_is_responding(True)
-                await self.push_frame(LLMFullResponseStartFrame())
+                await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
 
             self._bot_text_buffer += text
             self._search_result_buffer += text  # Also accumulate for grounding
-            frame = LLMTextFrame(text=text)
+            frame = LLMTextFrame(text=text, skip_tts=self._get_skip_tts())
             await self.push_frame(frame)
 
         # Check for grounding metadata in server content
@@ -1491,7 +1491,7 @@ class GeminiLiveLLMService(LLMService):
         if not self._bot_is_responding:
             await self._set_bot_is_responding(True)
             await self.push_frame(TTSStartedFrame())
-            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
 
         self._bot_audio_buffer.extend(audio)
         frame = TTSAudioRawFrame(
@@ -1552,10 +1552,10 @@ class GeminiLiveLLMService(LLMService):
             if not text:
                 # AUDIO modality case
                 await self.push_frame(TTSStoppedFrame())
-                await self.push_frame(LLMFullResponseEndFrame())
+                await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
             else:
                 # TEXT modality case
-                await self.push_frame(LLMFullResponseEndFrame())
+                await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
 
     @traced_stt
     async def _handle_user_transcription(
@@ -1643,7 +1643,7 @@ class GeminiLiveLLMService(LLMService):
         if not self._bot_is_responding:
             await self._set_bot_is_responding(True)
             await self.push_frame(TTSStartedFrame())
-            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
 
         frame = TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
         # Gemini Live text already includes any necessary inter-chunk spaces

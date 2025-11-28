@@ -14,9 +14,7 @@ from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
-from pipecat.frames.frames import (
-    LLMTextFrame,
-)
+from pipecat.frames.frames import LLMTextFrame
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -176,14 +174,20 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+                await self.push_frame(
+                    LLMTextFrame(chunk.choices[0].delta.content, skip_tts=self._get_skip_tts())
+                )
 
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript
             elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
                 "transcript"
             ):
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
+                await self.push_frame(
+                    LLMTextFrame(
+                        chunk.choices[0].delta.audio["transcript"], skip_tts=self._get_skip_tts()
+                    )
+                )
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to

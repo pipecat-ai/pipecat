@@ -327,23 +327,19 @@ class TextFrame(DataFrame):
 
     Parameters:
         text: The text content.
+        skip_tts: Whether this text should skip TTS processing.
     """
 
     text: str
-    skip_tts: bool = field(init=False)
+    skip_tts: bool = field(default=False, kw_only=True)
     # Whether any necessary inter-frame (leading/trailing) spaces are already
     # included in the text.
-    # NOTE: Ideally this would be available at init time with a default value,
-    # but that would impact how subclasses can be initialized (it would require
-    # mandatory fields of theirs to have defaults to preserve
-    # non-default-before-default argument order)
     includes_inter_frame_spaces: bool = field(init=False)
     # Whether this text frame should be appended to the LLM context.
     append_to_context: bool = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
-        self.skip_tts = False
         self.includes_inter_frame_spaces = False
         self.append_to_context = True
 
@@ -1630,24 +1626,23 @@ class LLMFullResponseStartFrame(ControlFrame):
 
     Used to indicate the beginning of an LLM response. Followed by one or
     more TextFrames and a final LLMFullResponseEndFrame.
+
+    Parameters:
+        skip_tts: Whether LLM output should skip TTS processing.
     """
 
-    skip_tts: bool = field(init=False)
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.skip_tts = False
+    skip_tts: bool = field(default=False, kw_only=True)
 
 
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
-    """Frame indicating the end of an LLM response."""
+    """Frame indicating the end of an LLM response.
 
-    skip_tts: bool = field(init=False)
+    Parameters:
+        skip_tts: Whether LLM output should skip TTS processing.
+    """
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.skip_tts = False
+    skip_tts: bool = field(default=False, kw_only=True)
 
 
 @dataclass

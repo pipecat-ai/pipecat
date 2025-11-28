@@ -981,7 +981,7 @@ class AWSBedrockLLMService(LLMService):
         using_noop_tool = False
 
         try:
-            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
             await self.start_processing_metrics()
 
             await self.start_ttfb_metrics()
@@ -1078,7 +1078,9 @@ class AWSBedrockLLMService(LLMService):
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]
                         if "text" in delta:
-                            await self.push_frame(LLMTextFrame(delta["text"]))
+                            await self.push_frame(
+                                LLMTextFrame(delta["text"], skip_tts=self._get_skip_tts())
+                            )
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use
@@ -1139,7 +1141,7 @@ class AWSBedrockLLMService(LLMService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
             comp_tokens = (
                 completion_tokens
                 if not use_completion_tokens_estimate

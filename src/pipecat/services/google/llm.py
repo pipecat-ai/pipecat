@@ -876,7 +876,7 @@ class GoogleLLMService(LLMService):
 
     @traced_llm
     async def _process_context(self, context: OpenAILLMContext | LLMContext):
-        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
 
         prompt_tokens = 0
         completion_tokens = 0
@@ -920,7 +920,9 @@ class GoogleLLMService(LLMService):
                         for part in candidate.content.parts:
                             if not part.thought and part.text:
                                 search_result += part.text
-                                await self.push_frame(LLMTextFrame(part.text))
+                                await self.push_frame(
+                                    LLMTextFrame(part.text, skip_tts=self._get_skip_tts())
+                                )
                             elif part.function_call:
                                 function_call = part.function_call
                                 id = function_call.id or str(uuid.uuid4())
@@ -1002,7 +1004,7 @@ class GoogleLLMService(LLMService):
                     reasoning_tokens=reasoning_tokens,
                 )
             )
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle different frame types.

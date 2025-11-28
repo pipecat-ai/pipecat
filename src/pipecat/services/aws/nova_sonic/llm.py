@@ -1016,7 +1016,7 @@ class AWSNovaSonicLLMService(LLMService):
         logger.debug("Assistant response started")
 
         # Report the start of the assistant response.
-        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
 
         # Report that equivalent of TTS (this is a speech-to-speech model) started
         await self.push_frame(TTSStartedFrame())
@@ -1062,7 +1062,7 @@ class AWSNovaSonicLLMService(LLMService):
                 # We also need to re-push the LLMFullResponseStartFrame since the
                 # TTSTextFrame would be ignored otherwise (the interruption frame
                 # would have cleared the assistant aggregator state).
-                await self.push_frame(LLMFullResponseStartFrame())
+                await self.push_frame(LLMFullResponseStartFrame(skip_tts=self._get_skip_tts()))
                 frame = TTSTextFrame(
                     self._assistant_text_buffer, aggregated_by=AggregationType.SENTENCE
                 )
@@ -1071,7 +1071,7 @@ class AWSNovaSonicLLMService(LLMService):
             self._may_need_repush_assistant_text = False
 
         # Report the end of the assistant response.
-        await self.push_frame(LLMFullResponseEndFrame())
+        await self.push_frame(LLMFullResponseEndFrame(skip_tts=self._get_skip_tts()))
 
         # Report that equivalent of TTS (this is a speech-to-speech model) stopped.
         await self.push_frame(TTSStoppedFrame())
