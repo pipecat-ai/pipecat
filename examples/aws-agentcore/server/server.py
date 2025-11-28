@@ -6,6 +6,7 @@
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -14,6 +15,7 @@ from typing import Any, Dict, List, Optional, TypedDict, Union
 
 import boto3
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
 from loguru import logger
@@ -24,6 +26,8 @@ from pipecat.transports.smallwebrtc.request_handler import (
 )
 from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
+load_dotenv(override=True)
+
 app = FastAPI()
 
 # Mount the frontend at /
@@ -33,7 +37,10 @@ app.mount("/client", SmallWebRTCPrebuiltUI)
 active_sessions: Dict[str, Dict[str, Any]] = {}
 
 # Initialize Bedrock client
-bedrock = boto3.client("bedrock-agent-runtime")
+bedrock = boto3.client("bedrock-agentcore")
+
+# You can find this inside .bedrock_agentcore.yaml
+AGENT_RUNTIME_ARN = os.getenv("AGENT_RUNTIME_ARN")
 
 
 @app.get("/", include_in_schema=False)
@@ -48,17 +55,17 @@ async def offer(request: Request):
     data = await request.json()
     print(f"Received offer: {data}")
 
-    response = bedrock.invoke_agent(
-        # TODO: create a custom randon id, maybe based on the pc_id
-        agentId="network_test-11111111",
-        agentAliasId="Network Test Agent",
-        sessionId="user-123456-conversation-11111",
-        inputText=json.dumps({"input": data}),
+    response = bedrock.invoke_agent_runtime(
+        agentRuntimeArn=AGENT_RUNTIME_ARN,
+        contentType="application/json",
+        accept="application/json",
+        payload=json.dumps({"input": data}),
+        # TODO: create a custom randon id
+        runtimeSessionId="user-123456-conversation-111115555",
     )
 
-    result = response["body"].read().decode("utf-8")
-
-    return {"result": result}
+    print(f"Received response: {response}")
+    return response
 
 
 @app.patch("/api/offer")
