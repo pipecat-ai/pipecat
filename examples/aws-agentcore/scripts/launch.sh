@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # Script to dynamically read all variables from .env file and launch agentcore
@@ -27,6 +28,12 @@ while IFS= read -r line || [ -n "$line" ]; do
         VAR_NAME=$(echo "$line" | cut -d'=' -f1 | xargs)
         VAR_VALUE=$(echo "$line" | cut -d'=' -f2- | xargs)
 
+        # Skip PIPECAT_LOCAL_DEV variable
+        if [[ "$VAR_NAME" == "PIPECAT_LOCAL_DEV" ]]; then
+            echo "  Skipping: $VAR_NAME (ignored for deployment)"
+            continue
+        fi
+
         # Skip if variable name or value is empty
         if [[ -n "$VAR_NAME" && -n "$VAR_VALUE" ]]; then
             # Add to launch command
@@ -37,7 +44,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < ".env"
 
 # Check if any environment variables were added
-if [[ "$LAUNCH_CMD" == "agentcore launch" ]]; then
+if [[ "$LAUNCH_CMD" == "agentcore launch --auto-update-on-conflict" ]]; then
     echo "Warning: No valid environment variables found in .env file"
     echo "Make sure your .env file contains variables in the format: KEY=value"
     exit 1
