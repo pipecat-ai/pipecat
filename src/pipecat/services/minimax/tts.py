@@ -89,7 +89,7 @@ class MiniMaxHttpTTSService(TTSService):
     """Text-to-speech service using MiniMax's T2A (Text-to-Audio) API.
 
     Provides streaming text-to-speech synthesis using MiniMax's HTTP API
-    with support for various voice settings, emotions, and audio configurations.
+    with support for various voice settings and audio configurations.
     Supports real-time audio streaming with configurable voice parameters.
 
     Platform documentation:
@@ -105,8 +105,6 @@ class MiniMaxHttpTTSService(TTSService):
             speed: Speech speed (range: 0.5 to 2.0).
             volume: Speech volume (range: 0 to 10).
             pitch: Pitch adjustment (range: -12 to 12).
-            emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
-                "disgusted", "surprised", "calm", "fluent").
             english_normalization: Deprecated; use `text_normalization` instead
 
                 .. deprecated:: 0.0.96
@@ -116,17 +114,18 @@ class MiniMaxHttpTTSService(TTSService):
             text_normalization: Enable text normalization (Chinese/English).
             latex_read: Enable LaTeX formula reading.
             exclude_aggregated_audio: Whether to exclude aggregated audio in final chunk.
+            subtitle_enable: Enable subtitle generation with word-level timestamps.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
         volume: Optional[float] = 1.0
         pitch: Optional[int] = 0
-        emotion: Optional[str] = None
         english_normalization: Optional[bool] = None  # Deprecated
         text_normalization: Optional[bool] = None
         latex_read: Optional[bool] = None
         exclude_aggregated_audio: Optional[bool] = None
+        subtitle_enable: Optional[bool] = None
 
     def __init__(
         self,
@@ -196,26 +195,6 @@ class MiniMaxHttpTTSService(TTSService):
             if service_lang:
                 self._settings["language_boost"] = service_lang
 
-        # Add optional emotion if provided
-        if params.emotion:
-            # Validate emotion is in the supported list
-            supported_emotions = [
-                "happy",
-                "sad",
-                "angry",
-                "fearful",
-                "disgusted",
-                "surprised",
-                "neutral",
-                "fluent",
-            ]
-            if params.emotion in supported_emotions:
-                self._settings["voice_setting"]["emotion"] = params.emotion
-            else:
-                logger.warning(
-                    f"Unsupported emotion: {params.emotion}. Supported emotions: {supported_emotions}"
-                )
-
         # If `english_normalization`, add `text_normalization` and print warning
         if params.english_normalization is not None:
             import warnings
@@ -235,6 +214,18 @@ class MiniMaxHttpTTSService(TTSService):
         # Add latex_read if provided
         if params.latex_read is not None:
             self._settings["voice_setting"]["latex_read"] = params.latex_read
+
+        # Add subtitle settings if provided
+        if params.subtitle_enable is not None:
+            self._settings["subtitle_enable"] = params.subtitle_enable
+            
+            # Always use word-level timestamps for streaming subtitles
+            if params.subtitle_enable:
+                self._settings["subtitle_type"] = "word"
+            else:
+                logger.info(
+                    "Subtitle generation is disabled. No word-level timestamps will be provided."
+                )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -356,6 +347,14 @@ class MiniMaxHttpTTSService(TTSService):
                             chunk_data = data.get("data", {})
                             if not chunk_data:
                                 continue
+
+                            # Check for subtitle file (if subtitle generation is enabled)
+                            subtitle_file = chunk_data.get("subtitle_file")
+                            if subtitle_file:
+                                logger.info(
+                                    f"Subtitle file available: {subtitle_file}",
+                                    extra={"trace_id": self._current_trace_id, "subtitle_url": subtitle_file},
+                                )
 
                             audio_data = chunk_data.get("audio")
                             if not audio_data:
