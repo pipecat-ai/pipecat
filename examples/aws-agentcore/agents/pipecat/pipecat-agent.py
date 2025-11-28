@@ -25,7 +25,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequest,
 )
@@ -130,9 +130,20 @@ async def agentcore_bot(payload, context):
     """Bot entry point for running on Amazon Bedrock AgentCore Runtime."""
     request = SmallWebRTCRequest.from_dict(payload)
 
-    # TODO: need to implement this
-    # ice_servers=self._ice_servers
-    pipecat_connection = SmallWebRTCConnection()
+    ice_servers = [
+        IceServer(
+            urls=[
+                "turn:turn.cloudflare.com:3478?transport=tcp",
+                "turn:turn.cloudflare.com:80?transport=tcp",
+                "turns:turn.cloudflare.com:5349?transport=tcp",
+                "turns:turn.cloudflare.com:443?transport=tcp",
+            ],
+            username=os.getenv("TURN_USERNAME"),
+            credential=os.getenv("TURN_CREDENTIAL"),
+        )
+    ]
+
+    pipecat_connection = SmallWebRTCConnection(ice_servers=ice_servers)
     await pipecat_connection.initialize(sdp=request.sdp, type=request.type)
 
     # Prepare runner arguments with the callback to run your bot
