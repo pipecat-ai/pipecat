@@ -21,11 +21,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from loguru import logger
-from pipecat.transports.smallwebrtc.request_handler import (
-    IceCandidate,
-    SmallWebRTCPatchRequest,
-    SmallWebRTCRequest,
-)
+from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
 load_dotenv(override=True)
 
@@ -34,7 +30,7 @@ app = FastAPI()
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Add your frontend URL
+    allow_origins=["*"],  # Add your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,14 +46,16 @@ bedrock = boto3.client("bedrock-agentcore")
 # You can find this inside .bedrock_agentcore.yaml
 AGENT_RUNTIME_ARN = os.getenv("AGENT_RUNTIME_ARN")
 
+# Mount the frontend at /
+app.mount("/client", SmallWebRTCPrebuiltUI)
+
 
 @app.get("/", include_in_schema=False)
 async def root_redirect():
     return RedirectResponse(url="/client/")
 
 
-@app.post("/api/offer")
-async def offer(request: Request):
+async def post_offer(request: Request, session_id: str):
     """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
 
     data = await request.json()
@@ -65,8 +63,7 @@ async def offer(request: Request):
         agentRuntimeArn=AGENT_RUNTIME_ARN,
         contentType="application/json",
         payload=json.dumps(data),
-        # TODO: create a custom randon id
-        runtimeSessionId="user-123456-conversation-111115555",
+        runtimeSessionId=session_id,
     )
 
     answer_sdp = None
@@ -102,6 +99,7 @@ async def offer(request: Request):
         raise HTTPException(500, "Did not find WebRTC answer in agent output")
 
     return answer_sdp
+
 
 @app.post("/start")
 async def rtvi_start(request: Request):
@@ -152,8 +150,8 @@ async def proxy_request(
 
     if path.endswith("api/offer"):
         try:
-             if request.method == HTTPMethod.POST.value:
-                return await offer(request)
+            if request.method == HTTPMethod.POST.value:
+                return await post_offer(request, session_id)
         except Exception as e:
             logger.error(f"Failed to parse WebRTC request: {e}")
             return Response(content="Invalid WebRTC request", status_code=400)
