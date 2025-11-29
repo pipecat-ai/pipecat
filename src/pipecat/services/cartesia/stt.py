@@ -172,7 +172,7 @@ class CartesiaSTTService(WebsocketSTTService):
                 }
             )
 
-        self._settings = merged_options
+        self._settings = merged_options.to_dict()
         self.set_model_name(merged_options.model)
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
@@ -269,7 +269,7 @@ class CartesiaSTTService(WebsocketSTTService):
                 return
             logger.debug("Connecting to Cartesia STT")
 
-            params = self._settings.to_dict()
+            params = self._settings
             ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
             headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 
@@ -363,3 +363,14 @@ class CartesiaSTTService(WebsocketSTTService):
                         language,
                     )
                 )
+
+    async def set_language(self, language: Language):
+        """Set the transcription language.
+
+        Args:
+            language: The language to use for speech-to-text transcription.
+        """
+        logger.debug(f"Switching STT language to: [{language}]")
+        # Reconnect with new settings
+        await self._disconnect()
+        await self._connect()
