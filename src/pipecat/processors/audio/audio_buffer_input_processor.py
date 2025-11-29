@@ -47,6 +47,7 @@ class AudioBufferInputProcessor(FrameProcessor):
         sample_rate: Optional[int] = None,
         buffer_size: int = 0,
         enable_turn_audio: bool = False,
+        max_recording_bytes: int = 0,
         **kwargs,
     ):
         """Initialize the audio buffer input processor.
@@ -55,6 +56,7 @@ class AudioBufferInputProcessor(FrameProcessor):
             sample_rate: Desired output sample rate. If None, uses source rate.
             buffer_size: Size of buffer before triggering events. 0 for no buffering.
             enable_turn_audio: Whether turn audio event handlers should be triggered.
+            max_recording_bytes: Maximum total bytes to record. 0 for unlimited.
             **kwargs: Additional keyword arguments passed to FrameProcessor.
         """
         super().__init__(**kwargs)
@@ -63,6 +65,7 @@ class AudioBufferInputProcessor(FrameProcessor):
         self._audio_buffer_size_1s = 0
         self._buffer_size = buffer_size
         self._enable_turn_audio = enable_turn_audio
+        self._max_recording_bytes = max_recording_bytes
 
         self._audio_buffer = bytearray()
         self._turn_audio_buffer = bytearray()
@@ -76,6 +79,10 @@ class AudioBufferInputProcessor(FrameProcessor):
         self._recording = False
         self._resampler = create_stream_resampler()
 
+        # Track total bytes recorded for max limit
+        self._total_bytes_recorded = 0
+        self._max_recording_reached = False
+
         self._register_event_handler("on_input_audio_data")
         self._register_event_handler("on_user_turn_audio_data")
 
@@ -88,6 +95,8 @@ class AudioBufferInputProcessor(FrameProcessor):
         """Start recording audio from input."""
         # logger.debug(f"AudioBufferInputProcessor: Starting recording")
         self._recording = True
+        self._total_bytes_recorded = 0
+        self._max_recording_reached = False
         self._reset_recording()
 
     async def stop_recording(self):
@@ -115,9 +124,6 @@ class AudioBufferInputProcessor(FrameProcessor):
                 f"AudioBufferInputProcessor: Received InputAudioRawFrame but not recording!"
             )
 
-        if isinstance(frame, (CancelFrame, EndFrame)):
-            await self.stop_recording()
-
         await self.push_frame(frame, direction)
 
     def _update_sample_rate(self, frame: StartFrame):
@@ -128,13 +134,24 @@ class AudioBufferInputProcessor(FrameProcessor):
         )
 
     async def _process_audio_frame(self, frame: InputAudioRawFrame):
-        # Add silence if we need to
-        silence = self._compute_silence(self._last_frame_at)
-        self._audio_buffer.extend(silence)
+        # Check if max recording limit reached
+        if self._max_recording_bytes > 0 and self._max_recording_reached:
+            return
 
         # Add audio
         resampled = await self._resample_audio(frame)
+
+        # Check if we've exceeded the max recording limit
+        if self._max_recording_bytes > 0 and self._total_bytes_recorded >= self._max_recording_bytes:
+            self._max_recording_reached = True
+            logger.warning(
+                f"AudioBufferInputProcessor: Max recording limit reached "
+                f"({self._total_bytes_recorded} bytes / {self._total_bytes_recorded / (self._sample_rate * 2):.1f}s)"
+            )
+            return
+
         self._audio_buffer.extend(resampled)
+        self._total_bytes_recorded += len(resampled)
 
         if not self._reported_first_frame_time:
             self._reported_first_frame_time = True
@@ -194,18 +211,3 @@ class AudioBufferInputProcessor(FrameProcessor):
     async def _resample_audio(self, frame: AudioRawFrame) -> bytes:
         """Return PCM audio for frame at the processor's output rate."""
         return await self._resampler.resample(frame.audio, frame.sample_rate, self._sample_rate)
-
-    def _compute_silence(self, from_time: float) -> bytes:
-        quiet_time = time.time() - from_time
-        # Introduce silence only if there's a big enough gap of 2s
-        # Currently, smart turn analysis can sometimes block passing of audio
-        # data to pipeline and can cause delay here.
-        if from_time == 0 or quiet_time < 2.0:
-            return b""
-
-        logger.warning(
-            f"Adding silence of length {quiet_time} seconds for AudioBufferInputProcessor"
-        )
-        num_bytes = int(quiet_time * self._sample_rate) * 2
-        silence = b"\x00" * num_bytes
-        return silence

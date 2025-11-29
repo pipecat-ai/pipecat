@@ -703,19 +703,7 @@ class BaseOutputTransport(FrameProcessor):
                     try:
                         frame = self._audio_queue.get_nowait()
                         if isinstance(frame, OutputAudioRawFrame):
-                            has_sound = any(byte != 0 for byte in frame.audio)
-                            if not has_sound:
-                                # In the case where we add silence between sentences,
-                                # lets not send TTSAudioRawFrame after mixing, otherwise
-                                # we may end up sending BotStartedSpeakingFrame again in
-                                # the pipeline.
-                                frame = OutputAudioRawFrame(
-                                    audio=await self._mixer.mix(silence),
-                                    sample_rate=frame.sample_rate,
-                                    num_channels=frame.num_channels,
-                                )
-                            else:
-                                frame.audio = await self._mixer.mix(frame.audio)
+                            frame.audio = await self._mixer.mix(frame.audio)
                             last_frame_time = time.time()
                         yield frame
                         self._audio_queue.task_done()

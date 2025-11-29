@@ -418,6 +418,7 @@ class AudioBuffer:
         sample_rate: Optional[int] = None,
         buffer_size: int = 0,
         enable_turn_audio: bool = False,
+        max_recording_bytes: int = 0,
     ):
         """Initialize factory with shared configuration.
 
@@ -425,10 +426,12 @@ class AudioBuffer:
             sample_rate: Desired output sample rate. If None, uses source rate
             buffer_size: Size of buffer before triggering events. 0 for no buffering
             enable_turn_audio: Whether turn audio event handlers should be triggered
+            max_recording_bytes: Maximum total bytes to record per processor. 0 for unlimited
         """
         self._sample_rate = sample_rate
         self._buffer_size = buffer_size
         self._enable_turn_audio = enable_turn_audio
+        self._max_recording_bytes = max_recording_bytes
         self._input_processor = None
         self._output_processor = None
 
@@ -446,6 +449,7 @@ class AudioBuffer:
                 sample_rate=self._sample_rate,
                 buffer_size=self._buffer_size,
                 enable_turn_audio=self._enable_turn_audio,
+                max_recording_bytes=self._max_recording_bytes,
                 **kwargs,
             )
         else:
@@ -466,6 +470,7 @@ class AudioBuffer:
                 sample_rate=self._sample_rate,
                 buffer_size=self._buffer_size,
                 enable_turn_audio=self._enable_turn_audio,
+                max_recording_bytes=self._max_recording_bytes,
                 **kwargs,
             )
         else:

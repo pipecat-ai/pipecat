@@ -95,7 +95,7 @@ class AudioSynchronizer:
 
     async def stop_recording(self):
         """Stop recording and flush remaining audio."""
-        await self._call_audio_handler()
+        await self._call_audio_handler(final_flush=True)
         self._recording = False
         logger.info(
             f"AudioSynchronizer: Stopped recording - "
@@ -153,16 +153,25 @@ class AudioSynchronizer:
         #     f"buffer_size={len(self._output_buffer)}"
         # )
 
-    async def _call_audio_handler(self):
-        """Call the audio data event handler with merged audio."""
+    async def _call_audio_handler(self, final_flush: bool = False):
+        """Call the audio data event handler with merged audio.
+
+        Args:
+            final_flush: If True, use max of both buffers and pad shorter one with silence.
+                        This is used when stopping recording to flush all remaining audio.
+        """
         if not self._has_audio() or not self._recording:
             logger.trace(
                 f"AudioSynchronizer: Not calling handler - has_audio={self._has_audio()}, recording={self._recording}"
             )
             return
 
-        # Determine how much we can merge (minimum of both buffers)
-        merge_size = min(len(self._input_buffer), len(self._output_buffer))
+        if final_flush:
+            # For final flush, use max of both buffers and pad shorter one with silence
+            merge_size = max(len(self._input_buffer), len(self._output_buffer))
+        else:
+            # Normal merge: use minimum of both buffers
+            merge_size = min(len(self._input_buffer), len(self._output_buffer))
 
         # Ensure even size for 16-bit audio
         if merge_size % 2 != 0:
@@ -171,13 +180,25 @@ class AudioSynchronizer:
         if merge_size == 0:
             return
 
-        # Extract equal amounts from both buffers
+        # Extract chunks from both buffers
         input_chunk = bytes(self._input_buffer[:merge_size])
         output_chunk = bytes(self._output_buffer[:merge_size])
 
+        # Pad with silence (zero bytes) if needed for final flush
+        if final_flush:
+            if len(input_chunk) < merge_size:
+                input_chunk = input_chunk + bytes(merge_size - len(input_chunk))
+            if len(output_chunk) < merge_size:
+                output_chunk = output_chunk + bytes(merge_size - len(output_chunk))
+
         # Remove processed data from buffers
-        self._input_buffer = self._input_buffer[merge_size:]
-        self._output_buffer = self._output_buffer[merge_size:]
+        if final_flush:
+            # Clear all buffers on final flush
+            self._input_buffer = bytearray()
+            self._output_buffer = bytearray()
+        else:
+            self._input_buffer = self._input_buffer[merge_size:]
+            self._output_buffer = self._output_buffer[merge_size:]
 
         # Merge the chunks
         if self._num_channels == 1:

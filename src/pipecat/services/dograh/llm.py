@@ -111,9 +111,7 @@ class DograhLLMService(OpenAILLMService):
             error_str = str(e)
             if "quota_exceeded" in error_str and "403" in error_str:
                 # Extract the meaningful error message
-                error_msg = (
-                    "Dograh Service quota exceeded"
-                )
+                error_msg = "Dograh Service quota exceeded"
 
                 # Push a fatal error frame to trigger pipeline shutdown
                 await self.push_frame(
