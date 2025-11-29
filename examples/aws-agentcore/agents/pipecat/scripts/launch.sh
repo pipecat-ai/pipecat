@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # Script to dynamically read all variables from .env file and launch agentcore
