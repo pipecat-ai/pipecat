@@ -1,0 +1,4 @@
+aioice
+aiohttp
+bedrock-agentcore
+python-dotenv

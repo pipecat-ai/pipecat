@@ -1,0 +1,3 @@
+aiohttp
+bedrock-agentcore
+pipecat-ai[webrtc,daily,silero,deepgram,openai,cartesia,runner]
