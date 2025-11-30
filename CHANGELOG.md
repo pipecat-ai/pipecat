@@ -17,8 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed 
 
-- Fixed an issue in `CartesiaSTTService` where dynamic language
-  updates were failing.
+- Fixed an issue in `CartesiaSTTService` where dynamic language updates were failing.
 
 ## [0.0.96] - 2025-11-26 🦃 "Happy Thanksgiving!" 🦃
 
