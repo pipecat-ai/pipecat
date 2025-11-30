@@ -292,8 +292,11 @@ class LLMService(AIService):
             frame: The frame to push.
             direction: The direction of frame pushing.
         """
+        # Only set skip_tts=True when configured, to preserve frames that already
+        # have skip_tts=True. This avoids overwriting frames passing through.
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
-            frame.skip_tts = self._skip_tts
+            if self._skip_tts:
+                frame.skip_tts = True
 
         await super().push_frame(frame, direction)
 
