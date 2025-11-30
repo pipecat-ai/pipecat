@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `AWSBedrockAgentCoreProcessor` to support invoking an AgentCore-hosted
+  agent in a Pipecat pipeline.
+
 - Enhanced error handling across the framework:
 
   - Added `on_error` callback to `FrameProcessor` for centralized error
