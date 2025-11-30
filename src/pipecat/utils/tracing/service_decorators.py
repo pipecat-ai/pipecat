@@ -483,7 +483,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Add all available attributes to the span
                             attribute_kwargs = {
                                 "service_name": service_class_name,
-                                "model": getattr(self, "model_name", "unknown"),
+                                "model": getattr(
+                                    self, getattr(self, "_full_model_name", "model_name"), "unknown"
+                                ),
                                 "stream": True,  # Most LLM services use streaming
                                 "parameters": params,
                             }
