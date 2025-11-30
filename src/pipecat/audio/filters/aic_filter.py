@@ -39,7 +39,7 @@ class AICFilter(BaseAudioFilter):
         self,
         *,
         license_key: str = "",
-        model_type: AICModelType = AICModelType.QUAIL_L,
+        model_type: AICModelType = AICModelType.QUAIL_STT,
         enhancement_level: Optional[float] = 1.0,
         voice_gain: Optional[float] = 1.0,
         noise_gate_enable: Optional[bool] = True,
@@ -52,12 +52,27 @@ class AICFilter(BaseAudioFilter):
             enhancement_level: Optional overall enhancement strength (0.0..1.0).
             voice_gain: Optional linear gain applied to detected speech (0.0..4.0).
             noise_gate_enable: Optional enable/disable noise gate (default: True).
+
+                .. deprecated:: 1.3.0
+                    The `noise_gate_enable` parameter is deprecated and no longer has any effect.
+                    It will be removed in a future version.
         """
         self._license_key = license_key
         self._model_type = model_type
 
         self._enhancement_level = enhancement_level
         self._voice_gain = voice_gain
+        if noise_gate_enable is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter `noise_gate_enable` is deprecated and no longer has any effect. "
+                    "It will be removed in a future version. Use AIC VAD instead (create_vad_analyzer()).",
+                    DeprecationWarning,
+                )
+
         self._noise_gate_enable = noise_gate_enable
 
         self._enabled = True
@@ -149,10 +164,6 @@ class AICFilter(BaseAudioFilter):
                 )
             if self._voice_gain is not None:
                 self._aic.set_parameter(AICParameter.VOICE_GAIN, float(self._voice_gain))
-            if self._noise_gate_enable is not None:
-                self._aic.set_parameter(
-                    AICParameter.NOISE_GATE_ENABLE, 1.0 if bool(self._noise_gate_enable) else 0.0
-                )
 
             self._aic_ready = True
 

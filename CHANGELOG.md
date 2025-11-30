@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `AICFilter` to use Quail STT as the default model (`AICModelType.QUAIL_STT`). Quail STT is optimized for human-to-machine interaction (e.g., voice agents, speech-to-text) and operates at a native sample rate of 16 kHz with fixed enhancement parameters.
+
+### Deprecated
+
+- The `noise_gate_enable` parameter in `AICFilter` is deprecated and no longer has any effect. Noise gating is now handled automatically by the AIC VAD system. Use `AICFilter.create_vad_analyzer()` for VAD functionality instead.
+
 ### Fixed 
 
 - Fixed an issue in `CartesiaSTTService` where dynamic language
