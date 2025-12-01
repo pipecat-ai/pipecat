@@ -139,7 +139,10 @@ class AudioBufferOutputProcessor(FrameProcessor):
         resampled = await self._resample_audio(frame)
 
         # Check if we've exceeded the max recording limit
-        if self._max_recording_bytes > 0 and self._total_bytes_recorded >= self._max_recording_bytes:
+        if (
+            self._max_recording_bytes > 0
+            and self._total_bytes_recorded >= self._max_recording_bytes
+        ):
             self._max_recording_reached = True
             logger.warning(
                 f"AudioBufferOutputProcessor: Max recording limit reached "

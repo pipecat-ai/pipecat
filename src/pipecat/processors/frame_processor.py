@@ -22,6 +22,7 @@ from pipecat.audio.interruptions.base_interruption_strategy import BaseInterrupt
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     FrameProcessorPauseFrame,
@@ -626,6 +627,8 @@ class FrameProcessor(BaseObject):
         elif isinstance(frame, CancelFrame):
             logger.debug(f"{self} Received CancelFrame")
             await self.__cancel(frame)
+        elif isinstance(frame, EndFrame):
+            logger.debug(f"{self} Received EndFrame")
         elif isinstance(frame, (FrameProcessorPauseFrame, FrameProcessorPauseUrgentFrame)):
             await self.__pause(frame)
         elif isinstance(frame, (FrameProcessorResumeFrame, FrameProcessorResumeUrgentFrame)):
