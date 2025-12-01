@@ -47,6 +47,8 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
+    LLMThinkingSignatureFrame,
+    LLMThinkingTextFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
@@ -591,6 +593,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._started = 0
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
+        self._thinking: List[TextPartForConcatenation] = []
 
     @property
     def has_function_calls_in_progress(self) -> bool:
@@ -600,6 +603,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
             True if function calls are in progress, False otherwise.
         """
         return bool(self._function_calls_in_progress)
+
+    async def reset(self):
+        """Reset the aggregation state."""
+        await super().reset()
+        self._thinking = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for assistant response aggregation and function call management.
@@ -619,6 +627,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_llm_end(frame)
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
+        elif isinstance(frame, LLMThinkingTextFrame):
+            await self._handle_thinking(frame)
+        elif isinstance(frame, LLMThinkingSignatureFrame):
+            await self._handle_thinking_signature(frame)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -662,6 +674,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Push timestamp frame with current time
         timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
         await self.push_frame(timestamp_frame)
+
+    def thinking_string(self) -> str:
+        """Get the current thinking as a string.
+
+        Returns:
+            The concatenated thinking string.
+        """
+        return concatenate_aggregated_text(self._thinking)
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -822,6 +842,35 @@ class LLMAssistantAggregator(LLMContextAggregator):
             TextPartForConcatenation(
                 frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
             )
+        )
+
+    async def _handle_thinking(self, frame: LLMThinkingTextFrame):
+        if not self._started:
+            return
+
+        # Make sure we really have text (spaces count, too!)
+        if len(frame.thinking) == 0:
+            return
+
+        self._thinking.append(
+            TextPartForConcatenation(
+                frame.thinking, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
+
+    async def _handle_thinking_signature(self, frame: LLMThinkingSignatureFrame):
+        if not self._started:
+            return
+
+        thinking = self.thinking_string()
+
+        self._context.add_message(
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": thinking, "signature": frame.signature},
+                ],
+            }
         )
 
     def _context_updated_task_finished(self, task: asyncio.Task):

@@ -82,6 +82,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         model="claude-3-7-sonnet-latest",
+        wait_for_all=True,
+        params=AnthropicLLMService.InputParams(
+            max_tokens=16000,
+            extra={
+                "thinking": {"type": "enabled", "budget_tokens": 10000},
+            },
+        ),
     )
     llm.register_function("get_weather", get_weather)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
