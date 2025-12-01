@@ -31,5 +31,5 @@ with warnings.catch_warnings():
 
 RivaSTTService = NvidiaSTTService
 language_to_riva_language = language_to_nvidia_riva_language
-RivaSegmentedSTTService = NvidiaSegmentedTTSService
-ParakeetSTTService = NvidiaTTSService
+RivaSegmentedSTTService = NvidiaSegmentedSTTService
+ParakeetSTTService = NvidiaSTTService
