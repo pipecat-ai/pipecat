@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `SarvamTTSService` where the last sentence was not being
+  spoken. Now, audio is flushed when the TTS services receives the
+  `LLMFullResponseEndFrame` or `EndFrame`.
+
 - Fixed an issue in `AWSTranscribeSTTService` where the `region` arg was
   always set to `us-east-1` when providing an AWS_REGION env var.
 

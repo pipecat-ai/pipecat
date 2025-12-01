@@ -514,9 +514,11 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame and flush audio if it's the end of a full response."""
-        if isinstance(frame, LLMFullResponseEndFrame):
+        await super().process_frame(frame, direction)
+
+        # When the LLM finishes responding, flush any remaining text in Sarvam's buffer
+        if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
-        return await super().process_frame(frame, direction)
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Update service settings and reconnect if voice changed."""
