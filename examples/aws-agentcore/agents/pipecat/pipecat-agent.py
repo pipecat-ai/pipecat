@@ -23,7 +23,6 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequest,
@@ -39,11 +38,6 @@ load_dotenv(override=True)
 # instantiated. The function will be called when the desired transport gets
 # selected.
 transport_params = {
-    "daily": lambda: DailyParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
-    ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
