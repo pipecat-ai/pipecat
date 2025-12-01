@@ -10,8 +10,9 @@ INSERT_LINE="RUN apt update && apt install -y libgl1 libglib2.0-0 && apt clean"
 ###############################################
 # STEP 1 — Configure agentcore
 # Already configuring to use Docker as it is required by Pipecat
+# Disabling memory by default since it is not needed by this example
 ###############################################
-agentcore configure -e pipecat-agent.py --deployment-type container --container-runtime docker
+agentcore configure -e pipecat-agent.py --deployment-type container --container-runtime docker --disable-memory
 
 ###############################################
 # STEP 2 — Wait until Dockerfile exists
