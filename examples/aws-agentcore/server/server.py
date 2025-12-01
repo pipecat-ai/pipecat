@@ -150,6 +150,9 @@ async def proxy_request(
 
     if path.endswith("api/offer"):
         try:
+            # TODO add support for the PATCH method
+            # Add a variable to the payload as well to say if it is a new session of not
+            # and the OPERATION: if it is POST or PATCH, so we can validate it inside the agent.
             if request.method == HTTPMethod.POST.value:
                 return await post_offer(request, session_id)
         except Exception as e:
