@@ -24,6 +24,7 @@ dependencies = [
     { name = "aioice" },
     { name = "bedrock-agentcore" },
     { name = "pipecat-ai", extra = ["cartesia", "daily", "deepgram", "openai", "runner", "silero", "webrtc"] },
+    { name = "pipecat-ai-small-webrtc-prebuilt" },
     { name = "python-dotenv" },
 ]
 
@@ -40,6 +41,7 @@ requires-dist = [
     { name = "aioice" },
     { name = "bedrock-agentcore" },
     { name = "pipecat-ai", extras = ["webrtc", "daily", "silero", "deepgram", "openai", "cartesia", "runner"] },
+    { name = "pipecat-ai-small-webrtc-prebuilt", specifier = ">=2.0.0" },
     { name = "python-dotenv" },
 ]
 
@@ -2409,12 +2411,12 @@ webrtc = [
 
 [[package]]
 name = "pipecat-ai-small-webrtc-prebuilt"
-version = "1.0.0"
+version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi", extra = ["all"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/c8/19e9edb707581431c74e57da386656b9f9072c7a968f5fa49005e0b53cd6/pipecat_ai_small_webrtc_prebuilt-1.0.0.tar.gz", hash = "sha256:7e3d1cba420842d469ee9ecae321a086732392acb2625d5587a54d28a16ca0ea", size = 563883, upload-time = "2025-07-25T17:57:53.266Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/14/8484ab387169779d1a6aaba90e133a067f0810ba5c53c9d0e2b6707857a9/pipecat_ai_small_webrtc_prebuilt-2.0.0.tar.gz", hash = "sha256:ad43b0ff1d4afaeae25241b3a8c2c283896f879d1e5d585ed8ed159db123178d", size = 588667, upload-time = "2025-12-01T00:27:43.27Z" }
 
 [[package]]
 name = "prance"

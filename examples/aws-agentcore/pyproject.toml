@@ -9,6 +9,7 @@ dependencies = [
     "bedrock-agentcore",
     "python-dotenv",
     "pipecat-ai[webrtc,daily,silero,deepgram,openai,cartesia,runner]",
+    "pipecat-ai-small-webrtc-prebuilt>=2.0.0"
 ]
 
 [dependency-groups]
