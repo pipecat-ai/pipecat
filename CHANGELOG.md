@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `noise_gate_enable` parameter in `AICFilter` is deprecated and no longer has any effect. Noise gating is now handled automatically by the AIC VAD system. Use `AICFilter.create_vad_analyzer()` for VAD functionality instead.
 
+### Fixed
+
+- Fixed an issue in `AWSTranscribeSTTService` where the `region` arg was
+  always set to `us-east-1` when providing an AWS_REGION env var.
+
 ## [0.0.96] - 2025-11-26 🦃 "Happy Thanksgiving!" 🦃
 
 ### Added
@@ -293,7 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed an issue in `AWSBedrockLLMService` where the `aws_region` arg was
-  always set to `us-east-1`.
+  always set to `us-east-1` when providing an AWS_REGION env var.
 
 - Fixed an issue with `DeepgramFluxSTTService` where it sometimes failed to reconnect.
 
