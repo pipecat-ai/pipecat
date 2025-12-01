@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `AWSTranscribeSTTService` where the `region` arg was
   always set to `us-east-1` when providing an AWS_REGION env var.
 
+- Fixed an issue in `DeepgramTTSService` where a `TTSStoppedFrame` was
+  incorrectly pushed after a functional call. This caused an issue with the
+  voice-ui-kit's conversational panel rending of the LLM output after a
+  function call.
+
 ## [0.0.96] - 2025-11-26 🦃 "Happy Thanksgiving!" 🦃
 
 ### Added

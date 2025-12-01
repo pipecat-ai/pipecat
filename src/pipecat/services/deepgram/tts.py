@@ -71,7 +71,12 @@ class DeepgramTTSService(WebsocketTTSService):
             encoding: Audio encoding format. Defaults to "linear16".
             **kwargs: Additional arguments passed to parent InterruptibleTTSService class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            pause_frame_processing=True,
+            push_stop_frames=True,
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._base_url = base_url
@@ -231,7 +236,6 @@ class DeepgramTTSService(WebsocketTTSService):
                         logger.trace(f"Received Flushed: {msg}")
                         # Flushed indicates the end of audio generation for the current buffer
                         # This happens after flush_audio() is called
-                        await self.push_frame(TTSStoppedFrame())
                     elif msg_type == "Cleared":
                         logger.trace(f"Received Cleared: {msg}")
                         # Buffer has been cleared after interruption
@@ -286,7 +290,7 @@ class DeepgramTTSService(WebsocketTTSService):
             speak_msg = {"type": "Speak", "text": text}
             await self._get_websocket().send(json.dumps(speak_msg))
 
-            # The actual audio frames will be handled in _receive_messages
+            # The audio frames will be handled in _receive_messages
             yield None
 
         except Exception as e:
