@@ -186,7 +186,7 @@ class LLMService(AIService):
         self._function_call_tasks: Dict[Optional[asyncio.Task], FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
         self._tracing_enabled: bool = False
-        self._skip_tts: bool = False
+        self._skip_tts: Optional[bool] = None
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
@@ -297,7 +297,8 @@ class LLMService(AIService):
             direction: The direction of frame pushing.
         """
         if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
-            frame.skip_tts = self._skip_tts
+            if self._skip_tts is not None:
+                frame.skip_tts = self._skip_tts
 
         await super().push_frame(frame, direction)
 

@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where `LLMTextFrame.skip_tts` was being overwritten by LLM
+  services.
+
 - Fixed an issue in `SarvamTTSService` where the last sentence was not being
   spoken. Now, audio is flushed when the TTS services receives the
   `LLMFullResponseEndFrame` or `EndFrame`.
