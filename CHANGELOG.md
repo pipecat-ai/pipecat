@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has any effect. Noise gating is now handled automatically by the AIC VAD
   system. Use `AICFilter.create_vad_analyzer()` for VAD functionality instead.
 
+- NVIDIA Services name changes (all functionality is unchanged):
+
+  - `NimLLMService` is now deprecated, use `NvidiaLLMService` instead.
+  - `RivaSTTService` is now deprecated, use `NvidiaSTTService` instead.
+  - `RivaTTSService` is now deprecated, use `NvidiaTTSService` instead.
+  - Use `uv pip install pipecat-ai[nvidia]` instead of
+    `uv pip install pipecat-ai[riva]`
+
 ### Fixed
 
 - Fixed an issue in `SarvamTTSService` where the last sentence was not being
