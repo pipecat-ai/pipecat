@@ -111,6 +111,19 @@ class BaseTextAggregator(ABC):
         pass
 
     @abstractmethod
+    async def flush(self) -> Optional[Aggregation]:
+        """Flush any pending aggregation.
+
+        This method is called at the end of a stream (e.g., when receiving
+        LLMFullResponseEndFrame) to return any text that was buffered.
+
+        Returns:
+            An Aggregation object if there is pending text, or None if there
+            is no pending text.
+        """
+        pass
+
+    @abstractmethod
     async def handle_interruption(self):
         """Handle interruptions in the text aggregation process.
 

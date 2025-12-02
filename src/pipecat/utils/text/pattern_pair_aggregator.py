@@ -368,6 +368,18 @@ class PatternPairAggregator(BaseTextAggregator):
         # No complete sentence found yet
         return None
 
+    async def flush(self) -> Optional[Aggregation]:
+        """Flush any pending aggregation.
+
+        For PatternPairAggregator, there is no lookahead buffering, so this
+        simply returns None. Any remaining text can be retrieved via the
+        .text property.
+
+        Returns:
+            None, as this aggregator does not buffer pending sentences.
+        """
+        return None
+
     async def handle_interruption(self):
         """Handle interruptions by clearing the buffer.
 

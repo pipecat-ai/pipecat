@@ -13,7 +13,7 @@ text processing scenarios.
 
 from typing import Optional
 
-from pipecat.utils.string import match_endofsentence
+from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, match_endofsentence
 from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
 
 
@@ -31,6 +31,7 @@ class SimpleTextAggregator(BaseTextAggregator):
         Creates an empty text buffer ready to begin accumulating text tokens.
         """
         self._text = ""
+        self._needs_lookahead: bool = False
 
     @property
     def text(self) -> Aggregation:
@@ -44,27 +45,59 @@ class SimpleTextAggregator(BaseTextAggregator):
     async def aggregate(self, text: str) -> Optional[Aggregation]:
         """Aggregate text and return completed sentences.
 
-        Adds the new text to the buffer and checks for end-of-sentence markers.
-        When a sentence boundary is found, returns the completed sentence and
-        removes it from the buffer.
+        Adds the new text to the buffer. When sentence-ending punctuation is
+        detected, it waits for non-whitespace lookahead before calling NLTK.
+        This prevents false positives like "$29." being detected as a sentence
+        when it's actually "$29.95", and avoids unnecessary NLTK calls.
 
         Args:
             text: New text to add to the aggregation buffer.
 
         Returns:
-            A complete sentence if an end-of-sentence marker is found,
-            or None if more text is needed to complete a sentence.
+            A complete sentence if an end-of-sentence marker is confirmed,
+            or None if more text is needed.
         """
-        result: Optional[str] = None
-
+        # Add new text to buffer
         self._text += text
 
-        eos_end_marker = match_endofsentence(self._text)
-        if eos_end_marker:
-            result = self._text[:eos_end_marker]
-            self._text = self._text[eos_end_marker:]
+        # If we need lookahead, check if we now have non-whitespace
+        if self._needs_lookahead:
+            # Check if the new character is non-whitespace
+            if text.strip():
+                # We have meaningful lookahead, call NLTK
+                self._needs_lookahead = False
+                eos_marker = match_endofsentence(self._text)
 
-        if result:
+                if eos_marker:
+                    # NLTK confirmed a sentence - return it
+                    result = self._text[:eos_marker]
+                    self._text = self._text[eos_marker:]
+                    return Aggregation(text=result, type=AggregationType.SENTENCE)
+                # No sentence found - keep accumulating
+                return None
+            # Still whitespace, keep waiting
+            return None
+
+        # Check if we just added sentence-ending punctuation
+        if self._text[-1] in SENTENCE_ENDING_PUNCTUATION:
+            # Mark that we need lookahead (don't call NLTK yet)
+            self._needs_lookahead = True
+
+        return None
+
+    async def flush(self) -> Optional[Aggregation]:
+        """Flush any remaining text in the buffer.
+
+        Returns any text remaining in the buffer. This is called at the end
+        of a stream to ensure all text is processed.
+
+        Returns:
+            Any remaining text as a sentence, or None if buffer is empty.
+        """
+        if self._text:
+            # Return whatever we have in the buffer
+            result = self._text
+            await self.reset()
             return Aggregation(text=result.strip(), type=AggregationType.SENTENCE)
         return None
 
@@ -75,6 +108,7 @@ class SimpleTextAggregator(BaseTextAggregator):
         discarding any partially accumulated text.
         """
         self._text = ""
+        self._needs_lookahead = False
 
     async def reset(self):
         """Clear the internally aggregated text.
@@ -83,3 +117,4 @@ class SimpleTextAggregator(BaseTextAggregator):
         any accumulated text content.
         """
         self._text = ""
+        self._needs_lookahead = False
