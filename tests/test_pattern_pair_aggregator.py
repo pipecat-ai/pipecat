@@ -40,12 +40,12 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_pattern_match_and_removal(self):
         # Feed text character by character
         full_text = "Hello <test>pattern content</test>!"
-        result = None
+        results = []
 
         for char in full_text:
             result = await self.aggregator.aggregate(char)
             if result:
-                break
+                results.append(result)
 
         # Verify the handler was called with correct PatternMatch object
         self.test_handler.assert_called_once()
@@ -55,18 +55,19 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_args.full_match, "<test>pattern content</test>")
         self.assertEqual(call_args.text, "pattern content")
 
-        # The exclamation point should be treated as a sentence boundary,
-        # but with lookahead, we need more text or flush() to confirm
-        self.assertIsNone(result)  # Waiting for lookahead after "!"
+        # No results yet (waiting for lookahead after "!")
+        self.assertEqual(len(results), 0)
 
         # Next sentence should provide the lookahead and trigger the previous sentence
         for char in " This is another sentence.":
             result = await self.aggregator.aggregate(char)
             if result:
-                break
+                results.append(result)
 
-        self.assertEqual(result.text, "Hello !")
-        self.assertEqual(result.type, "sentence")
+        # First result should be "Hello !" triggered by the space lookahead
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].text, "Hello !")
+        self.assertEqual(results[0].type, "sentence")
 
         # Now flush to get the remaining sentence
         result = await self.aggregator.flush()
@@ -76,29 +77,22 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.aggregator.text.text, "")
 
     async def test_pattern_match_and_aggregate(self):
-        # Feed text character by character until we get the first aggregation
-        result = None
-        for char in "Here is code <code>pattern content</code>":
+        # Feed text character by character, collecting all results
+        results = []
+        full_text = "Here is code <code>pattern content</code> This is another sentence."
+
+        for char in full_text:
             result = await self.aggregator.aggregate(char)
             if result:
-                break
+                results.append(result)
 
         # First result should be "Here is code" when pattern starts
-        self.assertEqual(result.text, "Here is code")
-        self.assertEqual(self.aggregator.text.text, "<code>pattern content</code>")
-        self.assertEqual(self.aggregator.text.type, "code_pattern")
+        self.assertEqual(results[0].text, "Here is code")
+        self.assertEqual(results[0].type, "sentence")
 
-        # Continue feeding to complete the pattern
-        result = None
-        for char in "":  # Already fed all chars, just need to check state
-            result = await self.aggregator.aggregate(char)
-            if result:
-                break
-
-        # Since we already fed all characters, we need to trigger pattern completion
-        # by checking what's in the buffer - the pattern should have been processed
-        # Let's continue with a space to trigger the next check
-        result = await self.aggregator.aggregate(" ")
+        # Second result should be the code pattern content
+        self.assertEqual(results[1].text, "pattern content")
+        self.assertEqual(results[1].type, "code_pattern")
 
         # Verify the handler was called with correct PatternMatch object
         self.code_handler.assert_called_once()
@@ -107,18 +101,8 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_args.type, "code_pattern")
         self.assertEqual(call_args.full_match, "<code>pattern content</code>")
         self.assertEqual(call_args.text, "pattern content")
-        self.assertEqual(result.text, "pattern content")
-        self.assertEqual(result.type, "code_pattern")
 
-        # Next sentence should be processed separately
-        # With lookahead, we need to flush to get the final sentence
-        for char in "This is another sentence.":
-            result = await self.aggregator.aggregate(char)
-            if result:
-                break
-
-        self.assertIsNone(result)  # Waiting for lookahead after "."
-
+        # Last sentence needs flush (waiting for lookahead after ".")
         result = await self.aggregator.flush()
         self.assertEqual(result.text, "This is another sentence.")
         self.assertEqual(result.type, "sentence")

@@ -100,6 +100,7 @@ class PatternPairAggregator(SimpleTextAggregator):
         super().__init__()
         self._patterns = {}
         self._handlers = {}
+        self._last_processed_position = 0  # Track where we last checked for complete patterns
 
     @property
     def text(self) -> Aggregation:
@@ -218,14 +219,18 @@ class PatternPairAggregator(SimpleTextAggregator):
         self._handlers[type] = handler
         return self
 
-    async def _process_complete_patterns(self, text: str) -> Tuple[List[PatternMatch], str]:
-        """Process all complete pattern pairs in the text.
+    async def _process_complete_patterns(
+        self, text: str, last_processed_position: int = 0
+    ) -> Tuple[List[PatternMatch], str]:
+        """Process newly complete pattern pairs in the text.
 
-        Searches for all complete pattern pairs in the text, calls the
-        appropriate handlers, and optionally removes the matches.
+        Searches for pattern pairs that have been completed since last_processed_position,
+        calls the appropriate handlers, and optionally removes the matches.
 
         Args:
             text: The text to process for pattern matches.
+            last_processed_position: The position in text that was already processed.
+                Only patterns that end at or after this position will be processed.
 
         Returns:
             Tuple of (all_matches, processed_text) where:
@@ -251,6 +256,20 @@ class PatternPairAggregator(SimpleTextAggregator):
             matches = list(match_iter)  # Convert to list for safe iteration
 
             for match in matches:
+                # Only process patterns that end at or after last_processed_position
+                # This ensures we only call handlers once when a pattern completes
+                if match.end() <= last_processed_position:
+                    # This pattern was already processed in a previous call
+                    if action != MatchAction.REMOVE:
+                        # For KEEP/AGGREGATE patterns, we still need to track them
+                        content = match.group(1)
+                        full_match = match.group(0)
+                        pattern_match = PatternMatch(
+                            content=content.strip(), type=type, full_match=full_match
+                        )
+                        all_matches.append(pattern_match)
+                    continue
+
                 content = match.group(1)  # Content between patterns
                 full_match = match.group(0)  # Full match including patterns
 
@@ -259,7 +278,7 @@ class PatternPairAggregator(SimpleTextAggregator):
                     content=content.strip(), type=type, full_match=full_match
                 )
 
-                # Call the appropriate handler if registered
+                # Call the appropriate handler if registered (only for newly complete patterns)
                 if type in self._handlers:
                     try:
                         await self._handlers[type](pattern_match)
@@ -322,8 +341,15 @@ class PatternPairAggregator(SimpleTextAggregator):
         # Add new text to buffer
         self._text += text
 
-        # Process any complete patterns in the buffer
-        patterns, processed_text = await self._process_complete_patterns(self._text)
+        # Process any newly complete patterns in the buffer
+        # Only patterns that complete after _last_processed_position will trigger handlers
+        patterns, processed_text = await self._process_complete_patterns(
+            self._text, self._last_processed_position
+        )
+
+        # Update the last processed position before modifying the text
+        # For REMOVE patterns, the text will be shorter, so we track the original position
+        self._last_processed_position = len(self._text)
 
         self._text = processed_text
 
@@ -372,6 +398,7 @@ class PatternPairAggregator(SimpleTextAggregator):
         to reset the state and discard any partially aggregated text.
         """
         await super().handle_interruption()
+        self._last_processed_position = 0
         # Pattern and handler state persists across interruptions
 
     async def reset(self):
@@ -381,4 +408,5 @@ class PatternPairAggregator(SimpleTextAggregator):
         buffered text and clearing pattern tracking state.
         """
         await super().reset()
+        self._last_processed_position = 0
         # Pattern and handler state persists across resets
