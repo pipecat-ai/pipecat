@@ -167,6 +167,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     class MessageConversionResult:
         """Result of converting a single universal context message to Google format.
 
+        # TODO: content could be other things, like {"tool_call_extra": ...}, for example. All bets are off when it's LLMSpecificMessage.
         Either content (a Google Content object) or a system instruction string
         is guaranteed to be set.
 
@@ -219,6 +220,20 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
                 ),
             )
+
+            # If we found a function-call-related thought_signature, modify the
+            # corresponding function call message to include it
+            if (
+                isinstance(result.content, dict)
+                and result.content.get("type") == "tool_call_extra"
+                and isinstance(data := result.content.get("data"), dict)
+                and (thought_signature := data.get("thought_signature"))
+            ):
+                self._apply_function_call_thought_signature_to_messages(
+                    thought_signature, result.content.get("tool_call_id"), messages
+                )
+                continue
+
             # Each result is either a Content or a system instruction
             if result.content:
                 messages.append(result.content)
@@ -410,3 +425,32 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             content=Content(role=role, parts=parts),
             tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
         )
+
+    def _apply_function_call_thought_signature_to_messages(
+        self, thought_signature: bytes, tool_call_id: str, messages: List[Content]
+    ) -> None:
+        """Apply tool_call_extra metadata to the corresponding function call message.
+
+        Args:
+            thought_signature: The thought signature bytes to apply.
+            tool_call_id: ID of the tool call message to find and modify.
+            messages: List of Content messages to search through.
+        """
+        # Search backwards through messages to find the matching function call
+        for message in reversed(messages):
+            if not isinstance(message, Content) or not message.parts:
+                continue
+            # Find the specific part with the matching function call
+            for part in message.parts:
+                if (
+                    hasattr(part, "function_call")
+                    and part.function_call
+                    and part.function_call.id == tool_call_id
+                ):
+                    part.thought_signature = thought_signature
+                    break
+            else:
+                # Continue outer loop if inner loop didn't break
+                continue
+            # Break outer loop if inner loop broke (found match)
+            break

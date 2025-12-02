@@ -16,7 +16,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional
 
 from loguru import logger
 from PIL import Image
@@ -34,6 +34,9 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
     OutputImageRawFrame,
     UserImageRawFrame,
@@ -665,6 +668,34 @@ class GoogleLLMService(LLMService):
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
+    class ThinkingConfig(BaseModel):
+        """Configuration for controlling the model's internal "thinking" process used before generating a response.
+
+        Gemini 2.5 and 3 series models have this thinking process.
+
+        Parameters:
+            thinking_level: Thinking level for Gemini 3 Pro. Can be "low" or "high".
+                If not provided, Gemini 3 Pro defaults to "high".
+                Note: Gemini 2.5 series should use thinking_budget instead.
+            thinking_budget: Token budget for thinking, for Gemini 2.5 series.
+                -1 for dynamic thinking (model decides), 0 to disable thinking,
+                or a specific token count (e.g., 128-32768 for 2.5 Pro).
+                If not provided, most models today default to dynamic thinking.
+                See https://ai.google.dev/gemini-api/docs/thinking#set-budget
+                for default values and allowed ranges.
+                Note: Gemini 3 Pro should use thinking_level instead.
+            include_thoughts: Whether to include thought summaries in the response.
+                Today's models default to not including thoughts (False).
+        """
+
+        thinking_budget: Optional[int] = Field(default=None)
+
+        # Why `| str` here? To not break compatibility in case Google adds more
+        # levels in the future.
+        thinking_level: Optional[Literal["low", "high"] | str] = Field(default=None)
+
+        include_thoughts: Optional[bool] = Field(default=None)
+
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
 
@@ -673,6 +704,12 @@ class GoogleLLMService(LLMService):
             temperature: Sampling temperature between 0.0 and 2.0.
             top_k: Top-k sampling parameter.
             top_p: Top-p sampling parameter between 0.0 and 1.0.
+            thinking: Thinking configuration with thinking_budget, thinking_level, and include_thoughts.
+                Used to control the model's internal "thinking" process used before generating a response.
+                Gemini 2.5 series models use thinking_budget; Gemini 3 models use thinking_level.
+                If this is not provided, Pipecat disables thinking for all
+                models where that's possible (the 2.5 series, except 2.5 Pro),
+                to reduce latency.
             extra: Additional parameters as a dictionary.
         """
 
@@ -680,6 +717,7 @@ class GoogleLLMService(LLMService):
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
         top_k: Optional[int] = Field(default=None, ge=0)
         top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+        thinking: Optional["GoogleLLMService.ThinkingConfig"] = Field(default=None)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -720,6 +758,7 @@ class GoogleLLMService(LLMService):
             "temperature": params.temperature,
             "top_k": params.top_k,
             "top_p": params.top_p,
+            "thinking": params.thinking,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self._tools = tools
@@ -830,6 +869,12 @@ class GoogleLLMService(LLMService):
             if v is not None
         }
 
+        # Add thinking parameters if configured
+        if self._settings["thinking"]:
+            generation_params["thinking_config"] = self._settings["thinking"].model_dump(
+                exclude_unset=True
+            )
+
         if self._settings["extra"]:
             generation_params.update(self._settings["extra"])
 
@@ -918,9 +963,17 @@ class GoogleLLMService(LLMService):
                 for candidate in chunk.candidates:
                     if candidate.content and candidate.content.parts:
                         for part in candidate.content.parts:
-                            if not part.thought and part.text:
-                                search_result += part.text
-                                await self.push_frame(LLMTextFrame(part.text))
+                            if part.text:
+                                if part.thought:
+                                    # Gemini emits fully-formed thoughts rather
+                                    # than chunks so bracket each thought in
+                                    # start/end
+                                    await self.push_frame(LLMThoughtStartFrame())
+                                    await self.push_frame(LLMThoughtTextFrame(part.text))
+                                    await self.push_frame(LLMThoughtEndFrame())
+                                else:
+                                    search_result += part.text
+                                    await self.push_frame(LLMTextFrame(part.text))
                             elif part.function_call:
                                 function_call = part.function_call
                                 id = function_call.id or str(uuid.uuid4())
@@ -931,6 +984,13 @@ class GoogleLLMService(LLMService):
                                         tool_call_id=id,
                                         function_name=function_call.name,
                                         arguments=function_call.args or {},
+                                        llm_specific_extra={
+                                            self.get_llm_adapter().id_for_llm_specific_messages: {
+                                                "thought_signature": part.thought_signature
+                                            }
+                                        }
+                                        if part.thought_signature
+                                        else None,
                                     )
                                 )
                             elif part.inline_data and part.inline_data.data:
