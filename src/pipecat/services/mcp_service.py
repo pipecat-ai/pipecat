@@ -46,7 +46,7 @@ class MCPClient(BaseObject):
     def __init__(
         self,
         server_params: ServerParameters,
-        tools_filter: List[str] | None = None,
+        tools_filter: Optional[List[str]] = None,
         tools_output_filters: Dict[str, Callable[[Any], Any]] | None = None,
         **kwargs,
     ):
