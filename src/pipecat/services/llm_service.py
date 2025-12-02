@@ -166,20 +166,24 @@ class LLMService(AIService):
     # However, subclasses should override this with a more specific adapter when necessary.
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
-    def __init__(self, run_in_parallel: bool = True, **kwargs):
+    def __init__(self, run_in_parallel: bool = True, wait_for_all: bool = False, **kwargs):
         """Initialize the LLM service.
 
         Args:
             run_in_parallel: Whether to run function calls in parallel or sequentially.
                 Defaults to True.
+            wait_for_all: Whether to wait for all function calls (parallel or
+                sequential) to complete. Defaults to False.
             **kwargs: Additional arguments passed to the parent AIService.
+
         """
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
+        self._wait_for_all = wait_for_all
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
-        self._function_call_tasks: Dict[asyncio.Task, FunctionCallRunnerItem] = {}
+        self._function_call_tasks: Dict[Optional[asyncio.Task], FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
         self._tracing_enabled: bool = False
         self._skip_tts: bool = False
@@ -435,6 +439,7 @@ class LLMService(AIService):
 
         await self.broadcast_frame(FunctionCallsStartedFrame, function_calls=function_calls)
 
+        runner_items = []
         for function_call in function_calls:
             if function_call.function_name in self._functions.keys():
                 item = self._functions[function_call.function_name]
@@ -446,28 +451,20 @@ class LLMService(AIService):
                 )
                 continue
 
-            runner_item = FunctionCallRunnerItem(
-                registry_item=item,
-                function_name=function_call.function_name,
-                tool_call_id=function_call.tool_call_id,
-                arguments=function_call.arguments,
-                context=function_call.context,
+            runner_items.append(
+                FunctionCallRunnerItem(
+                    registry_item=item,
+                    function_name=function_call.function_name,
+                    tool_call_id=function_call.tool_call_id,
+                    arguments=function_call.arguments,
+                    context=function_call.context,
+                )
             )
 
-            if self._run_in_parallel:
-                task = self.create_task(self._run_function_call(runner_item))
-                self._function_call_tasks[task] = runner_item
-                task.add_done_callback(self._function_call_task_finished)
-            else:
-                await self._sequential_runner_queue.put(runner_item)
-
-    async def _call_start_function(
-        self, context: OpenAILLMContext | LLMContext, function_name: str
-    ):
-        if function_name in self._start_callbacks.keys():
-            await self._start_callbacks[function_name](function_name, self, context)
-        elif None in self._start_callbacks.keys():
-            return await self._start_callbacks[None](function_name, self, context)
+        if self._run_in_parallel:
+            await self._run_parallel_function_calls(runner_items)
+        else:
+            await self._run_sequential_function_calls(runner_items)
 
     async def request_image_frame(
         self,
@@ -539,6 +536,46 @@ class LLMService(AIService):
             # task.add_done_callback(self._function_call_task_finished).
             await task
             del self._function_call_tasks[task]
+
+    async def _run_parallel_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
+        tasks = []
+        for runner_item in runner_items:
+            task = self.create_task(self._run_function_call(runner_item))
+            tasks.append(task)
+            self._function_call_tasks[task] = runner_item
+            task.add_done_callback(self._function_call_task_finished)
+
+        if self._wait_for_all:
+            # Protect gather from being cancelled. This will protect all tasks
+            # form being cancelled. That is fine, because we cancel them
+            # explicitly when handling the interruption (InterruptionFrame). We
+            # need to set `return_exceptions=True` because `asyncio.shield()`
+            # will get cancelled (from FrameProcessor process task), then
+            # `asyncio.gather()` will keep running (because it was protected by
+            # the shield). Then, individiaul function call tasks will be
+            # cancelled by us and we don't need to propagate those
+            # CancelledErrors at that point.
+            await asyncio.shield(asyncio.gather(*tasks, return_exceptions=True))
+
+    async def _run_sequential_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
+        if self._wait_for_all:
+            # Run each function call sequentially, waiting for each to complete.
+            for runner_item in runner_items:
+                self._function_call_tasks[None] = runner_item
+                await self._run_function_call(runner_item)
+                del self._function_call_tasks[None]
+        else:
+            # Enqueue all function calls for background execution.
+            for runner_item in runner_items:
+                await self._sequential_runner_queue.put(runner_item)
+
+    async def _call_start_function(
+        self, context: OpenAILLMContext | LLMContext, function_name: str
+    ):
+        if function_name in self._start_callbacks.keys():
+            await self._start_callbacks[function_name](function_name, self, context)
+        elif None in self._start_callbacks.keys():
+            return await self._start_callbacks[None](function_name, self, context)
 
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
         if runner_item.function_name in self._functions.keys():
@@ -623,19 +660,18 @@ class LLMService(AIService):
                 name = runner_item.function_name
                 tool_call_id = runner_item.tool_call_id
 
-                # We remove the callback because we are going to cancel the task
-                # now, otherwise we will be removing it from the set while we
-                # are iterating.
-                task.remove_done_callback(self._function_call_task_finished)
-
                 logger.debug(f"{self} Cancelling function call [{name}:{tool_call_id}]...")
 
-                await self.cancel_task(task)
+                if task:
+                    # We remove the callback because we are going to cancel the
+                    # task next, otherwise we will be removing it from the set
+                    # while we are iterating.
+                    task.remove_done_callback(self._function_call_task_finished)
+                    await self.cancel_task(task)
+                    cancelled_tasks.add(task)
 
                 frame = FunctionCallCancelFrame(function_name=name, tool_call_id=tool_call_id)
                 await self.push_frame(frame)
-
-                cancelled_tasks.add(task)
 
                 logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
 
