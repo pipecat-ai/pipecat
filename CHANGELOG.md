@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `RivaSTTService` is now deprecated, use `NvidiaSTTService` instead.
   - `RivaTTSService` is now deprecated, use `NvidiaTTSService` instead.
   - Use `uv pip install pipecat-ai[nvidia]` instead of
-    `uv pip install pipecat-ai[nim]` or `uv pip install pipecat-ai[riva]`
+    `uv pip install pipecat-ai[riva]`
 
 ### Fixed
 
