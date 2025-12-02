@@ -281,7 +281,7 @@ class MCPClient(BaseObject):
                 logger.debug(f"Final response (after filter): {response}")
 
             except Exception:
-                logger.error("Error applying output filter")
+                logger.error(f"Error applying output filter for {function_name}")
                 response = ""
 
         if response and len(response) and isinstance(response, str):
