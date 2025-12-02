@@ -20,6 +20,10 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterruptionFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
+    ThoughtTranscriptionMessage,
     TranscriptionFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
@@ -202,10 +206,113 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             await self.push_frame(frame, direction)
 
 
+class ThoughtTranscriptProcessor(BaseTranscriptProcessor):
+    """Processes LLM thought frames into timestamped thought messages.
+
+    This processor aggregates LLM thought text frames into complete thoughts
+    and emits them as thought transcript messages. Thoughts are completed when:
+
+    - A thought ends (LLMThoughtEndFrame)
+    - The bot is interrupted (InterruptionFrame)
+    - The pipeline ends (EndFrame)
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize processor with thought aggregation state.
+
+        Args:
+            **kwargs: Additional arguments passed to parent class.
+        """
+        super().__init__(**kwargs)
+        self._current_thought_parts: List[TextPartForConcatenation] = []
+        self._thought_start_time: Optional[str] = None
+        self._thought_active = False
+
+    async def _emit_aggregated_thought(self):
+        """Aggregates and emits thought text fragments as a thought transcript message.
+
+        This method aggregates thought fragments that may arrive in multiple
+        LLMThoughtTextFrame instances and emits them as a single ThoughtTranscriptionMessage.
+        """
+        if self._current_thought_parts and self._thought_start_time:
+            content = concatenate_aggregated_text(self._current_thought_parts)
+            if content:
+                logger.trace(f"Emitting aggregated thought message: {content}")
+                message = ThoughtTranscriptionMessage(
+                    content=content,
+                    timestamp=self._thought_start_time,
+                )
+                await self._emit_update([message])
+            else:
+                logger.trace("No thought content to emit after stripping whitespace")
+
+            # Reset aggregation state
+            self._current_thought_parts = []
+            self._thought_start_time = None
+            self._thought_active = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames into thought transcript messages.
+
+        Handles different frame types:
+
+        - LLMThoughtStartFrame: Begins aggregating a new thought
+        - LLMThoughtTextFrame: Aggregates text for current thought
+        - LLMThoughtEndFrame: Completes current thought
+        - InterruptionFrame: Completes current thought due to interruption
+        - EndFrame: Completes current thought at pipeline end
+        - CancelFrame: Completes current thought due to cancellation
+
+        Args:
+            frame: Input frame to process.
+            direction: Frame processing direction.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, (InterruptionFrame, CancelFrame)):
+            # Push frame first otherwise our emitted transcription update frame
+            # might get cleaned up.
+            await self.push_frame(frame, direction)
+            # Emit accumulated thought with interruptions
+            if self._thought_active:
+                await self._emit_aggregated_thought()
+        elif isinstance(frame, LLMThoughtStartFrame):
+            # Start a new thought
+            self._thought_active = True
+            self._thought_start_time = time_now_iso8601()
+            self._current_thought_parts = []
+            # Push frame.
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMThoughtTextFrame):
+            # Aggregate thought text if we have an active thought
+            if self._thought_active:
+                self._current_thought_parts.append(
+                    TextPartForConcatenation(
+                        frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                    )
+                )
+            # Push frame.
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMThoughtEndFrame):
+            # Emit accumulated thought when thought ends
+            if self._thought_active:
+                await self._emit_aggregated_thought()
+            # Push frame.
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, EndFrame):
+            # Emit accumulated thought at pipeline end if still active
+            if self._thought_active:
+                await self._emit_aggregated_thought()
+            # Push frame.
+            await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
+
 class TranscriptProcessor:
     """Factory for creating and managing transcript processors.
 
-    Provides unified access to user and assistant transcript processors
+    Provides unified access to user, assistant, and thought transcript processors
     with shared event handling.
 
     Example::
@@ -219,9 +326,10 @@ class TranscriptProcessor:
                 transcript.user(),              # User transcripts
                 context_aggregator.user(),
                 llm,
+                transcript.thought(),           # Thought transcripts
                 tts,
                 transport.output(),
-                transcript.assistant_tts(),     # Assistant transcripts
+                transcript.assistant(),         # Assistant transcripts
                 context_aggregator.assistant(),
             ]
         )
@@ -235,6 +343,7 @@ class TranscriptProcessor:
         """Initialize factory."""
         self._user_processor = None
         self._assistant_processor = None
+        self._thought_processor = None
         self._event_handlers = {}
 
     def user(self, **kwargs) -> UserTranscriptProcessor:
@@ -277,6 +386,26 @@ class TranscriptProcessor:
 
         return self._assistant_processor
 
+    def thought(self, **kwargs) -> ThoughtTranscriptProcessor:
+        """Get the thought transcript processor.
+
+        Args:
+            **kwargs: Arguments specific to ThoughtTranscriptProcessor.
+
+        Returns:
+            The thought transcript processor instance.
+        """
+        if self._thought_processor is None:
+            self._thought_processor = ThoughtTranscriptProcessor(**kwargs)
+            # Apply any registered event handlers
+            for event_name, handler in self._event_handlers.items():
+
+                @self._thought_processor.event_handler(event_name)
+                async def thought_handler(processor, frame):
+                    return await handler(processor, frame)
+
+        return self._thought_processor
+
     def event_handler(self, event_name: str):
         """Register event handler for both processors.
 
@@ -301,6 +430,12 @@ class TranscriptProcessor:
 
                 @self._assistant_processor.event_handler(event_name)
                 async def assistant_handler(processor, frame):
+                    return await handler(processor, frame)
+
+            if self._thought_processor:
+
+                @self._thought_processor.event_handler(event_name)
+                async def thought_handler(processor, frame):
                     return await handler(processor, frame)
 
             return handler

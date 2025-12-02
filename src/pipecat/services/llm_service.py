@@ -127,6 +127,9 @@ class FunctionCallRunnerItem:
         tool_call_id: A unique identifier for the function call.
         arguments: The arguments for the function.
         context: The LLM context.
+        llm_specific_extra: Optional extra data specific to particular LLMs, e.g.:
+            {"google": {"thought_signature": ...}}
+            Uses the LLM adapter's ID for LLM-specific messages as the key.
         run_llm: Optional flag to control LLM execution after function call.
     """
 
@@ -135,6 +138,7 @@ class FunctionCallRunnerItem:
     tool_call_id: str
     arguments: Mapping[str, Any]
     context: OpenAILLMContext | LLMContext
+    llm_specific_extra: Optional[Dict[str, Any]] = None
     run_llm: Optional[bool] = None
 
 
@@ -456,6 +460,7 @@ class LLMService(AIService):
                     tool_call_id=function_call.tool_call_id,
                     arguments=function_call.arguments,
                     context=function_call.context,
+                    llm_specific_extra=function_call.llm_specific_extra,
                 )
             )
 
@@ -580,6 +585,7 @@ class LLMService(AIService):
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
             arguments=runner_item.arguments,
+            llm_specific_extra=runner_item.llm_specific_extra,
             cancel_on_interruption=item.cancel_on_interruption,
         )
 

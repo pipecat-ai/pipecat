@@ -165,8 +165,42 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
         if isinstance(message, LLMSpecificMessage):
-            return copy.deepcopy(message.message)
+            return self._from_anthropic_specific_message(message)
         return self._from_standard_message(message)
+
+    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam:
+        """Convert LLMSpecificMessage to Anthropic format.
+
+        Assumes that we already know the message is intended for Anthropic.
+
+        Args:
+            message: Message in LLMSpecificMessage format.
+        """
+        # Handle special case of thought messages.
+        # These can be converted to standalone "assistant" messages; later
+        # these thinking messages will be properly merged into the assistant
+        # response messages before the context is sent to Anthropic for the
+        # next turn.
+        if (
+            isinstance(message.message, dict)
+            and message.message.get("type") == "thought"
+            and (text := message.message.get("text"))
+            and isinstance(metadata := message.message.get("metadata"), dict)
+            and (signature := metadata.get("signature"))
+        ):
+            return {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": text,
+                        "signature": signature,
+                    }
+                ],
+            }
+
+        # Fallback to assumption that the message is already in Anthropic format
+        return copy.deepcopy(message.message)
 
     def _from_standard_message(self, message: LLMStandardMessage) -> MessageParam:
         """Convert standard universal context message to Anthropic format.

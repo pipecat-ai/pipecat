@@ -224,8 +224,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash",
-        # turn on thinking if you want it
-        # params=GoogleLLMService.InputParams(extra={"thinking_config": {"thinking_budget": 4096}}),
+        # force a certain amount of thinking if you want it
+        # params=GoogleLLMService.InputParams(
+        #     thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
+        # ),
     )
 
     tts = GoogleTTSService(
