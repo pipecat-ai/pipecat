@@ -60,6 +60,22 @@ class SimpleTextAggregator(BaseTextAggregator):
         # Add new text to buffer
         self._text += text
 
+        # Delegate to sentence detection logic
+        return await self._check_sentence_with_lookahead(text)
+
+    async def _check_sentence_with_lookahead(self, text: str) -> Optional[Aggregation]:
+        """Check for sentence boundaries using lookahead logic.
+
+        This method implements the core sentence detection logic with lookahead.
+        Subclasses can call this via super() to reuse the lookahead behavior
+        while adding their own logic (e.g., tag handling, pattern matching).
+
+        Args:
+            text: The most recently added text (used for lookahead check).
+
+        Returns:
+            Aggregation if sentence found, None otherwise.
+        """
         # If we need lookahead, check if we now have non-whitespace
         if self._needs_lookahead:
             # Check if the new character is non-whitespace

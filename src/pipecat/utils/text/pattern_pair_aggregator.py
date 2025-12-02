@@ -17,8 +17,8 @@ from typing import Awaitable, Callable, List, Optional, Tuple
 
 from loguru import logger
 
-from pipecat.utils.string import match_endofsentence
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
+from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
+from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
 class MatchAction(Enum):
@@ -72,7 +72,7 @@ class PatternMatch(Aggregation):
         return f"PatternMatch(type={self.type}, text={self.text}, full_match={self.full_match})"
 
 
-class PatternPairAggregator(BaseTextAggregator):
+class PatternPairAggregator(SimpleTextAggregator):
     """Aggregator that identifies and processes content between pattern pairs.
 
     This aggregator buffers text until it can identify complete pattern pairs
@@ -97,7 +97,7 @@ class PatternPairAggregator(BaseTextAggregator):
         Creates an empty aggregator with no patterns or handlers registered.
         Text buffering and pattern detection will begin when text is aggregated.
         """
-        self._text = ""
+        super().__init__()
         self._patterns = {}
         self._handlers = {}
 
@@ -309,9 +309,8 @@ class PatternPairAggregator(BaseTextAggregator):
         """Aggregate text and process pattern pairs.
 
         This method adds the new text to the buffer, processes any complete pattern
-        pairs, and returns processed text up to sentence boundaries if possible.
-        If there are incomplete patterns (start without matching end), it will
-        continue buffering text.
+        pairs, and uses the parent's lookahead logic for sentence detection when
+        no patterns are active.
 
         Args:
             text: New text to add to the buffer.
@@ -355,38 +354,25 @@ class PatternPairAggregator(BaseTextAggregator):
                 content=result.strip(), type=AggregationType.SENTENCE, full_match=result
             )
 
-        # Find sentence boundary if no incomplete patterns
-        eos_marker = match_endofsentence(self._text)
-        if eos_marker:
-            # Extract text up to the sentence boundary
-            result = self._text[:eos_marker]
-            self._text = self._text[eos_marker:]
+        # Use parent's lookahead logic for sentence detection
+        aggregation = await super()._check_sentence_with_lookahead(text)
+        if aggregation:
+            # Convert to PatternMatch for consistency with return type
             return PatternMatch(
-                content=result.strip(), type=AggregationType.SENTENCE, full_match=result
+                content=aggregation.text, type=aggregation.type, full_match=aggregation.text
             )
 
         # No complete sentence found yet
         return None
 
-    async def flush(self) -> Optional[Aggregation]:
-        """Flush any pending aggregation.
-
-        For PatternPairAggregator, there is no lookahead buffering, so this
-        simply returns None. Any remaining text can be retrieved via the
-        .text property.
-
-        Returns:
-            None, as this aggregator does not buffer pending sentences.
-        """
-        return None
-
     async def handle_interruption(self):
-        """Handle interruptions by clearing the buffer.
+        """Handle interruptions by clearing the buffer and pattern state.
 
         Called when an interruption occurs in the processing pipeline,
         to reset the state and discard any partially aggregated text.
         """
-        self._text = ""
+        await super().handle_interruption()
+        # Pattern and handler state persists across interruptions
 
     async def reset(self):
         """Clear the internally aggregated text.
@@ -394,4 +380,5 @@ class PatternPairAggregator(BaseTextAggregator):
         Resets the aggregator to its initial state, discarding any
         buffered text and clearing pattern tracking state.
         """
-        self._text = ""
+        await super().reset()
+        # Pattern and handler state persists across resets

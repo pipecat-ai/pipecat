@@ -17,7 +17,18 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         await self.aggregator.reset()
 
         # No tags involved, aggregate at end of sentence.
-        result = await self.aggregator.aggregate("Hello Pipecat!")
+        # Feed text character by character
+        result = None
+        for char in "Hello Pipecat!":
+            result = await self.aggregator.aggregate(char)
+            if result:
+                break
+
+        # Should still be waiting for lookahead after "!"
+        self.assertIsNone(result)
+
+        # Flush to get the pending sentence
+        result = await self.aggregator.flush()
         self.assertEqual(result.text, "Hello Pipecat!")
         self.assertEqual(result.type, "sentence")
         self.assertEqual(self.aggregator.text.text, "")
@@ -26,7 +37,18 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         await self.aggregator.reset()
 
         # Tags involved, avoid aggregation during tags.
-        result = await self.aggregator.aggregate("My email is <spell>foo@pipecat.ai</spell>.")
+        # Feed text character by character
+        result = None
+        for char in "My email is <spell>foo@pipecat.ai</spell>.":
+            result = await self.aggregator.aggregate(char)
+            if result:
+                break
+
+        # Should still be waiting for lookahead after "."
+        self.assertIsNone(result)
+
+        # Flush to get the pending sentence
+        result = await self.aggregator.flush()
         self.assertEqual(result.text, "My email is <spell>foo@pipecat.ai</spell>.")
         self.assertEqual(result.type, "sentence")
         self.assertEqual(self.aggregator.text.text, "")
@@ -34,25 +56,22 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_streaming_tags(self):
         await self.aggregator.reset()
 
-        # Tags involved, stream small chunk of texts.
-        result = await self.aggregator.aggregate("My email is <sp")
-        self.assertIsNone(result)
-        self.assertEqual(self.aggregator.text.text, "My email is <sp")
+        # Tags involved, feed character by character
+        full_text = "My email is <spell>foo.bar@pipecat.ai</spell>."
+        result = None
 
-        result = await self.aggregator.aggregate("ell>foo.")
-        self.assertIsNone(result)
-        self.assertEqual(self.aggregator.text.text, "My email is <spell>foo.")
+        for char in full_text:
+            result = await self.aggregator.aggregate(char)
+            if result:
+                break
 
-        result = await self.aggregator.aggregate("bar@pipecat.")
+        # Should still be waiting for lookahead after "."
         self.assertIsNone(result)
-        self.assertEqual(self.aggregator.text.text, "My email is <spell>foo.bar@pipecat.")
-
-        result = await self.aggregator.aggregate("ai</spe")
-        self.assertIsNone(result)
-        self.assertEqual(self.aggregator.text.text, "My email is <spell>foo.bar@pipecat.ai</spe")
+        self.assertEqual(self.aggregator.text.text, full_text)
         self.assertEqual(self.aggregator.text.type, "sentence")
 
-        result = await self.aggregator.aggregate("ll>.")
-        self.assertEqual(result.text, "My email is <spell>foo.bar@pipecat.ai</spell>.")
+        # Flush to get the pending sentence
+        result = await self.aggregator.flush()
+        self.assertEqual(result.text, full_text)
         self.assertEqual(self.aggregator.text.text, "")
         self.assertEqual(self.aggregator.text.type, "sentence")
