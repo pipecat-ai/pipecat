@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interaction (e.g., voice agents, speech-to-text) and operates at a native
   sample rate of 16 kHz with fixed enhancement parameters.
 
+- Updated Deepgram logging to include Deepgram request IDs for improved debugging.
+
 ### Deprecated
 
 - The `noise_gate_enable` parameter in `AICFilter` is deprecated and no longer
