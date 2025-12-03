@@ -159,7 +159,7 @@ where = ["src"]
     "src/pipecat/audio/dtmf/dtmf-star.wav",
 ]
 "pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
-"pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.0.onnx"]
+"pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.1-cpu.onnx"]
 
 [tool.pytest.ini_options]
 addopts = "--verbose"
