@@ -11,7 +11,7 @@ until it finds an end-of-sentence marker, making it suitable for basic TTS
 text processing scenarios.
 """
 
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 from pipecat.utils.string import SENTENCE_ENDING_PUNCTUATION, match_endofsentence
 from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
@@ -42,27 +42,30 @@ class SimpleTextAggregator(BaseTextAggregator):
         """
         return Aggregation(text=self._text.strip(), type=AggregationType.SENTENCE)
 
-    async def aggregate(self, text: str) -> Optional[Aggregation]:
-        """Aggregate text and return completed sentences.
+    async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
+        """Aggregate text and yield completed sentences.
 
-        Adds the new text to the buffer. When sentence-ending punctuation is
-        detected, it waits for non-whitespace lookahead before calling NLTK.
-        This prevents false positives like "$29." being detected as a sentence
-        when it's actually "$29.95", and avoids unnecessary NLTK calls.
+        Processes the input text character-by-character. When sentence-ending
+        punctuation is detected, it waits for non-whitespace lookahead before
+        calling NLTK. This prevents false positives like "$29." being detected
+        as a sentence when it's actually "$29.95".
 
         Args:
-            text: New text to add to the aggregation buffer.
+            text: Text to aggregate.
 
-        Returns:
-            A complete sentence if an end-of-sentence marker is confirmed,
-            or None if more text is needed.
+        Yields:
+            Complete sentences as Aggregation objects.
         """
-        # Add new text to buffer
-        self._text += text
+        # Process text character by character
+        for char in text:
+            self._text += char
 
-        return await self._check_sentence_with_lookahead(text)
+            # Check for sentence with lookahead
+            result = await self._check_sentence_with_lookahead(char)
+            if result:
+                yield result
 
-    async def _check_sentence_with_lookahead(self, text: str) -> Optional[Aggregation]:
+    async def _check_sentence_with_lookahead(self, char: str) -> Optional[Aggregation]:
         """Check for sentence boundaries using lookahead logic.
 
         This method implements the core sentence detection logic with lookahead.
@@ -77,7 +80,7 @@ class SimpleTextAggregator(BaseTextAggregator):
         while adding their own logic (e.g., tag handling, pattern matching).
 
         Args:
-            text: The most recently added text (used for lookahead check).
+            char: The most recently added character (used for lookahead check).
 
         Returns:
             Aggregation if sentence found, None otherwise.
@@ -85,7 +88,7 @@ class SimpleTextAggregator(BaseTextAggregator):
         # If we need lookahead, check if we now have non-whitespace
         if self._needs_lookahead:
             # Check if the new character is non-whitespace
-            if text.strip():
+            if char.strip():
                 # We have meaningful lookahead, call NLTK
                 self._needs_lookahead = False
                 eos_marker = match_endofsentence(self._text)
@@ -101,7 +104,7 @@ class SimpleTextAggregator(BaseTextAggregator):
             return None
 
         # Check if we just added sentence-ending punctuation
-        if self._text[-1] in SENTENCE_ENDING_PUNCTUATION:
+        if self._text and self._text[-1] in SENTENCE_ENDING_PUNCTUATION:
             # Mark that we need lookahead (don't call NLTK yet)
             self._needs_lookahead = True
 

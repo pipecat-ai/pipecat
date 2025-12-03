@@ -13,7 +13,7 @@ support for custom handlers and configurable actions for when a pattern is found
 
 import re
 from enum import Enum
-from typing import Awaitable, Callable, List, Optional, Tuple
+from typing import AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
 from loguru import logger
 
@@ -256,20 +256,6 @@ class PatternPairAggregator(SimpleTextAggregator):
             matches = list(match_iter)  # Convert to list for safe iteration
 
             for match in matches:
-                # Only process patterns that end at or after last_processed_position
-                # This ensures we only call handlers once when a pattern completes
-                if match.end() <= last_processed_position:
-                    # This pattern was already processed in a previous call
-                    if action != MatchAction.REMOVE:
-                        # For KEEP/AGGREGATE patterns, we still need to track them
-                        content = match.group(1)
-                        full_match = match.group(0)
-                        pattern_match = PatternMatch(
-                            content=content.strip(), type=type, full_match=full_match
-                        )
-                        all_matches.append(pattern_match)
-                    continue
-
                 content = match.group(1)  # Content between patterns
                 full_match = match.group(0)  # Full match including patterns
 
@@ -278,17 +264,23 @@ class PatternPairAggregator(SimpleTextAggregator):
                     content=content.strip(), type=type, full_match=full_match
                 )
 
-                # Call the appropriate handler if registered (only for newly complete patterns)
-                if type in self._handlers:
+                # Check if this pattern was already processed
+                already_processed = match.end() <= last_processed_position
+
+                # Only call handler for newly completed patterns
+                if not already_processed and type in self._handlers:
                     try:
                         await self._handlers[type](pattern_match)
                     except Exception as e:
                         logger.error(f"Error in pattern handler for {type}: {e}")
 
-                # Remove the pattern from the text if configured
+                # Handle pattern based on action
                 if action == MatchAction.REMOVE:
-                    processed_text = processed_text.replace(full_match, "", 1)
+                    # Remove patterns are only removed once (when newly completed)
+                    if not already_processed:
+                        processed_text = processed_text.replace(full_match, "", 1)
                 else:
+                    # KEEP/AGGREGATE patterns stay in all_matches
                     all_matches.append(pattern_match)
 
         return all_matches, processed_text
@@ -324,72 +316,74 @@ class PatternPairAggregator(SimpleTextAggregator):
 
         return None
 
-    async def aggregate(self, text: str) -> Optional[PatternMatch]:
+    async def aggregate(self, text: str) -> AsyncIterator[PatternMatch]:
         """Aggregate text and process pattern pairs.
 
-        This method adds the new text to the buffer, processes any complete pattern
-        pairs, and uses the parent's lookahead logic for sentence detection when
-        no patterns are active.
+        Processes the input text character-by-character, handles pattern pairs,
+        and uses the parent's lookahead logic for sentence detection when no
+        patterns are active.
 
         Args:
-            text: New text to add to the buffer.
+            text: Text to aggregate.
 
-        Returns:
-            Processed text up to a sentence boundary, or None if more
-            text is needed to form a complete sentence or pattern.
+        Yields:
+            PatternMatch objects as patterns complete or sentences are detected.
         """
-        # Add new text to buffer
-        self._text += text
+        # Process text character by character
+        for char in text:
+            self._text += char
 
-        # Process any newly complete patterns in the buffer
-        # Only patterns that complete after _last_processed_position will trigger handlers
-        patterns, processed_text = await self._process_complete_patterns(
-            self._text, self._last_processed_position
-        )
+            # Process any newly complete patterns in the buffer
+            # Only patterns that complete after _last_processed_position will trigger handlers
+            patterns, processed_text = await self._process_complete_patterns(
+                self._text, self._last_processed_position
+            )
 
-        # Update the last processed position before modifying the text
-        # For REMOVE patterns, the text will be shorter, so we track the original position
-        self._last_processed_position = len(self._text)
+            # Update the last processed position to prevent re-processing patterns
+            # This tracks where in the buffer we've already called handlers, so we
+            # only trigger handlers once when a pattern completes
+            self._last_processed_position = len(self._text)
 
-        self._text = processed_text
+            self._text = processed_text
 
-        if len(patterns) > 0:
-            if len(patterns) > 1:
-                logger.warning(
-                    f"Multiple patterns matched: {[p.type for p in patterns]}. Only the first pattern will be returned."
+            if len(patterns) > 0:
+                if len(patterns) > 1:
+                    logger.warning(
+                        f"Multiple patterns matched: {[p.type for p in patterns]}. Only the first pattern will be returned."
+                    )
+                # If the pattern found is set to be aggregated, return it
+                action = self._patterns[patterns[0].type].get("action", MatchAction.REMOVE)
+                if action == MatchAction.AGGREGATE:
+                    self._text = ""
+                    yield patterns[0]
+                    continue
+
+            # Check if we have incomplete patterns
+            pattern_start = self._match_start_of_pattern(self._text)
+            if pattern_start is not None:
+                # If the start pattern is at the beginning or should not be separately aggregated, continue
+                if (
+                    pattern_start[0] == 0
+                    or pattern_start[1].get("action", MatchAction.REMOVE) != MatchAction.AGGREGATE
+                ):
+                    continue
+                # For AGGREGATE patterns: yield any text before the pattern starts
+                # This ensures text doesn't get stuck in the buffer waiting for sentence
+                # boundaries when a pattern begins (e.g., "Here is code <code>..." yields "Here is code")
+                result = self._text[: pattern_start[0]]
+                self._text = self._text[pattern_start[0] :]
+                yield PatternMatch(
+                    content=result.strip(), type=AggregationType.SENTENCE, full_match=result
                 )
-            # If the pattern found is set to be aggregated, return it
-            action = self._patterns[patterns[0].type].get("action", MatchAction.REMOVE)
-            if action == MatchAction.AGGREGATE:
-                self._text = ""
-                return patterns[0]
+                continue
 
-        # Check if we have incomplete patterns
-        pattern_start = self._match_start_of_pattern(self._text)
-        if pattern_start is not None:
-            # If the start pattern is at the beginning or should not be separately aggregated, return None
-            if (
-                pattern_start[0] == 0
-                or pattern_start[1].get("action", MatchAction.REMOVE) != MatchAction.AGGREGATE
-            ):
-                return None
-            # Otherwise, strip the text up to the start pattern and return it
-            result = self._text[: pattern_start[0]]
-            self._text = self._text[pattern_start[0] :]
-            return PatternMatch(
-                content=result.strip(), type=AggregationType.SENTENCE, full_match=result
-            )
-
-        # Use parent's lookahead logic for sentence detection
-        aggregation = await super()._check_sentence_with_lookahead(text)
-        if aggregation:
-            # Convert to PatternMatch for consistency with return type
-            return PatternMatch(
-                content=aggregation.text, type=aggregation.type, full_match=aggregation.text
-            )
-
-        # No complete sentence found yet
-        return None
+            # Use parent's lookahead logic for sentence detection
+            aggregation = await super()._check_sentence_with_lookahead(char)
+            if aggregation:
+                # Convert to PatternMatch for consistency with return type
+                yield PatternMatch(
+                    content=aggregation.text, type=aggregation.type, full_match=aggregation.text
+                )
 
     async def handle_interruption(self):
         """Handle interruptions by clearing the buffer and pattern state.

@@ -280,27 +280,3 @@ def concatenate_aggregated_text(text_parts: List[TextPartForConcatenation]) -> s
     result = result.strip()
 
     return result
-
-
-def split_text_by_characters(text: str) -> List[str]:
-    """Split text into individual characters.
-
-    Returns each character as a separate string element, allowing character-by-character
-    processing while maintaining the ability to reconstruct the original text.
-
-    Args:
-        text: The text to split into characters.
-
-    Returns:
-        A list of individual characters.
-
-    Example::
-
-        >>> split_text_by_characters("Hello world!")
-        ["H", "e", "l", "l", "o", " ", "w", "o", "r", "l", "d", "!"]
-        >>> split_text_by_characters("Hi")
-        ["H", "i"]
-        >>> split_text_by_characters("")
-        []
-    """
-    return list(text)

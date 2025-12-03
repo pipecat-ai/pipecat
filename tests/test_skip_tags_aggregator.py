@@ -17,15 +17,11 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         await self.aggregator.reset()
 
         # No tags involved, aggregate at end of sentence.
-        # Feed text character by character
-        result = None
-        for char in "Hello Pipecat!":
-            result = await self.aggregator.aggregate(char)
-            if result:
-                break
+        text = "Hello Pipecat!"
+        results = [agg async for agg in self.aggregator.aggregate(text)]
 
         # Should still be waiting for lookahead after "!"
-        self.assertIsNone(result)
+        self.assertEqual(len(results), 0)
 
         # Flush to get the pending sentence
         result = await self.aggregator.flush()
@@ -37,15 +33,11 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         await self.aggregator.reset()
 
         # Tags involved, avoid aggregation during tags.
-        # Feed text character by character
-        result = None
-        for char in "My email is <spell>foo@pipecat.ai</spell>.":
-            result = await self.aggregator.aggregate(char)
-            if result:
-                break
+        text = "My email is <spell>foo@pipecat.ai</spell>."
+        results = [agg async for agg in self.aggregator.aggregate(text)]
 
         # Should still be waiting for lookahead after "."
-        self.assertIsNone(result)
+        self.assertEqual(len(results), 0)
 
         # Flush to get the pending sentence
         result = await self.aggregator.flush()
@@ -56,22 +48,17 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_streaming_tags(self):
         await self.aggregator.reset()
 
-        # Tags involved, feed character by character
-        full_text = "My email is <spell>foo.bar@pipecat.ai</spell>."
-        result = None
-
-        for char in full_text:
-            result = await self.aggregator.aggregate(char)
-            if result:
-                break
+        # Tags involved
+        text = "My email is <spell>foo.bar@pipecat.ai</spell>."
+        results = [agg async for agg in self.aggregator.aggregate(text)]
 
         # Should still be waiting for lookahead after "."
-        self.assertIsNone(result)
-        self.assertEqual(self.aggregator.text.text, full_text)
+        self.assertEqual(len(results), 0)
+        self.assertEqual(self.aggregator.text.text, text)
         self.assertEqual(self.aggregator.text.type, "sentence")
 
         # Flush to get the pending sentence
         result = await self.aggregator.flush()
-        self.assertEqual(result.text, full_text)
+        self.assertEqual(result.text, text)
         self.assertEqual(self.aggregator.text.text, "")
         self.assertEqual(self.aggregator.text.type, "sentence")

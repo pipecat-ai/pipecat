@@ -11,7 +11,7 @@ between specified start/end tag pairs, ensuring that tagged content is processed
 as a unit regardless of internal punctuation.
 """
 
-from typing import Optional, Sequence
+from typing import AsyncIterator, Optional, Sequence
 
 from pipecat.utils.string import StartEndTags, parse_start_end_tags
 from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
@@ -43,35 +43,37 @@ class SkipTagsAggregator(SimpleTextAggregator):
         self._current_tag: Optional[StartEndTags] = None
         self._current_tag_index: int = 0
 
-    async def aggregate(self, text: str) -> Optional[Aggregation]:
+    async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
         """Aggregate text while respecting tag boundaries.
 
-        This method adds the new text to the buffer, updates tag state,
-        and uses the parent's lookahead logic for sentence detection when
-        not inside tags.
+        Processes the input text character-by-character, updates tag state, and
+        uses the parent's lookahead logic for sentence detection when not
+        inside tags.
 
         Args:
-            text: New text to add to the buffer.
+            text: Text to aggregate.
 
-        Returns:
-            An Aggregation object containing text up to a sentence boundary and
-            marked as SENTENCE type or None if more text is needed to complete a
-            sentence or close tags.
+        Yields:
+            Aggregation objects containing text up to a sentence boundary,
+            marked as SENTENCE type.
         """
-        # Add new text to buffer
-        self._text += text
+        # Process text character by character
+        for char in text:
+            self._text += char
 
-        # Update tag state
-        (self._current_tag, self._current_tag_index) = parse_start_end_tags(
-            self._text, self._tags, self._current_tag, self._current_tag_index
-        )
+            # Update tag state
+            (self._current_tag, self._current_tag_index) = parse_start_end_tags(
+                self._text, self._tags, self._current_tag, self._current_tag_index
+            )
 
-        # If inside tags, don't check for sentences
-        if self._current_tag:
-            return None
+            # If inside tags, don't check for sentences
+            if self._current_tag:
+                continue
 
-        # Otherwise, use parent's lookahead logic for sentence detection
-        return await super()._check_sentence_with_lookahead(text)
+            # Otherwise, use parent's lookahead logic for sentence detection
+            result = await super()._check_sentence_with_lookahead(char)
+            if result:
+                yield result
 
     async def handle_interruption(self):
         """Handle interruptions by clearing the buffer and tag state.
