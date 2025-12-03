@@ -60,13 +60,19 @@ class SimpleTextAggregator(BaseTextAggregator):
         # Add new text to buffer
         self._text += text
 
-        # Delegate to sentence detection logic
         return await self._check_sentence_with_lookahead(text)
 
     async def _check_sentence_with_lookahead(self, text: str) -> Optional[Aggregation]:
         """Check for sentence boundaries using lookahead logic.
 
         This method implements the core sentence detection logic with lookahead.
+        When sentence-ending punctuation is detected, it waits for the next
+        non-whitespace character before calling NLTK. This disambiguates cases
+        like "$29." (not a sentence) vs "$29. Next" (sentence ends at period).
+        Whitespace alone is not meaningful lookahead since it appears in both
+        cases. Instead, the first non-whitespace character after the punctuation
+        is used to confirm the sentence boundary.
+
         Subclasses can call this via super() to reuse the lookahead behavior
         while adding their own logic (e.g., tag handling, pattern matching).
 

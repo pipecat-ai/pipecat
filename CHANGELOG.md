@@ -15,10 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `LLMTextProcessor` and `TTSService` to normalize text input by
-  splitting into individual characters before aggregation. This ensures proper
-  sentence boundary detection when LLMs return multiple sentences in a single
-  chunk (e.g., Google Gemini).
+- Text Aggregation Improvements:
+
+  - Updated `LLMTextProcessor` and `TTSService` to normalize text input by
+    splitting into individual characters before aggregation. This ensures proper
+    sentence boundary detection when LLMs return multiple sentences in a single
+    chunk (e.g., Google Gemini).
+  - All text aggregators now properly support character-by-character streaming
+    input.
+  - Refactored text aggregators to use inheritance: `SkipTagsAggregator` and
+    `PatternPairAggregator` now inherit from `SimpleTextAggregator`, reusing
+    its lookahead-based sentence detection logic via
+    `_check_sentence_with_lookahead()`.
 
 - Updated `AICFilter` to use Quail STT as the default model
   (`AICModelType.QUAIL_STT`). Quail STT is optimized for human-to-machine
@@ -57,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   incorrectly pushed after a functional call. This caused an issue with the
   voice-ui-kit's conversational panel rending of the LLM output after a
   function call.
+
+- Fixed a bug in `PatternPairAggregator` where pattern handlers could be called
+  multiple times for patterns with `MatchAction.KEEP` or `MatchAction.AGGREGATE`
+  actions.
 
 ## [0.0.96] - 2025-11-26 🦃 "Happy Thanksgiving!" 🦃
 
