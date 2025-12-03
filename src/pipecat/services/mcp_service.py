@@ -47,7 +47,7 @@ class MCPClient(BaseObject):
         self,
         server_params: ServerParameters,
         tools_filter: Optional[List[str]] = None,
-        tools_output_filters: Dict[str, Callable[[Any], Any]] | None = None,
+        tools_output_filters: Optional[Dict[str, Callable[[Any], Any]]] = None,
         **kwargs,
     ):
         """Initialize the MCP client with server parameters.
