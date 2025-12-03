@@ -280,6 +280,14 @@ class DeepgramTTSService(WebsocketTTSService):
                 await self._connect()
 
             await self.start_ttfb_metrics()
+
+            response = await self._deepgram_client.speak.asyncrest.v("1").stream_raw(
+                {"text": text}, options
+            )
+
+            headers = {k: v for k, v in response.headers.items() if k.startswith("dg-")}
+            logger.debug(f'{self}: HTTP connection initialized: {{"headers": {headers}}}')
+
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()

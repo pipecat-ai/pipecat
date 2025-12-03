@@ -244,6 +244,11 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
 
+            headers = {
+                k: v for k, v in self._websocket.response.headers.items() if k.startswith("dg-")
+            }
+            logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
+
             # Creating the receiver task
             if not self._receive_task:
                 self._receive_task = self.create_task(
