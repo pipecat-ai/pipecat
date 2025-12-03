@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `pause_frame_processing` parameter to `CartesiaTTSService` to allow
+  disabling frame processing pausing during TTS generation.
+
 - Added `wait_for_all` argument to the base `LLMService`. When enabled, this
   ensures all function calls complete before returning results to the LLM (i.e.,
   before running a new inference with those results).
