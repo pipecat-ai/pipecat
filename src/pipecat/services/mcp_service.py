@@ -7,7 +7,7 @@
 """MCP (Model Context Protocol) client for integrating external tools with LLMs."""
 
 import json
-from typing import Any, Dict, List, TypeAlias, Callable
+from typing import Any, Callable, Dict, List, Optional, TypeAlias
 
 from loguru import logger
 
