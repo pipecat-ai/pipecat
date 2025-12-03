@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- If an unexpected exception is caught, or if `FrameProcessor.push_error()` is
+  called with an exception, the file name and line number where the exception
+  occured are now logged.
+
 - Improved interruption handling to prevent bots from repeating themselves.
   LLM services that return multiple sentences in a single response (e.g.,
   `GoogleLLMService`) are now split into individual sentences before being sent
