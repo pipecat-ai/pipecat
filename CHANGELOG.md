@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated Deepgram logging to include Deepgram request IDs for improved debugging.
 
+- Updated Smart Turn model weights to v3.1.
+
 ### Deprecated
 
 - Package `pipecat.sync` is deprecated, use `pipecat.utils.sync` instead.
