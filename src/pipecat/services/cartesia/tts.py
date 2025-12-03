@@ -234,6 +234,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
         aggregate_sentences: Optional[bool] = True,
+        pause_frame_processing: Optional[bool] = True,
         **kwargs,
     ):
         """Initialize the Cartesia TTS service.
@@ -254,6 +255,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                     Use an LLMTextProcessor before the TTSService for custom text aggregation.
 
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
+            pause_frame_processing: Whether to pause processing frames while receiving audio.
             **kwargs: Additional arguments passed to the parent service.
         """
         # Aggregating sentences still gives cleaner-sounding results and fewer
@@ -269,7 +271,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         super().__init__(
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=pause_frame_processing,
             sample_rate=sample_rate,
             text_aggregator=text_aggregator,
             **kwargs,
