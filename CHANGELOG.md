@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated Deepgram logging to include Deepgram request IDs for improved debugging.
 
+- Updated Smart Turn model weights to v3.1.
+
 ### Deprecated
 
 - The `noise_gate_enable` parameter in `AICFilter` is deprecated and no longer
