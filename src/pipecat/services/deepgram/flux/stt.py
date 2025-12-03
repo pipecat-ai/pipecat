@@ -245,8 +245,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             )
 
             headers = {
-                k: v for k, v in self._websocket.response.headers.items()
-                if k.startswith("dg-")
+                k: v for k, v in self._websocket.response.headers.items() if k.startswith("dg-")
             }
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
 
