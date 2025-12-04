@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- Package `pipecat.sync` is deprecated, use `pipecat.utils.sync` instead.
+
 - The `noise_gate_enable` parameter in `AICFilter` is deprecated and no longer
   has any effect. Noise gating is now handled automatically by the AIC VAD
   system. Use `AICFilter.create_vad_analyzer()` for VAD functionality instead.
