@@ -185,8 +185,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             isinstance(message.message, dict)
             and message.message.get("type") == "thought"
             and (text := message.message.get("text"))
-            and isinstance(metadata := message.message.get("metadata"), dict)
-            and (signature := metadata.get("signature"))
+            and (signature := message.message.get("signature"))
         ):
             return {
                 "role": "assistant",

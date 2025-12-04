@@ -905,7 +905,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 message={
                     "type": "thought",
                     "text": thought,
-                    "metadata": frame.thought_metadata,
+                    "signature": frame.signature,
                 },
             )
         )
