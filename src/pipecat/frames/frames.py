@@ -187,6 +187,20 @@ class ControlFrame(Frame):
 
 
 @dataclass
+class UninterruptibleFrame:
+    """A marker for data or control frames that must not be interrupted.
+
+    Frames with this mixin are still ordered normally, but unlike other frames,
+    they are preserved during interruptions: they remain in internal queues and
+    any task processing them will not be cancelled. This ensures the frame is
+    always delivered and processed to completion.
+
+    """
+
+    pass
+
+
+@dataclass
 class AudioRawFrame:
     """A frame containing a chunk of raw audio.
 
