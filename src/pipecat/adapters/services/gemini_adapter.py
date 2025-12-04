@@ -210,6 +210,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         system_instruction = None
         messages = []
         tool_call_id_to_name_mapping = {}
+        non_fn_thought_signatures = []
 
         # Process each message, preserving Google-formatted messages and converting others
         for message in universal_context_messages:
@@ -234,6 +235,17 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 )
                 continue
 
+            # If we found a standalone non-function-call-related thought
+            # signature (Gemini 3 Pro), store it to apply later to the
+            # corresponding assistant message
+            if (
+                isinstance(result.content, dict)
+                and result.content.get("type") == "thought_signature"
+                and (thought_signature := result.content.get("signature"))
+            ):
+                non_fn_thought_signatures.append(thought_signature)
+                continue
+
             # Each result is either a Content or a system instruction
             if result.content:
                 messages.append(result.content)
@@ -243,6 +255,10 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             # Merge tool call ID to name mapping
             if result.tool_call_id_to_name_mapping:
                 tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+
+        # Apply non-function-call-related thought signatures to the appropriate
+        # messages
+        self._apply_non_function_thought_signatures_to_messages(non_fn_thought_signatures, messages)
 
         # Check if we only have function-related messages (no regular text)
         has_regular_messages = any(
@@ -434,7 +450,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         Args:
             thought_signature: The thought signature bytes to apply.
             tool_call_id: ID of the tool call message to find and modify.
-            messages: List of Content messages to search through.
+            messages: List of messages to search through.
         """
         # Search backwards through messages to find the matching function call
         for message in reversed(messages):
@@ -454,3 +470,46 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 continue
             # Break outer loop if inner loop broke (found match)
             break
+
+    def _apply_non_function_thought_signatures_to_messages(
+        self, thought_signatures: List[bytes], messages: List[Content]
+    ) -> None:
+        """Apply non-function-call-related thought signatures to the last part of each non-function-call assistant message.
+
+        Gemini 3 Pro outputs a thought signature at the end of each assistant
+        response.
+
+        Args:
+            thought_signatures: The list of thought signature bytes to apply.
+            messages: List of messages to search through.
+        """
+        if not thought_signatures:
+            return
+
+        # Find all assistant (model) messages that aren't function calls
+        non_fn_assistant_messages = []
+        for message in messages:
+            if not isinstance(message, Content) or not message.parts:
+                continue
+            # Check if this is a model message without function calls
+            if message.role == "model":
+                has_function_call = any(
+                    hasattr(part, "function_call") and part.function_call for part in message.parts
+                )
+                if not has_function_call:
+                    non_fn_assistant_messages.append(message)
+
+        # Warn if counts don't match
+        if len(thought_signatures) != len(non_fn_assistant_messages):
+            logger.warning(
+                f"Thought signature count ({len(thought_signatures)}) doesn't match "
+                f"non-function-call assistant message count ({len(non_fn_assistant_messages)})"
+            )
+
+        # Apply thought signatures to the corresponding assistant messages
+        # Match them in order (oldest to newest)
+        for i, thought_signature in enumerate(thought_signatures):
+            if i < len(non_fn_assistant_messages):
+                message = non_fn_assistant_messages[i]
+                if message.parts:
+                    message.parts[-1].thought_signature = thought_signature
