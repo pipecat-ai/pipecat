@@ -425,16 +425,13 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            pending_aggregation = self._text_aggregator.text
+            # Flush any remaining text (including text waiting for lookahead)
+            remaining = await self._text_aggregator.flush()
+            if remaining:
+                await self._push_tts_frames(AggregatedTextFrame(remaining.text, remaining.type))
 
             # Reset aggregator state
-            await self._text_aggregator.reset()
             self._processing_text = False
-
-            if pending_aggregation.text:
-                await self._push_tts_frames(
-                    AggregatedTextFrame(pending_aggregation.text, pending_aggregation.type)
-                )
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
                     await self.push_frame(frame, direction)
@@ -539,17 +536,20 @@ class TTSService(AIService):
             text = frame.text
             includes_inter_frame_spaces = frame.includes_inter_frame_spaces
             aggregated_by = "token"
+
+            if text:
+                logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
+                await self._push_tts_frames(
+                    AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
+                )
         else:
-            aggregate = await self._text_aggregator.aggregate(frame.text)
-            if aggregate:
+            async for aggregate in self._text_aggregator.aggregate(frame.text):
                 text = aggregate.text
                 aggregated_by = aggregate.type
-
-        if text:
-            logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
-            await self._push_tts_frames(
-                AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
-            )
+                logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
+                await self._push_tts_frames(
+                    AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
+                )
 
     async def _push_tts_frames(
         self, src_frame: AggregatedTextFrame, includes_inter_frame_spaces: Optional[bool] = False

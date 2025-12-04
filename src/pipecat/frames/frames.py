@@ -330,7 +330,7 @@ class TextFrame(DataFrame):
     """
 
     text: str
-    skip_tts: bool = field(init=False)
+    skip_tts: Optional[bool] = field(init=False)
     # Whether any necessary inter-frame (leading/trailing) spaces are already
     # included in the text.
     # NOTE: Ideally this would be available at init time with a default value,
@@ -343,7 +343,7 @@ class TextFrame(DataFrame):
 
     def __post_init__(self):
         super().__post_init__()
-        self.skip_tts = False
+        self.skip_tts = None
         self.includes_inter_frame_spaces = False
         self.append_to_context = True
 
@@ -1632,22 +1632,22 @@ class LLMFullResponseStartFrame(ControlFrame):
     more TextFrames and a final LLMFullResponseEndFrame.
     """
 
-    skip_tts: bool = field(init=False)
+    skip_tts: Optional[bool] = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
-        self.skip_tts = False
+        self.skip_tts = None
 
 
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
     """Frame indicating the end of an LLM response."""
 
-    skip_tts: bool = field(init=False)
+    skip_tts: Optional[bool] = field(init=False)
 
     def __post_init__(self):
         super().__post_init__()
-        self.skip_tts = False
+        self.skip_tts = None
 
 
 @dataclass

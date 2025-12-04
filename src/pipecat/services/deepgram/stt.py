@@ -234,6 +234,13 @@ class DeepgramSTTService(STTService):
 
         if not await self._connection.start(options=self._settings, addons=self._addons):
             await self.push_error(error_msg=f"Unable to connect to Deepgram")
+        else:
+            headers = {
+                k: v
+                for k, v in self._connection._socket.response.headers.items()
+                if k.startswith("dg-")
+            }
+            logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
 
     async def _disconnect(self):
         if await self._connection.is_connected():
