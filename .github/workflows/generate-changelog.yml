@@ -1,0 +1,126 @@
+name: Generate Changelog for Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 0.0.97)"
+        required: true
+        type: string
+      date:
+        description: "Release date (YYYY-MM-DD format, e.g., 2025-12-04)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --group dev
+
+      - name: Validate inputs
+        run: |
+          # Validate version format (basic check)
+          if ! [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "Error: Version must be in format X.Y.Z (e.g., 0.0.97)"
+            exit 1
+          fi
+
+          # Validate date format
+          if ! date -d "${{ inputs.date }}" >/dev/null 2>&1; then
+            # Try macOS date format
+            if ! date -j -f "%Y-%m-%d" "${{ inputs.date }}" >/dev/null 2>&1; then
+              echo "Error: Date must be in YYYY-MM-DD format (e.g., 2025-12-04)"
+              exit 1
+            fi
+          fi
+
+      - name: Check for changelog fragments
+        id: check_fragments
+        run: |
+          FRAGMENT_COUNT=$(find changelog -name "*.md" ! -name "README.md" ! -name "_template.md.j2" | wc -l | tr -d ' ')
+          echo "fragment_count=$FRAGMENT_COUNT" >> $GITHUB_OUTPUT
+
+          if [ "$FRAGMENT_COUNT" -eq "0" ]; then
+            echo "⚠️ Warning: No changelog fragments found"
+            echo "has_fragments=false" >> $GITHUB_OUTPUT
+          else
+            echo "✓ Found $FRAGMENT_COUNT changelog fragment(s)"
+            echo "has_fragments=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Preview changelog
+        run: |
+          echo "## Preview of changelog for version ${{ inputs.version }}"
+          echo ""
+          uv run towncrier build --draft --version "${{ inputs.version }}" --date "${{ inputs.date }}"
+
+      - name: Build changelog
+        run: |
+          uv run towncrier build --version "${{ inputs.version }}" --date "${{ inputs.date }}" --yes
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Update changelog for version ${{ inputs.version }}"
+          title: "Release ${{ inputs.version }} - Changelog Update"
+          body: |
+            ## Changelog Update for Release ${{ inputs.version }}
+
+            This PR updates the CHANGELOG.md with all changes for version **${{ inputs.version }}**.
+
+            ### Summary
+            - **Version:** ${{ inputs.version }}
+            - **Date:** ${{ inputs.date }}
+            - **Fragments processed:** ${{ steps.check_fragments.outputs.fragment_count }}
+
+            ### What this PR does
+            - ✅ Adds new release section to CHANGELOG.md
+            - ✅ Removes processed changelog fragments
+            - ✅ Ready to merge for release
+
+            ### Next Steps
+            1. Review the changelog entries below
+            2. Make any necessary edits to CHANGELOG.md if needed
+            3. Merge this PR
+            4. Continue with your release process
+
+            ---
+
+            <details>
+            <summary>📋 Preview of changes</summary>
+
+            The changelog has been updated with entries from the following fragments:
+
+            ```bash
+            ${{ steps.check_fragments.outputs.fragment_count }} fragments processed
+            ```
+
+            </details>
+          branch: changelog-${{ inputs.version }}
+          delete-branch: true
+          labels: |
+            changelog
+            release
