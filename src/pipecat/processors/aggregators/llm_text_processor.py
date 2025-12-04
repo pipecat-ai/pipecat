@@ -92,7 +92,7 @@ class LLMTextProcessor(FrameProcessor):
             out_frame.skip_tts = in_frame.skip_tts
             await self.push_frame(out_frame)
 
-    async def _handle_llm_end(self, skip_tts: bool = False):
+    async def _handle_llm_end(self, skip_tts: Optional[bool] = None):
         # Flush any remaining aggregated text at the end of the LLM response
         aggregation = self._text_aggregator.text
         await self._text_aggregator.reset()
