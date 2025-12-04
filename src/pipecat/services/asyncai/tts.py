@@ -56,6 +56,17 @@ def language_to_async_language(language: Language) -> Optional[str]:
         Language.ES: "es",
         Language.DE: "de",
         Language.IT: "it",
+        Language.PT: "pt",
+        Language.NL: "nl",
+        Language.AR: "ar",
+        Language.RU: "ru",
+        Language.RO: "ro",
+        Language.JA: "ja",
+        Language.HE: "he",
+        Language.HY: "hy",
+        Language.TR: "tr",
+        Language.HI: "hi",
+        Language.ZH: "zh",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
@@ -74,7 +85,7 @@ class AsyncAITTSService(InterruptibleTTSService):
             language: Language to use for synthesis.
         """
 
-        language: Optional[Language] = Language.EN
+        language: Optional[Language] = None
 
     def __init__(
         self,
@@ -83,7 +94,7 @@ class AsyncAITTSService(InterruptibleTTSService):
         voice_id: str,
         version: str = "v1",
         url: str = "wss://api.async.ai/text_to_speech/websocket/ws",
-        model: str = "asyncflow_v2.0",
+        model: str = "asyncflow_multilingual_v1.0",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
@@ -99,7 +110,7 @@ class AsyncAITTSService(InterruptibleTTSService):
                 https://docs.async.ai/list-voices-16699698e0
             version: Async API version.
             url: WebSocket URL for Async TTS API.
-            model: TTS model to use (e.g., "asyncflow_v2.0").
+            model: TTS model to use (e.g., "asyncflow_multilingual_v1.0").
             sample_rate: Audio sample rate.
             encoding: Audio encoding format.
             container: Audio container format.
@@ -357,7 +368,7 @@ class AsyncAIHttpTTSService(TTSService):
             language: Language to use for synthesis.
         """
 
-        language: Optional[Language] = Language.EN
+        language: Optional[Language] = None
 
     def __init__(
         self,
@@ -365,7 +376,7 @@ class AsyncAIHttpTTSService(TTSService):
         api_key: str,
         voice_id: str,
         aiohttp_session: aiohttp.ClientSession,
-        model: str = "asyncflow_v2.0",
+        model: str = "asyncflow_multilingual_v1.0",
         url: str = "https://api.async.ai",
         version: str = "v1",
         sample_rate: Optional[int] = None,
@@ -380,7 +391,7 @@ class AsyncAIHttpTTSService(TTSService):
             api_key: Async API key.
             voice_id: ID of the voice to use for synthesis.
             aiohttp_session: An aiohttp session for making HTTP requests.
-            model: TTS model to use (e.g., "asyncflow_v2.0").
+            model: TTS model to use (e.g., "asyncflow_multilingual_v1.0").
             url: Base URL for Async API.
             version: API version string for Async API.
             sample_rate: Audio sample rate.
