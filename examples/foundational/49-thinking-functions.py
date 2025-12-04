@@ -169,7 +169,7 @@ async def run_bot(
         messages.append(
             {
                 "role": "user",
-                "content": "Check the status of flight AA100 and book me a taxi 2 hours beforehand if the flight is delayed.",
+                "content": "Check the status of flight AA100 and, if it's delayed, book me a taxi 2 hours before its departure time.",
             }
         )
         await task.queue_frames([LLMRunFrame()])
