@@ -421,11 +421,7 @@ class AnthropicLLMService(LLMService):
                     elif hasattr(event.delta, "thinking"):
                         await self.push_frame(LLMThoughtTextFrame(text=event.delta.thinking))
                     elif hasattr(event.delta, "signature"):
-                        await self.push_frame(
-                            LLMThoughtEndFrame(
-                                thought_metadata={"signature": event.delta.signature}
-                            )
-                        )
+                        await self.push_frame(LLMThoughtEndFrame(signature=event.delta.signature))
                 elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         tool_use_block = event.content_block

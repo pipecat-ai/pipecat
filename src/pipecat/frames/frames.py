@@ -642,15 +642,16 @@ class LLMThoughtEndFrame(ControlFrame):
     """Frame indicating the end of an LLM thought.
 
     Parameters:
-        thought_metadata: Optional metadata associated with the thought,
-            e.g. an Anthropic thought signature.
+        signature: Optional signature associated with the thought.
+            This is used by Anthropic, which includes a signature at the end of
+            each thought.
     """
 
-    thought_metadata: Optional[Dict[str, Any]] = None
+    signature: Any = None
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, metadata: {self.thought_metadata})"
+        return f"{self.name}(pts: {pts}, signature: {self.signature})"
 
 
 @dataclass
