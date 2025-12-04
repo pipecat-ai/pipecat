@@ -14,7 +14,7 @@ aggregated text should be sent for speech synthesis.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 
 class AggregationType(str, Enum):
@@ -80,33 +80,43 @@ class BaseTextAggregator(ABC):
         pass
 
     @abstractmethod
-    async def aggregate(self, text: str) -> Optional[Aggregation]:
-        """Aggregate the specified text with the currently accumulated text.
+    async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
+        """Aggregate the specified text and yield completed aggregations.
 
-        This method should be implemented to define how the new text contributes
-        to the aggregation process. It returns the aggregated text and a string
-        describing how it was aggregated if it's ready to be processed,
-        or None otherwise.
+        This method processes the input text character-by-character internally
+        and yields Aggregation objects as they complete.
 
         Subclasses should implement their specific logic for:
 
-        - How to combine new text with existing accumulated text
+        - How to process text character-by-character
         - When to consider the aggregated text ready for processing
         - What criteria determine text completion (e.g., sentence boundaries)
-        - When a completion occurs, the method should return an Aggregation object
-          containing the aggregated text and its type. The text should be stripped
-          of leading/trailing whitespace so that consumers can rely on a consistent
-          format.
+        - When a completion occurs, yield an Aggregation object containing the
+          aggregated text (stripped of leading/trailing whitespace) and its type
 
         Args:
             text: The text to be aggregated.
 
+        Yields:
+            Aggregation objects as they complete. Each Aggregation consists of
+            the aggregated text (stripped of leading/trailing whitespace) and
+            a string indicating the type of aggregation (e.g., 'sentence', 'word',
+            'token', 'my_custom_aggregation').
+        """
+        pass
+        # Make this a generator to satisfy type checker
+        yield  # pragma: no cover
+
+    @abstractmethod
+    async def flush(self) -> Optional[Aggregation]:
+        """Flush any pending aggregation.
+
+        This method is called at the end of a stream (e.g., when receiving
+        LLMFullResponseEndFrame) to return any text that was buffered.
+
         Returns:
-            An Aggregation object if ready for processing, or None if more
-            text is needed before the aggregated content is ready. If an Aggregation
-            object is returned, it should consist of the updated aggregated text,
-            stripped of leading/trailing whitespace, and a string indicating the
-            type of aggregation (e.g., 'sentence', 'word', 'token', 'my_custom_aggregation').
+            An Aggregation object if there is pending text, or None if there
+            is no pending text.
         """
         pass
 

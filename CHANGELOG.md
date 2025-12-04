@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Improved interruption handling to prevent bots from repeating themselves.
+  LLM services that return multiple sentences in a single response (e.g.,
+  `GoogleLLMService`) are now split into individual sentences before being sent
+  to TTS. This ensures interruptions occur at sentence boundaries, preventing
+  the bot from repeating content after being interrupted during long responses.
+
+- Text Aggregation Improvements:
+
+  - **Breaking Change**: `BaseTextAggregator.aggregate()` now returns
+    `AsyncIterator[Aggregation]` instead of `Optional[Aggregation]`. This
+    enables the aggregator to return multiple results based on the provided
+    text.
+  - Refactored text aggregators to use inheritance: `SkipTagsAggregator` and
+    `PatternPairAggregator` now inherit from `SimpleTextAggregator`, reusing
+    the base class's sentence detection logic.
+
 - Updated `AICFilter` to use Quail STT as the default model
   (`AICModelType.QUAIL_STT`). Quail STT is optimized for human-to-machine
   interaction (e.g., voice agents, speech-to-text) and operates at a native
@@ -40,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where `LLMTextFrame.skip_tts` was being overwritten by LLM
   services.
+
+- Fixed sentence aggregation to correctly handle ambiguous punctuation in
+  streaming text, such as currency ("$29.95") and abbreviations ("Mr. Smith").
+
+- Fixed bug in `PatternPairAggregator` where pattern handlers could be called
+  multiple times for `KEEP` or `AGGREGATE` patterns.
 
 - Fixed an issue in `SarvamTTSService` where the last sentence was not being
   spoken. Now, audio is flushed when the TTS services receives the

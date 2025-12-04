@@ -11,13 +11,14 @@ between specified start/end tag pairs, ensuring that tagged content is processed
 as a unit regardless of internal punctuation.
 """
 
-from typing import Optional, Sequence
+from typing import AsyncIterator, Optional, Sequence
 
-from pipecat.utils.string import StartEndTags, match_endofsentence, parse_start_end_tags
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType, BaseTextAggregator
+from pipecat.utils.string import StartEndTags, parse_start_end_tags
+from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
+from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
-class SkipTagsAggregator(BaseTextAggregator):
+class SkipTagsAggregator(SimpleTextAggregator):
     """Aggregator that prevents end of sentence matching between start/end tags.
 
     This aggregator buffers text until it finds an end of sentence or a start
@@ -37,67 +38,59 @@ class SkipTagsAggregator(BaseTextAggregator):
             tags: Sequence of StartEndTags objects defining the tag pairs
                   that should prevent sentence boundary detection.
         """
-        self._text = ""
+        super().__init__()
         self._tags = tags
         self._current_tag: Optional[StartEndTags] = None
         self._current_tag_index: int = 0
 
-    @property
-    def text(self) -> Aggregation:
-        """Get the currently buffered text.
-
-        Returns:
-            The current text buffer content that hasn't been processed yet.
-        """
-        return Aggregation(text=self._text.strip(), type=AggregationType.SENTENCE)
-
-    async def aggregate(self, text: str) -> Optional[Aggregation]:
+    async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
         """Aggregate text while respecting tag boundaries.
 
-        This method adds the new text to the buffer, processes any complete
-        pattern pairs, and returns processed text up to sentence boundaries if
-        possible. If there are incomplete patterns (start without matching
-        end), it will continue buffering text.
+        Processes the input text character-by-character, updates tag state, and
+        uses the parent's lookahead logic for sentence detection when not
+        inside tags.
 
         Args:
-            text: New text to add to the buffer.
+            text: Text to aggregate.
 
-        Returns:
-            An Aggregation object containing text up to a sentence boundary and
-            marked as SENTENCE type or None if more text is needed to complete a
-            sentence or close tags.
+        Yields:
+            Aggregation objects containing text up to a sentence boundary,
+            marked as SENTENCE type.
         """
-        # Add new text to buffer
-        self._text += text
+        # Process text character by character
+        for char in text:
+            self._text += char
 
-        (self._current_tag, self._current_tag_index) = parse_start_end_tags(
-            self._text, self._tags, self._current_tag, self._current_tag_index
-        )
+            # Update tag state
+            (self._current_tag, self._current_tag_index) = parse_start_end_tags(
+                self._text, self._tags, self._current_tag, self._current_tag_index
+            )
 
-        # Find sentence boundary if no incomplete patterns
-        if not self._current_tag:
-            eos_marker = match_endofsentence(self._text)
-            if eos_marker:
-                # Extract text up to the sentence boundary
-                result = self._text[:eos_marker]
-                self._text = self._text[eos_marker:]
-                return Aggregation(text=result.strip(), type=AggregationType.SENTENCE)
+            # If inside tags, don't check for sentences
+            if self._current_tag:
+                continue
 
-        # No complete sentence found yet
-        return None
+            # Otherwise, use parent's lookahead logic for sentence detection
+            result = await super()._check_sentence_with_lookahead(char)
+            if result:
+                yield result
 
     async def handle_interruption(self):
-        """Handle interruptions by clearing the buffer.
+        """Handle interruptions by clearing the buffer and tag state.
 
         Called when an interruption occurs in the processing pipeline,
         to reset the state and discard any partially aggregated text.
         """
-        self._text = ""
+        await super().handle_interruption()
+        self._current_tag = None
+        self._current_tag_index = 0
 
     async def reset(self):
-        """Clear the internally aggregated text.
+        """Clear the internally aggregated text and tag state.
 
         Resets the aggregator to its initial state, discarding any
         buffered text.
         """
-        self._text = ""
+        await super().reset()
+        self._current_tag = None
+        self._current_tag_index = 0
