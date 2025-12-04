@@ -40,6 +40,8 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
+    LLMThinkingSignatureFrame,
+    LLMThinkingTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
 )
@@ -380,6 +382,10 @@ class AnthropicLLMService(LLMService):
                         completion_tokens_estimate += self._estimate_tokens(
                             event.delta.partial_json
                         )
+                    elif hasattr(event.delta, "thinking"):
+                        await self.push_frame(LLMThinkingTextFrame(event.delta.thinking))
+                    elif hasattr(event.delta, "signature"):
+                        await self.push_frame(LLMThinkingSignatureFrame(event.delta.signature))
                 elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         tool_use_block = event.content_block
