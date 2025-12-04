@@ -198,7 +198,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 ],
             }
 
-        # Fallback to assumption that the message is already in Anthropic format
+        # Fall back to assuming that the message is already in Anthropic format
         return copy.deepcopy(message.message)
 
     def _from_standard_message(self, message: LLMStandardMessage) -> MessageParam:

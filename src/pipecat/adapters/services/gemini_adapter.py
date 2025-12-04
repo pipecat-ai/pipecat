@@ -167,7 +167,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     class MessageConversionResult:
         """Result of converting a single universal context message to Google format.
 
-        # TODO: content could be other things, like {"tool_call_extra": ...}, for example. All bets are off when it's LLMSpecificMessage.
         Either content (a Google Content object) or a system instruction string
         is guaranteed to be set.
 
@@ -212,39 +211,50 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         tool_call_id_to_name_mapping = {}
         non_fn_thought_signatures = []
 
-        # Process each message, preserving Google-formatted messages and converting others
+        # Process each message, converting to Google format as needed
         for message in universal_context_messages:
-            result = self._from_universal_context_message(
+            # We have a Google-specific message; this may either be a
+            # thought-signature-containing message that we need to handle in a
+            # special way, or a message already in Google format that we can
+            # use directly
+            if isinstance(message, LLMSpecificMessage):
+                # Special handling for function-call-related thought signature
+                # messages
+                if (
+                    isinstance(message.message, dict)
+                    and message.message.get("type") == "tool_call_extra"
+                    and isinstance(data := message.message.get("data"), dict)
+                    and (thought_signature := data.get("thought_signature"))
+                ):
+                    self._apply_function_call_thought_signature_to_messages(
+                        thought_signature, message.message.get("tool_call_id"), messages
+                    )
+                    continue
+
+                # Special handling for non-function-call-related thought
+                # signature messages (Gemini 3 Pro)
+                if (
+                    isinstance(message.message, dict)
+                    and message.message.get("type") == "thought_signature"
+                    and (thought_signature := message.message.get("signature"))
+                ):
+                    non_fn_thought_signatures.append(thought_signature)
+                    continue
+
+                # Fall back to assuming that the message is already in Google
+                # format
+                messages.append(message.message)
+                continue
+
+            # We have a standard universal context message; convert it to
+            # Google format
+            result = self._from_standard_message(
                 message,
                 params=self.MessageConversionParams(
                     already_have_system_instruction=bool(system_instruction),
                     tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
                 ),
             )
-
-            # If we found a function-call-related thought_signature, modify the
-            # corresponding function call message to include it
-            if (
-                isinstance(result.content, dict)
-                and result.content.get("type") == "tool_call_extra"
-                and isinstance(data := result.content.get("data"), dict)
-                and (thought_signature := data.get("thought_signature"))
-            ):
-                self._apply_function_call_thought_signature_to_messages(
-                    thought_signature, result.content.get("tool_call_id"), messages
-                )
-                continue
-
-            # If we found a standalone non-function-call-related thought
-            # signature (Gemini 3 Pro), store it to apply later to the
-            # corresponding assistant message
-            if (
-                isinstance(result.content, dict)
-                and result.content.get("type") == "thought_signature"
-                and (thought_signature := result.content.get("signature"))
-            ):
-                non_fn_thought_signatures.append(thought_signature)
-                continue
 
             # Each result is either a Content or a system instruction
             if result.content:
@@ -277,13 +287,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         messages = [m for m in messages if m.parts]
 
         return self.ConvertedMessages(messages=messages, system_instruction=system_instruction)
-
-    def _from_universal_context_message(
-        self, message: LLMContextMessage, *, params: MessageConversionParams
-    ) -> MessageConversionResult:
-        if isinstance(message, LLMSpecificMessage):
-            return self.MessageConversionResult(content=message.message)
-        return self._from_standard_message(message, params=params)
 
     def _from_standard_message(
         self, message: LLMStandardMessage, *, params: MessageConversionParams
