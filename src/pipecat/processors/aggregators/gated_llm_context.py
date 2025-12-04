@@ -9,7 +9,7 @@
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, LLMContextFrame, StartFrame
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.sync.base_notifier import BaseNotifier
+from pipecat.utils.sync.base_notifier import BaseNotifier
 
 
 class GatedLLMContextAggregator(FrameProcessor):
