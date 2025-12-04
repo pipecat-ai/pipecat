@@ -564,11 +564,17 @@ class FrameProcessor(BaseObject):
         if self._cancelling:
             return
 
-        # If we are waiting for an interruption we will bypass all queued system
-        # frames and we will process the frame right away. This is because a
-        # previous system frame might be waiting for the interruption frame and
-        # it's blocking the input task.
-        if self._wait_for_interruption and isinstance(frame, InterruptionFrame):
+        # Process InterruptionFrame immediately by all processors to ensure
+        # synchronous propagation through the pipeline. This guarantees that when
+        # push_interruption_task_frame_and_wait() returns, all processors
+        # (including downstream ones like LLMAssistantContextAggregator) have
+        # already processed the interruption and updated their state.
+        #
+        # Without this, there's a race condition: the processor that initiates
+        # the interruption (e.g., user aggregator) would push the new context
+        # to the LLM before downstream processors (e.g., assistant aggregator)
+        # had a chance to save their partial response to the shared context.
+        if isinstance(frame, InterruptionFrame):
             await self.__process_frame(frame, direction, callback)
             return
 
