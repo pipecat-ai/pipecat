@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Introducing new interruption and speaking strategies. Interruption strategies
+  are used to indicate when the user should interrupt the bot (e.g. using VAD
+  events or when a user says one or more words). Speaking strategies are used to
+  indicate when the bot should start talking (e.g. using an end-of-turn
+  detection model, or checking how long until the last user transcription). In
+  conversational agents these are usually referred to start/stop speaking
+  policies or plans.
+
+  Available interruption strategies:
+    - VADInterruptionStrategy (default)
+    - MinWordsInterruptionStrategy
+
+  Avaliable speaking strategies:
+    - TranscriptionSpeakingStrategy (default)
+    - TurnAnalyzerSpeakingStrategy
+
+  To set these strategies you do it when setting up the `PipelineTask`, for
+  example:
+
+  ```python
+  task = PipelineTask(..., params=PipelineParams(
+      interruption_strategies=[MinWordsInterruptionStrategy(min_words=1)],
+      speaking_strategies=[
+          TurnAnalyzerSpeakingStrategy(
+              turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams())
+          )
+      ],
+  ))
+  ```
+
+  In order to use the new interruption and speaking strategies you should update
+  to the new universal `LLMContext` and `LLMContextAggregatorPair`.
+
 - Added `wait_for_all` argument to the base `LLMService`. When enabled, this
   ensures all function calls complete before returning results to the LLM (i.e.,
   before running a new inference with those results).
@@ -23,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated Deepgram logging to include Deepgram request IDs for improved debugging.
 
 ### Deprecated
+
+- `pipecat.audio.interruptions.MinWordsInterruptionStrategy` is deprecated. Use
+  the new interruption and speaking strategies.
+
+- `TransportParams.turn_analyzer` is deprecated, use the new speaking strategies.
 
 - The `noise_gate_enable` parameter in `AICFilter` is deprecated and no longer
   has any effect. Noise gating is now handled automatically by the AIC VAD

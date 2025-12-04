@@ -46,6 +46,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
+from pipecat.turns.base_interruption_strategy import BaseInterruptionStrategy
 
 AUDIO_INPUT_TIMEOUT_SECS = 0.5
 
@@ -77,6 +78,9 @@ class BaseInputTransport(FrameProcessor):
 
         # Track user speaking state for interruption logic
         self._user_speaking = False
+
+        # Whether we are using the new interruption/speaking strategies.
+        self._new_interruption_strategies = False
 
         # Task to process incoming audio (VAD) and push audio frames downstream
         # if passthrough is enabled.
@@ -127,6 +131,16 @@ class BaseInputTransport(FrameProcessor):
             self._params.video_out_framerate = self._params.camera_out_framerate
             self._params.video_out_color_format = self._params.camera_out_color_format
 
+        if self._params.turn_analyzer:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'turn_analyzer' is deprecated, use speaking strategies instead.",
+                    DeprecationWarning,
+                )
+
     def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
         """Enable or disable audio streaming on transport start.
 
@@ -165,9 +179,21 @@ class BaseInputTransport(FrameProcessor):
     def turn_analyzer(self) -> Optional[BaseTurnAnalyzer]:
         """Get the turn-taking analyzer.
 
+        .. deprecated:: 0.0.95
+            This method is deprecated and will be removed in a future version.
+            Use speaking strategies instead.
+
         Returns:
             The turn analyzer instance if configured, None otherwise.
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Method 'turn_analyzer' is deprecated. Use speaking strategies instead.",
+                DeprecationWarning,
+            )
         return self._params.turn_analyzer
 
     async def start(self, frame: StartFrame):
@@ -199,6 +225,12 @@ class BaseInputTransport(FrameProcessor):
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
+
+        # Check if we have one of the new interruption strategies. If we don't
+        # have any interruption strategy then we are running the legacy approach.
+        self._new_interruption_strategies = len(frame.interruption_strategies) > 0
+        for strategy in frame.interruption_strategies:
+            self._new_interruption_strategies &= isinstance(strategy, BaseInterruptionStrategy)
 
     async def stop(self, frame: EndFrame):
         """Stop the input transport and cleanup resources.
@@ -286,17 +318,17 @@ class BaseInputTransport(FrameProcessor):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
-            await self._handle_bot_started_speaking(frame)
+            await self._deprecated_handle_bot_started_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._handle_bot_stopped_speaking(frame)
+            await self._deprecated_handle_bot_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, EmulateUserStartedSpeakingFrame):
             logger.debug("Emulating user started speaking")
-            await self._handle_user_interruption(VADState.SPEAKING, emulated=True)
+            await self._deprecated_handle_user_interruption(VADState.SPEAKING, emulated=True)
         elif isinstance(frame, EmulateUserStoppedSpeakingFrame):
             logger.debug("Emulating user stopped speaking")
-            await self._handle_user_interruption(VADState.QUIET, emulated=True)
+            await self._deprecated_handle_user_interruption(VADState.QUIET, emulated=True)
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
@@ -326,10 +358,116 @@ class BaseInputTransport(FrameProcessor):
             await self.push_frame(frame, direction)
 
     #
-    # Handle interruptions
+    # Audio input
     #
 
-    async def _handle_user_interruption(self, vad_state: VADState, emulated: bool = False):
+    def _create_audio_task(self):
+        """Create the audio processing task if audio input is enabled."""
+        if not self._audio_task and self._params.audio_in_enabled:
+            self._audio_in_queue = asyncio.Queue()
+            self._audio_task = self.create_task(self._audio_task_handler())
+
+    async def _cancel_audio_task(self):
+        """Cancel and cleanup the audio processing task."""
+        if self._audio_task:
+            await self.cancel_task(self._audio_task)
+            self._audio_task = None
+
+    async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
+        """Analyze audio frame for voice activity."""
+        state = VADState.QUIET
+        if self.vad_analyzer:
+            state = await self.vad_analyzer.analyze_audio(audio_frame.audio)
+        return state
+
+    async def _new_handle_vad(
+        self, audio_frame: InputAudioRawFrame, vad_state: VADState
+    ) -> VADState:
+        """Handle Voice Activity Detection results and generate appropriate frames."""
+        new_vad_state = await self._vad_analyze(audio_frame)
+        if (
+            new_vad_state != vad_state
+            and new_vad_state != VADState.STARTING
+            and new_vad_state != VADState.STOPPING
+        ):
+            if new_vad_state == VADState.SPEAKING:
+                await self.push_frame(VADUserStartedSpeakingFrame())
+            elif new_vad_state == VADState.QUIET:
+                await self.push_frame(VADUserStoppedSpeakingFrame())
+
+            vad_state = new_vad_state
+        return vad_state
+
+    async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState) -> VADState:
+        """Handle Voice Activity Detection results and generate appropriate frames."""
+        if self._params.turn_analyzer or not self._new_interruption_strategies:
+            return await self._deprecated_handle_vad(audio_frame, vad_state)
+        else:
+            return await self._new_handle_vad(audio_frame, vad_state)
+
+    async def _audio_task_handler(self):
+        """Main audio processing task handler for VAD and turn analysis."""
+        vad_state: VADState = VADState.QUIET
+        while True:
+            try:
+                frame: InputAudioRawFrame = await asyncio.wait_for(
+                    self._audio_in_queue.get(), timeout=AUDIO_INPUT_TIMEOUT_SECS
+                )
+
+                # If an audio filter is available, run it before VAD.
+                if self._params.audio_in_filter:
+                    frame.audio = await self._params.audio_in_filter.filter(frame.audio)
+
+                # Check VAD and push event if necessary. We just care about
+                # changes from QUIET to SPEAKING and vice versa.
+                previous_vad_state = vad_state
+                if self._params.vad_analyzer:
+                    vad_state = await self._handle_vad(frame, vad_state)
+
+                # DEPRECATED.
+                if self._params.turn_analyzer:
+                    await self._deprecated_run_turn_analyzer(frame, vad_state, previous_vad_state)
+
+                if vad_state == VADState.SPEAKING:
+                    await self.broadcast_frame(UserSpeakingFrame)
+
+                # Push audio downstream if passthrough is set.
+                if self._params.audio_in_passthrough:
+                    await self.push_frame(frame)
+
+                self._audio_in_queue.task_done()
+            except asyncio.TimeoutError:
+                if self._user_speaking:
+                    logger.warning(
+                        "Forcing VAD user stopped speaking due to timeout receiving audio frame!"
+                    )
+                    vad_state = VADState.QUIET
+                    if self._params.turn_analyzer:
+                        self._params.turn_analyzer.clear()
+
+                    if self._params.turn_analyzer or not self._new_interruption_strategies:
+                        await self._deprecated_handle_user_interruption(VADState.QUIET)
+                    else:
+                        await self.push_frame(VADUserStoppedSpeakingFrame())
+
+    #
+    # DEPRECATED.
+    #
+    # The functions below are deprecated and should be removed once the old
+    # interruption strategies and turn analyzer are removed.
+    #
+
+    async def _deprecated_handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
+        """Update bot speaking state when bot starts speaking."""
+        self._bot_speaking = True
+
+    async def _deprecated_handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
+        """Update bot speaking state when bot stops speaking."""
+        self._bot_speaking = False
+
+    async def _deprecated_handle_user_interruption(
+        self, vad_state: VADState, emulated: bool = False
+    ):
         """Handle user interruption events based on speaking state."""
         if vad_state == VADState.SPEAKING:
             logger.debug("User started speaking")
@@ -358,42 +496,9 @@ class BaseInputTransport(FrameProcessor):
 
             await self.broadcast_frame(UserStoppedSpeakingFrame, emulated=emulated)
 
-    #
-    # Handle bot speaking state
-    #
-
-    async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
-        """Update bot speaking state when bot starts speaking."""
-        self._bot_speaking = True
-
-    async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
-        """Update bot speaking state when bot stops speaking."""
-        self._bot_speaking = False
-
-    #
-    # Audio input
-    #
-
-    def _create_audio_task(self):
-        """Create the audio processing task if audio input is enabled."""
-        if not self._audio_task and self._params.audio_in_enabled:
-            self._audio_in_queue = asyncio.Queue()
-            self._audio_task = self.create_task(self._audio_task_handler())
-
-    async def _cancel_audio_task(self):
-        """Cancel and cleanup the audio processing task."""
-        if self._audio_task:
-            await self.cancel_task(self._audio_task)
-            self._audio_task = None
-
-    async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
-        """Analyze audio frame for voice activity."""
-        state = VADState.QUIET
-        if self.vad_analyzer:
-            state = await self.vad_analyzer.analyze_audio(audio_frame.audio)
-        return state
-
-    async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState) -> VADState:
+    async def _deprecated_handle_vad(
+        self, audio_frame: InputAudioRawFrame, vad_state: VADState
+    ) -> VADState:
         """Handle Voice Activity Detection results and generate appropriate frames."""
         new_vad_state = await self._vad_analyze(audio_frame)
         if (
@@ -420,24 +525,28 @@ class BaseInputTransport(FrameProcessor):
                     interruption_state = VADState.QUIET
 
             if interruption_state:
-                await self._handle_user_interruption(interruption_state)
+                await self._deprecated_handle_user_interruption(interruption_state)
 
             vad_state = new_vad_state
         return vad_state
 
-    async def _handle_end_of_turn(self):
+    async def _deprecated_handle_end_of_turn(self):
         """Handle end-of-turn analysis and generate prediction results."""
         if self.turn_analyzer:
             state, prediction = await self.turn_analyzer.analyze_end_of_turn()
-            await self._handle_prediction_result(prediction)
-            await self._handle_end_of_turn_complete(state)
+            await self._deprecated_handle_prediction_result(prediction)
+            await self._deprecated_handle_end_of_turn_complete(state)
 
-    async def _handle_end_of_turn_complete(self, state: EndOfTurnState):
+    async def _deprecated_handle_end_of_turn_complete(self, state: EndOfTurnState):
         """Handle completion of end-of-turn analysis."""
         if state == EndOfTurnState.COMPLETE:
-            await self._handle_user_interruption(VADState.QUIET)
+            await self._deprecated_handle_user_interruption(VADState.QUIET)
 
-    async def _run_turn_analyzer(
+    async def _deprecated_handle_prediction_result(self, result: MetricsData):
+        """Handle a prediction result event from the turn analyzer."""
+        await self.push_frame(MetricsFrame(data=[result]))
+
+    async def _deprecated_run_turn_analyzer(
         self, frame: InputAudioRawFrame, vad_state: VADState, previous_vad_state: VADState
     ):
         """Run turn analysis on audio frame and handle results."""
@@ -445,51 +554,7 @@ class BaseInputTransport(FrameProcessor):
         # If silence exceeds threshold, we are going to receive EndOfTurnState.COMPLETE
         end_of_turn_state = self._params.turn_analyzer.append_audio(frame.audio, is_speech)
         if end_of_turn_state == EndOfTurnState.COMPLETE:
-            await self._handle_end_of_turn_complete(end_of_turn_state)
+            await self._deprecated_handle_end_of_turn_complete(end_of_turn_state)
         # Otherwise we are going to trigger to check if the turn is completed based on the VAD
         elif vad_state == VADState.QUIET and vad_state != previous_vad_state:
-            await self._handle_end_of_turn()
-
-    async def _audio_task_handler(self):
-        """Main audio processing task handler for VAD and turn analysis."""
-        vad_state: VADState = VADState.QUIET
-        while True:
-            try:
-                frame: InputAudioRawFrame = await asyncio.wait_for(
-                    self._audio_in_queue.get(), timeout=AUDIO_INPUT_TIMEOUT_SECS
-                )
-
-                # If an audio filter is available, run it before VAD.
-                if self._params.audio_in_filter:
-                    frame.audio = await self._params.audio_in_filter.filter(frame.audio)
-
-                # Check VAD and push event if necessary. We just care about
-                # changes from QUIET to SPEAKING and vice versa.
-                previous_vad_state = vad_state
-                if self._params.vad_analyzer:
-                    vad_state = await self._handle_vad(frame, vad_state)
-
-                if self._params.turn_analyzer:
-                    await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
-
-                if vad_state == VADState.SPEAKING:
-                    await self.broadcast_frame(UserSpeakingFrame)
-
-                # Push audio downstream if passthrough is set.
-                if self._params.audio_in_passthrough:
-                    await self.push_frame(frame)
-
-                self._audio_in_queue.task_done()
-            except asyncio.TimeoutError:
-                if self._user_speaking:
-                    logger.warning(
-                        "Forcing user stopped speaking due to timeout receiving audio frame!"
-                    )
-                    vad_state = VADState.QUIET
-                    if self._params.turn_analyzer:
-                        self._params.turn_analyzer.clear()
-                    await self._handle_user_interruption(VADState.QUIET)
-
-    async def _handle_prediction_result(self, result: MetricsData):
-        """Handle a prediction result event from the turn analyzer."""
-        await self.push_frame(MetricsFrame(data=[result]))
+            await self._deprecated_handle_end_of_turn()

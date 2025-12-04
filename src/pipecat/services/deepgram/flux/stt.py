@@ -24,10 +24,9 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -559,7 +558,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         try:
             flux_event_type = FluxEventType(event)
         except ValueError:
-            logger.debug(f"Unhandled TurnInfo event: {event}")
+            logger.debug(f"{self}: unhandled TurnInfo event: {event}")
             return
 
         match flux_event_type:
@@ -578,25 +577,22 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """Handle StartOfTurn events from Deepgram Flux.
 
         StartOfTurn events are fired when Deepgram Flux detects the beginning
-        of a new speaking turn. This triggers bot interruption to stop any
-        ongoing speech synthesis and signals the start of user speech detection.
+        of a new speaking turn.
 
         The service will:
-        - Send a BotInterruptionFrame upstream to stop bot speech
-        - Send a UserStartedSpeakingFrame downstream to notify other components
+        - Send a VADUserStartedSpeakingFrame downstream to notify other components
         - Start metrics collection for measuring response times
 
         Args:
             transcript: maybe the first few words of the turn.
         """
-        logger.debug("User started speaking")
+        logger.debug(f"{self}: start of turn detected")
         self._user_is_speaking = True
-        await self.push_interruption_task_frame_and_wait()
-        await self.broadcast_frame(UserStartedSpeakingFrame)
+        await self.broadcast_frame(VADUserStartedSpeakingFrame)
         await self.start_metrics()
         await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
-            logger.trace(f"Start of turn transcript: {transcript}")
+            logger.trace(f"{self}: start of turn transcript: {transcript}")
 
     async def _handle_turn_resumed(self, event: str):
         """Handle TurnResumed events from Deepgram Flux.
@@ -608,7 +604,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Args:
             event: The event type string for logging purposes.
         """
-        logger.trace(f"Received event TurnResumed: {event}")
+        logger.trace(f"{self}: received event TurnResumed: {event}")
         await self._call_event_handler("on_turn_resumed")
 
     def _calculate_average_confidence(self, transcript_data) -> Optional[float]:
@@ -639,13 +635,13 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         - Create and send a final TranscriptionFrame with the complete transcript
         - Trigger transcription handling with tracing for metrics
         - Stop processing metrics collection
-        - Send a UserStoppedSpeakingFrame to signal turn completion
+        - Send a VADUserStoppedSpeakingFrame to signal turn completion
 
         Args:
             transcript: The final transcript text for the completed turn.
             data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
-        logger.debug("User stopped speaking")
+        logger.debug(f"{self}: end of turn detected")
         self._user_is_speaking = False
 
         # Compute the average confidence
@@ -663,13 +659,12 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             )
         else:
             logger.warning(
-                f"Transcription confidence below min_confidence threshold: {average_confidence}"
+                f"{self}: transcription confidence below min_confidence threshold: {average_confidence}"
             )
 
         await self._handle_transcription(transcript, True, self._language)
         await self.stop_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+        await self.broadcast_frame(VADUserStoppedSpeakingFrame)
         await self._call_event_handler("on_end_of_turn", transcript)
 
     async def _handle_eager_end_of_turn(self, transcript: str, data: Dict[str, Any]):
@@ -732,7 +727,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             transcript: The current partial transcript text for the ongoing turn.
         """
         if transcript:
-            logger.trace(f"Update event: {transcript}")
+            logger.trace(f"{self}: update event: {transcript}")
             # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
             # Ideally, TTFB should measure the time from when a user starts speaking
             # until we receive the first transcript. However, Deepgram Flux delivers

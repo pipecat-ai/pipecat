@@ -449,7 +449,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._was_bot_speaking = False
         self._seen_interim_results = False
         self._waiting_for_aggregation = False
-        [await s.reset() for s in self._interruption_strategies]
+        [
+            await s.reset()
+            for s in self.interruption_strategies
+            if isinstance(s, BaseInterruptionStrategy)
+        ]
 
     async def handle_aggregation(self, aggregation: str):
         """Add the aggregated user text to the context.
@@ -570,7 +574,13 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await strategy.append_text(self._aggregation)
             return await strategy.should_interrupt()
 
-        return any([await should_interrupt(s) for s in self._interruption_strategies])
+        return any(
+            [
+                await should_interrupt(s)
+                for s in self.interruption_strategies
+                if isinstance(s, BaseInterruptionStrategy)
+            ]
+        )
 
     async def _start(self, frame: StartFrame):
         self._create_aggregation_task()
@@ -596,7 +606,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         for s in self.interruption_strategies:
-            await s.append_audio(frame.audio, frame.sample_rate)
+            if isinstance(s, BaseInterruptionStrategy):
+                await s.append_audio(frame.audio, frame.sample_rate)
 
     async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
         self._user_speaking = True
