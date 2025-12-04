@@ -12,6 +12,7 @@ management, and frame flow control mechanisms.
 """
 
 import asyncio
+import traceback
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Sequence, Tuple, Type
@@ -677,7 +678,17 @@ class FrameProcessor(BaseObject):
         if not error.processor:
             error.processor = self
         await self._call_event_handler("on_error", error)
-        logger.error(f"{error.processor} error: {error.error}")
+
+        if error.exception:
+            tb = traceback.extract_tb(error.exception.__traceback__)
+            last = tb[-1]
+            error_message = (
+                f"{error.processor} exception ({last.filename}:{last.lineno}): {error.error}"
+            )
+        else:
+            error_message = f"{error.processor} error: {error.error}"
+
+        logger.error(error_message)
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
