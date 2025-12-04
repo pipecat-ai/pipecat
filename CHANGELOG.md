@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `ElevenLabsTTSService` where character usage metrics were
+  only reported on the first TTS generation per turn.
+
 - Fixed an issue where `LLMTextFrame.skip_tts` was being overwritten by LLM
   services.
 
