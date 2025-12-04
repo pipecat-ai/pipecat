@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMTextFrame,
     LLMThoughtEndFrame,
+    LLMThoughtSignatureFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
@@ -999,6 +1000,17 @@ class GoogleLLMService(LLMService):
                                     image=image.tobytes(), size=image.size, format="RGB"
                                 )
                                 await self.push_frame(frame)
+
+                            # With Gemini 3 Pro, thought signatures can be
+                            # included in any kind of part, not just function
+                            # calls. It will come in the last part of a response.
+                            if part.thought_signature and not part.function_call:
+                                await self.push_frame(
+                                    LLMThoughtSignatureFrame(
+                                        llm=self.get_llm_adapter().id_for_llm_specific_messages,
+                                        signature=part.thought_signature,
+                                    )
+                                )
 
                     if (
                         candidate.grounding_metadata

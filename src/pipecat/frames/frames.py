@@ -594,7 +594,8 @@ class LLMThoughtStartFrame(ControlFrame):
             If it is appended, the `llm` field is required, since it will be
             appended as an `LLMSpecificMessage`.
         llm: Optional identifier of the LLM provider for LLM-specific handling.
-            Only required if `append_to_context` is True.
+            Only required if `append_to_context` is True, as the thought is
+            appended to context as an `LLMSpecificMessage`.
     """
 
     append_to_context: bool = False
@@ -642,7 +643,7 @@ class LLMThoughtEndFrame(ControlFrame):
 
     Parameters:
         thought_metadata: Optional metadata associated with the thought,
-            e.g. thought signature.
+            e.g. an Anthropic thought signature.
     """
 
     thought_metadata: Optional[Dict[str, Any]] = None
@@ -650,6 +651,28 @@ class LLMThoughtEndFrame(ControlFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, metadata: {self.thought_metadata})"
+
+
+@dataclass
+class LLMThoughtSignatureFrame(DataFrame):
+    """Frame containing a standalone LLM thought signature (as opposed to a thought signature associated with a thought).
+
+    This is useful for Gemini 3 Pro, which can output a signature at the end of
+    a response.
+
+    Parameters:
+        llm: Identifier of the LLM provider for LLM-specific handling.
+            Needed because the thought signature is appended to context as an
+            `LLMSpecificMessage`.
+        signature: The thought signature data.
+    """
+
+    llm: str
+    signature: Any
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, signature: {self.signature})"
 
 
 @dataclass

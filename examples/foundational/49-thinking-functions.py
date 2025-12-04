@@ -108,8 +108,10 @@ async def run_bot(
     elif llm_provider == LLM_GOOGLE:
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
+            # model="gemini-3-pro-preview", # A more powerful reasoning model, but slower
             params=GoogleLLMService.InputParams(
                 thinking=GoogleLLMService.ThinkingConfig(
+                    # thinking_level="low", # Use this field instead of thinking_budget for Gemini 3 Pro. Defaults to "high".
                     thinking_budget=-1,  # Dynamic thinking
                     include_thoughts=True,
                 )
