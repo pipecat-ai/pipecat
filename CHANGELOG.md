@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated Smart Turn model weights to v3.1.
 
+- Smart Turn analyzer now uses the full context of the turn rather than just the
+  audio since VAD last triggered.
+
 ### Deprecated
 
 - Package `pipecat.sync` is deprecated, use `pipecat.utils.sync` instead.
