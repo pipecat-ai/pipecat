@@ -10,7 +10,6 @@ This module provides integration with Gradium's real-time speech-to-text
 WebSocket API for streaming audio transcription.
 """
 
-import asyncio
 import base64
 import json
 from typing import AsyncGenerator
@@ -63,7 +62,6 @@ class GradiumSTTService(WebsocketSTTService):
 
         Args:
             api_key: Gradium API key for authentication.
-            language: Language code for transcription. Defaults to English (Language.EN).
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
             json_config: Optional JSON configuration string for additional model settings.
             **kwargs: Additional arguments passed to parent STTService class.
@@ -96,7 +94,7 @@ class GradiumSTTService(WebsocketSTTService):
             frame: Start frame to begin processing.
         """
         await super().start(frame)
-        self._chunk_size_bytes = int(self._chunk_size_ms * self._sample_rate * 2 / 1000)
+        self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -191,7 +189,7 @@ class GradiumSTTService(WebsocketSTTService):
                 raise Exception(f"unexpected first message type {ready_msg['type']}")
 
         except Exception as e:
-            logger.error(f"{self}: unable to connect to Gradium: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             raise
 
     async def _disconnect(self):
@@ -207,7 +205,7 @@ class GradiumSTTService(WebsocketSTTService):
                 logger.debug("Disconnecting from Gradium STT")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
@@ -238,7 +236,7 @@ class GradiumSTTService(WebsocketSTTService):
         elif type_ == "end_of_stream":
             await self._handle_end_of_stream()
         elif type_ == "error":
-            logger.error(f"Gradium error: {msg.get('message', 'Unknown error')}")
+            await self.push_error(error_msg=f"Error: {msg}")
 
     async def _handle_end_of_stream(self):
         """Handle termination message."""
