@@ -78,8 +78,11 @@ jobs:
           echo "fragment_count=$FRAGMENT_COUNT" >> $GITHUB_OUTPUT
 
           if [ "$FRAGMENT_COUNT" -eq "0" ]; then
-            echo "⚠️ Warning: No changelog fragments found"
-            echo "has_fragments=false" >> $GITHUB_OUTPUT
+            echo "❌ Error: No changelog fragments found in changelog/"
+            echo ""
+            echo "Cannot create a release without changelog entries."
+            echo "Add changelog fragments to the changelog/ directory (e.g., 1234.added.md) and try again."
+            exit 1
           else
             echo "✓ Found $FRAGMENT_COUNT changelog fragment(s)"
             echo "has_fragments=true" >> $GITHUB_OUTPUT
