@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ensures all function calls complete before returning results to the LLM (i.e.,
   before running a new inference with those results).
 
+- Added new Gradium services, `GradiumSTTService` and `GradiumTTSService`, for
+  speech-to-text and text-to-speech functionality using Gradium's API.
+
 ### Changed
 
 - If an unexpected exception is caught, or if `FrameProcessor.push_error()` is
