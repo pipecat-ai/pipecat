@@ -270,7 +270,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
             elif msg["type"] == "error":
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(error_msg=f"Error: {msg['message']}"))
+                await self.push_error(error_msg=f"Error: {msg['message']}")
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push frame and handle end-of-turn conditions.
