@@ -12,7 +12,7 @@ from typing import Awaitable, Callable, Optional
 
 import websockets
 from loguru import logger
-from websockets.exceptions import ConnectionClosedOK
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
@@ -136,6 +136,10 @@ class WebsocketService(ABC):
             except ConnectionClosedOK as e:
                 # Normal closure, don't retry
                 logger.debug(f"{self} connection closed normally: {e}")
+                break
+            except ConnectionClosedError as e:
+                # Error closure, don't retry
+                logger.warning(f"{self} connection closed, but with an error: {e}")
                 break
             except Exception as e:
                 message = f"{self} error receiving messages: {e}"
