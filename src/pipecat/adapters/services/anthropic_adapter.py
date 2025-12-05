@@ -171,10 +171,12 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
     def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam:
         """Convert LLMSpecificMessage to Anthropic format.
 
-        Assumes that we already know the message is intended for Anthropic.
+        Anthropic-specific messages may either be special thought messages that
+        need to be handled in a special way, or messages already in Anthropic
+        format.
 
         Args:
-            message: Message in LLMSpecificMessage format.
+            message: Anthropic-specific message.
         """
         # Handle special case of thought messages.
         # These can be converted to standalone "assistant" messages; later
