@@ -115,6 +115,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `ElevenLabsTTSService` where character usage metrics were
   only reported on the first TTS generation per turn.
 
+### Fixed 
+
+- Fixed an issue in `CartesiaSTTService` where dynamic language updates were failing.
+
 ## [0.0.96] - 2025-11-26 🦃 "Happy Thanksgiving!" 🦃
 
 ### Added
