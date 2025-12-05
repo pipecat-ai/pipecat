@@ -74,7 +74,7 @@ jobs:
       - name: Check for changelog fragments
         id: check_fragments
         run: |
-          FRAGMENT_COUNT=$(find changelog -name "*.md" ! -name "README.md" ! -name "_template.md.j2" | wc -l | tr -d ' ')
+          FRAGMENT_COUNT=$(find changelog -name "*.md" ! -name "_template.md.j2" | wc -l | tr -d ' ')
           echo "fragment_count=$FRAGMENT_COUNT" >> $GITHUB_OUTPUT
 
           if [ "$FRAGMENT_COUNT" -eq "0" ]; then
@@ -90,8 +90,8 @@ jobs:
           INVALID_FRAGMENTS=""
 
           for file in changelog/*.md; do
-            # Skip README and template
-            if [[ "$file" == "changelog/README.md" ]] || [[ "$file" == "changelog/_template.md.j2" ]]; then
+            # Skip template
+            if [[ "$file" == "changelog/_template.md.j2" ]]; then
               continue
             fi
             
