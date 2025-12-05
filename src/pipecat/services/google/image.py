@@ -22,7 +22,8 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat import __version__
+
+from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
 
@@ -76,19 +77,7 @@ class GoogleImageGenService(ImageGenService):
         self._params = params or GoogleImageGenService.InputParams()
 
         # Add client header
-        client_header = {"x-goog-api-client": f"pipecat/{__version__}"}
-        if http_options is None:
-            http_options = {"headers": client_header}
-        elif isinstance(http_options, dict):
-            if "headers" in http_options:
-                http_options["headers"].update(client_header)
-            else:
-                http_options["headers"] = client_header
-        elif hasattr(http_options, "headers"):
-            if http_options.headers is None:
-                http_options.headers = client_header
-            else:
-                http_options.headers.update(client_header)
+        http_options = update_google_client_http_options(http_options)
         
         self._client = genai.Client(api_key=api_key, http_options=http_options)
         self.set_model_name(self._params.model)
