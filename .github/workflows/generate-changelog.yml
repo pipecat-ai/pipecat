@@ -8,9 +8,10 @@ on:
         required: true
         type: string
       date:
-        description: "Release date (YYYY-MM-DD format, e.g., 2025-12-04)"
-        required: true
+        description: "Release date (YYYY-MM-DD format, defaults to today)"
+        required: false
         type: string
+        default: ""
 
 permissions:
   contents: write
@@ -39,6 +40,18 @@ jobs:
         run: |
           uv sync --group dev
 
+      - name: Set release date
+        id: set_date
+        run: |
+          if [ -z "${{ inputs.date }}" ]; then
+            RELEASE_DATE=$(date +%Y-%m-%d)
+            echo "Using today's date: $RELEASE_DATE"
+          else
+            RELEASE_DATE="${{ inputs.date }}"
+            echo "Using provided date: $RELEASE_DATE"
+          fi
+          echo "release_date=$RELEASE_DATE" >> $GITHUB_OUTPUT
+
       - name: Validate inputs
         run: |
           # Validate version format (basic check)
@@ -47,12 +60,14 @@ jobs:
             exit 1
           fi
 
-          # Validate date format
-          if ! date -d "${{ inputs.date }}" >/dev/null 2>&1; then
-            # Try macOS date format
-            if ! date -j -f "%Y-%m-%d" "${{ inputs.date }}" >/dev/null 2>&1; then
-              echo "Error: Date must be in YYYY-MM-DD format (e.g., 2025-12-04)"
-              exit 1
+          # Validate date format if provided
+          if [ -n "${{ inputs.date }}" ]; then
+            if ! date -d "${{ inputs.date }}" >/dev/null 2>&1; then
+              # Try macOS date format
+              if ! date -j -f "%Y-%m-%d" "${{ inputs.date }}" >/dev/null 2>&1; then
+                echo "Error: Date must be in YYYY-MM-DD format (e.g., 2025-12-04)"
+                exit 1
+              fi
             fi
           fi
 
@@ -74,11 +89,11 @@ jobs:
         run: |
           echo "## Preview of changelog for version ${{ inputs.version }}"
           echo ""
-          uv run towncrier build --draft --version "${{ inputs.version }}" --date "${{ inputs.date }}"
+          uv run towncrier build --draft --version "${{ inputs.version }}" --date "${{ steps.set_date.outputs.release_date }}"
 
       - name: Build changelog
         run: |
-          uv run towncrier build --version "${{ inputs.version }}" --date "${{ inputs.date }}" --yes
+          uv run towncrier build --version "${{ inputs.version }}" --date "${{ steps.set_date.outputs.release_date }}" --yes
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
@@ -93,7 +108,7 @@ jobs:
 
             ### Summary
             - **Version:** ${{ inputs.version }}
-            - **Date:** ${{ inputs.date }}
+            - **Date:** ${{ steps.set_date.outputs.release_date }}
             - **Fragments processed:** ${{ steps.check_fragments.outputs.fragment_count }}
 
             ### What this PR does
