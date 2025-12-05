@@ -14,6 +14,8 @@ from pydantic import BaseModel
 
 from pipecat import __version__
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
@@ -110,9 +112,9 @@ class HumeTTSService(WordTTSService):
 
         # Create a custom httpx.AsyncClient with tracking headers
         # Headers are included in all requests made by the Hume SDK
-        custom_http_client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
+        self._http_client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
 
-        self._client = AsyncHumeClient(api_key=api_key, httpx_client=custom_http_client)
+        self._client = AsyncHumeClient(api_key=api_key, httpx_client=self._http_client)
         self._params = params or HumeTTSService.InputParams()
 
         # Store voice in the base class (mirrors other services)
@@ -145,6 +147,26 @@ class HumeTTSService(WordTTSService):
         """Reset internal state variables."""
         self._cumulative_time = 0.0
         self._started = False
+
+    async def stop(self, frame: EndFrame) -> None:
+        """Stop the service and cleanup resources.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        if hasattr(self, "_http_client") and self._http_client:
+            await self._http_client.aclose()
+
+    async def cancel(self, frame: CancelFrame) -> None:
+        """Cancel the service and cleanup resources.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        if hasattr(self, "_http_client") and self._http_client:
+            await self._http_client.aclose()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
