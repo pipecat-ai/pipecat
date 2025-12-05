@@ -54,8 +54,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
         self,
         *,
         api_key: str,
-        voice: Optional[str] = None,
-        voice_id: Optional[str] = None,
+        voice_id: str = "YTpq7expH9539ERJ",
         url: str = "wss://eu.api.gradium.ai/api/speech/tts",
         model: str = "default",
         json_config: Optional[str] = None,
@@ -64,13 +63,9 @@ class GradiumTTSService(InterruptibleWordTTSService):
     ):
         """Initialize the Gradium TTS service.
 
-        The voice used in the generation is specified by setting either the `voice` argument
-        for catalog voices or the `voice_id` argument for custom voices.
-
         Args:
             api_key: Gradium API key for authentication.
-            voice: name for a catalog voice.
-            voice_id: identifier for a custom voice.
+            voice_id: the voice identifier.
             url: Gradium websocket API endpoint.
             model: Model ID to use for synthesis.
             json_config: Optional JSON configuration string for additional model settings.
@@ -85,22 +80,15 @@ class GradiumTTSService(InterruptibleWordTTSService):
             **kwargs,
         )
 
-        if voice is None and voice_id is None:
-            raise ValueError("one of voice and voice_id has to be set")
-        if voice is not None and voice_id is not None:
-            raise ValueError("voice and voice_id cannot be set at the same time")
-
         params = params or GradiumTTSService.InputParams()
 
         # Store service configuration
         self._api_key = api_key
         self._url = url
-        self._voice = voice
         self._voice_id = voice_id
         self._json_config = json_config
         self._model = model
         self._settings = {
-            "voice": voice,
             "voice_id": voice_id,
             "model_name": model,
             "output_format": "pcm",
@@ -205,13 +193,10 @@ class GradiumTTSService(InterruptibleWordTTSService):
             setup_msg = {
                 "type": "setup",
                 "output_format": "pcm",
+                "voice_id": self._voice_id,
             }
             if self._json_config is not None:
                 setup_msg["json_config"] = self._json_config
-            if self._voice is not None:
-                setup_msg["voice"] = self._voice
-            if self._voice_id is not None:
-                setup_msg["voice_id"] = self._voice_id
             await self._websocket.send(json.dumps(setup_msg))
             ready_msg = await self._websocket.recv()
             ready_msg = json.loads(ready_msg)

@@ -125,6 +125,8 @@ class GradiumSTTService(WebsocketSTTService):
             None (processing handled via WebSocket messages).
         """
         self._audio_buffer.extend(audio)
+        await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
 
         while len(self._audio_buffer) >= self._chunk_size_bytes:
             chunk = bytes(self._audio_buffer[: self._chunk_size_bytes])
@@ -135,19 +137,6 @@ class GradiumSTTService(WebsocketSTTService):
                 await self._websocket.send(json.dumps(msg))
 
         yield None
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames for VAD and metrics handling.
-
-        Args:
-            frame: Frame to process.
-            direction: Direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
-        if isinstance(frame, UserStartedSpeakingFrame):
-            await self.start_ttfb_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self.start_processing_metrics()
 
     @traced_stt
     async def _trace_transcription(self, transcript: str, is_final: bool, language: Language):
