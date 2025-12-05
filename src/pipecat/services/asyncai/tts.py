@@ -139,7 +139,7 @@ class AsyncAITTSService(InterruptibleTTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
         }
 
         self.set_model_name(model)
@@ -415,7 +415,7 @@ class AsyncAIHttpTTSService(TTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
         }
         self.set_voice(voice_id)
         self.set_model_name(model)
