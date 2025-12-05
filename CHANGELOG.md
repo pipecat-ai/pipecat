@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added new languages for AsyncAI in `AsyncAITTSService` and `AsyncAIHttpTTSService`.
+- Added new languages to AsyncAI in `AsyncAITTSService` and `AsyncAIHttpTTSService`.
   New `languages`:  `pt`, `nl`, `ar`, `ru`, `ro`, `ja`, `he`, `hy`, `tr`, `hi`, `zh`.
+  
+- Updated the default AsyncAI TTS model to asyncflow_multilingual_v1.0 for improved accuracy and broader language coverage.
 
 - Added `wait_for_all` argument to the base `LLMService`. When enabled, this
   ensures all function calls complete before returning results to the LLM (i.e.,
