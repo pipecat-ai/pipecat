@@ -160,7 +160,7 @@ def build_elevenlabs_voice_settings(
 class PronunciationDictionaryLocator(BaseModel):
     """Locator for a pronunciation dictionary.
 
-    Attributes:
+    Parameters:
         pronunciation_dictionary_id: The ID of the pronunciation dictionary.
         version_id: The version ID of the pronunciation dictionary.
     """
