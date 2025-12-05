@@ -76,7 +76,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = FireworksLLMService(
         api_key=os.getenv("FIREWORKS_API_KEY"),
-        model="accounts/fireworks/models/llama-v3p1-405b-instruct",
+        model="accounts/fireworks/models/gpt-oss-20b",
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
