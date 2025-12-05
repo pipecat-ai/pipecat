@@ -22,10 +22,7 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -229,8 +226,7 @@ class GradiumSTTService(WebsocketSTTService):
 
     async def _handle_end_of_stream(self):
         """Handle termination message."""
-        logger.info("Received end_of_stream message from server")
-        await self.push_frame(EndFrame())
+        logger.debug("Received end_of_stream message from server")
 
     async def _handle_text(self, text: str):
         """Handle transcription results."""
