@@ -96,7 +96,6 @@ class GradiumTTSService(InterruptibleWordTTSService):
 
         # State tracking
         self._receive_task = None
-        self._request_id = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -221,7 +220,6 @@ class GradiumTTSService(InterruptibleWordTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._websocket = None
-            self._request_id = None
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -301,10 +299,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
                 await self._connect()
 
             try:
-                if not self._request_id:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._request_id = str(uuid.uuid4())
+                yield TTSStartedFrame()
 
                 msg = self._build_msg(text=text)
                 await self._get_websocket().send(json.dumps(msg))
