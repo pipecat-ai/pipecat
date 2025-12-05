@@ -433,7 +433,10 @@ class TTSService(AIService):
             # Reset aggregator state
             self._processing_text = False
             if isinstance(frame, LLMFullResponseEndFrame):
-                if self._push_text_frames:
+                # Ensure the sentence is not empty. In some cases, such as function calling, the
+                # LLMFullResponseEndFrame may never be pushed into the pipeline, which would
+                # cause issues if we proceed without "or not sentence" this check.
+                if self._push_text_frames or not sentence:
                     await self.push_frame(frame, direction)
             else:
                 await self.push_frame(frame, direction)
