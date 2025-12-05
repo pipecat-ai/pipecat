@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added new languages to AsyncAI in `AsyncAITTSService` and `AsyncAIHttpTTSService`.
-  New `languages`:  `pt`, `nl`, `ar`, `ru`, `ro`, `ja`, `he`, `hy`, `tr`, `hi`, `zh`.
-  
-- Updated the default AsyncAI TTS model to asyncflow_multilingual_v1.0 for improved accuracy and broader language coverage.
+
+- Added new languages to AsyncAI in `AsyncAITTSService` and
+  `AsyncAIHttpTTSService`. New `languages`: `pt`, `nl`, `ar`, `ru`, `ro`, `ja`,
+  `he`, `hy`, `tr`, `hi`, `zh`.
+
+- Updated the default AsyncAI TTS model to `asyncflow_multilingual_v1.0` for
+  improved accuracy and broader language coverage.
 
 - Added `wait_for_all` argument to the base `LLMService`. When enabled, this
   ensures all function calls complete before returning results to the LLM (i.e.,
@@ -21,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   speech-to-text and text-to-speech functionality using Gradium's API.
 
 ### Changed
+
+- Updated `CartesiaSTTService` to return the full transcription `result` in the
+  `TranscriptionFrame` and `InterimTranscriptionFrame`. This provides access to
+  word timestamp data.
 
 - If an unexpected exception is caught, or if `FrameProcessor.push_error()` is
   called with an exception, the file name and line number where the exception
