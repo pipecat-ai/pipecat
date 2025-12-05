@@ -64,11 +64,14 @@ class UrlToImageProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     def extract_url(self, text: str):
-        data = json.loads(text)
-        if "artObject" in data:
-            return data["artObject"]["webImage"]["url"]
-        if "artworks" in data and len(data["artworks"]):
-            return data["artworks"][0]["webImage"]["url"]
+        try:
+            data = json.loads(text)
+            if "artObject" in data:
+                return data["artObject"]["webImage"]["url"]
+            if "artworks" in data and len(data["artworks"]):
+                return data["artworks"][0]["webImage"]["url"]
+        except:
+            pass
 
         return None
 
@@ -86,6 +89,23 @@ class UrlToImageProcessor(FrameProcessor):
         except Exception as e:
             error_msg = f"Error handling image url {image_url}: {str(e)}"
             logger.error(error_msg)
+
+
+# full list of tools available from rijksmuseum MCP:
+# - get_artwork_details
+# - get_artwork_image
+# - get_user_sets
+# - get_user_set_details
+# - open_image_in_browser
+# - get_artist_timeline
+
+mcp_tools_filter = ["get_artwork_details", "get_artwork_image", "open_image_in_browser"]
+
+
+def open_image_output_filter(output: str):
+    pattern = r"Successfully opened image in browser: "
+    text_to_print = re.sub(pattern, "", output)
+    print(f"🖼️ link to high resolution artwork: {text_to_print}")
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -136,7 +156,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     # https://github.com/r-huijts/rijksmuseum-mcp
                     args=["-y", "mcp-server-rijksmuseum"],
                     env={"RIJKSMUSEUM_API_KEY": os.getenv("RIJKSMUSEUM_API_KEY")},
-                )
+                ),
+                # Optional
+                tools_filter=mcp_tools_filter,  # Optional
+                tools_output_filters={"open_image_in_browser": open_image_output_filter},
             )
         except Exception as e:
             logger.error(f"error setting up mcp")
