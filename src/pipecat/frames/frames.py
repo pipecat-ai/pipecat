@@ -187,6 +187,20 @@ class ControlFrame(Frame):
 
 
 @dataclass
+class UninterruptibleFrame:
+    """A marker for data or control frames that must not be interrupted.
+
+    Frames with this mixin are still ordered normally, but unlike other frames,
+    they are preserved during interruptions: they remain in internal queues and
+    any task processing them will not be cancelled. This ensures the frame is
+    always delivered and processed to completion.
+
+    """
+
+    pass
+
+
+@dataclass
 class AudioRawFrame:
     """A frame containing a chunk of raw audio.
 
@@ -697,6 +711,44 @@ class LLMConfigureOutputFrame(DataFrame):
 
 
 @dataclass
+class FunctionCallResultProperties:
+    """Properties for configuring function call result behavior.
+
+    Parameters:
+        run_llm: Whether to run the LLM after receiving this result.
+        on_context_updated: Callback to execute when context is updated.
+    """
+
+    run_llm: Optional[bool] = None
+    on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
+
+
+@dataclass
+class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
+    """Frame containing the result of an LLM function call.
+
+    This is an uninterruptible frame because once a result is generated we
+    always want to update the context.
+
+    Parameters:
+        function_name: Name of the function that was executed.
+        tool_call_id: Unique identifier for the function call.
+        arguments: Arguments that were passed to the function.
+        result: The result returned by the function.
+        run_llm: Whether to run the LLM after this result.
+        properties: Additional properties for result handling.
+
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+    result: Any
+    run_llm: Optional[bool] = None
+    properties: Optional[FunctionCallResultProperties] = None
+
+
+@dataclass
 class TTSSpeakFrame(DataFrame):
     """Frame containing text that should be spoken by TTS.
 
@@ -1090,23 +1142,6 @@ class FunctionCallsStartedFrame(SystemFrame):
 
 
 @dataclass
-class FunctionCallInProgressFrame(SystemFrame):
-    """Frame signaling that a function call is currently executing.
-
-    Parameters:
-        function_name: Name of the function being executed.
-        tool_call_id: Unique identifier for this function call.
-        arguments: Arguments passed to the function.
-        cancel_on_interruption: Whether to cancel this call if interrupted.
-    """
-
-    function_name: str
-    tool_call_id: str
-    arguments: Any
-    cancel_on_interruption: bool = False
-
-
-@dataclass
 class FunctionCallCancelFrame(SystemFrame):
     """Frame signaling that a function call has been cancelled.
 
@@ -1117,40 +1152,6 @@ class FunctionCallCancelFrame(SystemFrame):
 
     function_name: str
     tool_call_id: str
-
-
-@dataclass
-class FunctionCallResultProperties:
-    """Properties for configuring function call result behavior.
-
-    Parameters:
-        run_llm: Whether to run the LLM after receiving this result.
-        on_context_updated: Callback to execute when context is updated.
-    """
-
-    run_llm: Optional[bool] = None
-    on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
-
-
-@dataclass
-class FunctionCallResultFrame(SystemFrame):
-    """Frame containing the result of an LLM function call.
-
-    Parameters:
-        function_name: Name of the function that was executed.
-        tool_call_id: Unique identifier for the function call.
-        arguments: Arguments that were passed to the function.
-        result: The result returned by the function.
-        run_llm: Whether to run the LLM after this result.
-        properties: Additional properties for result handling.
-    """
-
-    function_name: str
-    tool_call_id: str
-    arguments: Any
-    result: Any
-    run_llm: Optional[bool] = None
-    properties: Optional[FunctionCallResultProperties] = None
 
 
 @dataclass
@@ -1648,6 +1649,27 @@ class LLMFullResponseEndFrame(ControlFrame):
     def __post_init__(self):
         super().__post_init__()
         self.skip_tts = None
+
+
+@dataclass
+class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
+    """Frame signaling that a function call is currently executing.
+
+    This is an uninterruptible frame because we always want to update the
+    context.
+
+    Parameters:
+        function_name: Name of the function being executed.
+        tool_call_id: Unique identifier for this function call.
+        arguments: Arguments passed to the function.
+        cancel_on_interruption: Whether to cancel this call if interrupted.
+
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+    cancel_on_interruption: bool = False
 
 
 @dataclass
