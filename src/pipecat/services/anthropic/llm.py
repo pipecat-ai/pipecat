@@ -17,7 +17,7 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import httpx
 from loguru import logger
@@ -40,6 +40,9 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
 )
@@ -110,6 +113,24 @@ class AnthropicLLMService(LLMService):
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AnthropicLLMAdapter
 
+    class ThinkingConfig(BaseModel):
+        """Configuration for extended thinking.
+
+        Parameters:
+            type: Type of thinking mode (currently only "enabled" or "disabled").
+            budget_tokens: Maximum number of tokens for thinking.
+                With today's models, the minimum is 1024.
+                Only allowed if type is "enabled".
+        """
+
+        # Why `| str` here? To not break compatibility in case Anthropic adds
+        # more types in the future.
+        type: Literal["enabled", "disabled"] | str
+
+        # Why not enforce minimnum of 1024 here? To not break compatibility in
+        # case Anthropic changes this requirement in the future.
+        budget_tokens: int
+
     class InputParams(BaseModel):
         """Input parameters for Anthropic model inference.
 
@@ -124,6 +145,10 @@ class AnthropicLLMService(LLMService):
             temperature: Sampling temperature between 0.0 and 1.0.
             top_k: Top-k sampling parameter.
             top_p: Top-p sampling parameter between 0.0 and 1.0.
+            thinking: Extended thinking configuration.
+                Enabling extended thinking causes the model to spend more time "thinking" before responding.
+                It also causes this service to emit LLMThinking*Frames during response generation.
+                Extended thinking is disabled by default.
             extra: Additional parameters to pass to the API.
         """
 
@@ -133,6 +158,9 @@ class AnthropicLLMService(LLMService):
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
+            default_factory=lambda: NOT_GIVEN
+        )
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
         def model_post_init(self, __context):
@@ -191,6 +219,7 @@ class AnthropicLLMService(LLMService):
             "temperature": params.temperature,
             "top_k": params.top_k,
             "top_p": params.top_p,
+            "thinking": params.thinking,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -354,12 +383,21 @@ class AnthropicLLMService(LLMService):
                 "top_p": self._settings["top_p"],
             }
 
+            # Add thinking parameter if set
+            if self._settings["thinking"]:
+                params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+
             # Messages, system, tools
             params.update(params_from_context)
 
             params.update(self._settings["extra"])
 
-            response = await self._create_message_stream(self._client.messages.create, params)
+            # "Interleaved thinking" needed to allow thinking between sequences
+            # of function calls, when extended thinking is enabled.
+            # Note that this requires us to use `client.beta`, below.
+            params.update({"betas": ["interleaved-thinking-2025-05-14"]})
+
+            response = await self._create_message_stream(self._client.beta.messages.create, params)
 
             await self.stop_ttfb_metrics()
 
@@ -380,10 +418,21 @@ class AnthropicLLMService(LLMService):
                         completion_tokens_estimate += self._estimate_tokens(
                             event.delta.partial_json
                         )
+                    elif hasattr(event.delta, "thinking"):
+                        await self.push_frame(LLMThoughtTextFrame(text=event.delta.thinking))
+                    elif hasattr(event.delta, "signature"):
+                        await self.push_frame(LLMThoughtEndFrame(signature=event.delta.signature))
                 elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         tool_use_block = event.content_block
                         json_accumulator = ""
+                    elif event.content_block.type == "thinking":
+                        await self.push_frame(
+                            LLMThoughtStartFrame(
+                                append_to_context=True,
+                                llm=self.get_llm_adapter().id_for_llm_specific_messages,
+                            )
+                        )
                 elif (
                     event.type == "message_delta"
                     and hasattr(event.delta, "stop_reason")

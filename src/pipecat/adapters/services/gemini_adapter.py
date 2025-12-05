@@ -209,16 +209,53 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         system_instruction = None
         messages = []
         tool_call_id_to_name_mapping = {}
+        non_fn_thought_signatures = []
 
-        # Process each message, preserving Google-formatted messages and converting others
+        # Process each message, converting to Google format as needed
         for message in universal_context_messages:
-            result = self._from_universal_context_message(
+            # We have a Google-specific message; this may either be a
+            # thought-signature-containing message that we need to handle in a
+            # special way, or a message already in Google format that we can
+            # use directly
+            if isinstance(message, LLMSpecificMessage):
+                # Special handling for function-call-related thought signature
+                # messages
+                if (
+                    isinstance(message.message, dict)
+                    and message.message.get("type") == "tool_call_extra"
+                    and isinstance(data := message.message.get("data"), dict)
+                    and (thought_signature := data.get("thought_signature"))
+                ):
+                    self._apply_function_call_thought_signature_to_messages(
+                        thought_signature, message.message.get("tool_call_id"), messages
+                    )
+                    continue
+
+                # Special handling for non-function-call-related thought
+                # signature messages (Gemini 3 Pro)
+                if (
+                    isinstance(message.message, dict)
+                    and message.message.get("type") == "thought_signature"
+                    and (thought_signature := message.message.get("signature"))
+                ):
+                    non_fn_thought_signatures.append(thought_signature)
+                    continue
+
+                # Fall back to assuming that the message is already in Google
+                # format
+                messages.append(message.message)
+                continue
+
+            # We have a standard universal context message; convert it to
+            # Google format
+            result = self._from_standard_message(
                 message,
                 params=self.MessageConversionParams(
                     already_have_system_instruction=bool(system_instruction),
                     tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
                 ),
             )
+
             # Each result is either a Content or a system instruction
             if result.content:
                 messages.append(result.content)
@@ -228,6 +265,10 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             # Merge tool call ID to name mapping
             if result.tool_call_id_to_name_mapping:
                 tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+
+        # Apply non-function-call-related thought signatures to the appropriate
+        # messages
+        self._apply_non_function_thought_signatures_to_messages(non_fn_thought_signatures, messages)
 
         # Check if we only have function-related messages (no regular text)
         has_regular_messages = any(
@@ -246,13 +287,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         messages = [m for m in messages if m.parts]
 
         return self.ConvertedMessages(messages=messages, system_instruction=system_instruction)
-
-    def _from_universal_context_message(
-        self, message: LLMContextMessage, *, params: MessageConversionParams
-    ) -> MessageConversionResult:
-        if isinstance(message, LLMSpecificMessage):
-            return self.MessageConversionResult(content=message.message)
-        return self._from_standard_message(message, params=params)
 
     def _from_standard_message(
         self, message: LLMStandardMessage, *, params: MessageConversionParams
@@ -410,3 +444,75 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             content=Content(role=role, parts=parts),
             tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
         )
+
+    def _apply_function_call_thought_signature_to_messages(
+        self, thought_signature: bytes, tool_call_id: str, messages: List[Content]
+    ) -> None:
+        """Apply tool_call_extra metadata to the corresponding function call message.
+
+        Args:
+            thought_signature: The thought signature bytes to apply.
+            tool_call_id: ID of the tool call message to find and modify.
+            messages: List of messages to search through.
+        """
+        # Search backwards through messages to find the matching function call
+        for message in reversed(messages):
+            if not isinstance(message, Content) or not message.parts:
+                continue
+            # Find the specific part with the matching function call
+            for part in message.parts:
+                if (
+                    hasattr(part, "function_call")
+                    and part.function_call
+                    and part.function_call.id == tool_call_id
+                ):
+                    part.thought_signature = thought_signature
+                    break
+            else:
+                # Continue outer loop if inner loop didn't break
+                continue
+            # Break outer loop if inner loop broke (found match)
+            break
+
+    def _apply_non_function_thought_signatures_to_messages(
+        self, thought_signatures: List[bytes], messages: List[Content]
+    ) -> None:
+        """Apply non-function-call-related thought signatures to the last part of each non-function-call assistant message.
+
+        Gemini 3 Pro outputs a thought signature at the end of each assistant
+        response.
+
+        Args:
+            thought_signatures: The list of thought signature bytes to apply.
+            messages: List of messages to search through.
+        """
+        if not thought_signatures:
+            return
+
+        # Find all assistant (model) messages that aren't function calls
+        non_fn_assistant_messages = []
+        for message in messages:
+            if not isinstance(message, Content) or not message.parts:
+                continue
+            # Check if this is a model message without function calls
+            if message.role == "model":
+                has_function_call = any(
+                    hasattr(part, "function_call") and part.function_call for part in message.parts
+                )
+                if not has_function_call:
+                    non_fn_assistant_messages.append(message)
+
+        # Warn if counts don't match
+        if len(thought_signatures) != len(non_fn_assistant_messages):
+            logger.warning(
+                f"Thought signature count ({len(thought_signatures)}) doesn't match "
+                f"non-function-call assistant message count ({len(non_fn_assistant_messages)})"
+            )
+
+        # Apply thought signatures to the corresponding assistant messages
+        # Match them in order (oldest to newest)
+        for i, thought_signature in enumerate(thought_signatures):
+            if i < len(non_fn_assistant_messages):
+                message = non_fn_assistant_messages[i]
+                if message.parts:
+                    message.parts[-1].thought_signature = thought_signature

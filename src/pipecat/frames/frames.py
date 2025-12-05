@@ -499,6 +499,14 @@ class TranscriptionMessage:
 
 
 @dataclass
+class ThoughtTranscriptionMessage:
+    """An LLM thought message in a conversation transcript."""
+
+    content: str
+    timestamp: Optional[str] = None
+
+
+@dataclass
 class TranscriptionUpdateFrame(DataFrame):
     """Frame containing new messages added to conversation transcript.
 
@@ -542,7 +550,7 @@ class TranscriptionUpdateFrame(DataFrame):
         messages: List of new transcript messages that were added.
     """
 
-    messages: List[TranscriptionMessage]
+    messages: List[TranscriptionMessage | ThoughtTranscriptionMessage]
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -561,6 +569,97 @@ class LLMContextFrame(Frame):
     """
 
     context: "LLMContext"
+
+
+@dataclass
+class LLMThoughtStartFrame(ControlFrame):
+    """Frame indicating the start of an LLM thought.
+
+    Parameters:
+        append_to_context: Whether the thought should be appended to the LLM context.
+            If it is appended, the `llm` field is required, since it will be
+            appended as an `LLMSpecificMessage`.
+        llm: Optional identifier of the LLM provider for LLM-specific handling.
+            Only required if `append_to_context` is True, as the thought is
+            appended to context as an `LLMSpecificMessage`.
+    """
+
+    append_to_context: bool = False
+    llm: Optional[str] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.append_to_context and self.llm is None:
+            raise ValueError("When append_to_context is True, llm must be set")
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return (
+            f"{self.name}(pts: {pts}, append_to_context: {self.append_to_context}, llm: {self.llm})"
+        )
+
+
+@dataclass
+class LLMThoughtTextFrame(DataFrame):
+    """Frame containing the text (or text chunk) of an LLM thought.
+
+    Note that despite this containing text, it is a DataFrame and not a
+    TextFrame, to avoid most typical text processing, such as TTS.
+
+    Parameters:
+        text: The text (or text chunk) of the thought.
+    """
+
+    text: str
+    includes_inter_frame_spaces: bool = field(init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Assume that thought text chunks include all necessary spaces
+        self.includes_inter_frame_spaces = True
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, thought text: {self.text})"
+
+
+@dataclass
+class LLMThoughtEndFrame(ControlFrame):
+    """Frame indicating the end of an LLM thought.
+
+    Parameters:
+        signature: Optional signature associated with the thought.
+            This is used by Anthropic, which includes a signature at the end of
+            each thought.
+    """
+
+    signature: Any = None
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, signature: {self.signature})"
+
+
+@dataclass
+class LLMThoughtSignatureFrame(DataFrame):
+    """Frame containing a standalone LLM thought signature (as opposed to a thought signature associated with a thought).
+
+    This is useful for Gemini 3 Pro, which can output a signature at the end of
+    a response.
+
+    Parameters:
+        llm: Identifier of the LLM provider for LLM-specific handling.
+            Needed because the thought signature is appended to context as an
+            `LLMSpecificMessage`.
+        signature: The thought signature data.
+    """
+
+    llm: str
+    signature: Any
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, signature: {self.signature})"
 
 
 @dataclass
@@ -1067,12 +1166,16 @@ class FunctionCallFromLLM:
         tool_call_id: A unique identifier for the function call.
         arguments: The arguments to pass to the function.
         context: The LLM context when the function call was made.
+        llm_specific_extra: Optional extra data specific to particular LLMs, e.g.:
+            {"google": {"thought_signature": ...}}
+            Uses the LLM adapter's ID for LLM-specific messages as the key.
     """
 
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any]
     context: Any
+    llm_specific_extra: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -1097,12 +1200,16 @@ class FunctionCallInProgressFrame(SystemFrame):
         function_name: Name of the function being executed.
         tool_call_id: Unique identifier for this function call.
         arguments: Arguments passed to the function.
+        llm_specific_extra: Optional extra data specific to particular LLMs, e.g.:
+            {"google": {"thought_signature": ...}}
+            Uses the LLM adapter's ID for LLM-specific messages as the key.
         cancel_on_interruption: Whether to cancel this call if interrupted.
     """
 
     function_name: str
     tool_call_id: str
     arguments: Any
+    llm_specific_extra: Optional[Dict[str, Any]] = None
     cancel_on_interruption: bool = False
 
 
