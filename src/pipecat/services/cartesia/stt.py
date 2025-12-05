@@ -10,7 +10,6 @@ This module provides a WebSocket-based STT service that integrates with
 the Cartesia Live transcription API for real-time speech recognition.
 """
 
-import asyncio
 import json
 import urllib.parse
 from typing import AsyncGenerator, Optional
@@ -159,20 +158,16 @@ class CartesiaSTTService(WebsocketSTTService):
             sample_rate=sample_rate,
         )
 
-        merged_options = default_options
+        merged_options = default_options.to_dict()
         if live_options:
-            merged_options_dict = default_options.to_dict()
-            merged_options_dict.update(live_options.to_dict())
-            merged_options = CartesiaLiveOptions(
-                **{
-                    k: v
-                    for k, v in merged_options_dict.items()
-                    if not isinstance(v, str) or v != "None"
-                }
-            )
+            merged_options.update(live_options.to_dict())
+            # Filter out "None" string values
+            merged_options = {
+                k: v for k, v in merged_options.items() if not isinstance(v, str) or v != "None"
+            }
 
         self._settings = merged_options
-        self.set_model_name(merged_options.model)
+        self.set_model_name(merged_options["model"])
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
         self._receive_task = None
@@ -253,7 +248,7 @@ class CartesiaSTTService(WebsocketSTTService):
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
-            self._receive_task = asyncio.create_task(self._receive_task_handler(self._report_error))
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         if self._receive_task:
@@ -268,7 +263,7 @@ class CartesiaSTTService(WebsocketSTTService):
                 return
             logger.debug("Connecting to Cartesia STT")
 
-            params = self._settings.to_dict()
+            params = self._settings
             ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
             headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 
@@ -294,12 +289,15 @@ class CartesiaSTTService(WebsocketSTTService):
         raise Exception("Websocket not connected")
 
     async def _process_messages(self):
+        """Process incoming WebSocket messages."""
         async for message in self._get_websocket():
             try:
                 data = json.loads(message)
                 await self._process_response(data)
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message: {message}")
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
 
     async def _receive_messages(self):
         while True:
