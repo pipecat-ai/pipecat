@@ -16,12 +16,13 @@ import os
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat import __version__
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
 
@@ -60,6 +61,7 @@ class GoogleImageGenService(ImageGenService):
         *,
         api_key: str,
         params: Optional[InputParams] = None,
+        http_options: Optional[Any] = None,
         **kwargs,
     ):
         """Initialize the GoogleImageGenService with API key and parameters.
@@ -67,11 +69,28 @@ class GoogleImageGenService(ImageGenService):
         Args:
             api_key: Google AI API key for authentication.
             params: Configuration parameters for image generation. Defaults to InputParams().
+            http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to the parent ImageGenService.
         """
         super().__init__(**kwargs)
         self._params = params or GoogleImageGenService.InputParams()
-        self._client = genai.Client(api_key=api_key)
+
+        # Add client header
+        client_header = {"x-goog-api-client": f"pipecat/{__version__}"}
+        if http_options is None:
+            http_options = {"headers": client_header}
+        elif isinstance(http_options, dict):
+            if "headers" in http_options:
+                http_options["headers"].update(client_header)
+            else:
+                http_options["headers"] = client_header
+        elif hasattr(http_options, "headers"):
+            if http_options.headers is None:
+                http_options.headers = client_header
+            else:
+                http_options.headers.update(client_header)
+        
+        self._client = genai.Client(api_key=api_key, http_options=http_options)
         self.set_model_name(self._params.model)
 
     def can_generate_metrics(self) -> bool:

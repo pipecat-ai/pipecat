@@ -24,6 +24,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat import __version__
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
@@ -682,6 +683,21 @@ class GeminiLiveLLMService(LLMService):
         self._context = None
         self._api_key = api_key
         self._http_options = http_options
+
+        # Add client header
+        client_header = {"x-goog-api-client": f"pipecat/{__version__}"}
+        if self._http_options is None:
+            self._http_options = {"headers": client_header}
+        elif isinstance(self._http_options, dict):
+            if "headers" in self._http_options:
+                self._http_options["headers"].update(client_header)
+            else:
+                self._http_options["headers"] = client_header
+        elif hasattr(self._http_options, "headers"):
+            if self._http_options.headers is None:
+                self._http_options.headers = client_header
+            else:
+                self._http_options.headers.update(client_header)
         self._session: AsyncSession = None
         self._connection_task = None
 
