@@ -19,11 +19,11 @@ from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 try:
     from pyrnnoise import RNNoise
 except ModuleNotFoundError as e:
+    RNNoise = None
     logger.error(f"Exception: {e}")
     logger.error(
         "In order to use the RNNoise filter, you need to `pip install pipecat-ai[rnnoise]`."
     )
-    raise Exception(f"Missing module: {e}")
 
 
 class RNNoiseFilter(BaseAudioFilter):
@@ -35,12 +35,21 @@ class RNNoiseFilter(BaseAudioFilter):
     processes it in chunks.
     """
 
-    def __init__(self) -> None:
-        """Initialize the RNNoise noise suppression filter."""
+    def __init__(self, resampler_quality: str = "QQ") -> None:
+        """Initialize the RNNoise noise suppression filter.
+
+        Args:
+            resampler_quality: Quality of the resampler if resampling is needed.
+                               One of "VHQ", "HQ", "MQ", "LQ", "QQ". Defaults to "QQ"
+                               (Quick) for lowest latency.
+        """
         self._filtering = True
         self._sample_rate = 0
         self._rnnoise = None
         self._rnnoise_ready = False
+        self._resampler_in = None
+        self._resampler_out = None
+        self._resampler_quality = resampler_quality
 
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
@@ -49,17 +58,33 @@ class RNNoiseFilter(BaseAudioFilter):
             sample_rate: The sample rate of the input transport in Hz.
         """
         self._sample_rate = sample_rate
-        if self._sample_rate != 48000:
-            logger.warning(f"RNNoise filter needs sample rate 48000 Hz (got {self._sample_rate})")
-            self._rnnoise_ready = False
-        else:
-            self._rnnoise = RNNoise(sample_rate=self._sample_rate)
+
+        try:
+            # RNNoise always requires 48kHz
+            self._rnnoise = RNNoise(sample_rate=48000)
             self._rnnoise_ready = True
+        except Exception as e:
+            logger.error(f"Failed to initialize RNNoise: {e}")
+            self._rnnoise_ready = False
+            return
+
+        if self._sample_rate != 48000:
+            logger.info(f"RNNoise filter enabling resampling: {self._sample_rate} <-> 48000")
+            try:
+                from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
+
+                self._resampler_in = SOXRStreamAudioResampler(quality=self._resampler_quality)
+                self._resampler_out = SOXRStreamAudioResampler(quality=self._resampler_quality)
+            except ImportError as e:
+                logger.error(f"Could not import SOXRStreamAudioResampler for resampling: {e}")
+                self._rnnoise_ready = False
 
     async def stop(self):
         """Clean up the RNNoise engine when stopping."""
         self._rnnoise = None
         self._rnnoise_ready = False
+        self._resampler_in = None
+        self._resampler_out = None
 
     async def process_frame(self, frame: FilterControlFrame):
         """Process control frames to enable/disable filtering.
@@ -85,25 +110,41 @@ class RNNoiseFilter(BaseAudioFilter):
         if not self._rnnoise_ready or not self._filtering:
             return audio
 
+        # Resample input if needed
+        in_audio = audio
+        if self._sample_rate != 48000 and self._resampler_in:
+            in_audio = await self._resampler_in.resample(audio, self._sample_rate, 48000)
+
         # Convert bytes to numpy array (int16)
-        audio_samples = np.frombuffer(audio, dtype=np.int16)
+        audio_samples = np.frombuffer(in_audio, dtype=np.int16)
 
         # Process chunk through RNNoise
-        # process_chunk handles buffering internally and yields (speech_prob, denoised_frame)
+        # denoise_chunk handles buffering internally and yields (speech_prob, denoised_frame)
         # denoised_frame is in float32 format normalized to [-1.0, 1.0]
         filtered_frames = []
-        for speech_prob, denoised_frame in self._rnnoise.process_chunk(audio_samples, last=False):
-            # Convert denoised_frame from float32 [-1.0, 1.0] to int16
-            denoised_int16 = (denoised_frame * 32767).astype(np.int16)
-            # Handle mono audio (squeeze channel dimension if present)
-            if len(denoised_int16.shape) > 1 and denoised_int16.shape[1] == 1:
-                denoised_int16 = denoised_int16[:, 0]
+        for speech_prob, denoised_frame in self._rnnoise.denoise_chunk(audio_samples):
+            # Check if output is float (needs scaling) or int16 (ready)
+            if np.issubdtype(denoised_frame.dtype, np.floating):
+                denoised_int16 = (denoised_frame * 32767).astype(np.int16)
+            else:
+                denoised_int16 = denoised_frame.astype(np.int16)
+
+            # Handle shape (pyrnnoise returns (channels, samples), e.g. (1, 480))
+            # We want flat array for mono
+            if denoised_int16.ndim > 1:
+                denoised_int16 = denoised_int16.squeeze()
+
             filtered_frames.append(denoised_int16)
 
         # Combine all processed frames
         if filtered_frames:
-            filtered_audio = np.concatenate(filtered_frames)
-            return filtered_audio.tobytes()
+            filtered_audio = np.concatenate(filtered_frames).tobytes()
+
+            # Resample output if needed
+            if self._sample_rate != 48000 and self._resampler_out:
+                return await self._resampler_out.resample(filtered_audio, 48000, self._sample_rate)
+
+            return filtered_audio
 
         # No frames processed yet (buffering)
         return b""
