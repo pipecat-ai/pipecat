@@ -126,6 +126,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             credentials=self._credentials,
             project=self._project_id,
             location=self._location,
+            http_options=self._http_options,
         )
 
     @property

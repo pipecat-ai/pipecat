@@ -24,6 +24,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
@@ -681,7 +682,7 @@ class GeminiLiveLLMService(LLMService):
         self._video_input_paused = start_video_paused
         self._context = None
         self._api_key = api_key
-        self._http_options = http_options
+        self._http_options = update_google_client_http_options(http_options)
         self._session: AsyncSession = None
         self._connection_task = None
 

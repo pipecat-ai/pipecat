@@ -22,6 +22,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -713,7 +714,7 @@ class GoogleLLMService(LLMService):
         self.set_model_name(model)
         self._api_key = api_key
         self._system_instruction = system_instruction
-        self._http_options = http_options
+        self._http_options = update_google_client_http_options(http_options)
 
         self._settings = {
             "max_tokens": params.max_tokens,
