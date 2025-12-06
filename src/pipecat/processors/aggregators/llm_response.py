@@ -76,11 +76,18 @@ class LLMUserAggregatorParams:
         enable_emulated_vad_interruptions: When True, allows emulated VAD events
             to interrupt the bot when it's speaking. When False, emulated speech
             is ignored while the bot is speaking.
+        enable_interim_transcription_interruptions: When True, evaluates
+            interruption strategies on interim (partial) transcriptions for
+            faster response. This allows the bot to be interrupted as soon as
+            the interruption threshold is met, without waiting for the final
+            transcription. When False, interruptions are only evaluated on
+            final transcriptions. Default is True for lower latency.
     """
 
     aggregation_timeout: float = 0.5
     turn_emulated_vad_timeout: float = 0.8
     enable_emulated_vad_interruptions: bool = False
+    enable_interim_transcription_interruptions: bool = True
 
 
 @dataclass
@@ -535,6 +542,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                     logger.debug(
                         "Interruption conditions met - pushing interruption and aggregation"
                     )
+                    # InterruptionFrame is processed synchronously through all processors,
+                    # ensuring the assistant aggregator saves its partial response before
+                    # we add the user's message to the context.
                     await self.push_interruption_task_frame_and_wait()
                     await self._process_aggregation()
                 else:
@@ -643,8 +653,39 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         # Reset aggregation timer.
         self._aggregation_event.set()
 
-    async def _handle_interim_transcription(self, _: InterimTranscriptionFrame):
+    async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
         self._seen_interim_results = True
+
+        # If interim transcription interruptions are enabled, bot is speaking,
+        # and interruption strategies are configured, evaluate interruption on
+        # interim results for faster response. This allows interrupting without
+        # waiting for the final transcription.
+        if (
+            self._params.enable_interim_transcription_interruptions
+            and self.interruption_strategies
+            and self._bot_speaking
+            and frame.text
+            and not self._wait_for_interruption  # Guard against re-entry during interruption
+        ):
+            # Temporarily set aggregation to interim text for strategy evaluation
+            original_aggregation = self._aggregation
+            self._aggregation = frame.text.strip()
+
+            if len(self._aggregation) > 0:
+                should_interrupt = await self._should_interrupt_based_on_strategies()
+                if should_interrupt:
+                    logger.debug(
+                        "Interruption conditions met on interim transcription - triggering early interruption"
+                    )
+                    # InterruptionFrame is processed synchronously through all processors,
+                    # ensuring the assistant aggregator saves its partial response before
+                    # we add the user's message to the context.
+                    await self.push_interruption_task_frame_and_wait()
+                    await self._process_aggregation()
+                    return  # Don't restore original aggregation, we've processed it
+
+            # Restore original aggregation if we didn't interrupt
+            self._aggregation = original_aggregation
 
     def _create_aggregation_task(self):
         if not self._aggregation_task:
