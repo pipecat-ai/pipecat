@@ -331,6 +331,9 @@ class LLMUserAggregator(LLMContextAggregator):
                     logger.debug(
                         "Interruption conditions met - pushing interruption and aggregation"
                     )
+                    # InterruptionFrame is processed synchronously through all processors,
+                    # ensuring the assistant aggregator saves its partial response before
+                    # we add the user's message to the context.
                     await self.push_interruption_task_frame_and_wait()
                     await self._process_aggregation()
                 else:
@@ -444,8 +447,41 @@ class LLMUserAggregator(LLMContextAggregator):
         # Reset aggregation timer.
         self._aggregation_event.set()
 
-    async def _handle_interim_transcription(self, _: InterimTranscriptionFrame):
+    async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
         self._seen_interim_results = True
+
+        # If interim transcription interruptions are enabled, bot is speaking,
+        # and interruption strategies are configured, evaluate interruption on
+        # interim results for faster response. This allows interrupting without
+        # waiting for the final transcription.
+        if (
+            self._params.enable_interim_transcription_interruptions
+            and self.interruption_strategies
+            and self._bot_speaking
+            and frame.text
+            and not self._wait_for_interruption  # Guard against re-entry during interruption
+        ):
+            # Temporarily set aggregation to interim text for strategy evaluation
+            original_aggregation = self._aggregation
+            self._aggregation = [
+                TextPartForConcatenation(frame.text.strip(), includes_inter_part_spaces=False)
+            ]
+
+            if len(self.aggregation_string()) > 0:
+                should_interrupt = await self._should_interrupt_based_on_strategies()
+                if should_interrupt:
+                    logger.debug(
+                        "Interruption conditions met on interim transcription - triggering early interruption"
+                    )
+                    # InterruptionFrame is processed synchronously through all processors,
+                    # ensuring the assistant aggregator saves its partial response before
+                    # we add the user's message to the context.
+                    await self.push_interruption_task_frame_and_wait()
+                    await self._process_aggregation()
+                    return  # Don't restore original aggregation, we've processed it
+
+            # Restore original aggregation if we didn't interrupt
+            self._aggregation = original_aggregation
 
     def _create_aggregation_task(self):
         if not self._aggregation_task:
