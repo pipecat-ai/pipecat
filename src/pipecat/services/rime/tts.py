@@ -850,8 +850,7 @@ class RimeNonJsonTTSService(WebsocketTTSService):
                     )
                     await self.push_frame(frame)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(error_msg=f"Error: {e}", exception=e)
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -877,8 +876,7 @@ class RimeNonJsonTTSService(WebsocketTTSService):
                 await self.start_tts_usage_metrics(text)
 
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
