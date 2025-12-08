@@ -160,7 +160,7 @@ def build_elevenlabs_voice_settings(
 class PronunciationDictionaryLocator(BaseModel):
     """Locator for a pronunciation dictionary.
 
-    Attributes:
+    Parameters:
         pronunciation_dictionary_id: The ID of the pronunciation dictionary.
         version_id: The version ID of the pronunciation dictionary.
     """
@@ -424,8 +424,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                         json.dumps({"context_id": self._context_id, "close_context": True})
                     )
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._context_id = None
             self._started = False
 
@@ -536,9 +535,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
             self._websocket = None
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -553,8 +551,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self._websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._started = False
             self._context_id = None
@@ -584,8 +581,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     json.dumps({"context_id": self._context_id, "close_context": True})
                 )
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._context_id = None
             self._started = False
             self._partial_word = ""
@@ -735,20 +731,16 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     await self._websocket.send(json.dumps(msg))
                     logger.trace(f"Created new context {self._context_id}")
 
-                    await self._send_text(text)
-                    await self.start_tts_usage_metrics(text)
-                else:
-                    await self._send_text(text)
+                await self._send_text(text)
+                await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
                 yield TTSStoppedFrame()
-                yield ErrorFrame(error=f"{self} error: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 self._started = False
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class ElevenLabsHttpTTSService(WordTTSService):
@@ -1043,7 +1035,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"{self} error: {error_text}")
                     yield ErrorFrame(error=f"ElevenLabs API error: {error_text}")
                     return
 
@@ -1091,8 +1082,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         logger.warning(f"Failed to parse JSON from stream: {e}")
                         continue
                     except Exception as e:
-                        logger.error(f"{self} exception: {e}")
-                        yield ErrorFrame(error=f"{self} error: {e}")
+                        yield ErrorFrame(error=f"Unknown error occurred: {e}")
                         continue
 
                 # After processing all chunks, emit any remaining partial word
@@ -1116,8 +1106,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                     self._previous_text = text
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             # Let the parent class handle TTSStoppedFrame

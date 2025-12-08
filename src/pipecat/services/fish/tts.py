@@ -76,7 +76,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         api_key: str,
         reference_id: Optional[str] = None,  # This is the voice ID
         model: Optional[str] = None,  # Deprecated
-        model_id: str = "speech-1.5",
+        model_id: str = "s1",
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -93,7 +93,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 The `model` parameter is deprecated and will be removed in version 0.1.0.
                 Use `reference_id` instead to specify the voice model.
 
-            model_id: Specify which Fish Audio TTS model to use (e.g. "speech-1.5")
+            model_id: Specify which Fish Audio TTS model to use (e.g. "s1")
             output_format: Audio output format. Defaults to "pcm".
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
@@ -228,8 +228,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -243,8 +242,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 await self._websocket.send(ormsgpack.packb(stop_message))
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._request_id = None
             self._started = False
@@ -286,8 +284,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                                 continue
 
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -323,8 +320,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 flush_message = {"event": "flush"}
                 await self._get_websocket().send(ormsgpack.packb(flush_message))
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                yield ErrorFrame(error=f"{self} error: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -332,5 +328,4 @@ class FishAudioTTSService(InterruptibleTTSService):
             yield None
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")

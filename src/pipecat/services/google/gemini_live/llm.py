@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
+    AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -1174,7 +1175,7 @@ class GeminiLiveLLMService(LLMService):
             self._connection_task = self.create_task(self._connection_task_handler(config=config))
 
         except Exception as e:
-            await self.push_error(ErrorFrame(error=f"{self} Initialization error: {e}"))
+            await self.push_error(error_msg=f"Initialization error: {e}", exception=e)
 
     async def _connection_task_handler(self, config: LiveConnectConfig):
         async with self._client.aio.live.connect(model=self._model_name, config=config) as session:
@@ -1251,11 +1252,11 @@ class GeminiLiveLLMService(LLMService):
         )
 
         if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-            logger.error(
+            error_msg = (
                 f"Max consecutive failures ({MAX_CONSECUTIVE_FAILURES}) reached, "
                 "treating as fatal error"
             )
-            await self.push_error(ErrorFrame(error=f"{self} Error in receive loop: {error}"))
+            await self.push_error(error_msg=error_msg, exception=error)
             return False
         else:
             logger.info(
@@ -1283,7 +1284,7 @@ class GeminiLiveLLMService(LLMService):
             self._completed_tool_calls = set()
             self._disconnecting = False
         except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
     async def _send_user_audio(self, frame):
         """Send user audio frame to Gemini Live API."""
@@ -1644,7 +1645,7 @@ class GeminiLiveLLMService(LLMService):
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
-        frame = TTSTextFrame(text=text)
+        frame = TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
         # Gemini Live text already includes any necessary inter-chunk spaces
         frame.includes_inter_frame_spaces = True
 
@@ -1722,6 +1723,8 @@ class GeminiLiveLLMService(LLMService):
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cache_read_input_tokens=usage.cached_content_token_count,
+            reasoning_tokens=usage.thoughts_token_count,
         )
 
         await self.start_llm_usage_metrics(tokens)
@@ -1742,7 +1745,7 @@ class GeminiLiveLLMService(LLMService):
         # state management, and that exponential backoff for retries can have
         # cost/stability implications for a service cluster, let's just treat a
         # send-side error as fatal.
-        await self.push_error(ErrorFrame(error=f"{self} Send error: {error}", fatal=True))
+        await self.push_error(error_msg=f"Send error: {error}")
 
     def create_context_aggregator(
         self,

@@ -7,7 +7,7 @@
 """MCP (Model Context Protocol) client for integrating external tools with LLMs."""
 
 import json
-from typing import Any, Dict, List, TypeAlias
+from typing import Any, Callable, Dict, List, Optional, TypeAlias
 
 from loguru import logger
 
@@ -46,17 +46,24 @@ class MCPClient(BaseObject):
     def __init__(
         self,
         server_params: ServerParameters,
+        tools_filter: Optional[List[str]] = None,
+        tools_output_filters: Optional[Dict[str, Callable[[Any], Any]]] = None,
         **kwargs,
     ):
         """Initialize the MCP client with server parameters.
 
         Args:
             server_params: Server connection parameters (stdio or SSE).
+            tools_filter: Optional list of tool names to register. If None, all tools are registered.
+            tools_output_filters: Optional dict mapping tool names to filter functions that process tool outputs.
+                                  Each filter function receives the raw tool output (any type) and returns the processed output (any type).
             **kwargs: Additional arguments passed to the parent BaseObject.
         """
         super().__init__(**kwargs)
         self._server_params = server_params
         self._session = ClientSession
+        self._tools_filter = tools_filter
+        self._tools_output_filters = tools_output_filters or {}
 
         if isinstance(server_params, StdioServerParameters):
             self._client = stdio_client
@@ -176,7 +183,6 @@ class MCPClient(BaseObject):
         except Exception as e:
             error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
             logger.error(error_msg)
-            logger.exception("Full exception details:")
             await params.result_callback(error_msg)
 
     async def _stdio_list_tools(self) -> ToolsSchema:
@@ -207,7 +213,6 @@ class MCPClient(BaseObject):
         except Exception as e:
             error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
             logger.error(error_msg)
-            logger.exception("Full exception details:")
             await params.result_callback(error_msg)
 
     async def _streamable_http_list_tools(self) -> ToolsSchema:
@@ -246,7 +251,6 @@ class MCPClient(BaseObject):
         except Exception as e:
             error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
             logger.error(error_msg)
-            logger.exception("Full exception details:")
             await params.result_callback(error_msg)
 
     async def _call_tool(self, session, function_name, arguments, result_callback):
@@ -267,13 +271,26 @@ class MCPClient(BaseObject):
                     else:
                         # logger.debug(f"Non-text result content: '{content}'")
                         pass
-                logger.info(f"Tool '{function_name}' completed successfully")
-                logger.debug(f"Final response: {response}")
             else:
                 logger.error(f"Error getting content from {function_name} results.")
 
-        final_response = response if len(response) else "Sorry, could not call the mcp tool"
-        await result_callback(final_response)
+        # Apply output filter if configured for this tool
+        if function_name in self._tools_output_filters:
+            try:
+                response = self._tools_output_filters[function_name](response)
+                logger.debug(f"Final response (after filter): {response}")
+
+            except Exception:
+                logger.error(f"Error applying output filter for {function_name}")
+                response = ""
+
+        if response and len(response) and isinstance(response, str):
+            logger.info(f"Tool '{function_name}' completed successfully")
+            logger.debug(f"Final response: {response}")
+        else:
+            response = "Sorry, could not call the mcp tool"
+
+        await result_callback(response)
 
     async def _list_tools_helper(self, session):
         available_tools = await session.list_tools()
@@ -286,6 +303,12 @@ class MCPClient(BaseObject):
 
         for tool in available_tools.tools:
             tool_name = tool.name
+
+            # Apply tools filter if configured
+            if self._tools_filter and tool_name not in self._tools_filter:
+                logger.debug(f"Skipping tool '{tool_name}' - not in allowed tools list")
+                continue
+
             logger.debug(f"Processing tool: {tool_name}")
             logger.debug(f"Tool description: {tool.description}")
 
@@ -302,7 +325,6 @@ class MCPClient(BaseObject):
 
             except Exception as e:
                 logger.error(f"Failed to read tool '{tool_name}': {str(e)}")
-                logger.exception("Full exception details:")
                 continue
 
         logger.debug(f"Completed reading {len(tool_schemas)} tools")
