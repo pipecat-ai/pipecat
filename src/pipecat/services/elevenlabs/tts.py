@@ -160,7 +160,7 @@ def build_elevenlabs_voice_settings(
 class PronunciationDictionaryLocator(BaseModel):
     """Locator for a pronunciation dictionary.
 
-    Attributes:
+    Parameters:
         pronunciation_dictionary_id: The ID of the pronunciation dictionary.
         version_id: The version ID of the pronunciation dictionary.
     """
@@ -731,10 +731,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     await self._websocket.send(json.dumps(msg))
                     logger.trace(f"Created new context {self._context_id}")
 
-                    await self._send_text(text)
-                    await self.start_tts_usage_metrics(text)
-                else:
-                    await self._send_text(text)
+                await self._send_text(text)
+                await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield TTSStoppedFrame()
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")

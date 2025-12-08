@@ -63,6 +63,7 @@ fireworks = []
 fish = [ "ormsgpack~=1.7.0", "pipecat-ai[websockets-base]" ]
 gladia = [ "pipecat-ai[websockets-base]" ]
 google = [ "google-cloud-speech>=2.33.0,<3", "google-cloud-texttospeech>=2.31.0,<3", "google-genai>=1.41.0,<2", "pipecat-ai[websockets-base]" ]
+gradium = [ "pipecat-ai[websockets-base]" ]
 grok = []
 groq = [ "groq~=0.23.0" ]
 gstreamer = [ "pygobject~=3.50.0" ]
@@ -129,6 +130,7 @@ dev = [
     "setuptools~=78.1.1",
     "setuptools_scm~=8.3.1",
     "python-dotenv>=1.0.1,<2.0.0",
+    "towncrier~=25.8.0",
 ]
 
 docs = [
@@ -159,7 +161,7 @@ where = ["src"]
     "src/pipecat/audio/dtmf/dtmf-star.wav",
 ]
 "pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
-"pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.0.onnx"]
+"pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.1-cpu.onnx"]
 
 [tool.pytest.ini_options]
 addopts = "--verbose"
@@ -206,3 +208,44 @@ convention = "google"
 command_line = "--module pytest"
 source = ["src"]
 omit = ["*/tests/*"]
+
+[tool.towncrier]
+package = "pipecat"
+package_dir = "src"
+filename = "CHANGELOG.md"
+directory = "changelog"
+start_string = "<!-- towncrier release notes start -->\n"
+template = "changelog/_template.md.j2"
+title_format = "## [{version}] - {project_date}"
+underlines = ["", "", ""]
+wrap = true
+
+[[tool.towncrier.type]]
+directory = "added"
+name = "Added"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "changed"
+name = "Changed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecated"
+name = "Deprecated"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removed"
+name = "Removed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "fixed"
+name = "Fixed"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "security"
+name = "Security"
+showcontent = true

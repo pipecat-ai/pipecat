@@ -203,7 +203,7 @@ def parse_start_end_tags(
 class TextPartForConcatenation:
     """Class representing a part of text for concatenation with concatenate_aggregated_text.
 
-    Attributes:
+    Parameters:
         text: The text content.
         includes_inter_part_spaces: Whether any necessary inter-frame
             (leading/trailing) spaces are already included in the text.

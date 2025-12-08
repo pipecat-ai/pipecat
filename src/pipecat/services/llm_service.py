@@ -166,20 +166,17 @@ class LLMService(AIService):
     # However, subclasses should override this with a more specific adapter when necessary.
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
-    def __init__(self, run_in_parallel: bool = True, wait_for_all: bool = False, **kwargs):
+    def __init__(self, run_in_parallel: bool = True, **kwargs):
         """Initialize the LLM service.
 
         Args:
             run_in_parallel: Whether to run function calls in parallel or sequentially.
                 Defaults to True.
-            wait_for_all: Whether to wait for all function calls (parallel or
-                sequential) to complete. Defaults to False.
             **kwargs: Additional arguments passed to the parent AIService.
 
         """
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
-        self._wait_for_all = wait_for_all
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
@@ -546,29 +543,10 @@ class LLMService(AIService):
             self._function_call_tasks[task] = runner_item
             task.add_done_callback(self._function_call_task_finished)
 
-        if self._wait_for_all:
-            # Protect gather from being cancelled. This will protect all tasks
-            # form being cancelled. That is fine, because we cancel them
-            # explicitly when handling the interruption (InterruptionFrame). We
-            # need to set `return_exceptions=True` because `asyncio.shield()`
-            # will get cancelled (from FrameProcessor process task), then
-            # `asyncio.gather()` will keep running (because it was protected by
-            # the shield). Then, individiaul function call tasks will be
-            # cancelled by us and we don't need to propagate those
-            # CancelledErrors at that point.
-            await asyncio.shield(asyncio.gather(*tasks, return_exceptions=True))
-
     async def _run_sequential_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
-        if self._wait_for_all:
-            # Run each function call sequentially, waiting for each to complete.
-            for runner_item in runner_items:
-                self._function_call_tasks[None] = runner_item
-                await self._run_function_call(runner_item)
-                del self._function_call_tasks[None]
-        else:
-            # Enqueue all function calls for background execution.
-            for runner_item in runner_items:
-                await self._sequential_runner_queue.put(runner_item)
+        # Enqueue all function calls for background execution.
+        for runner_item in runner_items:
+            await self._sequential_runner_queue.put(runner_item)
 
     async def _call_start_function(
         self, context: OpenAILLMContext | LLMContext, function_name: str

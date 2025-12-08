@@ -20,7 +20,6 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -349,6 +348,7 @@ class CartesiaSTTService(WebsocketSTTService):
                         self._user_id,
                         time_now_iso8601(),
                         language,
+                        result=data,
                     )
                 )
                 await self._handle_transcription(transcript, is_final, language)
@@ -361,5 +361,6 @@ class CartesiaSTTService(WebsocketSTTService):
                         self._user_id,
                         time_now_iso8601(),
                         language,
+                        result=data,
                     )
                 )

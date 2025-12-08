@@ -935,8 +935,8 @@ class RTVIObserverParams:
         system_logs_enabled: Indicates if system logs should be sent.
         errors_enabled: [Deprecated] Indicates if errors messages should be sent.
         skip_aggregator_types: List of aggregation types to skip sending as tts/output messages.
-          Note: if using this to avoid sending secure information, be sure to also disable
-                bot_llm_enabled to avoid leaking through LLM messages.
+            Note: if using this to avoid sending secure information, be sure to also disable
+            bot_llm_enabled to avoid leaking through LLM messages.
         bot_output_transforms: A list of callables to transform text before just before sending it
             to TTS. Each callable takes the aggregated text and its type, and returns the
             transformed text. To register, provide a list of tuples of

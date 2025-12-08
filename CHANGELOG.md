@@ -5,21 +5,28 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+<!-- towncrier release notes start -->
+
+## [0.0.97] - 2025-12-05
 
 ### Added
 
-- Added `wait_for_all` argument to the base `LLMService`. When enabled, this
-  ensures all function calls complete before returning results to the LLM (i.e.,
-  before running a new inference with those results).
+- Added new Gradium services, `GradiumSTTService` and `GradiumTTSService`, for
+  speech-to-text and text-to-speech functionality using Gradium's API.
+
+- Additions for `AsyncAITTSService` and `AsyncAIHttpTTSService`:
+
+  - Added new `languages`: `pt`, `nl`, `ar`, `ru`, `ro`, `ja`, `he`, `hy`,
+    `tr`, `hi`, `zh`.
+  - Updated the default model to `asyncflow_multilingual_v1.0` for improved
+    accuracy and broader language coverage.
+
+- Added optional tool and tool output filters for MCP services.
 
 ### Changed
 
-- Improved interruption handling to prevent bots from repeating themselves.
-  LLM services that return multiple sentences in a single response (e.g.,
-  `GoogleLLMService`) are now split into individual sentences before being sent
-  to TTS. This ensures interruptions occur at sentence boundaries, preventing
-  the bot from repeating content after being interrupted during long responses.
+- Updated Deepgram logging to include Deepgram request IDs for improved
+  debugging.
 
 - Text Aggregation Improvements:
 
@@ -31,20 +38,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `PatternPairAggregator` now inherit from `SimpleTextAggregator`, reusing
     the base class's sentence detection logic.
 
+- Improved interruption handling to prevent bots from repeating themselves. LLM
+  services that return multiple sentences in a single response (e.g.,
+  `GoogleLLMService`) are now split into individual sentences before being sent
+  to TTS. This ensures interruptions occur at sentence boundaries, preventing
+  the bot from repeating content after being interrupted during long responses.
+
 - Updated `AICFilter` to use Quail STT as the default model
   (`AICModelType.QUAIL_STT`). Quail STT is optimized for human-to-machine
   interaction (e.g., voice agents, speech-to-text) and operates at a native
   sample rate of 16 kHz with fixed enhancement parameters.
 
-- Updated Deepgram logging to include Deepgram request IDs for improved debugging.
+- If an unexpected exception is caught, or if `FrameProcessor.push_error()` is
+  called with an exception, the file name and line number where the exception
+  occured are now logged.
+
+- Updated Smart Turn model weights to v3.1.
+
+- Smart Turn analyzer now uses the full context of the turn rather than just
+  the audio since VAD last triggered.
+
+- Updated `CartesiaSTTService` to return the full transcription `result` in the
+  `TranscriptionFrame` and `InterimTranscriptionFrame`. This provides access to
+  word timestamp data.
+
+- `HumeTTSService` changes:
+
+  - Added tracking headers (`X-Hume-Client-Name` and `X-Hume-Client-Version`)
+    to all requests made by `HumeTTSService` to the Hume API for better usage
+    tracking and analytics.
+  - Added `stop()` and `cancel()` cleanup methods to `HumeTTSService` to
+    properly close the HTTP client and prevent resource leaks.
 
 ### Deprecated
-
-- Package `pipecat.sync` is deprecated, use `pipecat.utils.sync` instead.
-
-- The `noise_gate_enable` parameter in `AICFilter` is deprecated and no longer
-  has any effect. Noise gating is now handled automatically by the AIC VAD
-  system. Use `AICFilter.create_vad_analyzer()` for VAD functionality instead.
 
 - NVIDIA Services name changes (all functionality is unchanged):
 
@@ -54,28 +80,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Use `uv pip install pipecat-ai[nvidia]` instead of
     `uv pip install pipecat-ai[riva]`
 
+- The `noise_gate_enable` parameter in `AICFilter` is deprecated and no longer
+  has any effect. Noise gating is now handled automatically by the AIC VAD
+  system. Use `AICFilter.create_vad_analyzer()` for VAD functionality instead.
+
+- Package `pipecat.sync` is deprecated, use `pipecat.utils.sync` instead.
+
 ### Fixed
 
-- Fixed an issue where `LLMTextFrame.skip_tts` was being overwritten by LLM
-  services.
+- Fixed bug in `PatternPairAggregator` where pattern handlers could be called
+  multiple times for `KEEP` or `AGGREGATE` patterns.
 
 - Fixed sentence aggregation to correctly handle ambiguous punctuation in
   streaming text, such as currency ("$29.95") and abbreviations ("Mr. Smith").
 
-- Fixed bug in `PatternPairAggregator` where pattern handlers could be called
-  multiple times for `KEEP` or `AGGREGATE` patterns.
+- Fixed an issue in `AWSTranscribeSTTService` where the `region` arg was always
+  set to `us-east-1` when providing an AWS_REGION env var.
 
 - Fixed an issue in `SarvamTTSService` where the last sentence was not being
   spoken. Now, audio is flushed when the TTS services receives the
   `LLMFullResponseEndFrame` or `EndFrame`.
 
-- Fixed an issue in `AWSTranscribeSTTService` where the `region` arg was
-  always set to `us-east-1` when providing an AWS_REGION env var.
-
 - Fixed an issue in `DeepgramTTSService` where a `TTSStoppedFrame` was
   incorrectly pushed after a functional call. This caused an issue with the
   voice-ui-kit's conversational panel rending of the LLM output after a
   function call.
+
+- Fixed an issue where `LLMTextFrame.skip_tts` was being overwritten by LLM
+  services.
+
+- Fixed an issue that caused `WebsocketService` instances to attempt
+  reconnection during shutdown.
+
+- Fixed an issue in `ElevenLabsTTSService` where character usage metrics were
+  only reported on the first TTS generation per turn.
 
 ## [0.0.96] - 2025-11-26 🦃 "Happy Thanksgiving!" 🦃
 
