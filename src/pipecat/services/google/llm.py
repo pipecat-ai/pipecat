@@ -942,6 +942,7 @@ class GoogleLLMService(LLMService):
             )
 
             function_calls = []
+            previous_part = None
             async for chunk in response:
                 # Stop TTFB metrics after the first chunk
                 await self.stop_ttfb_metrics()
@@ -1005,25 +1006,49 @@ class GoogleLLMService(LLMService):
                                 )
                                 await self.push_frame(frame)
 
-                            # With Gemini 3 Pro (and, somewhat surprisingly,
-                            # other models models, too, especially when
+                            # With Gemini 3 Pro (and, contrary to Google's
+                            # docs, other models models, too, especially when
                             # functions are involved in the conversation),
-                            # thought signatures can be included in any kind of
-                            # part, not just function calls. It will come in
-                            # the last part of a response.
+                            # thought signatures can be associated with any
+                            # kind of Part, not just function calls.
+                            #
+                            # They should always be included in the last
+                            # response Part. (*)
+                            #
+                            # (*) Since we're using the streaming API, though,
+                            # where text Parts may be split across multiple
+                            # chunks (each represented by a Part, confusingly),
+                            # signatures may actually appear with the first
+                            # chunk (Gemini 2.5) or in a trailing empty-text
+                            # chunk (Gemini 3 Pro).
                             if part.thought_signature and not part.function_call:
+                                # Save a "bookmark" for the signature, so we
+                                # can later stick it in the right place in
+                                # context when sending it back to the LLM to
+                                # continue the conversation.
+                                bookmark = {}
+                                if part.inline_data and part.inline_data.data:
+                                    bookmark["inline_data"] = {"inline_data": part.inline_data}
+                                elif part.text is not None:
+                                    # Account for Gemini 3 Pro trailing
+                                    # empty-text chunk by using search_result,
+                                    # which accumulates all text so far.
+                                    bookmark["text"] = search_result
                                 await self.push_frame(
                                     LLMMessagesAppendFrame(
                                         [
                                             self.get_llm_adapter().create_llm_specific_message(
                                                 {
                                                     "type": "non_fn_thought_signature",
-                                                    "signed_part": part,
+                                                    "signature": part.thought_signature,
+                                                    "bookmark": bookmark,
                                                 }
                                             )
                                         ]
                                     )
                                 )
+
+                            previous_part = part
 
                     if (
                         candidate.grounding_metadata
