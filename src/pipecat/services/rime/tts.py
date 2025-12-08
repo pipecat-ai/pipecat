@@ -627,8 +627,10 @@ class RimeNonJsonTTSService(WebsocketTTSService):
         - Does not support word-level timestamps or context IDs.
         - Intended specifically for integrations where the TTS provider only
           accepts and returns non-JSON messages.
+
+    Note:
         - Arcana and similar models may add JSON WebSocket support in the
-          future; this service focuses on the current plain text protocol.
+          future. This service focuses on the current plain text protocol.
     """
 
     class InputParams(BaseModel):
