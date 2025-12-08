@@ -222,9 +222,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 # messages
                 if (
                     isinstance(message.message, dict)
-                    and message.message.get("type") == "tool_call_extra"
-                    and isinstance(data := message.message.get("data"), dict)
-                    and (thought_signature := data.get("thought_signature"))
+                    and message.message.get("type") == "fn_call_thought_signature"
+                    and (thought_signature := message.message.get("signature"))
                 ):
                     self._apply_function_call_thought_signature_to_messages(
                         thought_signature, message.message.get("tool_call_id"), messages

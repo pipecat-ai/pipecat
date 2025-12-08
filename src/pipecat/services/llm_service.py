@@ -14,6 +14,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    List,
     Mapping,
     Optional,
     Protocol,
@@ -44,7 +45,11 @@ from pipecat.frames.frames import (
     StartFrame,
     UserImageRequestFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+)
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -127,9 +132,9 @@ class FunctionCallRunnerItem:
         tool_call_id: A unique identifier for the function call.
         arguments: The arguments for the function.
         context: The LLM context.
-        llm_specific_extra: Optional extra data specific to particular LLMs, e.g.:
-            {"google": {"thought_signature": ...}}
-            Uses the LLM adapter's ID for LLM-specific messages as the key.
+        append_extra_context_messages: Optional extra messages to append to the
+            context after the function call message. Used to add Google
+            function-call-related thought signatures to the context.
         run_llm: Optional flag to control LLM execution after function call.
     """
 
@@ -138,7 +143,7 @@ class FunctionCallRunnerItem:
     tool_call_id: str
     arguments: Mapping[str, Any]
     context: OpenAILLMContext | LLMContext
-    llm_specific_extra: Optional[Dict[str, Any]] = None
+    append_extra_context_messages: Optional[List[LLMContextMessage]] = None
     run_llm: Optional[bool] = None
 
 
@@ -460,7 +465,7 @@ class LLMService(AIService):
                     tool_call_id=function_call.tool_call_id,
                     arguments=function_call.arguments,
                     context=function_call.context,
-                    llm_specific_extra=function_call.llm_specific_extra,
+                    append_extra_context_messages=function_call.append_extra_context_messages,
                 )
             )
 
@@ -585,7 +590,7 @@ class LLMService(AIService):
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
             arguments=runner_item.arguments,
-            llm_specific_extra=runner_item.llm_specific_extra,
+            append_extra_context_messages=runner_item.append_extra_context_messages,
             cancel_on_interruption=item.cancel_on_interruption,
         )
 

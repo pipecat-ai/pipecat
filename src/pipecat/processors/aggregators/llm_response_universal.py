@@ -743,23 +743,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             }
         )
 
-        # If there's LLM-specific extra data associated with this function call
-        # add it to the context as an adjacent LLM-specific message. The
-        # LLM-specific adapter can then use this extra data as needed, for
-        # example by merging it into the tool call message. This is how Google's
-        # "thought_signature" makes it into the tool call message.
-        if frame.llm_specific_extra:
-            for key, value in frame.llm_specific_extra.items():
-                self._context.add_message(
-                    LLMSpecificMessage(
-                        llm=key,
-                        message={
-                            "type": "tool_call_extra",
-                            "data": value,
-                            "tool_call_id": frame.tool_call_id,
-                        },
-                    )
-                )
+        # Append to context any specified extra context messages
+        if frame.append_extra_context_messages:
+            self._context.add_messages(frame.append_extra_context_messages)
 
         self._function_calls_in_progress[frame.tool_call_id] = frame
 

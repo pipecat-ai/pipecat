@@ -43,7 +43,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -985,11 +985,16 @@ class GoogleLLMService(LLMService):
                                         tool_call_id=id,
                                         function_name=function_call.name,
                                         arguments=function_call.args or {},
-                                        llm_specific_extra={
-                                            self.get_llm_adapter().id_for_llm_specific_messages: {
-                                                "thought_signature": part.thought_signature
-                                            }
-                                        }
+                                        append_extra_context_messages=[
+                                            LLMSpecificMessage(
+                                                llm=self.get_llm_adapter().id_for_llm_specific_messages,
+                                                message={
+                                                    "type": "fn_call_thought_signature",
+                                                    "signature": part.thought_signature,
+                                                    "tool_call_id": id,
+                                                },
+                                            )
+                                        ]
                                         if part.thought_signature
                                         else None,
                                     )
