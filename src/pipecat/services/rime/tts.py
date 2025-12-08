@@ -36,7 +36,6 @@ from pipecat.services.tts_service import (
     TTSService,
     WebsocketTTSService,
 )
-from pipecat.transcriptions import language
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
