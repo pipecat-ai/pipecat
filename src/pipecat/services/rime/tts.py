@@ -599,9 +599,9 @@ class RimeNonJsonTTSService(WebsocketTTSService):
     """
 
     class InputParams(BaseModel):
-        """Configuration parameters for Rime WebSocket TTS service.
+        """Configuration parameters for Rime Non-JSON WebSocket TTS service.
 
-        Parameters:
+        Args:
             language: Language for synthesis. Defaults to English.
             segment: Text segmentation mode ("immediate", "bySentence", "never").
             repetition_penalty: Token repetition penalty (1.0-2.0).
@@ -744,7 +744,7 @@ class RimeNonJsonTTSService(WebsocketTTSService):
         await self._disconnect_websocket()
 
     async def _connect_websocket(self):
-        """Establish WebSocket connection to Rime None json websocket."""
+        """Establish WebSocket connection to Rime non-JSON websocket."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
@@ -770,7 +770,7 @@ class RimeNonJsonTTSService(WebsocketTTSService):
                 # Send EOS command to gracefully close
                 await self._websocket.send("<EOS>")
                 await self._websocket.close()
-                logger.debug("Disconnected from Rime non json websocket")
+                logger.debug("Disconnected from Rime non-JSON websocket")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
