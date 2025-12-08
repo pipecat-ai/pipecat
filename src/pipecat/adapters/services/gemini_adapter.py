@@ -222,10 +222,10 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 # messages
                 if (
                     isinstance(message.message, dict)
-                    and message.message.get("type") == "fn_call_thought_signature"
+                    and message.message.get("type") == "fn_thought_signature"
                     and (thought_signature := message.message.get("signature"))
                 ):
-                    self._apply_function_call_thought_signature_to_messages(
+                    self._apply_function_thought_signature_to_messages(
                         thought_signature, message.message.get("tool_call_id"), messages
                     )
                     continue
@@ -234,7 +234,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 # signature messages (Gemini 3 Pro)
                 if (
                     isinstance(message.message, dict)
-                    and message.message.get("type") == "thought_signature"
+                    and message.message.get("type") == "non_fn_thought_signature"
                     and (thought_signature := message.message.get("signature"))
                 ):
                     non_fn_thought_signatures.append(thought_signature)
@@ -444,7 +444,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
         )
 
-    def _apply_function_call_thought_signature_to_messages(
+    def _apply_function_thought_signature_to_messages(
         self, thought_signature: bytes, tool_call_id: str, messages: List[Content]
     ) -> None:
         """Apply tool_call_extra metadata to the corresponding function call message.

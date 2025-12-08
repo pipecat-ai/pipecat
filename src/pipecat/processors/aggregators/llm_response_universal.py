@@ -48,7 +48,6 @@ from pipecat.frames.frames import (
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMThoughtEndFrame,
-    LLMThoughtSignatureFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     SpeechControlParamsFrame,
@@ -644,8 +643,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_thought_text(frame)
         elif isinstance(frame, LLMThoughtEndFrame):
             await self._handle_thought_end(frame)
-        elif isinstance(frame, LLMThoughtSignatureFrame):
-            await self._handle_standalone_thought_signature(frame)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -891,17 +888,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 message={
                     "type": "thought",
                     "text": thought,
-                    "signature": frame.signature,
-                },
-            )
-        )
-
-    async def _handle_standalone_thought_signature(self, frame: LLMThoughtSignatureFrame):
-        self._context.add_message(
-            LLMSpecificMessage(
-                llm=frame.llm,
-                message={
-                    "type": "thought_signature",
                     "signature": frame.signature,
                 },
             )

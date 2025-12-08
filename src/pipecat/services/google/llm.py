@@ -32,10 +32,10 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMThoughtEndFrame,
-    LLMThoughtSignatureFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
@@ -986,13 +986,12 @@ class GoogleLLMService(LLMService):
                                         function_name=function_call.name,
                                         arguments=function_call.args or {},
                                         append_extra_context_messages=[
-                                            LLMSpecificMessage(
-                                                llm=self.get_llm_adapter().id_for_llm_specific_messages,
-                                                message={
-                                                    "type": "fn_call_thought_signature",
+                                            self.get_llm_adapter().create_llm_specific_message(
+                                                {
+                                                    "type": "fn_thought_signature",
                                                     "signature": part.thought_signature,
                                                     "tool_call_id": id,
-                                                },
+                                                }
                                             )
                                         ]
                                         if part.thought_signature
@@ -1011,9 +1010,15 @@ class GoogleLLMService(LLMService):
                             # calls. It will come in the last part of a response.
                             if part.thought_signature and not part.function_call:
                                 await self.push_frame(
-                                    LLMThoughtSignatureFrame(
-                                        llm=self.get_llm_adapter().id_for_llm_specific_messages,
-                                        signature=part.thought_signature,
+                                    LLMMessagesAppendFrame(
+                                        [
+                                            self.get_llm_adapter().create_llm_specific_message(
+                                                {
+                                                    "type": "non_fn_thought_signature",
+                                                    "signature": part.thought_signature,
+                                                }
+                                            )
+                                        ]
                                     )
                                 )
 

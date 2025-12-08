@@ -655,28 +655,6 @@ class LLMThoughtEndFrame(ControlFrame):
 
 
 @dataclass
-class LLMThoughtSignatureFrame(DataFrame):
-    """Frame containing a standalone LLM thought signature (as opposed to a thought signature associated with a thought).
-
-    This is useful for Gemini 3 Pro, which can output a signature at the end of
-    a response.
-
-    Parameters:
-        llm: Identifier of the LLM provider for LLM-specific handling.
-            Needed because the thought signature is appended to context as an
-            `LLMSpecificMessage`.
-        signature: The thought signature data.
-    """
-
-    llm: str
-    signature: Any
-
-    def __str__(self):
-        pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, signature: {self.signature})"
-
-
-@dataclass
 class LLMMessagesFrame(DataFrame):
     """Frame containing LLM messages for chat completion.
 
