@@ -584,12 +584,18 @@ class RimeHttpTTSService(TTSService):
 class RimeNonJsonTTSService(InterruptibleTTSService):
     """Pipecat TTS service for Rime's non-JSON WebSocket API.
 
-    This service enables Text-to-Speech synthesis over WebSocket endpoints that require plain text (not JSON) messages and return raw audio bytes. It is designed for use with TTS models like Arcana, which currently do not support JSON-based WebSocket protocols (though this may change in the future).
+    This service enables Text-to-Speech synthesis over WebSocket endpoints
+    that require plain text (not JSON) messages and return raw audio bytes.
+    It is designed for use with TTS models like Arcana, which currently do
+    not support JSON-based WebSocket protocols (though this may change in
+    the future).
 
     Limitations:
         - Does not support word-level timestamps or context IDs.
-        - Intended specifically for integrations where the TTS provider only accepts and returns non-JSON messages.
-        - Arcana and similar models may add JSON WebSocket support in the future; this service focuses on the current plain text protocol.
+        - Intended specifically for integrations where the TTS provider only
+          accepts and returns non-JSON messages.
+        - Arcana and similar models may add JSON WebSocket support in the
+          future; this service focuses on the current plain text protocol.
     """
 
     class InputParams(BaseModel):
