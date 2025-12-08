@@ -231,7 +231,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     continue
 
                 # Special handling for non-function-call-related thought
-                # signature messages (Gemini 3 Pro)
+                # signature messages (Gemini 3 Pro mainly, but possibly others,
+                # too, especially when functions are involved in the
+                # conversation)
                 if (
                     isinstance(message.message, dict)
                     and message.message.get("type") == "non_fn_thought_signature"
@@ -447,7 +449,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     def _apply_function_thought_signature_to_messages(
         self, thought_signature: bytes, tool_call_id: str, messages: List[Content]
     ) -> None:
-        """Apply tool_call_extra metadata to the corresponding function call message.
+        """Apply a function-related thought signature to the corresponding function call message.
 
         Args:
             thought_signature: The thought signature bytes to apply.
@@ -476,10 +478,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     def _apply_non_function_thought_signatures_to_messages(
         self, thought_signatures: List[bytes], messages: List[Content]
     ) -> None:
-        """Apply non-function-call-related thought signatures to the last part of each non-function-call assistant message.
+        """Apply non-function-call-related thought signatures to the last part of corresponding non-function-call assistant messages.
 
-        Gemini 3 Pro outputs a thought signature at the end of each assistant
-        response.
+        Gemini 3 Pro (and, somewhat surprisingly, other models, too, when
+        functions are involved in the conversation) outputs a thought signature
+        at the end of assistant responses.
 
         Args:
             thought_signatures: The list of thought signature bytes to apply.

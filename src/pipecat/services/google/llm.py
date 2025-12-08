@@ -1005,9 +1005,12 @@ class GoogleLLMService(LLMService):
                                 )
                                 await self.push_frame(frame)
 
-                            # With Gemini 3 Pro, thought signatures can be
-                            # included in any kind of part, not just function
-                            # calls. It will come in the last part of a response.
+                            # With Gemini 3 Pro (and, somewhat surprisingly,
+                            # other models models, too, especially when
+                            # functions are involved in the conversation),
+                            # thought signatures can be included in any kind of
+                            # part, not just function calls. It will come in
+                            # the last part of a response.
                             if part.thought_signature and not part.function_call:
                                 await self.push_frame(
                                     LLMMessagesAppendFrame(
