@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Utility functions for Google services."""
+
 from typing import Any, Dict, Optional, Union
 
-from pipecat import __version__ as pipecat_version
+from pipecat import version as pipecat_version
 
 
 def update_google_client_http_options(http_options: Optional[Union[Dict[str, Any], Any]]) -> Any:
@@ -19,7 +21,7 @@ def update_google_client_http_options(http_options: Optional[Union[Dict[str, Any
     Returns:
         The updated http_options.
     """
-    client_header = {"x-goog-api-client": f"pipecat/{pipecat_version}"}
+    client_header = {"x-goog-api-client": f"pipecat/{pipecat_version()}"}
 
     if http_options is None:
         http_options = {"headers": client_header}

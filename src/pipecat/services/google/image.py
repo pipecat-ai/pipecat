@@ -22,9 +22,8 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-
-from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
+from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
 
 try:
@@ -78,7 +77,7 @@ class GoogleImageGenService(ImageGenService):
 
         # Add client header
         http_options = update_google_client_http_options(http_options)
-        
+
         self._client = genai.Client(api_key=api_key, http_options=http_options)
         self.set_model_name(self._params.model)
 
