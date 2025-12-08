@@ -885,8 +885,7 @@ class RimeNonJsonTTSService(WebsocketTTSService):
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            yield ErrorFrame(error=f"{self} error: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Update service settings and reconnect if necessary.
