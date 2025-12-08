@@ -15,8 +15,8 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
@@ -56,9 +56,9 @@ class UserBotLatencyLogObserver(BaseObserver):
 
         self._processed_frames.add(data.frame.id)
 
-        if isinstance(data.frame, UserStartedSpeakingFrame):
+        if isinstance(data.frame, VADUserStartedSpeakingFrame):
             self._user_stopped_time = 0
-        elif isinstance(data.frame, UserStoppedSpeakingFrame):
+        elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
             self._user_stopped_time = time.time()
         elif isinstance(data.frame, (EndFrame, CancelFrame)):
             self._log_summary()
