@@ -50,6 +50,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
+from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
@@ -713,7 +714,7 @@ class GoogleLLMService(LLMService):
         self.set_model_name(model)
         self._api_key = api_key
         self._system_instruction = system_instruction
-        self._http_options = http_options
+        self._http_options = update_google_client_http_options(http_options)
 
         self._settings = {
             "max_tokens": params.max_tokens,

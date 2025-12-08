@@ -68,6 +68,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
+from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
@@ -681,7 +682,7 @@ class GeminiLiveLLMService(LLMService):
         self._video_input_paused = start_video_paused
         self._context = None
         self._api_key = api_key
-        self._http_options = http_options
+        self._http_options = update_google_client_http_options(http_options)
         self._session: AsyncSession = None
         self._connection_task = None
 
