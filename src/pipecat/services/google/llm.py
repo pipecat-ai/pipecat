@@ -1018,7 +1018,7 @@ class GoogleLLMService(LLMService):
                                             self.get_llm_adapter().create_llm_specific_message(
                                                 {
                                                     "type": "non_fn_thought_signature",
-                                                    "signature": part.thought_signature,
+                                                    "signed_part": part,
                                                 }
                                             )
                                         ]
