@@ -496,7 +496,7 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
 
     async def test_basic_thought_transcription(self):
         """Test basic thought frame processing"""
-        processor = AssistantTranscriptProcessor()
+        processor = AssistantTranscriptProcessor(process_thoughts=True)
 
         received_updates: List[TranscriptionUpdateFrame] = []
 
@@ -533,7 +533,7 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
 
     async def test_thought_aggregation(self):
         """Test that thought text frames are properly aggregated"""
-        processor = AssistantTranscriptProcessor()
+        processor = AssistantTranscriptProcessor(process_thoughts=True)
 
         received_updates: List[TranscriptionUpdateFrame] = []
 
@@ -575,7 +575,7 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
 
     async def test_thought_with_interruption(self):
         """Test that thoughts are properly captured when interrupted"""
-        processor = AssistantTranscriptProcessor()
+        processor = AssistantTranscriptProcessor(process_thoughts=True)
 
         received_updates: List[TranscriptionUpdateFrame] = []
 
@@ -613,7 +613,7 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
 
     async def test_thought_with_cancel(self):
         """Test that thoughts are properly captured when cancelled"""
-        processor = AssistantTranscriptProcessor()
+        processor = AssistantTranscriptProcessor(process_thoughts=True)
 
         received_updates: List[TranscriptionUpdateFrame] = []
 
@@ -649,7 +649,7 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
 
     async def test_thought_with_end_frame(self):
         """Test that thoughts are captured when pipeline ends normally"""
-        processor = AssistantTranscriptProcessor()
+        processor = AssistantTranscriptProcessor(process_thoughts=True)
 
         received_updates: List[TranscriptionUpdateFrame] = []
 
@@ -683,7 +683,7 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
 
     async def test_multiple_thoughts(self):
         """Test multiple separate thoughts in sequence"""
-        processor = AssistantTranscriptProcessor()
+        processor = AssistantTranscriptProcessor(process_thoughts=True)
 
         received_updates: List[TranscriptionUpdateFrame] = []
 
@@ -735,7 +735,7 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_thought_handling(self):
         """Test that empty thoughts are not emitted"""
-        processor = AssistantTranscriptProcessor()
+        processor = AssistantTranscriptProcessor(process_thoughts=True)
 
         received_updates: List[TranscriptionUpdateFrame] = []
 
@@ -768,7 +768,7 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
 
     async def test_thought_without_start_frame(self):
         """Test that thought text without start frame is ignored"""
-        processor = AssistantTranscriptProcessor()
+        processor = AssistantTranscriptProcessor(process_thoughts=True)
 
         received_updates: List[TranscriptionUpdateFrame] = []
 

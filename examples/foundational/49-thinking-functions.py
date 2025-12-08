@@ -125,7 +125,7 @@ async def run_bot(
 
     tools = ToolsSchema(standard_tools=[check_flight_status, book_taxi])
 
-    transcript = TranscriptProcessor()
+    transcript = TranscriptProcessor(process_thoughts=True)
 
     messages = [
         {

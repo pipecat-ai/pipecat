@@ -99,7 +99,7 @@ async def run_bot(
     else:
         raise ValueError(f"Unsupported LLM provider: {llm_provider}")
 
-    transcript = TranscriptProcessor()
+    transcript = TranscriptProcessor(process_thoughts=True)
 
     messages = [
         {

@@ -101,14 +101,16 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
     - The pipeline ends (EndFrame, CancelFrame)
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, process_thoughts: bool = False, **kwargs):
         """Initialize processor with aggregation state.
 
         Args:
+            process_thoughts: Whether to process LLM thought frames. Defaults to False.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
 
+        self._process_thoughts = process_thoughts
         self._current_assistant_text_parts: List[TextPartForConcatenation] = []
         self._assistant_text_start_time: Optional[str] = None
 
@@ -188,18 +190,19 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             await self.push_frame(frame, direction)
             # Emit accumulated text and thought with interruptions
             await self._emit_aggregated_assistant_text()
-            if self._thought_active:
+            if self._process_thoughts and self._thought_active:
                 await self._emit_aggregated_thought()
         elif isinstance(frame, LLMThoughtStartFrame):
             # Start a new thought
-            self._thought_active = True
-            self._thought_start_time = time_now_iso8601()
-            self._current_thought_parts = []
+            if self._process_thoughts:
+                self._thought_active = True
+                self._thought_start_time = time_now_iso8601()
+                self._current_thought_parts = []
             # Push frame.
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMThoughtTextFrame):
             # Aggregate thought text if we have an active thought
-            if self._thought_active:
+            if self._process_thoughts and self._thought_active:
                 self._current_thought_parts.append(
                     TextPartForConcatenation(
                         frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
@@ -209,7 +212,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMThoughtEndFrame):
             # Emit accumulated thought when thought ends
-            if self._thought_active:
+            if self._process_thoughts and self._thought_active:
                 await self._emit_aggregated_thought()
             # Push frame.
             await self.push_frame(frame, direction)
@@ -230,7 +233,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             # Emit accumulated text when bot finishes speaking or pipeline ends.
             await self._emit_aggregated_assistant_text()
             # Emit accumulated thought at pipeline end if still active
-            if isinstance(frame, EndFrame) and self._thought_active:
+            if isinstance(frame, EndFrame) and self._process_thoughts and self._thought_active:
                 await self._emit_aggregated_thought()
             # Push frame.
             await self.push_frame(frame, direction)
@@ -268,8 +271,14 @@ class TranscriptProcessor:
             print(f"New messages: {frame.messages}")
     """
 
-    def __init__(self):
-        """Initialize factory."""
+    def __init__(self, *, process_thoughts: bool = False):
+        """Initialize factory.
+
+        Args:
+            process_thoughts: Whether the assistant processor should handle LLM thought
+                frames. Defaults to False.
+        """
+        self._process_thoughts = process_thoughts
         self._user_processor = None
         self._assistant_processor = None
         self._event_handlers = {}
@@ -304,7 +313,9 @@ class TranscriptProcessor:
             The assistant transcript processor instance.
         """
         if self._assistant_processor is None:
-            self._assistant_processor = AssistantTranscriptProcessor(**kwargs)
+            self._assistant_processor = AssistantTranscriptProcessor(
+                process_thoughts=self._process_thoughts, **kwargs
+            )
             # Apply any registered event handlers
             for event_name, handler in self._event_handlers.items():
 
