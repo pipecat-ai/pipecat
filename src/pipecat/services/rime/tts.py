@@ -625,7 +625,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         url: str = "wss://users.rime.ai/ws",
         model: str = "arcana",
         audio_format: str = "pcm",
-        sample_rate: Optional[int] = 24000,
+        sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         aggregate_sentences: Optional[bool] = True,
         **kwargs,
