@@ -593,7 +593,6 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _process_aggregation(self):
         """Process the current aggregation and push it downstream."""
-        print("before processing aggregation", self._context.messages)
         msgs = []
         for message in self._context.messages:
             msg = copy.deepcopy(message)
@@ -645,7 +644,6 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         
         self._context.set_messages(msgs)
 
-        print("after processing aggregation", self._context.messages)
 
 
     
