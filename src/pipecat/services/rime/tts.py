@@ -33,8 +33,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import (
     AudioContextWordTTSService,
-    InterruptibleTTSService,
     TTSService,
+    WebsocketTTSService,
 )
 from pipecat.transcriptions import language
 from pipecat.transcriptions.language import Language, resolve_language
@@ -581,7 +581,7 @@ class RimeHttpTTSService(TTSService):
             yield TTSStoppedFrame()
 
 
-class RimeNonJsonTTSService(InterruptibleTTSService):
+class RimeNonJsonTTSService(WebsocketTTSService):
     """Pipecat TTS service for Rime's non-JSON WebSocket API.
 
     This service enables Text-to-Speech synthesis over WebSocket endpoints
@@ -770,7 +770,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                 # Send EOS command to gracefully close
                 await self._websocket.send("<EOS>")
                 await self._websocket.close()
-                logger.debug("Disconnected from Rime None json websocket")
+                logger.debug("Disconnected from Rime non json websocket")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
