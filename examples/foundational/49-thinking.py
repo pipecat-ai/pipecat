@@ -118,10 +118,9 @@ async def run_bot(
             transcript.user(),  # User transcripts
             context_aggregator.user(),  # User responses
             llm,  # LLM
-            transcript.thought(),  # Thought transcripts
             tts,  # TTS
             transport.output(),  # Transport bot output
-            transcript.assistant(),  # Assistant transcripts
+            transcript.assistant(),  # Assistant transcripts (including thoughts)
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )

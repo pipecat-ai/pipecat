@@ -85,14 +85,20 @@ class UserTranscriptProcessor(BaseTranscriptProcessor):
 
 
 class AssistantTranscriptProcessor(BaseTranscriptProcessor):
-    """Processes assistant TTS text frames into timestamped conversation messages.
+    """Processes assistant TTS text frames and LLM thought frames into timestamped messages.
 
-    This processor aggregates TTS text frames into complete utterances and emits them as
-    transcript messages. Utterances are completed when:
+    This processor aggregates both TTS text frames and LLM thought frames into
+    complete utterances and thoughts, emitting them as transcript messages.
 
+    An assistant utterance is completed when:
     - The bot stops speaking (BotStoppedSpeakingFrame)
     - The bot is interrupted (InterruptionFrame)
-    - The pipeline ends (EndFrame)
+    - The pipeline ends (EndFrame, CancelFrame)
+
+    A thought is completed when:
+    - The thought ends (LLMThoughtEndFrame)
+    - The bot is interrupted (InterruptionFrame)
+    - The pipeline ends (EndFrame, CancelFrame)
     """
 
     def __init__(self, **kwargs):
@@ -102,131 +108,36 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._current_text_parts: List[TextPartForConcatenation] = []
-        self._aggregation_start_time: Optional[str] = None
 
-    async def _emit_aggregated_text(self):
+        self._current_assistant_text_parts: List[TextPartForConcatenation] = []
+        self._assistant_text_start_time: Optional[str] = None
+
+        self._current_thought_parts: List[TextPartForConcatenation] = []
+        self._thought_start_time: Optional[str] = None
+        self._thought_active = False
+
+    async def _emit_aggregated_assistant_text(self):
         """Aggregates and emits text fragments as a transcript message.
 
-        This method uses a heuristic to automatically detect whether text fragments
-        contain embedded spacing (spaces at the beginning or end of fragments) or not,
-        and applies the appropriate joining strategy. It handles fragments from different
-        TTS services with different formatting patterns.
-
-        Examples:
-            Fragments with embedded spacing (concatenated)::
-
-                TTSTextFrame: ["Hello"]
-                TTSTextFrame: [" there"]  # Leading space
-                TTSTextFrame: ["!"]
-                TTSTextFrame: [" How"]    # Leading space
-                TTSTextFrame: ["'s"]
-                TTSTextFrame: [" it"]     # Leading space
-
-                Result: "Hello there! How's it"
-
-            Fragments with trailing spaces (concatenated)::
-
-                TTSTextFrame: ["Hel"]
-                TTSTextFrame: ["lo "]     # Trailing space
-                TTSTextFrame: ["to "]     # Trailing space
-                TTSTextFrame: ["you"]
-
-                Result: "Hello to you"
-
-            Word-by-word fragments without spacing (joined with spaces)::
-
-                TTSTextFrame: ["Hello"]
-                TTSTextFrame: ["there"]
-                TTSTextFrame: ["how"]
-                TTSTextFrame: ["are"]
-                TTSTextFrame: ["you"]
-
-                Result: "Hello there how are you"
+        This method aggregates text fragments that may arrive in multiple
+        TTSTextFrame instances and emits them as a single TranscriptionMessage.
         """
-        if self._current_text_parts and self._aggregation_start_time:
-            content = concatenate_aggregated_text(self._current_text_parts)
+        if self._current_assistant_text_parts and self._assistant_text_start_time:
+            content = concatenate_aggregated_text(self._current_assistant_text_parts)
             if content:
                 logger.trace(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(
                     role="assistant",
                     content=content,
-                    timestamp=self._aggregation_start_time,
+                    timestamp=self._assistant_text_start_time,
                 )
                 await self._emit_update([message])
             else:
                 logger.trace("No content to emit after stripping whitespace")
 
             # Reset aggregation state
-            self._current_text_parts = []
-            self._aggregation_start_time = None
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames into assistant conversation messages.
-
-        Handles different frame types:
-
-        - TTSTextFrame: Aggregates text for current utterance
-        - BotStoppedSpeakingFrame: Completes current utterance
-        - InterruptionFrame: Completes current utterance due to interruption
-        - EndFrame: Completes current utterance at pipeline end
-        - CancelFrame: Completes current utterance due to cancellation
-
-        Args:
-            frame: Input frame to process.
-            direction: Frame processing direction.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, (InterruptionFrame, CancelFrame)):
-            # Push frame first otherwise our emitted transcription update frame
-            # might get cleaned up.
-            await self.push_frame(frame, direction)
-            # Emit accumulated text with interruptions
-            await self._emit_aggregated_text()
-        elif isinstance(frame, TTSTextFrame):
-            # Start timestamp on first text part
-            if not self._aggregation_start_time:
-                self._aggregation_start_time = time_now_iso8601()
-
-            self._current_text_parts.append(
-                TextPartForConcatenation(
-                    frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
-                )
-            )
-
-            # Push frame.
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, (BotStoppedSpeakingFrame, EndFrame)):
-            # Emit accumulated text when bot finishes speaking or pipeline ends.
-            await self._emit_aggregated_text()
-            # Push frame.
-            await self.push_frame(frame, direction)
-        else:
-            await self.push_frame(frame, direction)
-
-
-class ThoughtTranscriptProcessor(BaseTranscriptProcessor):
-    """Processes LLM thought frames into timestamped thought messages.
-
-    This processor aggregates LLM thought text frames into complete thoughts
-    and emits them as thought transcript messages. Thoughts are completed when:
-
-    - A thought ends (LLMThoughtEndFrame)
-    - The bot is interrupted (InterruptionFrame)
-    - The pipeline ends (EndFrame)
-    """
-
-    def __init__(self, **kwargs):
-        """Initialize processor with thought aggregation state.
-
-        Args:
-            **kwargs: Additional arguments passed to parent class.
-        """
-        super().__init__(**kwargs)
-        self._current_thought_parts: List[TextPartForConcatenation] = []
-        self._thought_start_time: Optional[str] = None
-        self._thought_active = False
+            self._current_assistant_text_parts = []
+            self._assistant_text_start_time = None
 
     async def _emit_aggregated_thought(self):
         """Aggregates and emits thought text fragments as a thought transcript message.
@@ -252,16 +163,18 @@ class ThoughtTranscriptProcessor(BaseTranscriptProcessor):
             self._thought_active = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames into thought transcript messages.
+        """Process frames into assistant conversation messages and thought messages.
 
         Handles different frame types:
 
+        - TTSTextFrame: Aggregates text for current utterance
         - LLMThoughtStartFrame: Begins aggregating a new thought
         - LLMThoughtTextFrame: Aggregates text for current thought
         - LLMThoughtEndFrame: Completes current thought
-        - InterruptionFrame: Completes current thought due to interruption
-        - EndFrame: Completes current thought at pipeline end
-        - CancelFrame: Completes current thought due to cancellation
+        - BotStoppedSpeakingFrame: Completes current utterance
+        - InterruptionFrame: Completes current utterance and thought due to interruption
+        - EndFrame: Completes current utterance and thought at pipeline end
+        - CancelFrame: Completes current utterance and thought due to cancellation
 
         Args:
             frame: Input frame to process.
@@ -273,7 +186,8 @@ class ThoughtTranscriptProcessor(BaseTranscriptProcessor):
             # Push frame first otherwise our emitted transcription update frame
             # might get cleaned up.
             await self.push_frame(frame, direction)
-            # Emit accumulated thought with interruptions
+            # Emit accumulated text and thought with interruptions
+            await self._emit_aggregated_assistant_text()
             if self._thought_active:
                 await self._emit_aggregated_thought()
         elif isinstance(frame, LLMThoughtStartFrame):
@@ -299,9 +213,24 @@ class ThoughtTranscriptProcessor(BaseTranscriptProcessor):
                 await self._emit_aggregated_thought()
             # Push frame.
             await self.push_frame(frame, direction)
-        elif isinstance(frame, EndFrame):
+        elif isinstance(frame, TTSTextFrame):
+            # Start timestamp on first text part
+            if not self._assistant_text_start_time:
+                self._assistant_text_start_time = time_now_iso8601()
+
+            self._current_assistant_text_parts.append(
+                TextPartForConcatenation(
+                    frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                )
+            )
+
+            # Push frame.
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, (BotStoppedSpeakingFrame, EndFrame)):
+            # Emit accumulated text when bot finishes speaking or pipeline ends.
+            await self._emit_aggregated_assistant_text()
             # Emit accumulated thought at pipeline end if still active
-            if self._thought_active:
+            if isinstance(frame, EndFrame) and self._thought_active:
                 await self._emit_aggregated_thought()
             # Push frame.
             await self.push_frame(frame, direction)
@@ -312,8 +241,9 @@ class ThoughtTranscriptProcessor(BaseTranscriptProcessor):
 class TranscriptProcessor:
     """Factory for creating and managing transcript processors.
 
-    Provides unified access to user, assistant, and thought transcript processors
-    with shared event handling.
+    Provides unified access to user and assistant transcript processors
+    with shared event handling. The assistant processor handles both TTS text
+    and LLM thought frames.
 
     Example::
 
@@ -326,10 +256,9 @@ class TranscriptProcessor:
                 transcript.user(),              # User transcripts
                 context_aggregator.user(),
                 llm,
-                transcript.thought(),           # Thought transcripts
                 tts,
                 transport.output(),
-                transcript.assistant(),         # Assistant transcripts
+                transcript.assistant(),         # Assistant transcripts (including thoughts)
                 context_aggregator.assistant(),
             ]
         )
@@ -343,7 +272,6 @@ class TranscriptProcessor:
         """Initialize factory."""
         self._user_processor = None
         self._assistant_processor = None
-        self._thought_processor = None
         self._event_handlers = {}
 
     def user(self, **kwargs) -> UserTranscriptProcessor:
@@ -386,26 +314,6 @@ class TranscriptProcessor:
 
         return self._assistant_processor
 
-    def thought(self, **kwargs) -> ThoughtTranscriptProcessor:
-        """Get the thought transcript processor.
-
-        Args:
-            **kwargs: Arguments specific to ThoughtTranscriptProcessor.
-
-        Returns:
-            The thought transcript processor instance.
-        """
-        if self._thought_processor is None:
-            self._thought_processor = ThoughtTranscriptProcessor(**kwargs)
-            # Apply any registered event handlers
-            for event_name, handler in self._event_handlers.items():
-
-                @self._thought_processor.event_handler(event_name)
-                async def thought_handler(processor, frame):
-                    return await handler(processor, frame)
-
-        return self._thought_processor
-
     def event_handler(self, event_name: str):
         """Register event handler for both processors.
 
@@ -430,12 +338,6 @@ class TranscriptProcessor:
 
                 @self._assistant_processor.event_handler(event_name)
                 async def assistant_handler(processor, frame):
-                    return await handler(processor, frame)
-
-            if self._thought_processor:
-
-                @self._thought_processor.event_handler(event_name)
-                async def thought_handler(processor, frame):
                     return await handler(processor, frame)
 
             return handler
