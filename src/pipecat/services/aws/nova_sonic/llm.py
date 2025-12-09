@@ -157,6 +157,12 @@ class Params(BaseModel):
         max_tokens: Maximum number of tokens to generate.
         top_p: Nucleus sampling parameter.
         temperature: Sampling temperature for text generation.
+        endpointing_sensitivity: Controls how quickly Nova Sonic decides the
+            user has stopped speaking. Can be "LOW", "MEDIUM", or "HIGH", with
+            "HIGH" being the most sensitive (i.e., causing the model to respond
+            most quickly).
+            If not set, uses the model's default behavior.
+            Only supported with Nova 2 Sonic (the default model).
     """
 
     # Audio input
@@ -173,6 +179,9 @@ class Params(BaseModel):
     max_tokens: Optional[int] = Field(default=1024)
     top_p: Optional[float] = Field(default=0.9)
     temperature: Optional[float] = Field(default=0.7)
+
+    # Turn-taking
+    endpointing_sensitivity: Optional[str] = Field(default=None)
 
 
 class AWSNovaSonicLLMService(LLMService):
@@ -238,6 +247,17 @@ class AWSNovaSonicLLMService(LLMService):
         self._params = params or Params()
         self._system_instruction = system_instruction
         self._tools = tools
+
+        # Validate endpointing_sensitivity parameter
+        if (
+            self._params.endpointing_sensitivity
+            and not self._is_endpointing_sensitivity_supported()
+        ):
+            logger.warning(
+                f"endpointing_sensitivity is not supported for model '{model}' and will be ignored. "
+                "This parameter is only supported starting with Nova 2 Sonic (amazon.nova-2-sonic-v1:0)."
+            )
+            self._params.endpointing_sensitivity = None
 
         if not send_transcription_frames:
             import warnings
@@ -598,11 +618,25 @@ class AWSNovaSonicLLMService(LLMService):
         )
         return BedrockRuntimeClient(config=config)
 
+    def _is_endpointing_sensitivity_supported(self) -> bool:
+        # endpointing_sensitivity is only supported with Nova 2 Sonic (and,
+        # presumably, future models)
+        return self._model != "amazon.nova-sonic-v1:0"
+
     #
     # LLM communication: input events (pipecat -> LLM)
     #
 
     async def _send_session_start_event(self):
+        turn_detection_config = (
+            f""",
+              "turnDetectionConfiguration": {{
+                "endpointingSensitivity": "{self._params.endpointing_sensitivity}"
+              }}"""
+            if self._params.endpointing_sensitivity
+            else ""
+        )
+
         session_start = f"""
         {{
           "event": {{
@@ -611,7 +645,7 @@ class AWSNovaSonicLLMService(LLMService):
                 "maxTokens": {self._params.max_tokens},
                 "topP": {self._params.top_p},
                 "temperature": {self._params.temperature}
-              }}
+              }}{turn_detection_config}
             }}
           }}
         }}
