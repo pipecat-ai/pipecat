@@ -192,7 +192,7 @@ class AWSNovaSonicLLMService(LLMService):
         access_key_id: str,
         session_token: Optional[str] = None,
         region: str,
-        model: str = "amazon.nova-sonic-v1:0",
+        model: str = "amazon.nova-2-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
         params: Optional[Params] = None,
         system_instruction: Optional[str] = None,
