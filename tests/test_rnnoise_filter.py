@@ -8,11 +8,20 @@ import unittest
 
 import numpy as np
 
+try:
+    import pyrnnoise
+except ImportError:
+    pyrnnoise = None
+
 from pipecat.audio.filters.rnnoise_filter import RNNoiseFilter
 from pipecat.frames.frames import FilterEnableFrame
 
 
 class TestRNNoiseFilter(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        if pyrnnoise is None:
+            self.skipTest("pyrnnoise not installed")
+
     async def test_rnnoise_filter_reduces_noise(self):
         """Test that RNNoise filter reduces noise in audio."""
         filter = RNNoiseFilter()
