@@ -11,6 +11,7 @@ from typing import Optional
 
 from pipecat.frames.frames import (
     Frame,
+    InterimTranscriptionFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -38,6 +39,7 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
         self._timeout = timeout
         self._text = ""
         self._vad_user_speaking = False
+        self._seen_interim_results = False
         self._event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
 
@@ -46,6 +48,7 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
         await super().reset()
         self._text = ""
         self._vad_user_speaking = False
+        self._seen_interim_results = False
         self._event.clear()
 
     async def setup(self, task_manager: BaseTaskManager):
@@ -78,6 +81,8 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
             await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            await self._handle_interim_transcription(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
 
@@ -88,10 +93,17 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
     async def _handle_vad_user_stopped_speaking(self, _: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
+        await self._maybe_trigger_bot_turn_started()
+
+    async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
+        self._seen_interim_results = True
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
         self._text += frame.text
+        # We just got a final result, so let's reset interim results.
+        self._seen_interim_results = False
+        # Reset aggregation timer.
         self._event.set()
 
     async def _task_handler(self):
@@ -107,5 +119,8 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
                 await asyncio.wait_for(self._event.wait(), timeout=self._timeout)
                 self._event.clear()
             except asyncio.TimeoutError:
-                if self._text and not self._vad_user_speaking:
-                    await self.trigger_bot_turn_started()
+                await self._maybe_trigger_bot_turn_started()
+
+    async def _maybe_trigger_bot_turn_started(self):
+        if not self._vad_user_speaking and not self._seen_interim_results and self._text:
+            await self.trigger_bot_turn_started()
