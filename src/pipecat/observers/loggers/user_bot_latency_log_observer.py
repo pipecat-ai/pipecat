@@ -36,7 +36,7 @@ class UserBotLatencyLogObserver(BaseObserver):
         to calculate response latencies.
         """
         super().__init__()
-        self._processed_frames = set()
+        self._user_bot_latency_processed_frames = set()
         self._user_stopped_time = 0
         self._latencies = []
 
@@ -51,10 +51,10 @@ class UserBotLatencyLogObserver(BaseObserver):
             return
 
         # Skip already processed frames
-        if data.frame.id in self._processed_frames:
+        if data.frame.id in self._user_bot_latency_processed_frames:
             return
 
-        self._processed_frames.add(data.frame.id)
+        self._user_bot_latency_processed_frames.add(data.frame.id)
 
         if isinstance(data.frame, VADUserStartedSpeakingFrame):
             self._user_stopped_time = 0
