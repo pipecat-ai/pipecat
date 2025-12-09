@@ -91,14 +91,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     # Specify initial system instruction.
-    # HACK: note that, for now, we need to inject a special bit of text into this instruction to
-    # allow the first assistant response to be programmatically triggered (which happens in the
-    # on_client_connected handler, below)
     system_instruction = (
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "
-        "two or three sentences for chatty scenarios. "
-        f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
+        "two or three sentences for chatty scenarios."
+        # HACK: if using the older Nova Sonic (pre-2) model, note that you need to inject a special
+        # bit of text into this instruction to allow the first assistant response to be
+        # programmatically triggered (which happens in the on_client_connected handler)
+        # f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
     )
 
     # Create the AWS Nova Sonic LLM service
@@ -167,10 +167,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
-        # HACK: for now, we need this special way of triggering the first assistant response in AWS
-        # Nova Sonic. Note that this trigger requires a special corresponding bit of text in the
-        # system instruction. In the future, simply queueing the context frame should be sufficient.
-        await llm.trigger_assistant_response()
+        # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
+        # triggering the first assistant response. Note that this trigger requires a special
+        # corresponding bit of text in the system instruction.
+        # await llm.trigger_assistant_response()
 
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")

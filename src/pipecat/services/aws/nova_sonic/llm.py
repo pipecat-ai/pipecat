@@ -618,10 +618,18 @@ class AWSNovaSonicLLMService(LLMService):
         )
         return BedrockRuntimeClient(config=config)
 
+    def _is_first_generation_sonic_model(self) -> bool:
+        # Nova Sonic (the older model) is identified by "amazon.nova-sonic-v1:0"
+        return self._model == "amazon.nova-sonic-v1:0"
+
     def _is_endpointing_sensitivity_supported(self) -> bool:
         # endpointing_sensitivity is only supported with Nova 2 Sonic (and,
         # presumably, future models)
-        return self._model != "amazon.nova-sonic-v1:0"
+        return not self._is_first_generation_sonic_model()
+
+    def _is_assistant_response_trigger_needed(self) -> bool:
+        # Assistant response trigger audio is only needed with the older model
+        return self._is_first_generation_sonic_model()
 
     #
     # LLM communication: input events (pipecat -> LLM)
@@ -1230,7 +1238,8 @@ class AWSNovaSonicLLMService(LLMService):
         )
 
     #
-    # assistant response trigger (HACK)
+    # assistant response trigger
+    # HACK: only needed for the older Nova Sonic (as opposed to Nova 2 Sonic) model
     #
 
     # Class variable
@@ -1244,12 +1253,17 @@ class AWSNovaSonicLLMService(LLMService):
 
         Sends a pre-recorded "ready" audio trigger to prompt the assistant
         to start speaking. This is useful for controlling conversation flow.
-
-        Returns:
-            False if already triggering a response, True otherwise.
         """
+        if not self._is_assistant_response_trigger_needed():
+            logger.warning(
+                f"Assistant response trigger not needed for model '{self._model}'; skipping. "
+                "An LLMRunFrame() should be sufficient to prompt the assistant to respond, "
+                "assuming the context ends in a user message."
+            )
+            return
+
         if self._triggering_assistant_response:
-            return False
+            return
 
         self._triggering_assistant_response = True
 
