@@ -51,7 +51,7 @@ from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.turns.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.turns.base_speaking_strategy import BaseSpeakingStrategy
-from pipecat.turns.transcription_speaking_strategy import TranscriptionSpeakingStrategy
+from pipecat.turns.lazy_transcription_speaking_strategy import LazyTranscriptionSpeakingStrategy
 from pipecat.turns.vad_interruption_strategy import VADInterruptionStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
@@ -293,7 +293,7 @@ class PipelineTask(BasePipelineTask):
         if not self._params.interruption_strategies:
             self._params.interruption_strategies = [VADInterruptionStrategy()]
         if not self._params.speaking_strategies:
-            self._params.speaking_strategies = [TranscriptionSpeakingStrategy()]
+            self._params.speaking_strategies = [LazyTranscriptionSpeakingStrategy()]
 
         self._finished = False
         self._cancelled = False

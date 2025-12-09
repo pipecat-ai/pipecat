@@ -11,6 +11,7 @@ from typing import Optional
 
 from pipecat.frames.frames import (
     Frame,
+    InterimTranscriptionFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -19,14 +20,14 @@ from pipecat.turns.base_speaking_strategy import BaseSpeakingStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
-class TranscriptionSpeakingStrategy(BaseSpeakingStrategy):
+class LazyTranscriptionSpeakingStrategy(BaseSpeakingStrategy):
     """Speaking strategy based on time after a transcription is received.
 
     This is a speaking strategy based on the time elapsed after a transcription
     is received.
     """
 
-    def __init__(self, *, timeout: float = 0.4):
+    def __init__(self, *, timeout: float = 0.5):
         """Initialize the speaking strategy.
 
         Args:
@@ -37,6 +38,7 @@ class TranscriptionSpeakingStrategy(BaseSpeakingStrategy):
         self._timeout = timeout
         self._text = ""
         self._vad_user_speaking = False
+        self._seen_interim_results = False
         self._event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
 
@@ -45,6 +47,7 @@ class TranscriptionSpeakingStrategy(BaseSpeakingStrategy):
         await super().reset()
         self._text = ""
         self._vad_user_speaking = False
+        self._seen_interim_results = False
         self._event.clear()
 
     async def setup(self, task_manager: BaseTaskManager):
@@ -77,6 +80,8 @@ class TranscriptionSpeakingStrategy(BaseSpeakingStrategy):
             await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            await self._handle_interim_transcription(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
 
@@ -87,23 +92,28 @@ class TranscriptionSpeakingStrategy(BaseSpeakingStrategy):
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
+        await self._maybe_trigger_speech()
+
+    async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
+        self._seen_interim_results = True
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
         self._text += frame.text
+        # We just got a final result, so let's reset interim results.
+        self._seen_interim_results = False
+        # Reset aggregation timer.
         self._event.set()
 
     async def _task_handler(self):
-        """Asynchronously check if the bot should start speaking.
-
-        If we have not received a transcription in the specified amount of time
-        (and we initially received one) and the user is not speaking, then the
-        bot is ready to speak.
-        """
+        """Asynchronously check if the bot should start speaking."""
         while True:
             try:
                 await asyncio.wait_for(self._event.wait(), timeout=self._timeout)
                 self._event.clear()
             except asyncio.TimeoutError:
-                if self._text and not self._vad_user_speaking:
-                    await self.trigger_speech()
+                await self._maybe_trigger_speech()
+
+    async def _maybe_trigger_speech(self):
+        if not self._vad_user_speaking and not self._seen_interim_results and self._text:
+            await self.trigger_speech()
