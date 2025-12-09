@@ -9,7 +9,7 @@ import unittest
 from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
 
 
-class TestInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
+class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_min_words(self):
         strategy = MinWordsInterruptionStrategy(min_words=2)
         await strategy.append_text("Hello")
