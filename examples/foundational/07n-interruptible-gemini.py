@@ -136,7 +136,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages.append(
             {
                 "role": "system",
-                "content": "Hello! I'm your AI assistant. I can help you with a variety of tasks. What would you like to know?",
+                "content": "You are an AI assistant. You can help with a variety of tasks. Introduce yourself and ask the user what they would like to know.",
             }
         )
         await task.queue_frames([LLMRunFrame()])
