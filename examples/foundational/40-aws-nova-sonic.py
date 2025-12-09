@@ -105,7 +105,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        region=os.getenv("AWS_REGION"),  # as of 2025-05-06, us-east-1 is the only supported region
+        # as of 2025-12-09, these are the supported regions:
+        # - Nova 2 Sonic (the default model):
+        #   - us-east-1
+        #   - us-west-2
+        #   - ap-northeast-1
+        # - Nova Sonic (the older model):
+        #   - us-east-1
+        #   - ap-northeast-1
+        region=os.getenv("AWS_REGION"),
         session_token=os.getenv("AWS_SESSION_TOKEN"),
         voice_id="tiffany",  # matthew, tiffany, amy
         # you could choose to pass instruction here rather than via context
