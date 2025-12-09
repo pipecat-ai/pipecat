@@ -798,17 +798,25 @@ class GoogleLLMService(LLMService):
         """
         messages = []
         system = []
+        tools = []
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
             params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
             messages = params["messages"]
             system = params["system_instruction"]
+            tools = params["tools"]
         else:
             context = GoogleLLMContext.upgrade_to_google(context)
             messages = context.messages
             system = getattr(context, "system_message", None)
+            tools = context.tools or []
 
-        generation_config = GenerateContentConfig(system_instruction=system)
+        # Build generation config using the same method as streaming
+        generation_params = self._build_generation_params(
+            system_instruction=system, tools=tools if tools else None
+        )
+
+        generation_config = GenerateContentConfig(**generation_params)
 
         # Use the new google-genai client's async method
         response = await self._client.aio.models.generate_content(
@@ -824,6 +832,48 @@ class GoogleLLMService(LLMService):
                     return part.text
 
         return None
+
+    def _build_generation_params(
+        self,
+        system_instruction: Optional[str] = None,
+        tools: Optional[List] = None,
+        tool_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build generation parameters for Google AI API.
+
+        Args:
+            system_instruction: Optional system instruction to use.
+            tools: Optional list of tools to include.
+            tool_config: Optional tool configuration.
+
+        Returns:
+            Dictionary of generation parameters with None values filtered out.
+        """
+        # Filter out None values and create GenerationContentConfig
+        generation_params = {
+            k: v
+            for k, v in {
+                "system_instruction": system_instruction,
+                "temperature": self._settings["temperature"],
+                "top_p": self._settings["top_p"],
+                "top_k": self._settings["top_k"],
+                "max_output_tokens": self._settings["max_tokens"],
+                "tools": tools,
+                "tool_config": tool_config,
+            }.items()
+            if v is not None
+        }
+
+        # Add thinking parameters if configured
+        if self._settings["thinking"]:
+            generation_params["thinking_config"] = self._settings["thinking"].model_dump(
+                exclude_unset=True
+            )
+
+        if self._settings["extra"]:
+            generation_params.update(self._settings["extra"])
+
+        return generation_params
 
     def _maybe_unset_thinking_budget(self, generation_params: Dict[str, Any]):
         try:
@@ -862,36 +912,15 @@ class GoogleLLMService(LLMService):
         if self._tool_config:
             tool_config = self._tool_config
 
-        # Filter out None values and create GenerationContentConfig
-        generation_params = {
-            k: v
-            for k, v in {
-                "system_instruction": self._system_instruction,
-                "temperature": self._settings["temperature"],
-                "top_p": self._settings["top_p"],
-                "top_k": self._settings["top_k"],
-                "max_output_tokens": self._settings["max_tokens"],
-                "tools": tools,
-                "tool_config": tool_config,
-            }.items()
-            if v is not None
-        }
-
-        # Add thinking parameters if configured
-        if self._settings["thinking"]:
-            generation_params["thinking_config"] = self._settings["thinking"].model_dump(
-                exclude_unset=True
-            )
-
-        if self._settings["extra"]:
-            generation_params.update(self._settings["extra"])
+        # Build generation parameters
+        generation_params = self._build_generation_params(
+            system_instruction=self._system_instruction, tools=tools, tool_config=tool_config
+        )
 
         # possibly modify generation_params (in place) to set thinking to off by default
         self._maybe_unset_thinking_budget(generation_params)
 
-        generation_config = (
-            GenerateContentConfig(**generation_params) if generation_params else None
-        )
+        generation_config = GenerateContentConfig(**generation_params)
 
         await self.start_ttfb_metrics()
         return await self._client.aio.models.generate_content_stream(
@@ -1165,6 +1194,14 @@ class GoogleLLMService(LLMService):
         except Exception:
             # Do nothing - we're shutting down anyway
             pass
+
+    async def _update_settings(self, settings):
+        """Override to handle ThinkingConfig validation."""
+        # Convert thinking dict to ThinkingConfig if needed
+        if "thinking" in settings and isinstance(settings["thinking"], dict):
+            settings = dict(settings)  # Make a copy to avoid modifying the original
+            settings["thinking"] = self.ThinkingConfig(**settings["thinking"])
+        await super()._update_settings(settings)
 
     def create_context_aggregator(
         self,

@@ -267,26 +267,41 @@ class AnthropicLLMService(LLMService):
         """
         messages = []
         system = NOT_GIVEN
+        tools = []
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
-            params = adapter.get_llm_invocation_params(
+            invocation_params = adapter.get_llm_invocation_params(
                 context, enable_prompt_caching=self._settings["enable_prompt_caching"]
             )
-            messages = params["messages"]
-            system = params["system"]
+            messages = invocation_params["messages"]
+            system = invocation_params["system"]
+            tools = invocation_params["tools"]
         else:
             context = AnthropicLLMContext.upgrade_to_anthropic(context)
             messages = context.messages
             system = getattr(context, "system", NOT_GIVEN)
+            tools = context.tools or []
+
+        # Build params using the same method as streaming completions
+        params = {
+            "model": self.model_name,
+            "max_tokens": self._settings["max_tokens"],
+            "stream": False,
+            "temperature": self._settings["temperature"],
+            "top_k": self._settings["top_k"],
+            "top_p": self._settings["top_p"],
+            "messages": messages,
+            "system": system,
+            "tools": tools,
+            "betas": ["interleaved-thinking-2025-05-14"],
+        }
+        if self._settings["thinking"]:
+            params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+
+        params.update(self._settings["extra"])
 
         # LLM completion
-        response = await self._client.messages.create(
-            model=self.model_name,
-            messages=messages,
-            system=system,
-            max_tokens=8192,
-            stream=False,
-        )
+        response = await self._client.beta.messages.create(**params)
 
         return response.content[0].text
 
