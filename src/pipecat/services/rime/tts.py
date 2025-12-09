@@ -33,8 +33,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import (
     AudioContextWordTTSService,
+    InterruptibleTTSService,
     TTSService,
-    WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -614,7 +614,7 @@ class RimeHttpTTSService(TTSService):
             yield TTSStoppedFrame()
 
 
-class RimeNonJsonTTSService(WebsocketTTSService):
+class RimeNonJsonTTSService(InterruptibleTTSService):
     """Pipecat TTS service for Rime's non-JSON WebSocket API.
 
     This service enables Text-to-Speech synthesis over WebSocket endpoints
@@ -817,14 +817,6 @@ class RimeNonJsonTTSService(WebsocketTTSService):
         if self._websocket:
             return self._websocket
         raise Exception("Websocket not connected")
-
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Handle interruption by clearing buffer."""
-        await super()._handle_interruption(frame, direction)
-        await self.stop_all_metrics()
-        if self._websocket:
-            # Send CLEAR command to clear buffer
-            await self._websocket.send("<CLEAR>")
 
     async def flush_audio(self):
         """Flush any pending audio synthesis."""
