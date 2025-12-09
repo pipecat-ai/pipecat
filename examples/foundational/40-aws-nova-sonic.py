@@ -49,6 +49,7 @@ async def fetch_weather_from_api(params: FunctionCallParams):
         {
             "conditions": "nice",
             "temperature": temperature,
+            "location": params.arguments["location"],
             "format": params.arguments["format"],
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
