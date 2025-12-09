@@ -115,7 +115,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         #   - ap-northeast-1
         region=os.getenv("AWS_REGION"),
         session_token=os.getenv("AWS_SESSION_TOKEN"),
-        voice_id="tiffany",  # matthew, tiffany, amy
+        voice_id="tiffany",
         # you could choose to pass instruction here rather than via context
         # system_instruction=system_instruction
         # you could choose to pass tools here rather than via context

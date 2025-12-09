@@ -193,7 +193,7 @@ class AWSNovaSonicLLMService(LLMService):
         session_token: Optional[str] = None,
         region: str,
         model: str = "amazon.nova-2-sonic-v1:0",
-        voice_id: str = "matthew",  # matthew, tiffany, amy
+        voice_id: str = "matthew",
         params: Optional[Params] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
@@ -207,8 +207,15 @@ class AWSNovaSonicLLMService(LLMService):
             access_key_id: AWS access key ID for authentication.
             session_token: AWS session token for authentication.
             region: AWS region where the service is hosted.
-            model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
-            voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
+                Supported regions:
+                - Nova 2 Sonic (the default model): "us-east-1", "us-west-2", "ap-northeast-1"
+                - Nova Sonic (the older model): "us-east-1", "ap-northeast-1"
+            model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
+            voice_id: Voice ID for speech synthesis.
+                Note that some voices are designed for use with a specific language.
+                Options:
+                - Nova 2 Sonic (the default model): see https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html
+                - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
             params: Model parameters for audio configuration and inference.
             system_instruction: System-level instruction for the model.
             tools: Available tools/functions for the model to use.
