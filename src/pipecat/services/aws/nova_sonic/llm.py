@@ -486,7 +486,7 @@ class AWSNovaSonicLLMService(LLMService):
     async def _process_completed_function_calls(self, send_new_results: bool):
         # Check for set of completed function calls in the context
         for message in self._context.get_messages():
-            if message.get("role") and message.get("content") != "IN_PROGRESS":
+            if message.get("role") and message.get("content") not in ["IN_PROGRESS", "CANCELLED"]:
                 tool_call_id = message.get("tool_call_id")
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     # Found a newly-completed function call - send the result to the service
