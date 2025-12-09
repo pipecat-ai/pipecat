@@ -44,7 +44,7 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     # You can continue chatting while waiting for this to complete.
     # With Nova 2 Sonic (the default model), the assistant will respond
     # appropriately once the function call is complete.
-    await asyncio.sleep(10)
+    await asyncio.sleep(5)
     await params.result_callback(
         {
             "conditions": "nice",
