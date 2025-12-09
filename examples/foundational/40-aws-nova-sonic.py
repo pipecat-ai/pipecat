@@ -5,7 +5,9 @@
 #
 
 
+import asyncio
 import os
+import random
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -33,7 +35,16 @@ load_dotenv(override=True)
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
-    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+    temperature = (
+        random.randint(60, 85)
+        if params.arguments["format"] == "fahrenheit"
+        else random.randint(15, 30)
+    )
+    # Simulate a long network delay.
+    # You can continue chatting while waiting for this to complete.
+    # With Nova 2 Sonic (the default model), the assistant will respond
+    # appropriately once the function call is complete.
+    await asyncio.sleep(10)
     await params.result_callback(
         {
             "conditions": "nice",
@@ -125,7 +136,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Register function for function calls
     # you can either register a single function for all function calls, or specific functions
     # llm.register_function(None, fetch_weather_from_api)
-    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function(
+        "get_current_weather", fetch_weather_from_api, cancel_on_interruption=False
+    )
 
     # Set up context and context management.
     context = LLMContext(
