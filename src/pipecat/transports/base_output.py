@@ -744,7 +744,7 @@ class BaseOutputTransport(FrameProcessor):
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
             consecutive_failures = 0
-            max_consecutive_failures = 40
+            max_consecutive_failures = 4
 
             async for frame in self._next_frame():
                 # No need to push EndFrame, it's pushed from process_frame().
@@ -777,7 +777,7 @@ class BaseOutputTransport(FrameProcessor):
 
                     # Break out if we've failed too many times consecutively
                     if consecutive_failures >= max_consecutive_failures:
-                        logger.error(
+                        logger.warning(
                             f"{self} Breaking out of audio task handler after {consecutive_failures} consecutive failures"
                         )
                         break

@@ -120,7 +120,7 @@ class DograhTTSService(AudioContextWordTTSService):
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
-            pause_frame_processing=True,
+            pause_frame_processing=False,
             sample_rate=sample_rate,
             **kwargs,
         )
