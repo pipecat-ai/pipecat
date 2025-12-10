@@ -928,6 +928,7 @@ class GoogleLLMService(LLMService):
                     if candidate.content and candidate.content.parts:
                         for part in candidate.content.parts:
                             if not part.thought and part.text:
+                                text_generated_signal = True
                                 search_result += part.text
                                 await self.push_frame(LLMTextFrame(part.text))
                             elif part.function_call:
