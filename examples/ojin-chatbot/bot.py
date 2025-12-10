@@ -144,10 +144,9 @@ async def main():
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
-    # DITTO_SERVER_URL: str = "wss://eu-central-1.models.ojin.foo/realtime"
     persona = OjinPersonaService(
         OjinPersonaSettings(
-            ws_url=os.getenv("OJIN_PROXY_URL", "wss://models.ojin.ai/realtime"),
+            ws_url=os.getenv("OJIN_REALTIME_API_URL", "wss://models.ojin.ai/realtime"),
             api_key=os.getenv("OJIN_API_KEY", ""),
             persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),
             image_size=(1280, 720),
