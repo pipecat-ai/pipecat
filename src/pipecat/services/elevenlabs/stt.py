@@ -427,6 +427,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         min_silence_duration_ms: Optional[int] = None
         include_timestamps: bool = False
         enable_logging: bool = False
+        include_language_detection: bool = False
 
     def __init__(
         self,
@@ -639,6 +640,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
             if self._params.enable_logging:
                 params.append(f"enable_logging={str(self._params.enable_logging).lower()}")
+
+            if self._params.include_language_detection:
+                params.append(f"include_language_detection={str(self._params.include_language_detection).lower()}")
 
             # Add VAD parameters if using VAD commit strategy and values are specified
             if self._params.commit_strategy == CommitStrategy.VAD:
