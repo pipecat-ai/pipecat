@@ -110,7 +110,6 @@ class MoondreamService(VisionService):
                   if analysis fails.
         """
         if not self._model:
-            logger.error(f"{self} error: Moondream model not available ({self.model_name})")
             yield ErrorFrame("Moondream model not available")
             return
 

@@ -48,12 +48,14 @@ class SimliVideoService(FrameProcessor):
         """Input parameters for Simli video configuration.
 
         Parameters:
+            enable_logging: Whether to enable Simli logging.
             max_session_length: Absolute maximum session duration in seconds.
                 Avatar will disconnect after this time even if it's speaking.
             max_idle_time: Maximum duration in seconds the avatar is not speaking
                 before the avatar disconnects.
         """
 
+        enable_logging: Optional[bool] = None
         max_session_length: Optional[int] = None
         max_idle_time: Optional[int] = None
 
@@ -84,6 +86,10 @@ class SimliVideoService(FrameProcessor):
                     Please use 'api_key' and 'face_id' parameters instead.
 
             use_turn_server: Whether to use TURN server for connection. Defaults to False.
+
+                .. deprecated:: 0.0.95
+                    The 'use_turn_server' parameter is deprecated and will be removed in a future version.
+
             latency_interval: Latency interval setting for sending health checks to check
                 the latency to Simli Servers. Defaults to 0.
             simli_url: URL of the simli servers. Can be changed for custom deployments
@@ -135,15 +141,22 @@ class SimliVideoService(FrameProcessor):
 
             config = SimliConfig(**config_kwargs)
 
+        if use_turn_server:
+            warnings.warn(
+                "The 'use_turn_server' parameter is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._initialized = False
         # Add buffer time to session limits
         config.maxIdleTime += 5
         config.maxSessionLength += 5
         self._simli_client = SimliClient(
-            config,
-            use_turn_server,
-            latency_interval,
+            config=config,
+            latencyInterval=latency_interval,
             simliURL=simli_url,
+            enable_logging=params.enable_logging or False,
         )
 
         self._pipecat_resampler: AudioResampler = None
@@ -168,7 +181,7 @@ class SimliVideoService(FrameProcessor):
             self._audio_task = self.create_task(self._consume_and_process_audio())
             self._video_task = self.create_task(self._consume_and_process_video())
         except Exception as e:
-            logger.error(f"{self}: unable to start connection: {e}")
+            await self.push_error(error_msg=f"Unable to start connection: {e}", exception=e)
 
     async def _consume_and_process_audio(self):
         """Consume audio frames from Simli and push them downstream."""
@@ -246,7 +259,7 @@ class SimliVideoService(FrameProcessor):
                         await self._simli_client.send(audioBytes)
                 return
             except Exception as e:
-                logger.exception(f"{self} exception: {e}")
+                await self.push_error(error_msg=f"Error sending audio: {e}", exception=e)
         elif isinstance(frame, TTSStoppedFrame):
             try:
                 if self._previously_interrupted and len(self._audio_buffer) > 0:
@@ -254,7 +267,7 @@ class SimliVideoService(FrameProcessor):
                     self._previously_interrupted = False
                     self._audio_buffer = bytearray()
             except Exception as e:
-                logger.exception(f"{self} exception: {e}")
+                await self.push_error(error_msg=f"Error stopping TTS: {e}", exception=e)
             return
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()

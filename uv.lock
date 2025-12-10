@@ -36,29 +36,29 @@ wheels = [
 
 [[package]]
 name = "aic-sdk"
-version = "1.0.2"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/51/90/b02e853e863c303f8456c689b42ac24ad403b781adc9642d0a91ed4bed7e/aic_sdk-1.0.2.tar.gz", hash = "sha256:239097dd3aaa8a8a0fd7542b75d2510cb34144caec796370639b7c636acbc56e", size = 32059, upload-time = "2025-08-24T09:20:03.9Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f9/ba/3ebe31b91e03d42437ec864e9d2af3a52b7ccc73a1a0c1026275956270b0/aic_sdk-1.2.0.tar.gz", hash = "sha256:eeda9a181c679f175dbe6f0efc0c67ec98ff3d84cfe01541fef7fa12ecd505ca", size = 35606, upload-time = "2025-11-20T14:42:14.333Z" }
 
 [[package]]
 name = "aioboto3"
-version = "15.0.0"
+version = "15.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiobotocore", extra = ["boto3"] },
     { name = "aiofiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/d0/ed107e16551ba1b93ddcca9a6bf79580450945268a8bc396530687b3189f/aioboto3-15.0.0.tar.gz", hash = "sha256:dce40b701d1f8e0886dc874d27cd9799b8bf6b32d63743f57e7bef7e4a562756", size = 225278, upload-time = "2025-06-26T16:30:48.967Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/01/92e9ab00f36e2899315f49eefcd5b4685fbb19016c7f19a9edf06da80bb0/aioboto3-15.5.0.tar.gz", hash = "sha256:ea8d8787d315594842fbfcf2c4dce3bac2ad61be275bc8584b2ce9a3402a6979", size = 255069, upload-time = "2025-10-30T13:37:16.122Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bf/95/d69c744f408e5e4592fe53ed98fc244dd13b83d84cf1f83b2499d98bfcc9/aioboto3-15.0.0-py3-none-any.whl", hash = "sha256:9cf54b3627c8b34bb82eaf43ab327e7027e37f92b1e10dd5cfe343cd512568d0", size = 35785, upload-time = "2025-06-26T16:30:47.444Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/3e/e8f5b665bca646d43b916763c901e00a07e40f7746c9128bdc912a089424/aioboto3-15.5.0-py3-none-any.whl", hash = "sha256:cc880c4d6a8481dd7e05da89f41c384dbd841454fc1998ae25ca9c39201437a6", size = 35913, upload-time = "2025-10-30T13:37:14.549Z" },
 ]
 
 [[package]]
 name = "aiobotocore"
-version = "2.23.0"
+version = "2.25.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -69,9 +69,9 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9d/25/4b06ea1214ddf020a28df27dc7136ac9dfaf87929d51e6f6044dd350ed67/aiobotocore-2.23.0.tar.gz", hash = "sha256:0333931365a6c7053aee292fe6ef50c74690c4ae06bb019afdf706cb6f2f5e32", size = 115825, upload-time = "2025-06-12T23:46:38.055Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/94/2e4ec48cf1abb89971cb2612d86f979a6240520f0a659b53a43116d344dc/aiobotocore-2.25.1.tar.gz", hash = "sha256:ea9be739bfd7ece8864f072ec99bb9ed5c7e78ebb2b0b15f29781fbe02daedbc", size = 120560, upload-time = "2025-10-28T22:33:21.787Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/43/ccf9b29669cdb09fd4bfc0a8effeb2973b22a0f3c3be4142d0b485975d11/aiobotocore-2.23.0-py3-none-any.whl", hash = "sha256:8202cebbf147804a083a02bc282fbfda873bfdd0065fd34b64784acb7757b66e", size = 84161, upload-time = "2025-06-12T23:46:36.305Z" },
+    { url = "https://files.pythonhosted.org/packages/95/2a/d275ec4ce5cd0096665043995a7d76f5d0524853c76a3d04656de49f8808/aiobotocore-2.25.1-py3-none-any.whl", hash = "sha256:eb6daebe3cbef5b39a0bb2a97cffbe9c7cb46b2fcc399ad141f369f3c2134b1f", size = 86039, upload-time = "2025-10-28T22:33:19.949Z" },
 ]
 
 [package.optional-dependencies]
@@ -419,16 +419,30 @@ wheels = [
 
 [[package]]
 name = "aws-sdk-bedrock-runtime"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "smithy-aws-core", extra = ["eventstream", "json"], marker = "python_full_version >= '3.12'" },
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
     { name = "smithy-http", extra = ["awscrt"], marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1d/78/48574454b3cac869df67665e4a403ebfc3abfcfba2c2ff01ccfd67d55f8f/aws_sdk_bedrock_runtime-0.1.1.tar.gz", hash = "sha256:c896f99e675c3a1ab600633a07b785f3dc9fe8ab94f640b1f992b63da2dfc784", size = 82446, upload-time = "2025-10-21T20:25:25.845Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/db/94/f2451bb09c106e5690bbb88fc366637cdcec942b352ed9bb788804c877e0/aws_sdk_bedrock_runtime-0.2.0.tar.gz", hash = "sha256:8de52dd4492e74c73244d4b41a52304e1db368814a10e49dbbf8f4e8e412cd0e", size = 88156, upload-time = "2025-11-22T00:35:44.978Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/07/62c0b70223d178c138f29124ac2f7973a6ba803abc7735b6a01a85217f3d/aws_sdk_bedrock_runtime-0.1.1-py3-none-any.whl", hash = "sha256:c0336b377b2112cf88197d3d44302fbeb3efb1101989fa49ae55e78f49cfe345", size = 74954, upload-time = "2025-10-21T20:25:24.973Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/6b/07fbddd31dd6e38c967fe088b5e91a7cc3a2bc0f645f18b4e5d45bc03f1f/aws_sdk_bedrock_runtime-0.2.0-py3-none-any.whl", hash = "sha256:19594de50a52d199d73efca153c0a2328bd781827715a6e012d50b11085236cc", size = 79875, upload-time = "2025-11-22T00:35:44.092Z" },
+]
+
+[[package]]
+name = "aws-sdk-sagemaker-runtime-http2"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "smithy-aws-core", extra = ["eventstream", "json"], marker = "python_full_version >= '3.12'" },
+    { name = "smithy-core", marker = "python_full_version >= '3.12'" },
+    { name = "smithy-http", extra = ["awscrt"], marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6e/ca/00f9c55887fc0f3fa345995dd871d40ff81473ab1591e56b4b4483d99d00/aws_sdk_sagemaker_runtime_http2-0.1.0.tar.gz", hash = "sha256:5077ec0c4440495b15004bbf04e27bc0bc137f1f8950d32195c6b45d7788d837", size = 20863, upload-time = "2025-11-22T00:20:56.358Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/24/2e2f727c51c20f4625cd19364d9421dbd7c893fe2b53a46eb0caaf6263a2/aws_sdk_sagemaker_runtime_http2-0.1.0-py3-none-any.whl", hash = "sha256:1aebb728ba6c6d14e58e29ecf89b51f7abbe8786d34144f8a7d59a419e80bd2f", size = 21911, upload-time = "2025-11-22T00:20:55.054Z" },
 ]
 
 [[package]]
@@ -606,30 +620,30 @@ wheels = [
 
 [[package]]
 name = "boto3"
-version = "1.38.27"
+version = "1.40.61"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e7/96/fc74d8521d2369dd8c412438401ff12e1350a1cd3eab5c758ed3dd5e5f82/boto3-1.38.27.tar.gz", hash = "sha256:94bd7fdd92d5701b362d4df100d21e28f8307a67ff56b6a8b0398119cf22f859", size = 111875, upload-time = "2025-05-30T19:32:41.352Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/f9/6ef8feb52c3cce5ec3967a535a6114b57ac7949fd166b0f3090c2b06e4e5/boto3-1.40.61.tar.gz", hash = "sha256:d6c56277251adf6c2bdd25249feae625abe4966831676689ff23b4694dea5b12", size = 111535, upload-time = "2025-10-28T19:26:57.247Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/8b/b2361188bd1e293eede1bc165e2461d390394f71ec0c8c21211c8dabf62c/boto3-1.38.27-py3-none-any.whl", hash = "sha256:95f5fe688795303a8a15e8b7e7f255cadab35eae459d00cc281a4fd77252ea80", size = 139938, upload-time = "2025-05-30T19:32:38.006Z" },
+    { url = "https://files.pythonhosted.org/packages/61/24/3bf865b07d15fea85b63504856e137029b6acbc73762496064219cdb265d/boto3-1.40.61-py3-none-any.whl", hash = "sha256:6b9c57b2a922b5d8c17766e29ed792586a818098efe84def27c8f582b33f898c", size = 139321, upload-time = "2025-10-28T19:26:55.007Z" },
 ]
 
 [[package]]
 name = "botocore"
-version = "1.38.27"
+version = "1.40.61"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/36/5e/67899214ad57f7f26af5bd776ac5eb583dc4ecf5c1e52e2cbfdc200e487a/botocore-1.38.27.tar.gz", hash = "sha256:9788f7efe974328a38cbade64cc0b1e67d27944b899f88cb786ae362973133b6", size = 13919963, upload-time = "2025-05-30T19:32:29.657Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/28/a3/81d3a47c2dbfd76f185d3b894f2ad01a75096c006a2dd91f237dca182188/botocore-1.40.61.tar.gz", hash = "sha256:a2487ad69b090f9cccd64cf07c7021cd80ee9c0655ad974f87045b02f3ef52cd", size = 14393956, upload-time = "2025-10-28T19:26:46.108Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/83/a753562020b69fa90cebc39e8af2c753b24dcdc74bee8355ee3f6cefdf34/botocore-1.38.27-py3-none-any.whl", hash = "sha256:a785d5e9a5eda88ad6ab9ed8b87d1f2ac409d0226bba6ff801c55359e94d91a8", size = 13580545, upload-time = "2025-05-30T19:32:26.712Z" },
+    { url = "https://files.pythonhosted.org/packages/38/c5/f6ce561004db45f0b847c2cd9b19c67c6bf348a82018a48cb718be6b58b0/botocore-1.40.61-py3-none-any.whl", hash = "sha256:17ebae412692fd4824f99cde0f08d50126dc97954008e5ba2b522eb049238aa7", size = 14055973, upload-time = "2025-10-28T19:26:42.15Z" },
 ]
 
 [[package]]
@@ -1291,13 +1305,13 @@ wheels = [
 
 [[package]]
 name = "daily-python"
-version = "0.21.0"
+version = "0.22.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ff/11/99590f8b7aad077f3f9b5b59d39b010aee0bd01b14dece8ae1e93d8080e7/daily_python-0.21.0-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:bdec96417825181559769bb2258ae688d1215949a1878336194e36fb452274a8", size = 13277066, upload-time = "2025-10-29T00:20:49.523Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/db/8c57f1a1b713ba3393584ac2be32d8074d3022a2c2c17c28eb4cd2aa3629/daily_python-0.21.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:18677fa1415a0dc48b891cdf2fb8fe9dabc70e1b019d5aaa3d0699ccc8d187c9", size = 11644908, upload-time = "2025-10-29T00:20:52.106Z" },
-    { url = "https://files.pythonhosted.org/packages/64/b6/b03f2f58a367d6ef4bb728715471542fdfa68afa8a177670139c3a2aadb7/daily_python-0.21.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:97eb97352fe74227061b678e330b8befcfa4c694feb6eb2b09fe6eacec00ad6d", size = 13652356, upload-time = "2025-10-29T00:20:54.813Z" },
-    { url = "https://files.pythonhosted.org/packages/f6/76/bde65f6f8d4c1679dc6c185fa37dae9223f6ddb4b7ced728ef46504956f7/daily_python-0.21.0-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:68c3e36f609fc2fce79e4d17ecf1021eadd836506db6c5125f95c682bcf3612a", size = 14304643, upload-time = "2025-10-29T00:20:57.194Z" },
+    { url = "https://files.pythonhosted.org/packages/04/db/d6c311ba760123a9987a9ae291171c9a6af11ee4dbefdb661d65e2ac13a2/daily_python-0.22.0-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:2ef7591a7929c5d9e5ea78329ea049d2f313bd3d2d289f5f4ecce4bb3799c3d0", size = 13526264, upload-time = "2025-11-20T05:52:04.134Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/47/f1f6d893e7aab4b2e3d3b20d0dd8fbf31c7a71597d274aae1d288e36fac3/daily_python-0.22.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:0fbc8467c471ce536dc6214a24cc28cbc38ff61113b1714e09d0eafc2741fc5a", size = 12041400, upload-time = "2025-11-20T05:52:06.419Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/c9/8f26944cd55ece2ab9c076fae5c1fcf4fdc8639ea6f2b861566d26ad9e00/daily_python-0.22.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:b8aa9531b0fa2852b41935697d184be86318eaee3b35f49e0b5714e53cdb524a", size = 14147194, upload-time = "2025-11-20T05:52:08.4Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/02/d86f4cee39bcdb112d83e2cf12345d7a974cbad5dafb350788148644f16b/daily_python-0.22.0-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:8f49fceee92830aaf53a65053f332504b2cc62af79c38edb9bce8707c9fa4b0c", size = 14654605, upload-time = "2025-11-20T05:52:10.639Z" },
 ]
 
 [[package]]
@@ -4461,6 +4475,7 @@ daily = [
 ]
 deepgram = [
     { name = "deepgram-sdk" },
+    { name = "websockets" },
 ]
 elevenlabs = [
     { name = "websockets" },
@@ -4479,6 +4494,9 @@ google = [
     { name = "google-cloud-speech" },
     { name = "google-cloud-texttospeech" },
     { name = "google-genai" },
+    { name = "websockets" },
+]
+gradium = [
     { name = "websockets" },
 ]
 groq = [
@@ -4508,6 +4526,7 @@ langchain = [
 livekit = [
     { name = "livekit" },
     { name = "livekit-api" },
+    { name = "pyjwt" },
     { name = "tenacity" },
 ]
 lmnt = [
@@ -4548,6 +4567,9 @@ neuphonic = [
 noisereduce = [
     { name = "noisereduce" },
 ]
+nvidia = [
+    { name = "nvidia-riva-client" },
+]
 openai = [
     { name = "websockets" },
 ]
@@ -4568,6 +4590,9 @@ runner = [
     { name = "pipecat-ai-small-webrtc-prebuilt" },
     { name = "python-dotenv" },
     { name = "uvicorn" },
+]
+sagemaker = [
+    { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12'" },
 ]
 sarvam = [
     { name = "sarvamai" },
@@ -4633,6 +4658,7 @@ dev = [
     { name = "ruff" },
     { name = "setuptools" },
     { name = "setuptools-scm" },
+    { name = "towncrier" },
 ]
 docs = [
     { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -4647,18 +4673,19 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'moondream'", specifier = "~=1.10.0" },
-    { name = "aic-sdk", marker = "extra == 'aic'", specifier = "~=1.0.1" },
-    { name = "aioboto3", marker = "extra == 'aws'", specifier = "~=15.0.0" },
+    { name = "aic-sdk", marker = "extra == 'aic'", specifier = "~=1.2.0" },
+    { name = "aioboto3", marker = "extra == 'aws'", specifier = "~=15.5.0" },
     { name = "aiofiles", specifier = ">=24.1.0,<25" },
     { name = "aiohttp", specifier = ">=3.11.12,<4" },
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.13.0,<2" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = "~=0.49.0" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.1" },
-    { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.1.1" },
+    { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.2.0" },
+    { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12' and extra == 'sagemaker'" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = "~=1.42.0" },
     { name = "cartesia", marker = "extra == 'cartesia'", specifier = "~=2.0.3" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
-    { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.21.0" },
+    { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.22.0" },
     { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = "~=4.7.0" },
     { name = "docstring-parser", specifier = "~=0.16" },
     { name = "einops", marker = "extra == 'moondream'", specifier = "~=0.8.0" },
@@ -4686,7 +4713,7 @@ requires-dist = [
     { name = "noisereduce", marker = "extra == 'noisereduce'", specifier = "~=3.0.3" },
     { name = "numba", specifier = "==0.61.2" },
     { name = "numpy", specifier = ">=1.26.4,<3" },
-    { name = "nvidia-riva-client", marker = "extra == 'riva'", specifier = "~=2.21.1" },
+    { name = "nvidia-riva-client", marker = "extra == 'nvidia'", specifier = "~=2.21.1" },
     { name = "onnxruntime", marker = "extra == 'local-smart-turn-v3'", specifier = ">=1.20.1,<2" },
     { name = "onnxruntime", marker = "extra == 'silero'", specifier = ">=1.20.1,<2" },
     { name = "openai", specifier = ">=1.74.0,<3" },
@@ -4697,14 +4724,17 @@ requires-dist = [
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.33.0" },
     { name = "ormsgpack", marker = "extra == 'fish'", specifier = "~=1.7.0" },
     { name = "pillow", specifier = ">=11.1.0,<12" },
+    { name = "pipecat-ai", extras = ["nvidia"], marker = "extra == 'riva'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'assemblyai'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'asyncai'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'aws'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'cartesia'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'deepgram'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'elevenlabs'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'fish'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'gladia'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'google'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'gradium'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'heygen'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'lmnt'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'neuphonic'" },
@@ -4721,13 +4751,14 @@ requires-dist = [
     { name = "pyaudio", marker = "extra == 'local'", specifier = "~=0.2.14" },
     { name = "pydantic", specifier = ">=2.10.6,<3" },
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
+    { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.10.1" },
     { name = "pyloudnorm", specifier = "~=0.1.1" },
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "resampy", specifier = "~=0.4.3" },
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.21" },
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.28.0,<3" },
-    { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=0.1.25" },
+    { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=1.0.3" },
     { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.1" },
     { name = "soxr", specifier = "~=0.5.0" },
     { name = "speechmatics-rt", marker = "extra == 'speechmatics'", specifier = ">=0.5.0" },
@@ -4745,7 +4776,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sarvam", "sentry", "local-smart-turn", "local-smart-turn-v3", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4762,6 +4793,7 @@ dev = [
     { name = "ruff", specifier = ">=0.12.11,<1" },
     { name = "setuptools", specifier = "~=78.1.1" },
     { name = "setuptools-scm", specifier = "~=8.3.1" },
+    { name = "towncrier", specifier = "~=25.8.0" },
 ]
 docs = [
     { name = "sphinx", specifier = ">=8.1.3" },
@@ -6202,14 +6234,14 @@ wheels = [
 
 [[package]]
 name = "s3transfer"
-version = "0.13.1"
+version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/05/d52bf1e65044b4e5e27d4e63e8d1579dbdec54fce685908ae09bc3720030/s3transfer-0.13.1.tar.gz", hash = "sha256:c3fdba22ba1bd367922f27ec8032d6a1cf5f10c934fb5d68cf60fd5a23d936cf", size = 150589, upload-time = "2025-07-18T19:22:42.31Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/74/8d69dcb7a9efe8baa2046891735e5dfe433ad558ae23d9e3c14c633d1d58/s3transfer-0.14.0.tar.gz", hash = "sha256:eff12264e7c8b4985074ccce27a3b38a485bb7f7422cc8046fee9be4983e4125", size = 151547, upload-time = "2025-09-09T19:23:31.089Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/4f/d073e09df851cfa251ef7840007d04db3293a0482ce607d2b993926089be/s3transfer-0.13.1-py3-none-any.whl", hash = "sha256:a981aa7429be23fe6dfc13e80e4020057cbab622b08c0315288758d67cabc724", size = 85308, upload-time = "2025-07-18T19:22:40.947Z" },
+    { url = "https://files.pythonhosted.org/packages/48/f0/ae7ca09223a81a1d890b2557186ea015f6e0502e9b8cb8e1813f1d8cfa4e/s3transfer-0.14.0-py3-none-any.whl", hash = "sha256:ea3b790c7077558ed1f02a3072fb3cb992bbbd253392f4b6e9e8976941c7d456", size = 85712, upload-time = "2025-09-09T19:23:30.041Z" },
 ]
 
 [[package]]
@@ -6496,18 +6528,19 @@ wheels = [
 
 [[package]]
 name = "simli-ai"
-version = "0.1.25"
+version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiortc" },
     { name = "av" },
     { name = "httpx" },
+    { name = "livekit" },
     { name = "numpy" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/6a/b28f90baf76f6a60865985f6233ff44abc72d45b66b76658bff3961e20a7/simli_ai-0.1.25.tar.gz", hash = "sha256:7a00b3426dc26a6a421641072c3e49014b7950c621cf4544152f35c58d13fcff", size = 13182, upload-time = "2025-11-06T16:27:08.862Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/03/b0b3e12c68fd3f9c57f6afeee67841349e4866b88760f413357af3043ae4/simli_ai-1.0.3.tar.gz", hash = "sha256:e96b0621a1dbd9582b2ae3d51eefd4995983b49c1f1061eb9239707b15a1ee27", size = 13350, upload-time = "2025-11-13T12:22:32.514Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ac/57/ae1032fd88214ea4ee6d3028c817c12a999eb90a67766bbab31e9819385a/simli_ai-0.1.25-py3-none-any.whl", hash = "sha256:7d01f65321dc9052f25e15d0463af6a20a86c6d37d9a7b3a2c4b01cbec0a54ed", size = 13651, upload-time = "2025-11-06T16:27:07.765Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/d1/dc382ba529de0d2d51f35e9bfd20b41d8f5c96404a3aa24bae97a5a5e51f/simli_ai-1.0.3-py3-none-any.whl", hash = "sha256:ffafa7540aa28833e207be8f3b199367c7f500dac1a8ba0108395bfb7d8362bc", size = 13863, upload-time = "2025-11-13T12:22:31.218Z" },
 ]
 
 [[package]]
@@ -6521,16 +6554,16 @@ wheels = [
 
 [[package]]
 name = "smithy-aws-core"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aws-sdk-signers", marker = "python_full_version >= '3.12'" },
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
     { name = "smithy-http", marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/d3/f847e0fd36b95aa36ce3a4c9ce1a08e16b2aa9a56b71714045c9c924e282/smithy_aws_core-0.1.1.tar.gz", hash = "sha256:78dfd7040fc2bc72b6af293096642fc9a7bfd2db28ddbdf7c4110535eab9d662", size = 11196, upload-time = "2025-10-21T20:21:18.648Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/c8/5970c869527972b23a1733de3993d54283c84a2340e84acdd48a11aa0ff4/smithy_aws_core-0.2.0.tar.gz", hash = "sha256:dfa1ecd311d6f0a16f48c86d793085e2a0a33a46de897d129dd1f142a43bf7f6", size = 11344, upload-time = "2025-11-21T18:33:01.928Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/04/87cb06f0f6d664b5cffdef6d4042dd52c11c138436084d30ffdaa3543031/smithy_aws_core-0.1.1-py3-none-any.whl", hash = "sha256:0d1634f276c2999dc2a04fafef63b9d28309de50d939d1d49df952773a7063c4", size = 18963, upload-time = "2025-10-21T20:21:17.692Z" },
+    { url = "https://files.pythonhosted.org/packages/88/25/739c0005a6cb4effbc2d37fe23590660b508fe314200f4acf94410a8f315/smithy_aws_core-0.2.0-py3-none-any.whl", hash = "sha256:d112082ef77758e1977f8694cf690ac35c76570c12a6590fccd5da085a3ce507", size = 18966, upload-time = "2025-11-21T18:33:00.812Z" },
 ]
 
 [package.optional-dependencies]
@@ -6543,35 +6576,35 @@ json = [
 
 [[package]]
 name = "smithy-aws-event-stream"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "smithy-core", marker = "python_full_version >= '3.12'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/49/26/8ff24194efed60b2df18f610ea05fa2a4c6546858b80a0a51335a4943b9b/smithy_aws_event_stream-0.1.0.tar.gz", hash = "sha256:6634691a3bf5d4801a2c29f0761db2dc4771f3ae43cdee50c10d4b4bb2f86475", size = 12216, upload-time = "2025-09-29T19:37:14.659Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/90/c4/2b63d31af58fc359577e5515bf730348a235f2f2fa10e17af8640495c81c/smithy_aws_event_stream-0.1.0-py3-none-any.whl", hash = "sha256:17a7300a85cb90df4c6c23f895ca6343361fa419203c3cf80019edd7d3b5f036", size = 15581, upload-time = "2025-09-29T19:37:13.589Z" },
-]
-
-[[package]]
-name = "smithy-core"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b9/8d/16028d03456071d21de7591f1e1e6a1cc81b2389e53ef8663dbf59caf9cd/smithy_core-0.1.0.tar.gz", hash = "sha256:b159b8905264e1e4c613eab9f74cec0b2f5b8119c42fbadddb4da0a8ed8050e9", size = 48415, upload-time = "2025-09-29T19:37:16.873Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/5b/563cb2beadcfa40597b0c3ff3f2d42e21f065b14782c4ba9cb41a44b745f/smithy_core-0.1.0-py3-none-any.whl", hash = "sha256:cb44e9355fb89e89f2c6ba6a1d59c5db4f2f7282c72d31d9307b6202d66cd0fa", size = 62895, upload-time = "2025-09-29T19:37:15.917Z" },
-]
-
-[[package]]
-name = "smithy-http"
 version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/1c/44e99a7dfb8c39bf0c3d998accdf4573a7a3488863b90f21af260cec2d45/smithy_http-0.2.0.tar.gz", hash = "sha256:2382562fa9af326be455f14b18615f16ffe9db756e51b2a4ca0d23e1b881cff8", size = 26729, upload-time = "2025-10-21T20:21:06.146Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/90/78283c21484f8cf9862982e53bc2769b784910735fb5fb2400a17bfb5fdd/smithy_aws_event_stream-0.2.0.tar.gz", hash = "sha256:99700a11346e7ab1435ff2e53e6f6d60a1e857f2b2ee1941d40b54270adf3323", size = 12278, upload-time = "2025-11-21T18:33:03.79Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d4/e2/d475fad81ac74ec0e145cb6d72afe5ecde4e2358bd632c2fd5d3f4bc87dc/smithy_http-0.2.0-py3-none-any.whl", hash = "sha256:49ee2402d7737798d70f99f491fbfb2a5767283ae562e21b6f86e3fd14f3e3e0", size = 37328, upload-time = "2025-10-21T20:21:05.362Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/f5/08b997eee81b55150496ce565f0e03c72d0c80e5b218170bdeae7c46a5a4/smithy_aws_event_stream-0.2.0-py3-none-any.whl", hash = "sha256:679a0c7d944e67d3a55d287541b3ca1e61f9d6a62e13401367dcc034e75aa55d", size = 15567, upload-time = "2025-11-21T18:33:02.711Z" },
+]
+
+[[package]]
+name = "smithy-core"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/f6/140f0be9331dd7cd8fa012b3ca4735df39a1a81d03eea89728f997249116/smithy_core-0.2.0.tar.gz", hash = "sha256:05c3e3309df5dcb9cf53e241bd57a96510e4575186443ea157db9dbb59b6c85e", size = 50334, upload-time = "2025-11-21T18:33:05.697Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/e3/d0defa2acf50b91625fe15e3ddb0c8e41ff64363a1f4cd9b8f19ae2ec0c6/smithy_core-0.2.0-py3-none-any.whl", hash = "sha256:db4620da3497abb60f79ac1d8a738d3eac46d7e820bfb50c777c36e932915239", size = 64777, upload-time = "2025-11-21T18:33:04.591Z" },
+]
+
+[[package]]
+name = "smithy-http"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "smithy-core", marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/c7/4d8be56e897f99f3b6ffcdf52ba00a468febc939fca85b90f1c122450830/smithy_http-0.3.0.tar.gz", hash = "sha256:55dcc3af315eee6863d2f3f58ada1d9cb4bcc3a57faac10a1b21d4a93722f520", size = 28674, upload-time = "2025-11-21T18:33:07.387Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2d/e5/59ae79ecdc9a935ad10512c581b3054ebb1afd90498ecc8afaf141dbc22b/smithy_http-0.3.0-py3-none-any.whl", hash = "sha256:972924304febd77c7134a7cffab83ce3b48423ff966dcc1f257e2c0d58fa9b18", size = 40520, upload-time = "2025-11-21T18:33:06.312Z" },
 ]
 
 [package.optional-dependencies]
@@ -6581,15 +6614,15 @@ awscrt = [
 
 [[package]]
 name = "smithy-json"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ijson", marker = "python_full_version >= '3.12'" },
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e2/5b/0ecb10007475e1b8faca3bbff1be2fc6edb3ea12ffc5e939e2249be95325/smithy_json-0.1.0.tar.gz", hash = "sha256:84fb48e445b87d850c240d837702c16b259ea53bad76b655ac1bbd8094d48912", size = 7086, upload-time = "2025-09-29T19:37:20.432Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/cf/e319a2a299b27bc0addf46ee3d4b9c25ec0817e3a0507b2b7a33eddc19f1/smithy_json-0.2.0.tar.gz", hash = "sha256:0946066fdda15d6a579dfdd4b61a547ab915eb057bd176fc2bc17d01dc789499", size = 7157, upload-time = "2025-11-21T18:33:08.968Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/62/95/e11c04e56aae12b62e38c49000004a1dc598a64dc207018c08448efde322/smithy_json-0.1.0-py3-none-any.whl", hash = "sha256:80ff64734dccdabf1ba6a2908555b97e60f62c07c3a27df48e421ee058413cb9", size = 9914, upload-time = "2025-09-29T19:37:19.459Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/b1/33012ac5b2e5940a00b6e1ccc313330e6f8692152a151f72a398cd6be0e0/smithy_json-0.2.0-py3-none-any.whl", hash = "sha256:5018a4e61731afa3094a02d737d4f956dbf270c271410c089045a17d86fc3b3b", size = 9911, upload-time = "2025-11-21T18:33:08.267Z" },
 ]
 
 [[package]]
@@ -7218,6 +7251,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/9a/2b59f5758ba7e3f23bc84e16947493bbce97392ec6d18efba7bdf0a3b10e/torchvision-0.22.0-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:753d3c84eeadd5979a33b3b73a25ecd0aa4af44d6b45ed2c70d44f5e0ac68312", size = 2476555, upload-time = "2025-04-23T14:41:38.357Z" },
     { url = "https://files.pythonhosted.org/packages/7d/40/a7bc2ab9b1e56d10a7fd9ae83191bb425fa308caa23d148f1c568006e02c/torchvision-0.22.0-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:b30e3ed29e4a61f7499bca50f57d8ebd23dfc52b14608efa17a534a55ee59a03", size = 7617924, upload-time = "2025-04-23T14:41:42.709Z" },
     { url = "https://files.pythonhosted.org/packages/c1/7b/30d423bdb2546250d719d7821aaf9058cc093d165565b245b159c788a9dd/torchvision-0.22.0-cp313-cp313t-win_amd64.whl", hash = "sha256:e5d680162694fac4c8a374954e261ddfb4eb0ce103287b0f693e4e9c579ef957", size = 1638621, upload-time = "2025-04-23T14:41:46.06Z" },
+]
+
+[[package]]
+name = "towncrier"
+version = "25.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "jinja2" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c2/eb/5bf25a34123698d3bbab39c5bc5375f8f8bcbcc5a136964ade66935b8b9d/towncrier-25.8.0.tar.gz", hash = "sha256:eef16d29f831ad57abb3ae32a0565739866219f1ebfbdd297d32894eb9940eb1", size = 76322, upload-time = "2025-08-30T11:41:55.393Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/06/8ba22ec32c74ac1be3baa26116e3c28bc0e76a5387476921d20b6fdade11/towncrier-25.8.0-py3-none-any.whl", hash = "sha256:b953d133d98f9aeae9084b56a3563fd2519dfc6ec33f61c9cd2c61ff243fb513", size = 65101, upload-time = "2025-08-30T11:41:53.644Z" },
 ]
 
 [[package]]

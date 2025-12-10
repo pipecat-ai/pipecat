@@ -1015,7 +1015,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         await self.push_aggregation(caller="LLMFullResponseEndFrame")
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started:
+        if not self._started or not frame.append_to_context:
             return
 
         if self._params.expect_stripped_words:

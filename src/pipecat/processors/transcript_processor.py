@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.string import concatenate_aggregated_text
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -106,15 +106,9 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._current_text_parts: List[str] = []
+        self._current_text_parts: List[TextPartForConcatenation] = []
         self._aggregation_start_time: Optional[str] = None
         self._correct_aggregation_callback = correct_aggregation_callback
-
-        # Whether to add spaces between text parts.
-        # (The use of this could be expanded to the UserTranscriptProcessor in
-        # the future if needed; currently the UserTranscriptProcessor assumes
-        # that user transcription frames do not need aggregation).
-        self._add_spaces = True
 
     async def _emit_aggregated_text(self):
         """Aggregates and emits text fragments as a transcript message.
@@ -156,7 +150,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
                 Result: "Hello there how are you"
         """
         if self._current_text_parts and self._aggregation_start_time:
-            content = concatenate_aggregated_text(self._current_text_parts, self._add_spaces)
+            content = concatenate_aggregated_text(self._current_text_parts)
 
             # Apply correction if callback is provided
             if content and self._correct_aggregation_callback:
@@ -164,7 +158,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
                     content = self._correct_aggregation_callback(content)
                 except Exception as e:
                     logger.error(f"Error in transcript correction callback: {e}")
-
+            
             if content:
                 logger.trace(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(
@@ -208,11 +202,11 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             if not self._aggregation_start_time:
                 self._aggregation_start_time = time_now_iso8601()
 
-            # Track whether we need to add spaces between text parts
-            # Assumption: we can just keep track of the latest frame's value
-            self._add_spaces = not frame.includes_inter_frame_spaces
-
-            self._current_text_parts.append(frame.text)
+            self._current_text_parts.append(
+                TextPartForConcatenation(
+                    frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+                )
+            )
 
             # Push frame.
             await self.push_frame(frame, direction)

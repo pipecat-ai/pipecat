@@ -194,7 +194,7 @@ class SonioxSTTService(STTService):
         self._websocket = await websocket_connect(self._url)
 
         if not self._websocket:
-            logger.error(f"Unable to connect to Soniox API at {self._url}")
+            await self.push_error(error_msg=f"Unable to connect to Soniox API at {self._url}")
 
         # If vad_force_turn_endpoint is not enabled, we need to enable endpoint detection.
         # Either one or the other is required.
@@ -327,8 +327,7 @@ class SonioxSTTService(STTService):
             # Expected when closing the connection
             logger.debug("WebSocket connection closed, keepalive task stopped.")
         except Exception as e:
-            logger.error(f"{self} error (_keepalive_task_handler): {e}")
-            await self.push_error(ErrorFrame(f"{self} error (_keepalive_task_handler): {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _receive_task_handler(self):
         if not self._websocket:
@@ -404,13 +403,8 @@ class SonioxSTTService(STTService):
                 if error_code or error_message:
                     # In case of error, still send the final transcript (if any remaining in the buffer).
                     await send_endpoint_transcript()
-                    logger.error(
-                        f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
-                    )
                     await self.push_error(
-                        ErrorFrame(
-                            f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
-                        )
+                        error_msg=f"Error: {error_code} (_receive_task_handler) - {error_message}"
                     )
 
                 finished = content.get("finished")
@@ -425,5 +419,4 @@ class SonioxSTTService(STTService):
             # Expected when closing the connection.
             pass
         except Exception as e:
-            logger.error(f"{self} error: {e}")
-            await self.push_error(ErrorFrame(f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Error receiving message: {e}", exception=e)

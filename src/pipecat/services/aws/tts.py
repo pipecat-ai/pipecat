@@ -209,15 +209,6 @@ class AWSPollyTTSService(TTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that AWS TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that AWS's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to AWS Polly language format.
 
@@ -321,7 +312,6 @@ class AWSPollyTTSService(TTSService):
 
                 yield TTSStoppedFrame()
         except (BotoCoreError, ClientError) as error:
-            logger.exception(f"{self} error generating TTS: {error}")
             error_message = f"AWS Polly TTS error: {str(error)}"
             yield ErrorFrame(error=error_message)
 

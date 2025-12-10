@@ -13,7 +13,13 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.frames.frames import Frame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+)
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -105,15 +111,6 @@ class GroqTTSService(TTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Groq TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Groq's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Groq's TTS API.
@@ -149,6 +146,6 @@ class GroqTTSService(TTSService):
                     bytes = w.readframes(num_frames)
                     yield TTSAudioRawFrame(bytes, frame_rate, channels)
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
         yield TTSStoppedFrame()

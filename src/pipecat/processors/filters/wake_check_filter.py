@@ -126,6 +126,4 @@ class WakeCheckFilter(FrameProcessor):
             else:
                 await self.push_frame(frame, direction)
         except Exception as e:
-            error_msg = f"Error in wake word filter: {e}"
-            logger.exception(error_msg)
-            await self.push_error(ErrorFrame(error_msg))
+            await self.push_error(error_msg=f"Error in wake word filter: {e}", exception=e)

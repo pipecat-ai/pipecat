@@ -373,9 +373,7 @@ class AnthropicLLMService(LLMService):
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
-                        frame = LLMTextFrame(event.delta.text)
-                        frame.includes_inter_frame_spaces = True
-                        await self.push_frame(frame)
+                        await self.push_frame(LLMTextFrame(event.delta.text))
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
                     elif hasattr(event.delta, "partial_json") and tool_use_block:
                         json_accumulator += event.delta.partial_json
@@ -460,8 +458,7 @@ class AnthropicLLMService(LLMService):
         except httpx.TimeoutException:
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"{e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())

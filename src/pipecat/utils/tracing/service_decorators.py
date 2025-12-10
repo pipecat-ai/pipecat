@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.utils.tracing.context_registry import get_current_turn_context
 from pipecat.utils.tracing.service_attributes import (
@@ -95,12 +95,43 @@ def _add_token_usage_to_span(span, token_usage):
             span.set_attribute("gen_ai.usage.input_tokens", token_usage["prompt_tokens"])
         if "completion_tokens" in token_usage:
             span.set_attribute("gen_ai.usage.output_tokens", token_usage["completion_tokens"])
+        # Add cached token metrics for dictionary
+        if (
+            "cache_read_input_tokens" in token_usage
+            and token_usage["cache_read_input_tokens"] is not None
+        ):
+            span.set_attribute(
+                "gen_ai.usage.cache_read_input_tokens", token_usage["cache_read_input_tokens"]
+            )
+        if (
+            "cache_creation_input_tokens" in token_usage
+            and token_usage["cache_creation_input_tokens"] is not None
+        ):
+            span.set_attribute(
+                "gen_ai.usage.cache_creation_input_tokens",
+                token_usage["cache_creation_input_tokens"],
+            )
+        if "reasoning_tokens" in token_usage and token_usage["reasoning_tokens"] is not None:
+            span.set_attribute("gen_ai.usage.reasoning_tokens", token_usage["reasoning_tokens"])
     else:
         # Handle LLMTokenUsage object
         span.set_attribute("gen_ai.usage.input_tokens", getattr(token_usage, "prompt_tokens", 0))
         span.set_attribute(
             "gen_ai.usage.output_tokens", getattr(token_usage, "completion_tokens", 0)
         )
+
+        # Add cached token metrics for LLMTokenUsage object
+        cache_read_tokens = getattr(token_usage, "cache_read_input_tokens", None)
+        if cache_read_tokens is not None:
+            span.set_attribute("gen_ai.usage.cache_read_input_tokens", cache_read_tokens)
+
+        cache_creation_tokens = getattr(token_usage, "cache_creation_input_tokens", None)
+        if cache_creation_tokens is not None:
+            span.set_attribute("gen_ai.usage.cache_creation_input_tokens", cache_creation_tokens)
+
+        reasoning_tokens = getattr(token_usage, "reasoning_tokens", None)
+        if reasoning_tokens is not None:
+            span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning_tokens)
 
 
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
@@ -450,11 +481,6 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 if hasattr(self, "get_llm_adapter"):
                                     adapter = self.get_llm_adapter()
                                     messages = adapter.get_messages_for_logging(context)
-                            elif hasattr(context, "get_messages"):
-                                # Fallback for unknown context types
-                                messages = context.get_messages()
-                            elif hasattr(context, "messages"):
-                                messages = context.messages
 
                             # Get tools
                             # For OpenAILLMContext: tools may need adapter conversion if set
@@ -469,9 +495,6 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
                                     adapter = self.get_llm_adapter()
                                     tools = adapter.from_standard_tools(context.tools)
-                            elif hasattr(context, "tools"):
-                                # Fallback for unknown context types
-                                tools = context.tools
 
                             # Handle system message for different services
                             system_message = None
@@ -512,7 +535,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Add all available attributes to the span
                             attribute_kwargs = {
                                 "service_name": service_class_name,
-                                "model": getattr(self, "model_name", "unknown"),
+                                "model": getattr(
+                                    self, getattr(self, "_full_model_name", "model_name"), "unknown"
+                                ),
                                 "stream": True,  # Most LLM services use streaming
                                 "parameters": params,
                             }
@@ -780,7 +805,7 @@ def traced_gemini_live(operation: str) -> Callable:
                                             else:
                                                 operation_attrs["tool.result_status"] = "completed"
 
-                                    except json.JSONDecodeError as e:
+                                    except json.JSONDecodeError:
                                         operation_attrs["tool.result"] = (
                                             f"Invalid JSON: {str(result_content)[:500]}"
                                         )

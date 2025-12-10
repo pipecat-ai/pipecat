@@ -47,11 +47,11 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import LLMService
-from pipecat.sync.base_notifier import BaseNotifier
-from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.utils.sync.base_notifier import BaseNotifier
+from pipecat.utils.sync.event_notifier import EventNotifier
 from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
@@ -391,7 +391,7 @@ class AudioAccumulator(FrameProcessor):
             )
             self._user_speaking = False
             context = LLMContext()
-            context.add_audio_frames_message(audio_frames=self._audio_frames)
+            await context.add_audio_frames_message(audio_frames=self._audio_frames)
             await self.push_frame(LLMContextFrame(context=context))
         elif isinstance(frame, InputAudioRawFrame):
             # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest

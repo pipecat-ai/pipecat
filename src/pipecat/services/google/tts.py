@@ -596,15 +596,6 @@ class GoogleHttpTTSService(TTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Google TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Google's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to Google TTS language format.
 
@@ -746,7 +737,6 @@ class GoogleHttpTTSService(TTSService):
             yield TTSStoppedFrame()
 
         except Exception as e:
-            logger.exception(f"{self} error generating TTS: {e}")
             error_message = f"TTS generation error: {str(e)}"
             yield ErrorFrame(error=error_message)
 
@@ -800,15 +790,6 @@ class GoogleBaseTTSService(TTSService):
 
         Returns:
             True, as Google streaming TTS services support metrics generation.
-        """
-        return True
-
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Google and Gemini TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Google's text frames include necessary inter-frame spaces.
         """
         return True
 
@@ -1014,9 +995,7 @@ class GoogleTTSService(GoogleBaseTTSService):
                 yield frame
 
         except Exception as e:
-            logger.exception(f"{self} error generating TTS: {e}")
-            error_message = f"TTS generation error: {str(e)}"
-            yield ErrorFrame(error=error_message)
+            await self.push_error(error_msg=f"TTS generation error: {str(e)}", exception=e)
 
 
 class GeminiTTSService(GoogleBaseTTSService):
@@ -1266,6 +1245,5 @@ class GeminiTTSService(GoogleBaseTTSService):
                 yield frame
 
         except Exception as e:
-            logger.exception(f"{self} error generating TTS: {e}")
             error_message = f"Gemini TTS generation error: {str(e)}"
             yield ErrorFrame(error=error_message)

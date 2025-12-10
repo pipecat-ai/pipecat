@@ -24,7 +24,7 @@ try:
     from langchain_core.messages import AIMessageChunk
     from langchain_core.runnables import Runnable
 except ModuleNotFoundError as e:
-    logger.exception("In order to use Langchain, you need to `pip install pipecat-ai[langchain]`. ")
+    logger.error("In order to use Langchain, you need to `pip install pipecat-ai[langchain]`. ")
     raise Exception(f"Missing module: {e}")
 
 
@@ -113,6 +113,6 @@ class LangchainProcessor(FrameProcessor):
         except GeneratorExit:
             logger.warning(f"{self} generator was closed prematurely")
         except Exception as e:
-            logger.exception(f"{self} an unknown error occurred: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.push_frame(LLMFullResponseEndFrame())

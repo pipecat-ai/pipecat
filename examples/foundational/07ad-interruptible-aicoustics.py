@@ -15,7 +15,6 @@ from loguru import logger
 from pipecat.audio.filters.aic_filter import AICFilter
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -48,7 +47,7 @@ def _create_aic_filter() -> AICFilter:
 
     return AICFilter(
         license_key=license_key,
-        enhancement_level=1.0,
+        enhancement_level=0.5,
     )
 
 
@@ -56,27 +55,33 @@ def _create_aic_filter() -> AICFilter:
 # instantiated. The function will be called when the desired transport gets
 # selected.
 transport_params = {
-    "daily": lambda: DailyParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
-        audio_in_filter=_create_aic_filter(),
-    ),
-    "twilio": lambda: FastAPIWebsocketParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
-        audio_in_filter=_create_aic_filter(),
-    ),
-    "webrtc": lambda: TransportParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
-        audio_in_filter=_create_aic_filter(),
-    ),
+    "daily": lambda: (
+        lambda aic: DailyParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=aic.create_vad_analyzer(lookback_buffer_size=6.0, sensitivity=6.0),
+            turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
+            audio_in_filter=aic,
+        )
+    )(_create_aic_filter()),
+    "twilio": lambda: (
+        lambda aic: FastAPIWebsocketParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=aic.create_vad_analyzer(lookback_buffer_size=6.0, sensitivity=6.0),
+            turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
+            audio_in_filter=aic,
+        )
+    )(_create_aic_filter()),
+    "webrtc": lambda: (
+        lambda aic: TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=aic.create_vad_analyzer(lookback_buffer_size=6.0, sensitivity=6.0),
+            turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
+            audio_in_filter=aic,
+        )
+    )(_create_aic_filter()),
 }
 
 

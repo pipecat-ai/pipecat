@@ -105,15 +105,6 @@ class SpeechmaticsTTSService(TTSService):
         """
         return True
 
-    @property
-    def includes_inter_frame_spaces(self) -> bool:
-        """Indicates that Speechmatics TTSTextFrames include necessary inter-frame spaces.
-
-        Returns:
-            True, indicating that Speechmatics's text frames include necessary inter-frame spaces.
-        """
-        return True
-
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Speechmatics' HTTP API.
@@ -172,7 +163,7 @@ class SpeechmaticsTTSService(TTSService):
 
                             # Report error frame
                             yield ErrorFrame(
-                                error=f"{self} Service unavailable [503] (attempt {attempt}, retry in {backoff_time:.2f}s)"
+                                error=f"Service unavailable [503] (attempt {attempt}, retry in {backoff_time:.2f}s)"
                             )
 
                             # Wait before retrying
@@ -183,16 +174,13 @@ class SpeechmaticsTTSService(TTSService):
 
                         except (ValueError, ArithmeticError):
                             yield ErrorFrame(
-                                error=f"{self} Service unavailable [503] (attempts {attempt})",
-                                fatal=True,
+                                error=f"Service unavailable [503] (attempts {attempt})",
                             )
                             return
 
                     # != 200 : Error
                     if response.status != 200:
-                        yield ErrorFrame(
-                            error=f"{self} Service unavailable [{response.status}]", fatal=True
-                        )
+                        yield ErrorFrame(error=f"Service unavailable [{response.status}]")
                         return
 
                     # Update Pipecat metrics
@@ -234,7 +222,7 @@ class SpeechmaticsTTSService(TTSService):
                     break
 
         except Exception as e:
-            yield ErrorFrame(error=f"{self}: Error generating TTS: {e}", fatal=True)
+            yield ErrorFrame(error=f"Error generating TTS: {e}")
         finally:
             # Emit the TTS stopped frame
             yield TTSStoppedFrame()

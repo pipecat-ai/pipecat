@@ -264,7 +264,10 @@ def _setup_webrtc_routes(
         # Prepare runner arguments with the callback to run your bot
         async def webrtc_connection_callback(connection):
             bot_module = _get_bot_module()
-            runner_args = SmallWebRTCRunnerArguments(webrtc_connection=connection)
+
+            runner_args = SmallWebRTCRunnerArguments(
+                webrtc_connection=connection, body=request.request_data
+            )
             background_tasks.add_task(bot_module.bot, runner_args)
 
         # Delegate handling to SmallWebRTCRequestHandler
@@ -299,7 +302,7 @@ def _setup_webrtc_routes(
         result: StartBotResult = {"sessionId": session_id}
         if request_data.get("enableDefaultIceServers"):
             result["iceConfig"] = IceConfig(
-                iceServers=[IceServer(urls="stun:stun.l.google.com:19302")]
+                iceServers=[IceServer(urls=["stun:stun.l.google.com:19302"])]
             )
 
         return result
@@ -326,7 +329,8 @@ def _setup_webrtc_routes(
                         type=request_data["type"],
                         pc_id=request_data.get("pc_id"),
                         restart_pc=request_data.get("restart_pc"),
-                        request_data=request_data,
+                        request_data=request_data.get("request_data")
+                        or request_data.get("requestData"),
                     )
                     return await offer(webrtc_request, background_tasks)
                 elif request.method == HTTPMethod.PATCH.value:

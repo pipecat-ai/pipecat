@@ -5,13 +5,19 @@
 #
 
 import sys
-from importlib.metadata import version
+from importlib.metadata import version as lib_version
 
 from loguru import logger
 
-__version__ = version("pipecat-ai")
+__version__ = lib_version("pipecat-ai")
 
 logger.info(f"ᓚᘏᗢ Pipecat {__version__} (Python {sys.version}) ᓚᘏᗢ")
+
+
+def version() -> str:
+    """Returns the Pipecat version."""
+    return __version__
+
 
 # We replace `asyncio.wait_for()` for `wait_for2.wait_for()` for Python < 3.12.
 #
