@@ -158,7 +158,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
                     content = self._correct_aggregation_callback(content)
                 except Exception as e:
                     logger.error(f"Error in transcript correction callback: {e}")
-            
+
             if content:
                 logger.trace(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(
