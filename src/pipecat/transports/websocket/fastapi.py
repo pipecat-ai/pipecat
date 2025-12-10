@@ -127,7 +127,7 @@ class FastAPIWebsocketClient:
                 else:
                     await self._websocket.send_text(data)
         except Exception as e:
-            logger.error(
+            logger.warning(
                 f"{self} exception sending data: {e.__class__.__name__} ({e}), application_state: {self._websocket.application_state}"
             )
             # For some reason the websocket is disconnected, and we are not able to send data
