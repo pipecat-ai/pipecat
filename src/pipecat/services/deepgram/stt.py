@@ -233,7 +233,14 @@ class DeepgramSTTService(STTService):
             )
 
         if not await self._connection.start(options=self._settings, addons=self._addons):
-            logger.error(f"{self}: unable to connect to Deepgram")
+            await self.push_error(error_msg=f"Unable to connect to Deepgram")
+        else:
+            headers = {
+                k: v
+                for k, v in self._connection._socket.response.headers.items()
+                if k.startswith("dg-")
+            }
+            logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
 
     async def _disconnect(self):
         if await self._connection.is_connected():
@@ -256,7 +263,7 @@ class DeepgramSTTService(STTService):
     async def _on_error(self, *args, **kwargs):
         error: ErrorResponse = kwargs["error"]
         logger.warning(f"{self} connection error, will retry: {error}")
-        await self.push_error(ErrorFrame(f"{error}"))
+        await self.push_error(error_msg=f"{error}")
         await self.stop_all_metrics()
         # NOTE(aleix): we don't disconnect (i.e. call finish on the connection)
         # because this triggers more errors internally in the Deepgram SDK. So,

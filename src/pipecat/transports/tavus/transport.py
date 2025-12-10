@@ -265,7 +265,7 @@ class TavusTransportClient:
         try:
             await self._client.cleanup()
         except Exception as e:
-            logger.exception(f"Exception during cleanup: {e}")
+            logger.error(f"Exception during cleanup: {e}")
 
     async def _on_joined(self, data):
         """Handle joined event."""

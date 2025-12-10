@@ -17,23 +17,120 @@ We welcome contributions of all kinds! Your help is appreciated. Follow these st
    git checkout -b your-branch-name
    ```
 4. **Make your changes**: Edit or add files as necessary.
-5. **Test your changes**: Ensure that your changes look correct and follow the style set in the codebase.
-6. **Commit your changes**: Once you're satisfied with your changes, commit them with a meaningful message.
+5. **Add a changelog entry**: Create a changelog fragment file (see [Changelog Entries](#changelog-entries) below).
+6. **Test your changes**: Ensure that your changes look correct and follow the style set in the codebase.
+7. **Commit your changes**: Once you're satisfied with your changes, commit them with a meaningful message.
 
 ```bash
 git commit -m "Description of your changes"
 ```
 
-7. **Push your changes**: Push your branch to your forked repository.
+8. **Push your changes**: Push your branch to your forked repository.
 
 ```bash
 git push origin your-branch-name
 ```
 
-8. **Submit a Pull Request (PR)**: Open a PR from your forked repository to the main branch of this repo.
+9. **Submit a Pull Request (PR)**: Open a PR from your forked repository to the main branch of this repo.
    > Important: Describe the changes you've made clearly!
 
 Our maintainers will review your PR, and once everything is good, your contributions will be merged!
+
+## Changelog Entries
+
+Every pull request that makes a user-facing change should include a changelog entry. We use a changelog fragment system to avoid merge conflicts.
+
+### Creating a Changelog Fragment
+
+1. Create a new file in the `changelog/` directory with this naming pattern:
+
+   ```
+   <PR_number>.<type>.md
+   ```
+
+2. Choose the appropriate type:
+
+   - `added.md` - New features
+   - `changed.md` - Changes in existing functionality
+   - `deprecated.md` - Soon-to-be removed features
+   - `removed.md` - Removed features
+   - `fixed.md` - Bug fixes
+   - `security.md` - Security fixes
+
+3. Write your changelog entry as a Markdown bullet point. Include the `-` at the start:
+
+**Example files:**
+
+`changelog/1234.added.md`:
+
+```markdown
+- Added support for Anthropic Claude 3.5 Sonnet with improved streaming performance.
+```
+
+`changelog/5678.fixed.md`:
+
+```markdown
+- Fixed an issue where audio frames were dropped during high-load scenarios.
+```
+
+**For entries with nested bullets:**
+
+`changelog/1234.changed.md`:
+
+```markdown
+- Updated service configuration:
+
+  - Changed default timeout to 30 seconds
+  - Added retry logic for failed connections
+```
+
+### Multiple Changes in One PR
+
+**Different types of changes:** Create separate fragment files for each type:
+
+```
+changelog/1234.added.md
+changelog/1234.fixed.md
+```
+
+**Multiple changes of the same type:** Create numbered fragment files:
+
+```
+changelog/1234.changed.md
+changelog/1234.changed.2.md
+```
+
+**Related changes:** Use nested bullets in a single fragment:
+
+```markdown
+- Updated service configuration:
+
+  - Changed default timeout to 30 seconds
+  - Added retry logic for failed connections
+```
+
+**Rule of thumb:** One logical change per fragment file. If changes are unrelated, use separate files.
+
+### Preview Your Changes
+
+To see what your changelog entry will look like:
+
+```bash
+towncrier build --draft --version Unreleased
+```
+
+This won't modify any files, just show you a preview.
+
+### When to Skip Changelog Entries
+
+You can skip adding a changelog entry for:
+
+- Documentation-only changes
+- Internal refactoring with no user-facing impact
+- Test-only changes
+- CI/build configuration changes
+
+If you're unsure whether your change needs a changelog entry, ask in your PR!
 
 ## Dependency Management
 

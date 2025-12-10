@@ -66,7 +66,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.string import concatenate_aggregated_text
+from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -90,15 +90,7 @@ class LLMContextAggregator(FrameProcessor):
         self._context = context
         self._role = role
 
-        self._aggregation: List[str] = []
-
-        # Whether to add spaces between text parts.
-        # (Currently only used by LLMAssistantAggregator, but could be expanded
-        # to LLMUserAggregator in the future if needed; that would require
-        # additional work since LLMUserAggregator currently trims spaces from
-        # incoming frames before determining whether it "really" received any
-        # text).
-        self._add_spaces = True
+        self._aggregation: List[TextPartForConcatenation] = []
 
     @property
     def messages(self) -> List[LLMContextMessage]:
@@ -191,7 +183,7 @@ class LLMContextAggregator(FrameProcessor):
         Returns:
             The concatenated aggregation string.
         """
-        return concatenate_aggregated_text(self._aggregation, self._add_spaces)
+        return concatenate_aggregated_text(self._aggregation)
 
 
 class LLMUserAggregator(LLMContextAggregator):
@@ -441,7 +433,12 @@ class LLMUserAggregator(LLMContextAggregator):
         if not text.strip():
             return
 
-        self._aggregation.append(text)
+        # Transcriptions never include inter-part spaces (so far).
+        self._aggregation.append(
+            TextPartForConcatenation(
+                text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
         # Reset aggregation timer.
@@ -796,7 +793,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
 
-        self._context.add_image_frame_message(
+        await self._context.add_image_frame_message(
             format=frame.format,
             size=frame.size,
             image=frame.image,
@@ -814,18 +811,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started:
+        if not self._started or not frame.append_to_context:
             return
 
         # Make sure we really have text (spaces count, too!)
         if len(frame.text) == 0:
             return
 
-        # Track whether we need to add spaces between text parts
-        # Assumption: we can just keep track of the latest frame's value
-        self._add_spaces = not frame.includes_inter_frame_spaces
-
-        self._aggregation.append(frame.text)
+        self._aggregation.append(
+            TextPartForConcatenation(
+                frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
 
     def _context_updated_task_finished(self, task: asyncio.Task):
         self._context_updated_tasks.discard(task)

@@ -66,6 +66,7 @@ class Language(StrEnum):
     AR_TN = "ar-TN"
     AR_XA = "ar-XA"
     AR_YE = "ar-YE"
+    AR_001 = "ar-001"
 
     # Assamese
     AS = "as"
@@ -83,6 +84,7 @@ class Language(StrEnum):
 
     # Belarusian
     BE = "be"
+    BE_BY = "be-BY"
 
     # Bulgarian
     BG = "bg"
@@ -109,6 +111,7 @@ class Language(StrEnum):
 
     # Cebuano
     CEB = "ceb"
+    CEB_PH = "ceb-PH"
 
     # Mandarin Chinese
     CMN = "cmn"
@@ -181,6 +184,7 @@ class Language(StrEnum):
     ES_US = "es-US"
     ES_UY = "es-UY"
     ES_VE = "es-VE"
+    ES_419 = "es-419"
 
     # Estonian
     ET = "et"
@@ -250,6 +254,7 @@ class Language(StrEnum):
 
     # Haitian Creole
     HT = "ht"
+    HT_HT = "ht-HT"
 
     # Hungarian
     HU = "hu"
@@ -288,6 +293,7 @@ class Language(StrEnum):
     # Javanese
     JV = "jv"
     JV_ID = "jv-ID"
+    JV_JV = "jv-JV"
     JW = "jw"  # Fal requires for Javanese
 
     # Georgian
@@ -309,6 +315,10 @@ class Language(StrEnum):
     KN = "kn"
     KN_IN = "kn-IN"
 
+    # Konkani
+    KOK = "kok"
+    KOK_IN = "kok-IN"
+
     # Korean
     KO = "ko"
     KO_KR = "ko-KR"
@@ -322,9 +332,11 @@ class Language(StrEnum):
 
     # Latin
     LA = "la"
+    LA_VA = "la-VA"
 
     # Luxembourgish
     LB = "lb"
+    LB_LU = "lb-LU"
 
     # Lingala
     LN = "ln"
@@ -349,6 +361,7 @@ class Language(StrEnum):
 
     # Malagasy
     MG = "mg"
+    MG_MG = "mg-MG"
 
     # Maori
     MI = "mi"
@@ -356,6 +369,10 @@ class Language(StrEnum):
     # Macedonian
     MK = "mk"
     MK_MK = "mk-MK"
+
+    # Maithili
+    MAI = "mai"
+    MAI_IN = "mai-IN"
 
     # Malayalam
     ML = "ml"
@@ -387,6 +404,7 @@ class Language(StrEnum):
     NB_NO = "nb-NO"
     NO = "no"
     NN = "nn"  # Norwegian Nynorsk
+    NN_NO = "nn-NO"
 
     # Nepali
     NE = "ne"
@@ -440,6 +458,7 @@ class Language(StrEnum):
 
     # Sindhi
     SD = "sd"
+    SD_IN = "sd-IN"
 
     # Sinhala
     SI = "si"

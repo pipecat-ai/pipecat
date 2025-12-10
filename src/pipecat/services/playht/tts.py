@@ -266,7 +266,7 @@ class PlayHTTTSService(InterruptibleTTSService):
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -279,7 +279,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from PlayHT")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
             self._request_id = None
             self._websocket = None
@@ -349,8 +349,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                             await self.push_frame(TTSStoppedFrame())
                             self._request_id = None
                     elif "error" in msg:
-                        logger.error(f"{self} error: {msg}")
-                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
+                        await self.push_error(error_msg=f"Error: {msg['error']}")
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
@@ -392,7 +391,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(json.dumps(tts_command))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -402,8 +401,7 @@ class PlayHTTTSService(InterruptibleTTSService):
             yield None
 
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
-            yield ErrorFrame(f"{self} error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class PlayHTHttpTTSService(TTSService):
@@ -623,7 +621,7 @@ class PlayHTHttpTTSService(TTSService):
                             yield frame
 
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

@@ -40,24 +40,40 @@ def language_to_minimax_language(language: Language) -> Optional[str]:
         The corresponding MiniMax language name, or None if not supported.
     """
     LANGUAGE_MAP = {
+        Language.AF: "Afrikaans",
         Language.AR: "Arabic",
+        Language.BG: "Bulgarian",
+        Language.CA: "Catalan",
         Language.CS: "Czech",
+        Language.DA: "Danish",
         Language.DE: "German",
         Language.EL: "Greek",
         Language.EN: "English",
         Language.ES: "Spanish",
+        Language.FA: "Persian",  # ⚠️ Only supported by speech-2.6-* models
         Language.FI: "Finnish",
+        Language.FIL: "Filipino",  # ⚠️ Only supported by speech-2.6-* models
         Language.FR: "French",
+        Language.HE: "Hebrew",
         Language.HI: "Hindi",
+        Language.HR: "Croatian",
+        Language.HU: "Hungarian",
         Language.ID: "Indonesian",
         Language.IT: "Italian",
         Language.JA: "Japanese",
         Language.KO: "Korean",
+        Language.MS: "Malay",
+        Language.NB: "Norwegian",
+        Language.NN: "Nynorsk",
         Language.NL: "Dutch",
         Language.PL: "Polish",
         Language.PT: "Portuguese",
         Language.RO: "Romanian",
         Language.RU: "Russian",
+        Language.SK: "Slovak",
+        Language.SL: "Slovenian",
+        Language.SV: "Swedish",
+        Language.TA: "Tamil",  # ⚠️ Only supported by speech-2.6-* models
         Language.TH: "Thai",
         Language.TR: "Turkish",
         Language.UK: "Ukrainian",
@@ -84,13 +100,22 @@ class MiniMaxHttpTTSService(TTSService):
         """Configuration parameters for MiniMax TTS.
 
         Parameters:
-            language: Language for TTS generation.
+            language: Language for TTS generation. Supports 40 languages.
+                Note: Filipino, Tamil, and Persian require speech-2.6-* models.
             speed: Speech speed (range: 0.5 to 2.0).
             volume: Speech volume (range: 0 to 10).
             pitch: Pitch adjustment (range: -12 to 12).
             emotion: Emotional tone (options: "happy", "sad", "angry", "fearful",
-                "disgusted", "surprised", "neutral").
-            english_normalization: Whether to apply English text normalization.
+                "disgusted", "surprised", "calm", "fluent").
+            english_normalization: Deprecated; use `text_normalization` instead
+
+                .. deprecated:: 0.0.96
+                    The `english_normalization` parameter is deprecated and will be removed in a future version.
+                    Use the `text_normalization` parameter instead.
+
+            text_normalization: Enable text normalization (Chinese/English).
+            latex_read: Enable LaTeX formula reading.
+            exclude_aggregated_audio: Whether to exclude aggregated audio in final chunk.
         """
 
         language: Optional[Language] = Language.EN
@@ -98,7 +123,10 @@ class MiniMaxHttpTTSService(TTSService):
         volume: Optional[float] = 1.0
         pitch: Optional[int] = 0
         emotion: Optional[str] = None
-        english_normalization: Optional[bool] = None
+        english_normalization: Optional[bool] = None  # Deprecated
+        text_normalization: Optional[bool] = None
+        latex_read: Optional[bool] = None
+        exclude_aggregated_audio: Optional[bool] = None
 
     def __init__(
         self,
@@ -120,9 +148,12 @@ class MiniMaxHttpTTSService(TTSService):
             base_url: API base URL, defaults to MiniMax's T2A endpoint.
                 Global: https://api.minimax.io/v1/t2a_v2
                 Mainland China: https://api.minimaxi.chat/v1/t2a_v2
+                Western United States: https://api-uw.minimax.io/v1/t2a_v2
             group_id: MiniMax Group ID to identify project.
-            model: TTS model name. Defaults to "speech-02-turbo". Options include
-                "speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo".
+            model: TTS model name. Defaults to "speech-02-turbo". Options include:
+                "speech-2.6-hd", "speech-2.6-turbo" (latest, supports Filipino/Tamil/Persian),
+                "speech-02-hd", "speech-02-turbo",
+                "speech-01-hd", "speech-01-turbo".
             voice_id: Voice identifier. Defaults to "Calm_Woman".
             aiohttp_session: aiohttp.ClientSession for API communication.
             sample_rate: Output audio sample rate in Hz. If None, uses pipeline default.
@@ -176,15 +207,34 @@ class MiniMaxHttpTTSService(TTSService):
                 "disgusted",
                 "surprised",
                 "neutral",
+                "fluent",
             ]
             if params.emotion in supported_emotions:
                 self._settings["voice_setting"]["emotion"] = params.emotion
             else:
-                logger.warning(f"Unsupported emotion: {params.emotion}. Using default.")
+                logger.warning(
+                    f"Unsupported emotion: {params.emotion}. Supported emotions: {supported_emotions}"
+                )
 
-        # Add english_normalization if provided
+        # If `english_normalization`, add `text_normalization` and print warning
         if params.english_normalization is not None:
-            self._settings["english_normalization"] = params.english_normalization
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead.",
+                    DeprecationWarning,
+                )
+            self._settings["voice_setting"]["text_normalization"] = params.english_normalization
+
+        # Add text_normalization if provided (corrected parameter name)
+        if params.text_normalization is not None:
+            self._settings["voice_setting"]["text_normalization"] = params.text_normalization
+
+        # Add latex_read if provided
+        if params.latex_read is not None:
+            self._settings["voice_setting"]["latex_read"] = params.latex_read
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -231,7 +281,7 @@ class MiniMaxHttpTTSService(TTSService):
         """
         await super().start(frame)
         self._settings["audio_setting"]["sample_rate"] = self.sample_rate
-        logger.debug(f"MiniMax TTS initialized with sample rate: {self.sample_rate}")
+        logger.debug(f"MiniMax TTS initialized with sample_rate: {self.sample_rate}")
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -264,7 +314,6 @@ class MiniMaxHttpTTSService(TTSService):
             ) as response:
                 if response.status != 200:
                     error_message = f"MiniMax TTS error: HTTP {response.status}"
-                    logger.error(error_message)
                     yield ErrorFrame(error=error_message)
                     return
 
@@ -330,16 +379,19 @@ class MiniMaxHttpTTSService(TTSService):
                                             num_channels=1,
                                         )
                                 except ValueError as e:
-                                    logger.error(f"Error converting hex to binary: {e}")
+                                    logger.error(
+                                        f"Error converting hex to binary: {e}",
+                                    )
                                     continue
 
                         except json.JSONDecodeError as e:
-                            logger.error(f"Error decoding JSON: {e}, data: {data_block[:100]}")
+                            logger.error(
+                                f"Error decoding JSON: {e}, data: {data_block[:100]}",
+                            )
                             continue
 
         except Exception as e:
-            logger.exception(f"Error generating TTS: {e}")
-            yield ErrorFrame(error=f"MiniMax TTS error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

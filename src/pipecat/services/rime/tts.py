@@ -60,6 +60,7 @@ def language_to_rime_language(language: Language) -> str:
         Language.FR: "fra",
         Language.EN: "eng",
         Language.ES: "spa",
+        Language.HI: "hin",
     }
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
@@ -112,6 +113,10 @@ class RimeTTSService(AudioContextWordTTSService):
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
             text_aggregator: Custom text aggregator for processing input text.
+
+                .. deprecated:: 0.0.95
+                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
+
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to parent class.
         """
@@ -122,9 +127,16 @@ class RimeTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            text_aggregator=text_aggregator or SkipTagsAggregator([("spell(", ")")]),
             **kwargs,
         )
+
+        if not text_aggregator:
+            # Always skip tags added for spelled-out text
+            # Note: This is primarily to support backwards compatibility.
+            #    The preferred way of taking advantage of Rime spelling is
+            #    to use an LLMTextProcessor and/or a text_transformer to identify
+            #    and insert these tags for the purpose of the TTS service alone.
+            self._text_aggregator = SkipTagsAggregator([("spell(", ")")])
 
         params = params or RimeTTSService.InputParams()
 
@@ -151,6 +163,7 @@ class RimeTTSService(AudioContextWordTTSService):
         self._context_id = None  # Tracks current turn
         self._receive_task = None
         self._cumulative_time = 0  # Accumulates time across messages
+        self._extra_msg_fields = {}  # Extra fields for next message
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -180,6 +193,31 @@ class RimeTTSService(AudioContextWordTTSService):
         self._model = model
         await super().set_model(model)
 
+    # A set of Rime-specific helpers for text transformations
+    def SPELL(text: str) -> str:
+        """Wrap text in Rime spell function."""
+        return f"spell({text})"
+
+    def PAUSE_TAG(seconds: float) -> str:
+        """Convenience method to create a pause tag."""
+        return f"<{seconds * 1000}>"
+
+    def PRONOUNCE(self, text: str, word: str, phoneme: str) -> str:
+        """Convenience method to support Rime's custom pronunciations feature.
+
+        https://docs.rime.ai/api-reference/custom-pronunciation
+        """
+        self._extra_msg_fields["phonemizeBetweenBrackets"] = True
+        return text.replace(word, f"{phoneme}")
+
+    def INLINE_SPEED(self, text: str, speed: float) -> str:
+        """Convenience method to support inline speeds."""
+        if not self._extra_msg_fields:
+            self._extra_msg_fields = {}
+        speed_vals = self._extra_msg_fields.get("inlineSpeedAlpha", "").split(",")
+        self._extra_msg_fields["inlineSpeedAlpha"] = ",".join(speed_vals + [str(speed)])
+        return f"[{text}]"
+
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Update service settings and reconnect if voice changed."""
         prev_voice = self._voice_id
@@ -192,7 +230,11 @@ class RimeTTSService(AudioContextWordTTSService):
 
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Rime API."""
-        return {"text": text, "contextId": self._context_id}
+        msg = {"text": text, "contextId": self._context_id}
+        if self._extra_msg_fields:
+            msg |= self._extra_msg_fields
+            self._extra_msg_fields = {}
+        return msg
 
     def _build_clear_msg(self) -> dict:
         """Build clear operation message."""
@@ -258,7 +300,7 @@ class RimeTTSService(AudioContextWordTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -270,7 +312,7 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self._websocket.send(json.dumps(self._build_eos_msg()))
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
             self._context_id = None
             self._websocket = None
@@ -363,10 +405,9 @@ class RimeTTSService(AudioContextWordTTSService):
                         logger.debug(f"Updated cumulative time to: {self._cumulative_time}")
 
             elif msg["type"] == "error":
-                logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(f"{self} error: {msg['message']}"))
+                await self.push_error(error_msg=f"Error: {msg['message']}")
                 self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -408,14 +449,14 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class RimeHttpTTSService(TTSService):
@@ -546,7 +587,6 @@ class RimeHttpTTSService(TTSService):
             ) as response:
                 if response.status != 200:
                     error_message = f"Rime TTS error: HTTP {response.status}"
-                    logger.error(error_message)
                     yield ErrorFrame(error=error_message)
                     return
 
@@ -564,8 +604,7 @@ class RimeHttpTTSService(TTSService):
                     yield frame
 
         except Exception as e:
-            logger.exception(f"Error generating TTS: {e}")
-            yield ErrorFrame(error=f"Rime TTS error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

@@ -14,20 +14,13 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (
-    LLMRunFrame,
-    LLMSetToolsFrame,
-    LLMUpdateSettingsFrame,
-    TranscriptionMessage,
-)
+from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame, TranscriptionMessage
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import LLMAssistantAggregatorParams
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments

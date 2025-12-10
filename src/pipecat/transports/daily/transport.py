@@ -2506,13 +2506,10 @@ class DailyTransport(BaseTransport):
     async def _on_error(self, error):
         """Handle error events and push error frames."""
         await self._call_event_handler("on_error", error)
-        # Push error frame to notify the pipeline
-        error_frame = ErrorFrame(error)
-
         if self._input:
-            await self._input.push_error(error_frame)
+            await self._input.push_error(error_msg=error)
         elif self._output:
-            await self._output.push_error(error_frame)
+            await self._output.push_error(error_msg=error)
         else:
             logger.error("Both input and output are None while trying to push error")
             raise Exception("No valid input or output channel to push error")
@@ -2568,7 +2565,7 @@ class DailyTransport(BaseTransport):
             except asyncio.TimeoutError:
                 logger.error(f"Timeout handling dialin-ready event ({url})")
             except Exception as e:
-                logger.exception(f"Error handling dialin-ready event ({url}): {e}")
+                logger.error(f"Error handling dialin-ready event ({url}): {e}")
 
     async def _on_dialin_connected(self, data):
         """Handle dial-in connected events."""

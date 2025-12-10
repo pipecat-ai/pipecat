@@ -15,6 +15,7 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -79,7 +80,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
@@ -112,7 +113,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             logger.info(f"Client connected")
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            await task.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):

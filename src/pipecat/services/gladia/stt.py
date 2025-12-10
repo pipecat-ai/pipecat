@@ -23,6 +23,7 @@ from pipecat import __version__ as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -467,7 +468,7 @@ class GladiaSTTService(STTService):
                             break
 
             except Exception as e:
-                logger.error(f"Error in connection handler: {e}")
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
                 self._connection_active = False
 
                 if not self._should_reconnect:
@@ -557,7 +558,7 @@ class GladiaSTTService(STTService):
         except websockets.exceptions.ConnectionClosed:
             logger.debug("Connection closed during keepalive")
         except Exception as e:
-            logger.error(f"Error in Gladia keepalive task: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _receive_task_handler(self):
         try:
@@ -620,7 +621,7 @@ class GladiaSTTService(STTService):
             # Expected when closing the connection
             pass
         except Exception as e:
-            logger.error(f"Error in Gladia WebSocket handler: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _maybe_reconnect(self) -> bool:
         """Handle exponential backoff reconnection logic."""
@@ -628,7 +629,9 @@ class GladiaSTTService(STTService):
             return False
         self._reconnection_attempts += 1
         if self._reconnection_attempts > self._max_reconnection_attempts:
-            logger.error(f"Max reconnection attempts ({self._max_reconnection_attempts}) reached")
+            await self.push_error(
+                error_msg=f"Max reconnection attempts ({self._max_reconnection_attempts}) reached",
+            )
             self._should_reconnect = False
             return False
         delay = self._reconnection_delay * (2 ** (self._reconnection_attempts - 1))

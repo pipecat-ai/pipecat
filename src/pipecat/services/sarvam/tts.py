@@ -254,8 +254,7 @@ class SarvamHttpTTSService(TTSService):
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Sarvam API error: {error_text}")
-                    await self.push_error(ErrorFrame(f"Sarvam API error: {error_text}"))
+                    yield ErrorFrame(error=f"Sarvam API error: {error_text}")
                     return
 
                 response_data = await response.json()
@@ -264,8 +263,7 @@ class SarvamHttpTTSService(TTSService):
 
             # Decode base64 audio data
             if "audios" not in response_data or not response_data["audios"]:
-                logger.error("No audio data received from Sarvam API")
-                await self.push_error(ErrorFrame("No audio data received"))
+                yield ErrorFrame(error="No audio data received")
                 return
 
             # Get the first audio (there should be only one for single text input)
@@ -286,8 +284,7 @@ class SarvamHttpTTSService(TTSService):
             yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+            yield ErrorFrame(error=f"Error generating TTS: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
@@ -517,9 +514,11 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame and flush audio if it's the end of a full response."""
-        if isinstance(frame, LLMFullResponseEndFrame):
+        await super().process_frame(frame, direction)
+
+        # When the LLM finishes responding, flush any remaining text in Sarvam's buffer
+        if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
-        return await super().process_frame(frame, direction)
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Update service settings and reconnect if voice changed."""
@@ -560,7 +559,7 @@ class SarvamTTSService(InterruptibleTTSService):
             await self._disconnect_websocket()
 
         except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             # Reset state only after everything is cleaned up
             self._started = False
@@ -584,7 +583,9 @@ class SarvamTTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(
+                error_msg=f"Error connecting to Sarvam TTS Websocket: {e}", exception=e
+            )
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -600,8 +601,7 @@ class SarvamTTSService(InterruptibleTTSService):
             await self._websocket.send(json.dumps(config_message))
             logger.debug("Configuration sent successfully")
         except Exception as e:
-            logger.error(f"Failed to send config: {str(e)}")
-            await self.push_frame(ErrorFrame(f"Failed to send config: {str(e)}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             raise
 
     async def _disconnect_websocket(self):
@@ -613,7 +613,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from Sarvam")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._started = False
             self._websocket = None
@@ -637,13 +637,13 @@ class SarvamTTSService(InterruptibleTTSService):
                     await self.push_frame(frame)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
-                    logger.error(f"TTS Error: {error_msg}")
+                    await self.push_error(error_msg=f"TTS Error: {error_msg}")
 
                     # If it's a timeout error, the connection might need to be reset
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
 
-                    await self.push_frame(ErrorFrame(f"TTS Error: {error_msg}"))
+                    await self.push_frame(ErrorFrame(error=f"TTS Error: {error_msg}"))
 
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
@@ -699,11 +699,11 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")

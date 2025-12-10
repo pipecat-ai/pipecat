@@ -19,6 +19,7 @@ from pipecat.adapters.services.open_ai_realtime_adapter import (
     OpenAIRealtimeLLMAdapter,
 )
 from pipecat.frames.frames import (
+    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -56,7 +57,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -443,7 +443,7 @@ class OpenAIRealtimeLLMService(LLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
 
     async def _disconnect(self):
@@ -460,7 +460,7 @@ class OpenAIRealtimeLLMService(LLMService):
             self._completed_tool_calls = set()
             self._disconnecting = False
         except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
     async def _ws_send(self, realtime_message):
         try:
@@ -473,12 +473,11 @@ class OpenAIRealtimeLLMService(LLMService):
                 # somehow *started* the websocket send attempt while we still
                 # had a connection)
                 return
-            logger.error(f"Error sending message to websocket: {e}")
             # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
             # treat a send-side error as fatal.
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
+            await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
     async def _update_settings(self):
         settings = self._session_properties
@@ -656,10 +655,17 @@ class OpenAIRealtimeLLMService(LLMService):
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
         # usage metrics
+        cached_tokens = (
+            evt.response.usage.input_token_details.cached_tokens
+            if hasattr(evt.response.usage, "input_token_details")
+            and evt.response.usage.input_token_details
+            else None
+        )
         tokens = LLMTokenUsage(
             prompt_tokens=evt.response.usage.input_tokens,
             completion_tokens=evt.response.usage.output_tokens,
             total_tokens=evt.response.usage.total_tokens,
+            cache_read_input_tokens=cached_tokens,
         )
         await self.start_llm_usage_metrics(tokens)
         await self.stop_processing_metrics()
@@ -667,9 +673,7 @@ class OpenAIRealtimeLLMService(LLMService):
         self._current_assistant_response = None
         # error handling
         if evt.response.status == "failed":
-            await self.push_error(
-                ErrorFrame(error=evt.response.status_details["error"]["message"], fatal=True)
-            )
+            await self.push_error(error_msg=evt.response.status_details["error"]["message"])
             return
         # response content
         for item in evt.response.output:
@@ -680,15 +684,13 @@ class OpenAIRealtimeLLMService(LLMService):
         # the output modality is "text"
         if evt.delta:
             frame = LLMTextFrame(evt.delta)
-            # OpenAI Realtime text already includes any necessary inter-chunk spaces
-            frame.includes_inter_frame_spaces = True
             await self.push_frame(frame)
 
     async def _handle_evt_audio_transcript_delta(self, evt):
         # We receive audio transcript deltas (as opposed to text deltas) when
         # the output modality is "audio" (the default)
         if evt.delta:
-            frame = TTSTextFrame(evt.delta)
+            frame = TTSTextFrame(evt.delta, aggregated_by=AggregationType.SENTENCE)
             # OpenAI Realtime text already includes any necessary inter-chunk spaces
             frame.includes_inter_frame_spaces = True
             await self.push_frame(frame)
@@ -763,7 +765,7 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
-        await self.push_error(ErrorFrame(error=f"Error: {evt}", fatal=True))
+        await self.push_error(error_msg=f"Error: {evt}")
 
     #
     # state and client events for the current conversation
@@ -813,7 +815,7 @@ class OpenAIRealtimeLLMService(LLMService):
             # We're done configuring the LLM for this session
             self._llm_needs_conversation_setup = False
 
-        logger.debug(f"Creating response")
+        logger.debug("Creating response")
 
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()

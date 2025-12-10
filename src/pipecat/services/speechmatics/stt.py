@@ -467,8 +467,7 @@ class SpeechmaticsSTTService(STTService):
                 await self._client.send_audio(audio)
             yield None
         except Exception as e:
-            logger.error(f"Speechmatics error: {e}")
-            yield ErrorFrame(f"Speechmatics error: {e}", fatal=False)
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
             await self._disconnect()
 
     def update_params(
@@ -514,6 +513,7 @@ class SpeechmaticsSTTService(STTService):
                 self._client.send_message(payload), self.get_event_loop()
             )
         except Exception as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             raise RuntimeError(f"error sending message to STT: {e}")
 
     async def _connect(self) -> None:
@@ -579,7 +579,7 @@ class SpeechmaticsSTTService(STTService):
             logger.debug(f"{self} Connected to Speechmatics STT service")
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} Error connecting to Speechmatics: {e}")
+            await self.push_error(error_msg=f"Error connecting to Speechmatics: {e}", exception=e)
             self._client = None
 
     async def _disconnect(self) -> None:
@@ -593,7 +593,9 @@ class SpeechmaticsSTTService(STTService):
         except asyncio.TimeoutError:
             logger.warning(f"{self} Timeout while closing Speechmatics client connection")
         except Exception as e:
-            logger.error(f"{self} Error closing Speechmatics client: {e}")
+            await self.push_error(
+                error_msg=f"Error disconnecting from Speechmatics: {e}", exception=e
+            )
         finally:
             self._client = None
             await self._call_event_handler("on_disconnected")

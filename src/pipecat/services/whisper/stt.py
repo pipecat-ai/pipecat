@@ -285,7 +285,6 @@ class WhisperSTTService(SegmentedSTTService):
             The service will normalize it to float32 in the range [-1, 1].
         """
         if not self._model:
-            logger.error(f"{self} error: Whisper model not available")
             yield ErrorFrame("Whisper model not available")
             return
 
@@ -428,5 +427,4 @@ class WhisperSTTServiceMLX(WhisperSTTService):
                 )
 
         except Exception as e:
-            logger.exception(f"MLX Whisper transcription error: {e}")
-            yield ErrorFrame(f"MLX Whisper transcription error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")

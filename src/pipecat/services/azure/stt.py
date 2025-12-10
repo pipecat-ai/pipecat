@@ -18,6 +18,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -111,13 +112,16 @@ class AzureSTTService(STTService):
             audio: Raw audio bytes to process.
 
         Yields:
-            None - actual transcription frames are pushed via callbacks.
+            Frame: Either None for successful processing or ErrorFrame on failure.
         """
-        await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
-        if self._audio_stream:
-            self._audio_stream.write(audio)
-        yield None
+        try:
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
+            if self._audio_stream:
+                self._audio_stream.write(audio)
+            yield None
+        except Exception as e:
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
     async def start(self, frame: StartFrame):
         """Start the speech recognition service.
@@ -133,17 +137,22 @@ class AzureSTTService(STTService):
         if self._audio_stream:
             return
 
-        stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
-        self._audio_stream = PushAudioInputStream(stream_format)
+        try:
+            stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
+            self._audio_stream = PushAudioInputStream(stream_format)
 
-        audio_config = AudioConfig(stream=self._audio_stream)
+            audio_config = AudioConfig(stream=self._audio_stream)
 
-        self._speech_recognizer = SpeechRecognizer(
-            speech_config=self._speech_config, audio_config=audio_config
-        )
-        self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
-        self._speech_recognizer.recognized.connect(self._on_handle_recognized)
-        self._speech_recognizer.start_continuous_recognition_async()
+            self._speech_recognizer = SpeechRecognizer(
+                speech_config=self._speech_config, audio_config=audio_config
+            )
+            self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
+            self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+            self._speech_recognizer.start_continuous_recognition_async()
+        except Exception as e:
+            await self.push_error(
+                error_msg=f"Uncaught exception during initialization: {e}", exception=e
+            )
 
     async def stop(self, frame: EndFrame):
         """Stop the speech recognition service.

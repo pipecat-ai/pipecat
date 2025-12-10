@@ -15,14 +15,21 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame, UserImageRequestFrame
+from pipecat.frames.frames import (
+    Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMRunFrame,
+    TextFrame,
+    UserImageRequestFrame,
+)
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -64,6 +71,27 @@ async def fetch_user_image(params: FunctionCallParams):
     # Instead of None, it's possible to also provide a tool call answer to
     # tell the LLM that we are grabbing the image to analyze.
     # await params.result_callback({"result": "Image is being captured."})
+
+
+class MoondreamTextFrameWrapper(FrameProcessor):
+    """Wraps Moondream-provided TextFrames with LLM response start/end frames.
+
+    This processor detects TextFrames and automatically wraps them with
+    LLMFullResponseStartFrame and LLMFullResponseEndFrame to provide proper
+    response boundaries for downstream processors.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # If we receive a TextFrame, wrap it with response start/end frames
+        if isinstance(frame, TextFrame):
+            await self.push_frame(LLMFullResponseStartFrame(), direction)
+            await self.push_frame(frame, direction)
+            await self.push_frame(LLMFullResponseEndFrame(), direction)
+        else:
+            # For all other frames, just pass them through
+            await self.push_frame(frame, direction)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -120,7 +148,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You are able to describe images from the user camera.",
         },
     ]
 
@@ -130,6 +158,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # If you run into weird description, try with use_cpu=True
     moondream = MoondreamService()
 
+    # Wrap TextFrames with LLM response start/end frames, which makes Moondream
+    # output be treated like LLM responses for the purpose of context
+    # aggregation. Without this, the assistant context aggregator would ignore
+    # Moondream output (if the TTS service is disabled).
+    moondream_text_wrapper = MoondreamTextFrameWrapper()
+
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
@@ -137,7 +171,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             context_aggregator.user(),  # User responses
             ParallelPipeline(
                 [llm],  # LLM
-                [moondream],
+                [moondream, moondream_text_wrapper],
             ),
             tts,  # TTS
             transport.output(),  # Transport bot output
