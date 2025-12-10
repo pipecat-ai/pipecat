@@ -685,6 +685,7 @@ class InworldWebsocketTTSService(WebsocketTTSService):
         self._contexts_queue: asyncio.Queue = asyncio.Queue()
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._active_contexts = set()
+        self._closing_contexts = set()  # Track contexts that have been sent close_context
 
         self.set_voice(voice_id)
         self.set_model_name(model)
@@ -713,14 +714,19 @@ class InworldWebsocketTTSService(WebsocketTTSService):
         await self._disconnect()
 
     async def flush_audio(self):
-        """Flush any pending audio for all active contexts."""
+        """Flush and close any pending audio contexts.
+
+        Uses close_context instead of flush_context to release server resources,
+        since Inworld limits connections to 5 concurrent contexts max.
+        """
         for context_id in list(self._active_contexts):
-            await self._send_flush(context_id)
+            await self._send_close_context(context_id)
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
             self._contexts_queue = asyncio.Queue()
             self._contexts = {}
+            self._closing_contexts = set()
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
@@ -737,6 +743,7 @@ class InworldWebsocketTTSService(WebsocketTTSService):
             if context_id:
                 await self._handle_audio_context(context_id)
                 self._active_contexts.discard(context_id)
+                self._closing_contexts.discard(context_id)
                 del self._contexts[context_id]
 
                 silence = b"\x00" * self.sample_rate
@@ -904,6 +911,19 @@ class InworldWebsocketTTSService(WebsocketTTSService):
         msg = {"flush_context": {}, "contextId": context_id}
         await self.send_with_retry(json.dumps(msg), self._report_error)
 
+    async def _send_close_context(self, context_id: str):
+        """Close a context to release server-side resources.
+
+        Per Inworld docs: 'for each connection, 5 contexts is the max'.
+        Contexts must be explicitly closed to avoid hitting this limit.
+        Closing a context automatically flushes any remaining text first.
+        """
+        if context_id in self._closing_contexts:
+            return  # Already sent close for this context
+        self._closing_contexts.add(context_id)
+        msg = {"close_context": {}, "contextId": context_id}
+        await self.send_with_retry(json.dumps(msg), self._report_error)
+
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Inworld's WebSocket API."""
@@ -922,7 +942,12 @@ class InworldWebsocketTTSService(WebsocketTTSService):
 
             await self._send_context(context_id)
             await self._send_text(context_id, text)
-            await self._send_flush(context_id)
+            # Use close_context instead of flush_context to release server resources.
+            # Per Inworld docs: "5 contexts is the max" per connection, and
+            # "Sending a close context message is equivalent to sending a flush
+            # message right before, so all text in the buffer will be synthesized
+            # before the context is closed."
+            await self._send_close_context(context_id)
             await self.start_tts_usage_metrics(text)
 
             yield None
