@@ -641,7 +641,7 @@ class InworldWebsocketTTSService(WebsocketTTSService):
         api_key: str,
         voice_id: str = "Ashley",
         model: str = "inworld-tts-1",
-        url: str = "wss://api.inworld.ai/tts/v1/voice:stream",
+        url: str = "wss://api.inworld.ai/tts/v1/voice:streamBidirectional",
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
         params: Optional[InputParams] = None,
@@ -813,7 +813,7 @@ class InworldWebsocketTTSService(WebsocketTTSService):
 
             logger.debug("Connecting to Inworld WebSocket TTS")
             headers = [("Authorization", f"Basic {self._api_key}")]
-            self._websocket = await websocket_connect(self._url, extra_headers=headers)
+            self._websocket = await websocket_connect(self._url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
             logger.error(f"{self} connection exception: {e}")
@@ -838,24 +838,23 @@ class InworldWebsocketTTSService(WebsocketTTSService):
                 logger.warning(f"{self} received non-JSON message")
                 continue
 
-            result = msg.get("result", msg)
-            ctx_id = (
-                msg.get("contextId")
-                or msg.get("context_id")
-                or result.get("contextId")
-                or result.get("context_id")
-            )
+            result = msg.get("result", {})
+            ctx_id = result.get("contextId") or result.get("context_id")
+
+            # Check for errors in status
+            status = result.get("status", {})
+            if status.get("code", 0) != 0:
+                error_msg = status.get("message", "Unknown error")
+                await self.push_error(ErrorFrame(error=f"Inworld API error: {error_msg}"))
+                continue
 
             if "error" in msg:
                 await self.push_error(ErrorFrame(error=str(msg["error"])))
                 continue
 
-            audio_b64 = (
-                result.get("audioContent")
-                or result.get("audioChunk")
-                or result.get("audio")
-                or result.get("audio_chunk")
-            )
+            # Handle audio chunk - audio is nested in result.audioChunk.audioContent
+            audio_chunk = result.get("audioChunk", {})
+            audio_b64 = audio_chunk.get("audioContent")
 
             if audio_b64:
                 await self.stop_ttfb_metrics()
@@ -871,37 +870,38 @@ class InworldWebsocketTTSService(WebsocketTTSService):
                 else:
                     await self.push_frame(frame)
 
-            if result.get("isFinal") or result.get("final"):
+            # Handle flush completed or context closed as final signals
+            if "flushCompleted" in result or "contextClosed" in result:
                 if ctx_id and self.audio_context_available(ctx_id):
                     await self.remove_audio_context(ctx_id)
                 await self.push_frame(TTSStoppedFrame())
 
     async def _send_context(self, context_id: str):
         """Send context creation/configuration message."""
-        config = {
+        create_config = {
             "voiceId": self._settings["voiceId"],
             "modelId": self._settings["modelId"],
             "audioConfig": self._settings["audioConfig"],
         }
 
         if "temperature" in self._settings:
-            config["temperature"] = self._settings["temperature"]
+            create_config["temperature"] = self._settings["temperature"]
         if "applyTextNormalization" in self._settings:
-            config["applyTextNormalization"] = self._settings["applyTextNormalization"]
+            create_config["applyTextNormalization"] = self._settings["applyTextNormalization"]
         if self._buffer_settings["maxBufferDelayMs"] is not None:
-            config["maxBufferDelayMs"] = self._buffer_settings["maxBufferDelayMs"]
+            create_config["maxBufferDelayMs"] = self._buffer_settings["maxBufferDelayMs"]
         if self._buffer_settings["bufferCharThreshold"] is not None:
-            config["bufferCharThreshold"] = self._buffer_settings["bufferCharThreshold"]
+            create_config["bufferCharThreshold"] = self._buffer_settings["bufferCharThreshold"]
 
-        msg = {"action": "create_context", "contextId": context_id, "config": config}
+        msg = {"create": create_config, "contextId": context_id}
         await self.send_with_retry(json.dumps(msg), self._report_error)
 
     async def _send_text(self, context_id: str, text: str):
-        msg = {"action": "synthesize", "contextId": context_id, "text": text}
+        msg = {"send_text": {"text": text}, "contextId": context_id}
         await self.send_with_retry(json.dumps(msg), self._report_error)
 
     async def _send_flush(self, context_id: str):
-        msg = {"action": "flush", "contextId": context_id}
+        msg = {"flush_context": {}, "contextId": context_id}
         await self.send_with_retry(json.dumps(msg), self._report_error)
 
     @traced_tts
