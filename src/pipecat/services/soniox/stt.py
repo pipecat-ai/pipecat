@@ -191,10 +191,20 @@ class SonioxSTTService(STTService):
         if self._websocket:
             return
 
+        await self._connect_websocket()
+
+        if self._websocket and not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler())
+        if self._websocket and not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+
+    async def _connect_websocket(self):
+        """Connect to Soniox WebSocket and send configuration."""
         self._websocket = await websocket_connect(self._url)
 
         if not self._websocket:
             logger.error(f"Unable to connect to Soniox API at {self._url}")
+            return
 
         # If vad_force_turn_endpoint is not enabled, we need to enable endpoint detection.
         # Either one or the other is required.
@@ -221,11 +231,6 @@ class SonioxSTTService(STTService):
 
         # Send the configuration message.
         await self._websocket.send(json.dumps(config))
-
-        if self._websocket and not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler())
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _cleanup(self):
         if self._keepalive_task:
@@ -331,6 +336,19 @@ class SonioxSTTService(STTService):
             await self.push_error(ErrorFrame(f"{self} error (_keepalive_task_handler): {e}"))
 
     async def _receive_task_handler(self):
+        while True:
+            await self._process_messages()
+            # Soniox connection may be disconnected, try to reconnect.
+            logger.debug("Soniox WebSocket connection was disconnected, reconnecting")
+            if self._websocket:
+                try:
+                    await self._websocket.close()
+                except Exception:
+                    pass
+                self._websocket = None
+            await self._connect_websocket()
+
+    async def _process_messages(self):
         if not self._websocket:
             return
 
