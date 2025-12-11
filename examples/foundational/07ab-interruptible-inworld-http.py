@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import os
 
 import aiohttp
@@ -33,14 +32,11 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 
 class LoggingInworldTTSService(InworldTTSService):
-    """InworldTTSService with timestamp logging enabled."""
+    """InworldTTSService subclass that logs timestamp info from the API."""
 
     async def _process_streaming_response(self, response):
-        """Override to log timestamp info from Inworld API responses."""
         import base64
         import json
-
-        from pipecat.services.inworld.tts import calculate_word_times_from_inworld
 
         buffer = ""
         async for chunk in response.content.iter_chunked(1024):
@@ -60,25 +56,14 @@ class LoggingInworldTTSService(InworldTTSService):
                             base64.b64decode(chunk_data["result"]["audioContent"])
                         ):
                             yield frame
-                    # Log and process timestamps
                     if "result" in chunk_data and "timestampInfo" in chunk_data["result"]:
-                        timestamp_info = chunk_data["result"]["timestampInfo"]
-                        # Log the raw timestamp info from Inworld API
-                        logger.info(f"Inworld timestampInfo: {timestamp_info}")
-                        word_times, new_cumulative = calculate_word_times_from_inworld(
-                            timestamp_info, self._cumulative_time, self._timestamp_type
-                        )
-                        if word_times:
-                            await self.add_word_timestamps(word_times)
-                            self._cumulative_time = new_cumulative
+                        logger.info(f"Inworld timestamps: {chunk_data['result']['timestampInfo']}")
                 except json.JSONDecodeError:
                     continue
 
+
 load_dotenv(override=True)
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -102,26 +87,17 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
-    # Create an HTTP session
     async with aiohttp.ClientSession() as session:
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-        # Inworld TTS Service - Unified streaming and non-streaming
-        # Set streaming=True for real-time audio, streaming=False for complete audio generation
-        # Character-level timestamps are enabled below to show word timing in RTVI events
-        streaming = True  # Toggle this to switch between modes
 
         tts = LoggingInworldTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
             aiohttp_session=session,
             voice_id="Ashley",
             model="inworld-tts-1",
-            streaming=streaming,  # True: real-time chunks, False: complete audio then playback
-            params=InworldTTSService.InputParams(
-                timestamp_type="CHARACTER",  # Enable character-level timestamps
-            ),
+            params=InworldTTSService.InputParams(timestamp_type="WORD"),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -129,7 +105,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages = [
             {
                 "role": "system",
-                "content": "You are very knowledgable about dogs. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
             },
         ]
 
@@ -140,14 +116,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         pipeline = Pipeline(
             [
-                transport.input(),  # Transport user input
-                rtvi,  # RTVI processor
-                stt,  # STT
-                context_aggregator.user(),  # User responses
-                llm,  # LLM
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
+                transport.input(),
+                rtvi,
+                stt,
+                context_aggregator.user(),
+                llm,
+                tts,
+                transport.output(),
+                context_aggregator.assistant(),
             ]
         )
 
@@ -163,14 +139,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
-            logger.info(f"Client connected")
+            logger.info("Client connected")
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
+            logger.info("Client disconnected")
             await task.cancel()
 
         runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)

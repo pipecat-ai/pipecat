@@ -96,7 +96,6 @@ class InworldTTSService(WordTTSService):
 
     Supports both streaming and non-streaming modes via the `streaming` parameter.
     Outputs LINEAR16 audio at configurable sample rates with word/character timestamps.
-    Language is automatically detected from input text.
     """
 
     class InputParams(BaseModel):
@@ -409,7 +408,9 @@ class InworldWebsocketTTSService(AudioContextWordTTSService):
 
     async def flush_audio(self):
         if self._context_id:
-            await self._send_close_context(self._context_id)
+            ctx_to_close = self._context_id
+            self._context_id = None
+            await self._send_close_context(ctx_to_close)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
@@ -598,6 +599,8 @@ class InworldWebsocketTTSService(AudioContextWordTTSService):
 
             await self._send_context(context_id)
             await self._send_text(context_id, text)
+            # Clear before close to prevent double-close on interruption
+            self._context_id = None
             await self._send_close_context(context_id)
             await self.start_tts_usage_metrics(text)
 
