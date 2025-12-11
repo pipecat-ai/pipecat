@@ -516,6 +516,7 @@ class TranscriptionMessage:
 class ThoughtTranscriptionMessage:
     """An LLM thought message in a conversation transcript."""
 
+    role: Literal["assistant"] = field(default="assistant", init=False)
     content: str
     timestamp: Optional[str] = None
 
