@@ -48,6 +48,10 @@ class TTSTextTransformer:
     # Date patterns - long and short month forms
     DATE_LONG_PATTERN = r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-9]{1,2})\b'
     DATE_SHORT_PATTERN = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(\.?)\s+([0-9]{1,2})\b'
+
+    # Date patterns with ordinal suffix (e.g., "December 12th", "Jan 3rd")
+    DATE_LONG_ORDINAL_PATTERN = r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-9]{1,2})(st|nd|rd|th)\b'
+    DATE_SHORT_ORDINAL_PATTERN = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(\.?)\s+([0-9]{1,2})(st|nd|rd|th)\b'
     DATE_THE_LONG_PATTERN = r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+the\s+([0-9]{1,2})\b'
     DATE_THE_SHORT_PATTERN = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(\.?)\s+the\s+([0-9]{1,2})\b'
     
@@ -822,7 +826,25 @@ class TTSTextTransformer:
         # Handle dates with "the" (with spaces)
         result = re.sub(self.DATE_THE_LONG_PATTERN, replace_date_with_the, result, flags=re.IGNORECASE)
         result = re.sub(self.DATE_THE_SHORT_PATTERN, replace_short_date_with_the, result, flags=re.IGNORECASE)
-        
+
+        # Handle date patterns with ordinal suffix (e.g., "December 12th", "Jan 3rd")
+        # These must come BEFORE regular date patterns to match the more specific case first
+        def replace_date_long_ordinal(match):
+            month = match.group(1)
+            day_num = int(match.group(2))
+            ordinal = self.number_to_ordinal(day_num)
+            return f"{month} {ordinal}"
+
+        def replace_date_short_ordinal(match):
+            month = match.group(1)
+            period = match.group(2)
+            day_num = int(match.group(3))
+            ordinal = self.number_to_ordinal(day_num)
+            return f"{month}{period} {ordinal}"
+
+        result = re.sub(self.DATE_LONG_ORDINAL_PATTERN, replace_date_long_ordinal, result, flags=re.IGNORECASE)
+        result = re.sub(self.DATE_SHORT_ORDINAL_PATTERN, replace_date_short_ordinal, result, flags=re.IGNORECASE)
+
         # Handle regular date patterns (with spaces)
         result = re.sub(self.DATE_LONG_PATTERN, replace_date_ordinal, result)
         result = re.sub(self.DATE_SHORT_PATTERN, replace_short_date_ordinal, result, flags=re.IGNORECASE)
