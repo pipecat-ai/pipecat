@@ -21,6 +21,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -214,8 +215,7 @@ class LLMUserAggregator(LLMContextAggregator):
         """
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
-
-        self._user_speaking = False
+        self._bot_speaking = False
 
     async def cleanup(self):
         """Clean up processor resources."""
@@ -270,6 +270,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            await self._handle_bot_started_speaking(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -287,8 +289,7 @@ class LLMUserAggregator(LLMContextAggregator):
         aggregation = self.aggregation_string()
         await self.reset()
         self._context.add_message({"role": self.role, "content": aggregation})
-        frame = LLMContextFrame(self._context)
-        await self.push_frame(frame)
+        await self.push_context_frame()
 
     async def _start(self, frame: StartFrame):
         for s in self.interruption_strategies:
@@ -340,6 +341,9 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
+    async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
+        self._bot_speaking = True
+
     async def _on_should_interrupt(self, strategy: BaseInterruptionStrategy):
         await self._trigger_bot_interruption(strategy)
 
@@ -354,14 +358,11 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         await self.push_frame(frame, direction)
 
-    async def _trigger_bot_interruption(self, strategy: BaseInterruptionStrategy):
-        """Generate an interruption if one of the strategies conditions is met."""
-        if self._user_speaking:
-            return
+    async def _trigger_bot_interruption(self, strategy: Optional[BaseInterruptionStrategy]):
+        """Generate an interruption if one of the interruption strategies conditions is met."""
+        logger.debug(f"User started speaking (interruption strategy: {strategy})")
 
-        self._user_speaking = True
-
-        logger.debug(f"User started speaking ({strategy})")
+        self._bot_speaking = False
 
         # Once we are interrupting, we reset all the interruption strategies.
         for s in self.interruption_strategies:
@@ -370,14 +371,15 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.push_frame(UserStartedSpeakingFrame())
         await self.push_frame(InterruptionFrame())
 
-    async def _trigger_bot_speech(self, strategy: BaseSpeakingStrategy):
-        """Generate an interruption if one of the strategies conditions is met."""
-        if not self._user_speaking:
-            return
+    async def _trigger_bot_speech(self, strategy: Optional[BaseSpeakingStrategy]):
+        """Push context frame if one of the speaking strategies conditions is met."""
+        # If the bot is (or was) speaking and we get here again it means we
+        # didn't interrupt the bot, so we should do it now. That is, we are
+        # emulating a user interruption.
+        if self._bot_speaking:
+            await self._trigger_bot_interruption(None)
 
-        self._user_speaking = False
-
-        logger.debug(f"User stopped speaking ({strategy})")
+        logger.debug(f"User stopped speaking (speaking strategy: {strategy})")
 
         # Reset all speaking strategies to start fresh.
         for s in self.speaking_strategies:
