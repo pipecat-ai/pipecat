@@ -16,7 +16,7 @@ import json
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import Any, Dict, List, Literal, Optional, Set, Type
 
 from loguru import logger
 
@@ -310,11 +310,13 @@ class LLMUserAggregator(LLMContextAggregator):
         for s in self.turn_start_strategies.user:
             await s.setup(self.task_manager)
             s.add_event_handler("on_push_frame", self._on_push_frame)
+            s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
             s.add_event_handler("on_user_turn_started", self._on_user_turn_started)
 
         for s in self.turn_start_strategies.bot:
             await s.setup(self.task_manager)
             s.add_event_handler("on_push_frame", self._on_push_frame)
+            s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
             s.add_event_handler("on_bot_turn_started", self._on_bot_turn_started)
 
     async def _stop(self, frame: EndFrame):
@@ -375,9 +377,17 @@ class LLMUserAggregator(LLMContextAggregator):
         self,
         strategy: BaseUserTurnStartStrategy | BaseBotTurnStartStrategy,
         frame: Frame,
-        direction: FrameDirection,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
     ):
         await self.push_frame(frame, direction)
+
+    async def _on_broadcast_frame(
+        self,
+        strategy: BaseUserTurnStartStrategy | BaseBotTurnStartStrategy,
+        frame_cls: Type[Frame],
+        **kwargs,
+    ):
+        await self.broadcast_frame(frame_cls, **kwargs)
 
     async def _trigger_user_turn_start(self, strategy: BaseUserTurnStartStrategy):
         if self._user_speaking:

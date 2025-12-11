@@ -30,7 +30,7 @@ from typing import (
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry as NewKeypadEntry
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
@@ -1550,7 +1550,7 @@ class SpeechControlParamsFrame(SystemFrame):
     """
 
     vad_params: Optional[VADParams] = None
-    turn_params: Optional[SmartTurnParams] = None
+    turn_params: Optional[BaseTurnParams] = None
 
 
 #
