@@ -1136,6 +1136,9 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
 
     Emitted by internal processors upstream to emulate VAD behavior when a
     user starts speaking.
+
+    .. deprecated:: 0.0.99
+        This frame is deprecated and will be removed in a future version.
     """
 
     pass
@@ -1147,6 +1150,9 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
     Emitted by internal processors upstream to emulate VAD behavior when a
     user stops speaking.
+
+    .. deprecated:: 0.0.99
+        This frame is deprecated and will be removed in a future version.
     """
 
     pass
