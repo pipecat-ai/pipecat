@@ -10,6 +10,7 @@ import asyncio
 from typing import AsyncGenerator, Optional
 
 from pipecat.frames.frames import (
+    AggregationType,
     Frame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -70,7 +71,7 @@ class MockTTSService(TTSService):
                         await asyncio.sleep(self._frame_delay)
 
         yield TTSStoppedFrame()
-        yield TTSTextFrame(text=text)
+        yield TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
 
     @staticmethod
     def create_mock_audio(duration_ms: int, sample_rate: int = 24000) -> bytes:
@@ -139,4 +140,4 @@ class PredictableMockTTSService(MockTTSService):
                     )
 
         yield TTSStoppedFrame()
-        yield TTSTextFrame(text=text)
+        yield TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)

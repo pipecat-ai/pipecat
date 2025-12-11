@@ -640,14 +640,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserImageRawFrame):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.push_aggregation()
+            await self.push_aggregation(caller="BotStoppedSpeakingFrame")
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
-    async def push_aggregation(self):
+    async def push_aggregation(self, caller: Optional[str] = None):
         """Push the current assistant aggregation with timestamp."""
         if not self._aggregation:
+            logger.debug(
+                f"{self} push_aggregation called - caller {caller} self._aggregation is empty"
+            )
             return
 
         aggregation = self.aggregation_string()
@@ -659,6 +662,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     aggregation = self._params.correct_aggregation_callback(aggregation)
                 except Exception as e:
                     logger.error(f"Error in aggregation correction callback: {e}")
+
+            logger.debug(
+                f"{self} push_aggregation called - caller {caller} self._aggregation = {aggregation}"
+            )
 
             self._context.add_message({"role": "assistant", "content": aggregation})
 
@@ -683,7 +690,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
-        await self.push_aggregation()
+        await self.push_aggregation(caller="InterruptionFrame")
         self._started = 0
         await self.reset()
 
@@ -806,7 +813,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             text=frame.text,
         )
 
-        await self.push_aggregation()
+        await self.push_aggregation(caller="UserImageRawFrame")
         await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
@@ -814,7 +821,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
         self._started -= 1
-        await self.push_aggregation()
+        await self.push_aggregation(caller="LLMFullResponseEndFrame")
 
     async def _handle_text(self, frame: TextFrame):
         if not self._started or not frame.append_to_context:

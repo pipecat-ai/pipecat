@@ -31,27 +31,27 @@ from mock_tts_service import PredictableMockTTSService
 
 async def aggregate_llm_output_text(llm_text: str) -> list[str]:
     """Aggregate LLM output text into sentences using SimpleTextAggregator.
-    
+
     Args:
         llm_text: Raw LLM output text to aggregate into sentences
-        
+
     Returns:
         List of aggregated sentences
     """
     text_aggregator = SimpleTextAggregator()
     sentences = []
-    
+
+    # aggregate() is an async generator, use async for
     for char in llm_text:
-        result = await text_aggregator.aggregate(char)
-        if result:
-            sentences.append(result)
-    
-    # Get any remaining text
-    await text_aggregator.reset()
-    final_result = text_aggregator.text
-    if final_result.strip():
-        sentences.append(final_result)
-    
+        async for result in text_aggregator.aggregate(char):
+            if result.text:
+                sentences.append(result.text)
+
+    # Get any remaining text using flush()
+    final_result = await text_aggregator.flush()
+    if final_result and final_result.text.strip():
+        sentences.append(final_result.text)
+
     return sentences
 
 
