@@ -15,6 +15,7 @@ import asyncio
 import json
 import warnings
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Set
 
 from loguru import logger
@@ -58,13 +59,27 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
 from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
+
+
+@dataclass
+class LLMUserAggregatorParams:
+    """Parameters for configuring LLM user aggregation behavior.
+
+    Parameters:
+        enable_user_speaking_frames: If True, the aggregator will emit frames
+            indicating when the user starts and stops speaking, as well as
+            interruption frames. This is enabled by default, but you may want
+            to disable it if another component (e.g., an STT service) is already
+            generating these frames.
+    """
+
+    enable_user_speaking_frames: bool = True
 
 
 class LLMContextAggregator(FrameProcessor):
@@ -370,15 +385,15 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._user_speaking = True
 
-        logger.debug(f"User started speaking (user turn start strategy: {strategy})")
-
         # Reset all user turn start strategies to start fresh.
         if self.turn_start_strategies:
             for s in self.turn_start_strategies.user:
                 await s.reset()
 
-        await self.push_frame(UserStartedSpeakingFrame())
-        await self.push_frame(InterruptionFrame())
+        if self._params.enable_user_speaking_frames:
+            logger.debug(f"User started speaking (user turn start strategy: {strategy})")
+            await self.push_frame(UserStartedSpeakingFrame())
+            await self.push_frame(InterruptionFrame())
 
     async def _trigger_bot_turn_start(self, strategy: BaseBotTurnStartStrategy):
         if not self._user_speaking:
@@ -386,14 +401,16 @@ class LLMUserAggregator(LLMContextAggregator):
 
         self._user_speaking = False
 
-        logger.debug(f"User stopped speaking (bot turn start strategy: {strategy})")
-
         # Reset all bot turn start strategies to start fresh.
         if self.turn_start_strategies:
             for s in self.turn_start_strategies.bot:
                 await s.reset()
 
-        await self.push_frame(UserStoppedSpeakingFrame())
+        if self._params.enable_user_speaking_frames:
+            logger.debug(f"User stopped speaking (bot turn start strategy: {strategy})")
+            await self.push_frame(UserStoppedSpeakingFrame())
+
+        # Always push context frame.
         await self.push_aggregation()
 
 
