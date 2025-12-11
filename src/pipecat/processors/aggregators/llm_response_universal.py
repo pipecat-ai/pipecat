@@ -15,6 +15,7 @@ import asyncio
 import json
 import warnings
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Set
 
 from loguru import logger
@@ -58,13 +59,27 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.turns.base_speaking_strategy import BaseSpeakingStrategy
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
+
+
+@dataclass
+class LLMUserAggregatorParams:
+    """Parameters for configuring LLM user aggregation behavior.
+
+    Parameters:
+        enable_user_speaking_frames: If True, the aggregator will emit frames
+            indicating when the user starts and stops speaking, as well as
+            interruption frames. This is enabled by default, but you may want
+            to disable it if another component (e.g., an STT service) is already
+            generating these frames.
+    """
+
+    enable_user_speaking_frames: bool = True
 
 
 class LLMContextAggregator(FrameProcessor):
@@ -360,16 +375,16 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _trigger_bot_interruption(self, strategy: Optional[BaseInterruptionStrategy]):
         """Generate an interruption if one of the interruption strategies conditions is met."""
-        logger.debug(f"User started speaking (interruption strategy: {strategy})")
-
         self._bot_speaking = False
 
         # Once we are interrupting, we reset all the interruption strategies.
         for s in self.interruption_strategies:
             await s.reset()
 
-        await self.push_frame(UserStartedSpeakingFrame())
-        await self.push_frame(InterruptionFrame())
+        if self._params.enable_user_speaking_frames:
+            logger.debug(f"User started speaking (interruption strategy: {strategy})")
+            await self.push_frame(UserStartedSpeakingFrame())
+            await self.push_frame(InterruptionFrame())
 
     async def _trigger_bot_speech(self, strategy: Optional[BaseSpeakingStrategy]):
         """Push context frame if one of the speaking strategies conditions is met."""
@@ -379,13 +394,15 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._bot_speaking:
             await self._trigger_bot_interruption(None)
 
-        logger.debug(f"User stopped speaking (speaking strategy: {strategy})")
-
         # Reset all speaking strategies to start fresh.
         for s in self.speaking_strategies:
             await s.reset()
 
-        await self.push_frame(UserStoppedSpeakingFrame())
+        if self._params.enable_user_speaking_frames:
+            logger.debug(f"User stopped speaking (speaking strategy: {strategy})")
+            await self.push_frame(UserStoppedSpeakingFrame())
+
+        # Always push context frame.
         await self.push_aggregation()
 
 
