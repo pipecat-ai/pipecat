@@ -4,10 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import os
-import random
-import sys
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -29,7 +26,6 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -56,11 +52,6 @@ async def book_taxi(params: FunctionCallParams, time: str):
     await params.result_callback({"status": "done"})
 
 
-# LLM provider constants
-LLM_ANTHROPIC = "anthropic"
-LLM_GOOGLE = "google"
-LLM_DEFAULT = LLM_GOOGLE
-
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
 # selected.
@@ -86,10 +77,8 @@ transport_params = {
 }
 
 
-async def run_bot(
-    transport: BaseTransport, runner_args: RunnerArguments, llm_provider: str = LLM_DEFAULT
-):
-    logger.info(f"Starting bot with {llm_provider.capitalize()} LLM")
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -98,27 +87,12 @@ async def run_bot(
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    if llm_provider == LLM_ANTHROPIC:
-        llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            params=AnthropicLLMService.InputParams(
-                thinking=AnthropicLLMService.ThinkingConfig(type="enabled", budget_tokens=2048)
-            ),
-        )
-    elif llm_provider == LLM_GOOGLE:
-        llm = GoogleLLMService(
-            api_key=os.getenv("GOOGLE_API_KEY"),
-            # model="gemini-3-pro-preview", # A more powerful reasoning model, but slower
-            params=GoogleLLMService.InputParams(
-                thinking=GoogleLLMService.ThinkingConfig(
-                    # thinking_level="low", # Use this field instead of thinking_budget for Gemini 3 Pro. Defaults to "high".
-                    thinking_budget=-1,  # Dynamic thinking
-                    include_thoughts=True,
-                )
-            ),
-        )
-    else:
-        raise ValueError(f"Unsupported LLM provider: {llm_provider}")
+    llm = AnthropicLLMService(
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        params=AnthropicLLMService.InputParams(
+            thinking=AnthropicLLMService.ThinkingConfig(type="enabled", budget_tokens=2048)
+        ),
+    )
 
     llm.register_direct_function(check_flight_status)
     llm.register_direct_function(book_taxi)
@@ -193,31 +167,11 @@ async def run_bot(
 
 async def bot(runner_args: RunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
-    # Get llm_provider from module attribute set in __main__
-    llm_provider = getattr(sys.modules[__name__], "llm_provider", LLM_DEFAULT)
     transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport, runner_args, llm_provider)
+    await run_bot(transport, runner_args)
 
 
 if __name__ == "__main__":
-    # Parse custom arguments before calling runner main()
-    parser = argparse.ArgumentParser(description="Thinking LLM Bot")
-    parser.add_argument(
-        "--llm",
-        type=str,
-        choices=[LLM_ANTHROPIC, LLM_GOOGLE],
-        default=LLM_DEFAULT,
-        help=f"LLM provider to use (default: {LLM_DEFAULT})",
-    )
-    # Parse only known args to allow runner's main() to handle its own args
-    args, remaining = parser.parse_known_args()
-
-    # Store the llm_provider in sys.modules for bot() function to access
-    sys.modules[__name__].llm_provider = args.llm
-
-    # Restore sys.argv with remaining args for runner's main()
-    sys.argv[1:] = remaining
-
     from pipecat.runner.run import main
 
     main()
