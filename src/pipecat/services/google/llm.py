@@ -50,6 +50,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
+from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
@@ -713,7 +714,7 @@ class GoogleLLMService(LLMService):
         self.set_model_name(model)
         self._api_key = api_key
         self._system_instruction = system_instruction
-        self._http_options = http_options
+        self._http_options = update_google_client_http_options(http_options)
 
         self._settings = {
             "max_tokens": params.max_tokens,
@@ -793,7 +794,7 @@ class GoogleLLMService(LLMService):
                 return
             generation_params.setdefault("thinking_config", {})["thinking_budget"] = 0
         except Exception as e:
-            logger.exception(f"Failed to unset thinking budget: {e}")
+            logger.error(f"Failed to unset thinking budget: {e}")
 
     async def _stream_content(
         self, params_from_context: GeminiLLMInvocationParams
@@ -983,7 +984,7 @@ class GoogleLLMService(LLMService):
         except DeadlineExceeded:
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(

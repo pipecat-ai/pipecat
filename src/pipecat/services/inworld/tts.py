@@ -228,6 +228,7 @@ class InworldTTSService(WordTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+
         finally:
             await self.stop_all_metrics()
 
@@ -275,7 +276,7 @@ class InworldTTSService(WordTTSService):
 
         if "audioContent" not in response_data:
             logger.error("No audioContent in Inworld API response")
-            await self.push_error(ErrorFrame(error="No audioContent in response"))
+            yield ErrorFrame(error="No audioContent in response")
             return
 
         if "timestampInfo" in response_data:

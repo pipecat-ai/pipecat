@@ -67,13 +67,14 @@ class UrlToImageProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     def extract_url(self, text: str):
-        data = json.loads(text)
-        if "artObject" in data:
-            return data["artObject"]["webImage"]["url"]
-        if "artworks" in data and len(data["artworks"]):
-            return data["artworks"][0]["webImage"]["url"]
-
-        return None
+        try:
+            data = json.loads(text)
+            if "artObject" in data:
+                return data["artObject"]["webImage"]["url"]
+            if "artworks" in data and len(data["artworks"]):
+                return data["artworks"][0]["webImage"]["url"]
+        except:
+            pass
 
     async def run_image_process(self, image_url: str):
         try:

@@ -113,8 +113,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await task.cancel()
 
+    @voicemail.event_handler("on_conversation_detected")
+    async def on_conversation_detected(processor):
+        logger.info("Conversation detected!")
+
     @voicemail.event_handler("on_voicemail_detected")
-    async def handle_voicemail(processor):
+    async def on_voicemail_detected(processor):
         logger.info("Voicemail detected! Leaving a message...")
 
         # Push frames using standard Pipecat pattern

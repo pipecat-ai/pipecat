@@ -774,8 +774,7 @@ class GoogleSTTService(STTService):
                 yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             raise
 
     async def _stream_audio(self):
@@ -806,15 +805,13 @@ class GoogleSTTService(STTService):
                         break
 
                 except Exception as e:
-                    logger.error(f"{self} exception: {e}")
-                    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+                    await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
                     await asyncio.sleep(1)  # Brief delay before reconnecting
                     self._stream_start_time = int(time.time() * 1000)
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process an audio chunk for STT transcription.
@@ -902,8 +899,7 @@ class GoogleSTTService(STTService):
             )
             raise
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             # Re-raise the exception to let it propagate (e.g. in the case of a
             # timeout, propagate to _stream_audio to reconnect)
             raise

@@ -199,7 +199,7 @@ class PlivoFrameSerializer(FrameSerializer):
                         )
 
         except Exception as e:
-            logger.exception(f"Failed to hang up Plivo call: {e}")
+            logger.error(f"Failed to hang up Plivo call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Plivo WebSocket data to Pipecat frames.
