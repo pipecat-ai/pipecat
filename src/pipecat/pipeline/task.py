@@ -138,10 +138,10 @@ class PipelineParams(BaseModel):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     heartbeats_period_secs: float = HEARTBEAT_SECS
-    interruption_strategies: List[BaseInterruptionStrategy | OldBaseInterruptionStrategy] = Field(
-        default_factory=list
-    )
-    speaking_strategies: List[BaseSpeakingStrategy] = Field(default_factory=list)
+    interruption_strategies: Optional[
+        List[BaseInterruptionStrategy | OldBaseInterruptionStrategy]
+    ] = None
+    speaking_strategies: Optional[List[BaseSpeakingStrategy]] = None
     observers: List[BaseObserver] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
@@ -290,9 +290,9 @@ class PipelineTask(BasePipelineTask):
             observers.append(self._turn_trace_observer)
 
         # Initialize default strategies.
-        if not self._params.interruption_strategies:
+        if self._params.interruption_strategies is None:
             self._params.interruption_strategies = [VADInterruptionStrategy()]
-        if not self._params.speaking_strategies:
+        if self._params.speaking_strategies is None:
             self._params.speaking_strategies = [LazyTranscriptionSpeakingStrategy()]
 
         self._finished = False
