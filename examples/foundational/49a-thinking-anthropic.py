@@ -118,7 +118,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "content": "Say hello briefly.",
             }
         )
-        # Here are some example example prompts conducive to demonstrating
+        # Here are some example prompts conducive to demonstrating
         # thinking (picked from Google and Anthropic docs).
         # messages.append(
         #     {
