@@ -23,7 +23,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
