@@ -209,16 +209,55 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         system_instruction = None
         messages = []
         tool_call_id_to_name_mapping = {}
+        non_fn_thought_signatures = []
 
-        # Process each message, preserving Google-formatted messages and converting others
+        # Process each message, converting to Google format as needed
         for message in universal_context_messages:
-            result = self._from_universal_context_message(
+            # We have a Google-specific message; this may either be a
+            # thought-signature-containing message that we need to handle in a
+            # special way, or a message already in Google format that we can
+            # use directly
+            if isinstance(message, LLMSpecificMessage):
+                # Special handling for function-call-related thought signature
+                # messages
+                if (
+                    isinstance(message.message, dict)
+                    and message.message.get("type") == "fn_thought_signature"
+                    and (thought_signature := message.message.get("signature"))
+                ):
+                    self._apply_function_thought_signature_to_messages(
+                        thought_signature, message.message.get("tool_call_id"), messages
+                    )
+                    continue
+
+                # Special handling for non-function-call-related thought-
+                # signature-containing messages
+                if (
+                    isinstance(message.message, dict)
+                    and message.message.get("type") == "non_fn_thought_signature"
+                    and (thought_signature := message.message.get("signature"))
+                    and (bookmark := message.message.get("bookmark"))
+                ):
+                    non_fn_thought_signatures.append(
+                        {"signature": thought_signature, "bookmark": bookmark}
+                    )
+                    continue
+
+                # Fall back to assuming that the message is already in Google
+                # format
+                messages.append(message.message)
+                continue
+
+            # We have a standard universal context message; convert it to
+            # Google format
+            result = self._from_standard_message(
                 message,
                 params=self.MessageConversionParams(
                     already_have_system_instruction=bool(system_instruction),
                     tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
                 ),
             )
+
             # Each result is either a Content or a system instruction
             if result.content:
                 messages.append(result.content)
@@ -228,6 +267,10 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             # Merge tool call ID to name mapping
             if result.tool_call_id_to_name_mapping:
                 tool_call_id_to_name_mapping.update(result.tool_call_id_to_name_mapping)
+
+        # Apply non-function-call-related thought signatures to the appropriate
+        # messages
+        self._apply_non_function_thought_signatures_to_messages(non_fn_thought_signatures, messages)
 
         # Check if we only have function-related messages (no regular text)
         has_regular_messages = any(
@@ -246,13 +289,6 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         messages = [m for m in messages if m.parts]
 
         return self.ConvertedMessages(messages=messages, system_instruction=system_instruction)
-
-    def _from_universal_context_message(
-        self, message: LLMContextMessage, *, params: MessageConversionParams
-    ) -> MessageConversionResult:
-        if isinstance(message, LLMSpecificMessage):
-            return self.MessageConversionResult(content=message.message)
-        return self._from_standard_message(message, params=params)
 
     def _from_standard_message(
         self, message: LLMStandardMessage, *, params: MessageConversionParams
@@ -410,3 +446,137 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             content=Content(role=role, parts=parts),
             tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
         )
+
+    def _apply_function_thought_signature_to_messages(
+        self, thought_signature: bytes, tool_call_id: str, messages: List[Content]
+    ) -> None:
+        """Apply a function-related thought signature to the corresponding function call message.
+
+        Args:
+            thought_signature: The thought signature bytes to apply.
+            tool_call_id: ID of the tool call message to find and modify.
+            messages: List of messages to search through.
+        """
+        # Search backwards through messages to find the matching function call
+        for message in reversed(messages):
+            if not isinstance(message, Content) or not message.parts:
+                continue
+            # Find the specific part with the matching function call
+            for part in message.parts:
+                if (
+                    hasattr(part, "function_call")
+                    and part.function_call
+                    and part.function_call.id == tool_call_id
+                ):
+                    part.thought_signature = thought_signature
+                    break
+            else:
+                # Continue outer loop if inner loop didn't break
+                continue
+            # Break outer loop if inner loop broke (found match)
+            break
+
+    def _apply_non_function_thought_signatures_to_messages(
+        self, thought_signatures: List[dict], messages: List[Content]
+    ) -> None:
+        """Apply (optional, but recommended) non-function-call-related thought signatures to the last part of corresponding non-function-call assistant messages.
+
+        Gemini 3 Pro (and, somewhat surprisingly, other models, too, when
+        functions are involved in the conversation) outputs thought signatures
+        at the end of assistant responses.
+
+        Args:
+            thought_signatures: A list of dicts containing:
+                - "signature": a thought signature
+                - "bookmark": a bookmark to identify the message part to apply the signature to.
+                  The bookmark may contain either:
+                    - "text"
+                    - "inline_data"
+            messages: List of messages to search through.
+        """
+        if not thought_signatures:
+            return
+
+        # For debugging, print out thought signatures and their bookmarks
+        logger.trace(f"Thought signatures to apply: {len(thought_signatures)}")
+        for ts in thought_signatures:
+            bookmark = ts.get("bookmark")
+            if bookmark.get("text"):
+                text = bookmark["text"]
+                log_display_text = f"{text[:50]}..." if len(text) > 50 else text
+                logger.trace(f" - At text: {log_display_text}")
+            elif bookmark.get("inline_data"):
+                logger.trace(f" - At inline data")
+
+        # Find all assistant (model) messages that aren't function calls
+        non_fn_assistant_messages = []
+        for message in messages:
+            if not isinstance(message, Content) or not message.parts:
+                continue
+            # Check if this is a model message without function calls
+            if message.role == "model":
+                has_function_call = any(
+                    hasattr(part, "function_call") and part.function_call for part in message.parts
+                )
+                if not has_function_call:
+                    non_fn_assistant_messages.append(message)
+
+        # Apply thought signatures to the corresponding assistant messages
+        # Match them using content heuristics, maintaining order (messages without signatures are skipped)
+        message_start_index = 0  # Track where to start searching for the next match
+        for thought_signature_dict in thought_signatures:
+            signature = thought_signature_dict.get("signature")
+            bookmark = thought_signature_dict.get("bookmark")
+            if not signature:
+                continue
+
+            # Search through remaining non-function assistant messages for a match
+            for i in range(message_start_index, len(non_fn_assistant_messages)):
+                message = non_fn_assistant_messages[i]
+                if not message.parts:
+                    continue
+
+                last_part = message.parts[-1]
+                matched = False
+
+                # If it's a text bookmark, check that the last message part text has the same text or
+                # - is a prefix of that text (in case spoken text was truncated due to interruption)
+                # - is prefixed by that text (in case bookmark represents just first chunk of multi-chunk text)
+                if bookmark_text := bookmark.get("text"):
+                    if hasattr(last_part, "text") and last_part.text:
+                        # Normalize whitespace for comparison
+                        signed_text = " ".join(bookmark_text.split())
+                        last_text = " ".join(last_part.text.split())
+                        if (
+                            last_text == signed_text
+                            or signed_text.startswith(last_text)
+                            or last_text.startswith(signed_text)
+                        ):
+                            log_display_text = (
+                                f"{last_part.text[:50]}..."
+                                if len(last_part.text) > 50
+                                else last_part.text
+                            )
+                            logger.trace(
+                                f"Applying thought signature to part with matching text: {log_display_text}"
+                            )
+                            last_part.thought_signature = signature
+                            matched = True
+
+                # Check if signed part has inline_data and last message part has matching inline_data
+                elif inline_data := bookmark.get("inline_data"):
+                    if (
+                        hasattr(last_part, "inline_data")
+                        and last_part.inline_data
+                        and last_part.inline_data.data == inline_data.data
+                    ):
+                        logger.trace(
+                            f"Applying thought signature to part with matching inline_data"
+                        )
+                        last_part.thought_signature = signature
+                        matched = True
+
+                # If we found a match, update start index and stop searching for this signed part
+                if matched:
+                    message_start_index = i + 1
+                    break

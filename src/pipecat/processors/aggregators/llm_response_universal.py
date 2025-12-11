@@ -47,6 +47,9 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
@@ -592,6 +595,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
+        self._thought_aggregation_enabled = False
+        self._thought_llm: str = ""
+        self._thought_aggregation: List[TextPartForConcatenation] = []
+
     @property
     def has_function_calls_in_progress(self) -> bool:
         """Check if there are any function calls currently in progress.
@@ -600,6 +607,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
             True if function calls are in progress, False otherwise.
         """
         return bool(self._function_calls_in_progress)
+
+    async def reset(self):
+        """Reset the aggregation state."""
+        await super().reset()
+        await self._reset_thought_aggregation()  # Just to be safe
+
+    async def _reset_thought_aggregation(self):
+        """Reset the thought aggregation state."""
+        self._thought_aggregation_enabled = False
+        self._thought_llm = ""
+        self._thought_aggregation = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for assistant response aggregation and function call management.
@@ -619,6 +637,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_llm_end(frame)
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
+        elif isinstance(frame, LLMThoughtStartFrame):
+            await self._handle_thought_start(frame)
+        elif isinstance(frame, LLMThoughtTextFrame):
+            await self._handle_thought_text(frame)
+        elif isinstance(frame, LLMThoughtEndFrame):
+            await self._handle_thought_end(frame)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
@@ -715,6 +739,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 "tool_call_id": frame.tool_call_id,
             }
         )
+
+        # Append to context any specified extra context messages
+        if frame.append_extra_context_messages:
+            self._context.add_messages(frame.append_extra_context_messages)
 
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
@@ -821,6 +849,47 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._aggregation.append(
             TextPartForConcatenation(
                 frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
+
+    async def _handle_thought_start(self, frame: LLMThoughtStartFrame):
+        if not self._started:
+            return
+
+        await self._reset_thought_aggregation()
+        self._thought_aggregation_enabled = frame.append_to_context
+        self._thought_llm = frame.llm
+
+    async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
+        if not self._started or not self._thought_aggregation_enabled:
+            return
+
+        # Make sure we really have text (spaces count, too!)
+        if len(frame.text) == 0:
+            return
+
+        self._thought_aggregation.append(
+            TextPartForConcatenation(
+                frame.text, includes_inter_part_spaces=frame.includes_inter_frame_spaces
+            )
+        )
+
+    async def _handle_thought_end(self, frame: LLMThoughtEndFrame):
+        if not self._started or not self._thought_aggregation_enabled:
+            return
+
+        thought = concatenate_aggregated_text(self._thought_aggregation)
+        llm = self._thought_llm
+        await self._reset_thought_aggregation()
+
+        self._context.add_message(
+            LLMSpecificMessage(
+                llm=llm,
+                message={
+                    "type": "thought",
+                    "text": thought,
+                    "signature": frame.signature,
+                },
             )
         )
 

@@ -74,6 +74,11 @@ EVAL_CONVERSATION = EvalConfig(
     eval_speaks_first=True,
 )
 
+EVAL_FLIGHT_STATUS = EvalConfig(
+    prompt="Check the status of flight AA100.",
+    eval="The user says something about the status of flight AA100, such as whether it's on time or delayed.",
+)
+
 
 TESTS_07 = [
     # 07 series
@@ -204,6 +209,13 @@ TESTS_44 = [
     ("44-voicemail-detection.py", EVAL_CONVERSATION),
 ]
 
+TESTS_49 = [
+    ("49a-thinking-anthropic.py", EVAL_SIMPLE_MATH),
+    ("49b-thinking-google.py", EVAL_SIMPLE_MATH),
+    ("49c-thinking-functions-anthropic.py", EVAL_FLIGHT_STATUS),
+    ("49d-thinking-functions-google.py", EVAL_FLIGHT_STATUS),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -216,6 +228,7 @@ TESTS = [
     *TESTS_40,
     *TESTS_43,
     *TESTS_44,
+    *TESTS_49,
 ]
 
 

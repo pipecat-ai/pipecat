@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import os
 
 from dotenv import load_dotenv
@@ -14,18 +13,18 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, ThoughtTranscriptionMessage, TranscriptionMessage
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.google.stt import GoogleSTTService
-from pipecat.services.google.tts import GoogleTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -60,26 +59,21 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = GoogleSTTService(
-        params=GoogleSTTService.InputParams(languages=Language.EN_US, model="chirp_3"),
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
-        location="us",
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    tts = GoogleTTSService(
-        voice_id="en-US-Chirp3-HD-Charon",
-        params=GoogleTTSService.InputParams(language=Language.EN_US),
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+    llm = AnthropicLLMService(
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        params=AnthropicLLMService.InputParams(
+            thinking=AnthropicLLMService.ThinkingConfig(type="enabled", budget_tokens=2048)
+        ),
     )
 
-    llm = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        model="gemini-2.5-flash",
-        # force a certain amount of thinking if you want it
-        # params=GoogleLLMService.InputParams(
-        #     thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
-        # ),
-    )
+    transcript = TranscriptProcessor(process_thoughts=True)
 
     messages = [
         {
@@ -94,11 +88,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # STT
-            context_aggregator.user(),  # User respones
+            stt,
+            transcript.user(),  # User transcripts
+            context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
+            transcript.assistant(),  # Assistant transcripts (including thoughts)
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
@@ -116,13 +112,37 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append(
+            {
+                "role": "user",
+                "content": "Say hello briefly.",
+            }
+        )
+        # Here are some example prompts conducive to demonstrating
+        # thinking (picked from Google and Anthropic docs).
+        # messages.append(
+        #     {
+        #         "role": "user",
+        #         "content": "Analogize photosynthesis and growing up. Keep your answer concise.",
+        #         # "content": "Compare and contrast electric cars and hybrid cars."
+        #         # "content": "Are there an infinite number of prime numbers such that n mod 4 == 3?"
+        #     }
+        # )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    # Register event handler for transcript updates
+    @transcript.event_handler("on_transcript_update")
+    async def on_transcript_update(processor, frame):
+        for msg in frame.messages:
+            if isinstance(msg, (ThoughtTranscriptionMessage, TranscriptionMessage)):
+                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
+                role = "THOUGHT" if isinstance(msg, ThoughtTranscriptionMessage) else msg.role
+                logger.info(f"Transcript: {timestamp}{role}: {msg.content}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

@@ -4,33 +4,53 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, ThoughtTranscriptionMessage, TranscriptionMessage
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.google.stt import GoogleSTTService
-from pipecat.services.google.tts import GoogleTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
+
+
+async def check_flight_status(params: FunctionCallParams, flight_number: str):
+    """Check the status of a flight. Returns status (e.g., "on time", "delayed") and departure time.
+
+    Args:
+        flight_number (str): The flight number, e.g. "AA100".
+    """
+    await params.result_callback({"status": "delayed", "departure_time": "14:30"})
+
+
+async def book_taxi(params: FunctionCallParams, time: str):
+    """Book a taxi for a given time. Returns status (e.g., "done").
+
+    Args:
+        time (str): The time to book the taxi for, e.g. "15:00".
+    """
+    await params.result_callback({"status": "done"})
+
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -60,26 +80,31 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = GoogleSTTService(
-        params=GoogleSTTService.InputParams(languages=Language.EN_US, model="chirp_3"),
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
-        location="us",
-    )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = GoogleTTSService(
-        voice_id="en-US-Chirp3-HD-Charon",
-        params=GoogleTTSService.InputParams(language=Language.EN_US),
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        model="gemini-2.5-flash",
-        # force a certain amount of thinking if you want it
-        # params=GoogleLLMService.InputParams(
-        #     thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
-        # ),
+        # model="gemini-3-pro-preview", # A more powerful reasoning model, but slower
+        params=GoogleLLMService.InputParams(
+            thinking=GoogleLLMService.ThinkingConfig(
+                # thinking_level="low", # Use this field instead of thinking_budget for Gemini 3 Pro. Defaults to "high".
+                thinking_budget=-1,  # Dynamic thinking
+                include_thoughts=True,
+            )
+        ),
     )
+
+    llm.register_direct_function(check_flight_status)
+    llm.register_direct_function(book_taxi)
+
+    tools = ToolsSchema(standard_tools=[check_flight_status, book_taxi])
+
+    transcript = TranscriptProcessor(process_thoughts=True)
 
     messages = [
         {
@@ -88,17 +113,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = LLMContext(messages)
+    context = LLMContext(messages, tools)
     context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # STT
-            context_aggregator.user(),  # User respones
+            stt,
+            transcript.user(),  # User transcripts
+            context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
+            transcript.assistant(),  # Assistant transcripts (including thoughts)
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
@@ -116,13 +143,35 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append(
+            {
+                "role": "user",
+                "content": "Say hello briefly.",
+            }
+        )
+        # Here is an example prompt conducive to demonstrating thinking and
+        # function calling.
+        # This example comes from Gemini docs.
+        # messages.append(
+        #     {
+        #         "role": "user",
+        #         "content": "Check the status of flight AA100 and, if it's delayed, book me a taxi 2 hours before its departure time.",
+        #     }
+        # )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @transcript.event_handler("on_transcript_update")
+    async def on_transcript_update(processor, frame):
+        for msg in frame.messages:
+            if isinstance(msg, (ThoughtTranscriptionMessage, TranscriptionMessage)):
+                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
+                role = "THOUGHT" if isinstance(msg, ThoughtTranscriptionMessage) else msg.role
+                logger.info(f"Transcript: {timestamp}{role}: {msg.content}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
