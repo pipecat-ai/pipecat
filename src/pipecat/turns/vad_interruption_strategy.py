@@ -32,4 +32,4 @@ class VADInterruptionStrategy(BaseInterruptionStrategy):
         await super().process_frame(frame)
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._call_event_handler("on_should_interrupt")
+            await self.trigger_interruption()

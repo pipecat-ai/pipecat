@@ -16,7 +16,7 @@ import json
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import Any, Dict, List, Literal, Optional, Set, Type
 
 from loguru import logger
 
@@ -310,11 +310,13 @@ class LLMUserAggregator(LLMContextAggregator):
         for s in self.interruption_strategies:
             await s.setup(self.task_manager)
             s.add_event_handler("on_push_frame", self._on_push_frame)
+            s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
             s.add_event_handler("on_should_interrupt", self._on_should_interrupt)
 
         for s in self.speaking_strategies:
             await s.setup(self.task_manager)
             s.add_event_handler("on_push_frame", self._on_push_frame)
+            s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
             s.add_event_handler("on_should_speak", self._on_should_speak)
 
     async def _stop(self, frame: EndFrame):
@@ -369,9 +371,17 @@ class LLMUserAggregator(LLMContextAggregator):
         self,
         strategy: BaseInterruptionStrategy | BaseSpeakingStrategy,
         frame: Frame,
-        direction: FrameDirection,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
     ):
         await self.push_frame(frame, direction)
+
+    async def _on_broadcast_frame(
+        self,
+        strategy: BaseInterruptionStrategy | BaseSpeakingStrategy,
+        frame_cls: Type[Frame],
+        **kwargs,
+    ):
+        await self.broadcast_frame(frame_cls, **kwargs)
 
     async def _trigger_bot_interruption(self, strategy: Optional[BaseInterruptionStrategy]):
         """Generate an interruption if one of the interruption strategies conditions is met."""

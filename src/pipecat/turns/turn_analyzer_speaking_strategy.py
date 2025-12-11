@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.turns.base_speaking_strategy import BaseSpeakingStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -98,9 +97,7 @@ class TurnAnalyzerSpeakingStrategy(BaseSpeakingStrategy):
     async def _start(self, frame: StartFrame):
         """Process the start frame to configure the Smart Turn analyzer."""
         self._turn_analyzer.set_sample_rate(frame.audio_in_sample_rate)
-        await self._call_event_handler(
-            "on_push_frame", SpeechControlParamsFrame(turn_params=self._turn_analyzer.params)
-        )
+        await self.broadcast_frame(SpeechControlParamsFrame, turn_params=self._turn_analyzer.params)
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""
@@ -135,11 +132,7 @@ class TurnAnalyzerSpeakingStrategy(BaseSpeakingStrategy):
     async def _handle_prediction_result(self, result: Optional[MetricsData]):
         """Handle a prediction result event from the turn analyzer."""
         if result:
-            await self._call_event_handler(
-                "on_push_frame",
-                MetricsFrame(data=[result]),
-                FrameDirection.DOWNSTREAM,
-            )
+            await self.push_frame(MetricsFrame(data=[result]))
 
     async def _task_handler(self):
         """Asynchronously check if the bot should start speaking.
@@ -155,4 +148,4 @@ class TurnAnalyzerSpeakingStrategy(BaseSpeakingStrategy):
                 self._event.clear()
             except asyncio.TimeoutError:
                 if self._text:
-                    await self._call_event_handler("on_should_speak")
+                    await self.trigger_speech()
