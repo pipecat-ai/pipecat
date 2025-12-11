@@ -31,6 +31,49 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
+
+class LoggingInworldTTSService(InworldTTSService):
+    """InworldTTSService with timestamp logging enabled."""
+
+    async def _process_streaming_response(self, response):
+        """Override to log timestamp info from Inworld API responses."""
+        import base64
+        import json
+
+        from pipecat.services.inworld.tts import calculate_word_times_from_inworld
+
+        buffer = ""
+        async for chunk in response.content.iter_chunked(1024):
+            if not chunk:
+                continue
+            buffer += chunk.decode("utf-8")
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    chunk_data = json.loads(line_str)
+                    if "result" in chunk_data and "audioContent" in chunk_data["result"]:
+                        await self.stop_ttfb_metrics()
+                        async for frame in self._process_audio_chunk(
+                            base64.b64decode(chunk_data["result"]["audioContent"])
+                        ):
+                            yield frame
+                    # Log and process timestamps
+                    if "result" in chunk_data and "timestampInfo" in chunk_data["result"]:
+                        timestamp_info = chunk_data["result"]["timestampInfo"]
+                        # Log the raw timestamp info from Inworld API
+                        logger.info(f"Inworld timestampInfo: {timestamp_info}")
+                        word_times, new_cumulative = calculate_word_times_from_inworld(
+                            timestamp_info, self._cumulative_time, self._timestamp_type
+                        )
+                        if word_times:
+                            await self.add_word_timestamps(word_times)
+                            self._cumulative_time = new_cumulative
+                except json.JSONDecodeError:
+                    continue
+
 load_dotenv(override=True)
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -67,14 +110,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         # Inworld TTS Service - Unified streaming and non-streaming
         # Set streaming=True for real-time audio, streaming=False for complete audio generation
+        # Character-level timestamps are enabled below to show word timing in RTVI events
         streaming = True  # Toggle this to switch between modes
 
-        tts = InworldTTSService(
+        tts = LoggingInworldTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
             aiohttp_session=session,
             voice_id="Ashley",
             model="inworld-tts-1",
             streaming=streaming,  # True: real-time chunks, False: complete audio then playback
+            params=InworldTTSService.InputParams(
+                timestamp_type="CHARACTER",  # Enable character-level timestamps
+            ),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
