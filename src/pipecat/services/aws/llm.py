@@ -840,15 +840,13 @@ class AWSBedrockLLMService(LLMService):
             messages = context.messages
             system = getattr(context, "system", None)  # [{"text": "system message"}]
 
-        # Determine if we're using Claude or Nova based on model ID
-        model_id = self.model_name
-
-        # Prepare request parameters
+        # Prepare request parameters using the same method as streaming
         inference_config = self._build_inference_config()
 
         request_params = {
-            "modelId": model_id,
+            "modelId": self.model_name,
             "messages": messages,
+            "additionalModelRequestFields": self._settings["additional_model_request_fields"],
         }
 
         if inference_config:

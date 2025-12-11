@@ -276,17 +276,23 @@ class BaseOpenAILLMService(LLMService):
         """
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
-            params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
-            messages = params["messages"]
+            invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+                context
+            )
         else:
-            messages = context.messages
+            invocation_params = OpenAILLMInvocationParams(
+                messages=context.messages, tools=context.tools, tool_choice=context.tool_choice
+            )
+
+        # Build params using the same method as streaming completions
+        params = self.build_chat_completion_params(invocation_params)
+
+        # Override for non-streaming
+        params["stream"] = False
+        params.pop("stream_options", None)
 
         # LLM completion
-        response = await self._client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            stream=False,
-        )
+        response = await self._client.chat.completions.create(**params)
 
         return response.choices[0].message.content
 
