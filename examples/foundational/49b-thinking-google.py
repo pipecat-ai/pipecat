@@ -116,16 +116,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation, using a prompt conducive to demonstrating
-        # thinking (chosen from Google and Anthropic docs).
+        # Kick off the conversation.
         messages.append(
             {
                 "role": "user",
-                "content": "Analogize photosynthesis and growing up.",
-                # "content": "Compare and contrast electric cars and hybrid cars."
-                # "content": "Are there an infinite number of prime numbers such that n mod 4 == 3?"
+                "content": "Say hello briefly.",
             }
         )
+        # Here are some example example prompts conducive to demonstrating
+        # thinking (picked from Google and Anthropic docs).
+        # messages.append(
+        #     {
+        #         "role": "user",
+        #         "content": "Analogize photosynthesis and growing up. Keep your answer concise.",
+        #         # "content": "Compare and contrast electric cars and hybrid cars."
+        #         # "content": "Are there an infinite number of prime numbers such that n mod 4 == 3?"
+        #     }
+        # )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

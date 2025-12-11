@@ -138,13 +138,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        # This example comes from Gemini docs.
         messages.append(
             {
                 "role": "user",
-                "content": "Check the status of flight AA100 and, if it's delayed, book me a taxi 2 hours before its departure time.",
+                "content": "Say hello briefly.",
             }
         )
+        # Here is an example prompt conducive to demonstrating thinking and
+        # function calling.
+        # This example comes from Gemini docs.
+        # messages.append(
+        #     {
+        #         "role": "user",
+        #         "content": "Check the status of flight AA100 and, if it's delayed, book me a taxi 2 hours before its departure time.",
+        #     }
+        # )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
