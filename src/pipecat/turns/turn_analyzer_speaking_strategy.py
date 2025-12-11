@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     MetricsFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
@@ -97,6 +98,9 @@ class TurnAnalyzerSpeakingStrategy(BaseSpeakingStrategy):
     async def _start(self, frame: StartFrame):
         """Process the start frame to configure the Smart Turn analyzer."""
         self._turn_analyzer.set_sample_rate(frame.audio_in_sample_rate)
+        await self._call_event_handler(
+            "on_push_frame", SpeechControlParamsFrame(turn_params=self._turn_analyzer.params)
+        )
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""
