@@ -425,6 +425,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added word-level timestamps support to Hume TTS service
 
+- Added optional speaking rate control to `InworldTTSService`.
+
+- Added Websocket support for `InworldTTSService`.
+
 ### Changed
 
 - ⚠️ Breaking change: `LLMContext.create_image_message()`,

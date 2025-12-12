@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import os
 
 import aiohttp
@@ -21,6 +20,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -30,11 +30,40 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
+
+class LoggingInworldTTSService(InworldTTSService):
+    """InworldTTSService subclass that logs timestamp info from the API."""
+
+    async def _process_streaming_response(self, response):
+        import base64
+        import json
+
+        buffer = ""
+        async for chunk in response.content.iter_chunked(1024):
+            if not chunk:
+                continue
+            buffer += chunk.decode("utf-8")
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    chunk_data = json.loads(line_str)
+                    if "result" in chunk_data and "audioContent" in chunk_data["result"]:
+                        await self.stop_ttfb_metrics()
+                        async for frame in self._process_audio_chunk(
+                            base64.b64decode(chunk_data["result"]["audioContent"])
+                        ):
+                            yield frame
+                    if "result" in chunk_data and "timestampInfo" in chunk_data["result"]:
+                        logger.info(f"Inworld timestamps: {chunk_data['result']['timestampInfo']}")
+                except json.JSONDecodeError:
+                    continue
+
+
 load_dotenv(override=True)
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -58,22 +87,17 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting bot")
 
-    # Create an HTTP session
     async with aiohttp.ClientSession() as session:
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        # Inworld TTS Service - Unified streaming and non-streaming
-        # Set streaming=True for real-time audio, streaming=False for complete audio generation
-        streaming = True  # Toggle this to switch between modes
-
-        tts = InworldTTSService(
+        tts = LoggingInworldTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
             aiohttp_session=session,
             voice_id="Ashley",
             model="inworld-tts-1",
-            streaming=streaming,  # True: real-time chunks, False: complete audio then playback
+            params=InworldTTSService.InputParams(timestamp_type="WORD"),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -81,22 +105,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages = [
             {
                 "role": "system",
-                "content": "You are very knowledgable about dogs. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
             },
         ]
 
         context = LLMContext(messages)
         context_aggregator = LLMContextAggregatorPair(context)
 
+        rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
         pipeline = Pipeline(
             [
-                transport.input(),  # Transport user input
-                stt,  # STT
-                context_aggregator.user(),  # User responses
-                llm,  # LLM
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
+                transport.input(),
+                rtvi,
+                stt,
+                context_aggregator.user(),
+                llm,
+                tts,
+                transport.output(),
+                context_aggregator.assistant(),
             ]
         )
 
@@ -106,19 +133,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 enable_metrics=True,
                 enable_usage_metrics=True,
             ),
+            observers=[RTVIObserver(rtvi)],
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         )
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
-            logger.info(f"Client connected")
+            logger.info("Client connected")
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
+            logger.info("Client disconnected")
             await task.cancel()
 
         runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
