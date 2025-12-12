@@ -440,6 +440,13 @@ class GladiaSTTService(STTService):
                     self._session_id = response["id"]
                     self._reconnection_attempts = 0
                     logger.info(f"{self} Session URL : {self._session_url}")
+                    async with self._buffer_lock:
+                        if self._bytes_sent:
+                            logger.debug(
+                                f"{self} Resetting acknowledged byte counter for new session "
+                                f"(was {self._bytes_sent})"
+                            )
+                        self._bytes_sent = 0
 
                 # Connect with automatic reconnection
                 async with websocket_connect(self._session_url) as websocket:
