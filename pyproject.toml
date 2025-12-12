@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pipecat-ai"
+
 dynamic = ["version"]
 description = "An open source framework for voice (and multimodal) assistants"
 license = "BSD-2-Clause"
@@ -114,6 +115,20 @@ webrtc = [ "aiortc>=1.13.0,<2", "opencv-python>=4.11.0.86,<5" ]
 websocket = [ "pipecat-ai[websockets-base]", "fastapi>=0.115.6,<0.122.0" ]
 websockets-base = [ "websockets>=13.1,<16.0" ]
 whisper = [ "faster-whisper~=1.1.1" ]
+
+oiip = [
+    "arize-otel>=0.0.1",
+    "arize-phoenix>=0.0.1",
+    "openinference-instrumentation>=0.1.12",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-semantic-conventions",
+    # Note: openinference-instrumentation-pipecat comes from [tool.uv.sources]
+    "openinference-instrumentation-pipecat"
+]
+
+[tool.uv.sources]
+openinference-instrumentation-pipecat = { path = "../../opensource/openinference/python/instrumentation/openinference-instrumentation-pipecat", editable = true }
 
 [dependency-groups]
 dev = [
