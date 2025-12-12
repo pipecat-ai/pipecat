@@ -907,11 +907,11 @@ class TTSTextTransformer:
         def replace_number(match):
             return self.transform_quantity_number(match.group(0))
         result = re.sub(self.STANDALONE_NUMBER_PATTERN, replace_number, result)
-        
-        # 12. Apply pronunciation dictionary with phoneme tags
-        result = self.apply_pronunciation_dictionary(result)
 
-        # 13. Clean special characters (final step after all pattern transformations)
+        # 12. Clean special characters (final step after all pattern transformations)
         result = self._clean_special_characters(result)
+
+         # 13. Apply pronunciation dictionary with phoneme tags
+        result = self.apply_pronunciation_dictionary(result)
 
         return result
