@@ -266,6 +266,7 @@ class GladiaSTTService(STTService):
         self._reconnection_delay = reconnection_delay
         self._reconnection_attempts = 0
         self._session_url = None
+        self._session_id = None
         self._connection_active = False
 
         # Audio buffer management
@@ -277,6 +278,9 @@ class GladiaSTTService(STTService):
         # Connection management
         self._connection_task = None
         self._should_reconnect = True
+
+    def __str__(self):
+        return f"{self.name} [{self._session_id}]"
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate performance metrics.
@@ -412,14 +416,14 @@ class GladiaSTTService(STTService):
                 trim_size = len(self._audio_buffer) - self._max_buffer_size
                 self._audio_buffer = self._audio_buffer[trim_size:]
                 self._bytes_sent = max(0, self._bytes_sent - trim_size)
-                logger.warning(f"Audio buffer exceeded max size, trimmed {trim_size} bytes")
+                logger.warning(f"{self} Audio buffer exceeded max size, trimmed {trim_size} bytes")
 
         # Send audio if connected
         if self._connection_active and self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._send_audio(audio)
             except websockets.exceptions.ConnectionClosed as e:
-                logger.warning(f"Websocket closed while sending audio chunk: {e}")
+                logger.warning(f"{self} Websocket closed while sending audio chunk: {e}")
                 self._connection_active = False
 
         yield None
@@ -433,8 +437,9 @@ class GladiaSTTService(STTService):
                     settings = self._prepare_settings()
                     response = await self._setup_gladia(settings)
                     self._session_url = response["url"]
+                    self._session_id = response["id"]
                     self._reconnection_attempts = 0
-                    logger.info(f"Session URL : {self._session_url}")
+                    logger.info(f"{self} Session URL : {self._session_url}")
 
                 # Connect with automatic reconnection
                 async with websocket_connect(self._session_url) as websocket:
@@ -454,7 +459,7 @@ class GladiaSTTService(STTService):
                         await asyncio.gather(self._receive_task, self._keepalive_task)
 
                     except websockets.exceptions.ConnectionClosed as e:
-                        logger.warning(f"WebSocket connection closed: {e}")
+                        logger.warning(f"{self} WebSocket connection closed: {e}")
                         self._connection_active = False
 
                         # Clean up tasks
@@ -510,10 +515,10 @@ class GladiaSTTService(STTService):
                 else:
                     error_text = await response.text()
                     logger.error(
-                        f"Gladia error: {response.status}: {error_text or response.reason}"
+                        f"{self} Gladia error: {response.status}: {error_text or response.reason}"
                     )
                     raise Exception(
-                        f"Failed to initialize Gladia session: {response.status} - {error_text}"
+                        f"{self} Failed to initialize Gladia session: {response.status} - {error_text}"
                     )
 
     @traced_stt
@@ -553,10 +558,10 @@ class GladiaSTTService(STTService):
                     empty_audio = b""
                     await self._send_audio(empty_audio)
                 else:
-                    logger.debug("Websocket closed, stopping keepalive")
+                    logger.debug(f"{self} Websocket closed, stopping keepalive")
                     break
         except websockets.exceptions.ConnectionClosed:
-            logger.debug("Connection closed during keepalive")
+            logger.debug(f"{self} Connection closed during keepalive")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
@@ -630,7 +635,7 @@ class GladiaSTTService(STTService):
         self._reconnection_attempts += 1
         if self._reconnection_attempts > self._max_reconnection_attempts:
             await self.push_error(
-                error_msg=f"Max reconnection attempts ({self._max_reconnection_attempts}) reached",
+                error_msg=f"{self} Max reconnection attempts ({self._max_reconnection_attempts}) reached",
             )
             self._should_reconnect = False
             return False
