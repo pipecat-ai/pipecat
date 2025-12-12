@@ -1,6 +1,5 @@
-pipecat-ai[ojin, silero, hume]
+pipecat-ai[local,hume,silero,ojin] @ git+https://github.com/journee-live/pipecat-ojin.git@main
 textual==1.0.0
-pydantic-settings==2.7.1
 pyaudio==0.2.14
 opencv-python>=4.10.0.84
 Pillow>=10.4.0

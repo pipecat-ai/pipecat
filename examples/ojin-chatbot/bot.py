@@ -5,21 +5,18 @@
 #
 
 import asyncio
-import io
 import os
 import sys
 import tkinter as tk
-from typing import Awaitable
 
 import cv2
 import numpy as np
 from dotenv import load_dotenv
 from loguru import logger
-from PIL import Image
-from utils.tk_overlay import create_fps_overlay, start_tk_fps_udpater, start_tk_updater
+from utils.tk_overlay import start_tk_updater
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, ImageRawFrame, OutputImageRawFrame
+from pipecat.frames.frames import Frame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -27,9 +24,9 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.hume.hume import HumeSTSService
 from pipecat.services.ojin.video import (
-    OjinPersonaInitializedFrame,
-    OjinPersonaService,
-    OjinPersonaSettings,
+    OjinVideoService,
+    OjinVideoServiceInitializedFrame,
+    OjinVideoServiceSettings,
 )
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
@@ -94,7 +91,7 @@ class ImageFormatConverter(FrameProcessor):
 
 async def main():
     tk_root = tk.Tk()
-    tk_root.title("Ojin Persona Chatbot")
+    tk_root.title("Ojin Video Service Chatbot")
 
     # Configure window to be visible on Windows
     tk_root.geometry("1280x720")
@@ -120,8 +117,6 @@ async def main():
         LocalAudioTransportParams(
             audio_out_enabled=False,
             audio_in_enabled=True,
-            vad_enabled=True,
-            vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(),
         )
     )
@@ -131,7 +126,7 @@ async def main():
         api_key=os.getenv("HUME_API_KEY", ""),
         config_id=os.getenv("HUME_CONFIG_ID", ""),
         model=os.getenv("HUME_MODEL", "evi"),
-        start_frame_cls=OjinPersonaInitializedFrame,
+        start_frame_cls=OjinVideoServiceInitializedFrame,
     )
 
     messages = [
@@ -144,15 +139,11 @@ async def main():
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
-    # DITTO_SERVER_URL: str = "wss://eu-central-1.models.ojin.foo/realtime"
-    persona = OjinPersonaService(
-        OjinPersonaSettings(
-            ws_url=os.getenv("OJIN_PROXY_URL", "wss://models.ojin.ai/realtime"),
+    persona = OjinVideoService(
+        OjinVideoServiceSettings(
+            ws_url=os.getenv("OJIN_REALTIME_API_URL", "wss://models.ojin.ai/realtime"),
             api_key=os.getenv("OJIN_API_KEY", ""),
-            persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),
-            image_size=(1280, 720),
-            tts_audio_passthrough=False,
-            extra_frames_lat=15,
+            config_id=os.getenv("OJIN_CONFIG_ID", ""),
         )
     )
 

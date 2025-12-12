@@ -23,7 +23,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
+from pipecat.services.ojin.video import OjinVideoService, OjinVideoServiceSettings
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 # Ensure we can import sibling 'utils' package when running from the 'mock' subdir
@@ -112,7 +112,7 @@ async def main():
     )
 
     tk_root = tk.Tk()
-    tk_root.title("Ojin Persona Chatbot")
+    tk_root.title("Ojin Video Service Chatbot")
 
     # Configure window to be visible on Windows
     tk_root.geometry("1280x720")
@@ -134,12 +134,11 @@ async def main():
         ),
     )
 
-    # DITTO_SERVER_URL: str = "wss://eu-central-1.models.ojin.foo/realtime"
-    persona = OjinPersonaService(
-        OjinPersonaSettings(
-            ws_url=os.getenv("OJIN_PROXY_URL", "wss://models.ojin.ai/realtime"),
+    persona = OjinVideoService(
+        OjinVideoServiceSettings(
+            ws_url=os.getenv("OJIN_REALTIME_API_URL", "wss://models.ojin.ai/realtime"),
             api_key=os.getenv("OJIN_API_KEY", ""),
-            persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),
+            config_id=os.getenv("OJIN_CONFIG_ID", ""),
             image_size=(1280, 720),
             tts_audio_passthrough=False,
         )
