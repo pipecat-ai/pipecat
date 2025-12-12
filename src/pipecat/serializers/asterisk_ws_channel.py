@@ -6,12 +6,14 @@
 
 """Asterisk WebSocket channel frame serialization interfaces for Pipecat."""
 
-from enum import Enum
 import json
+from enum import Enum
+from typing import Optional
 
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import (
     alaw_to_pcm,
     create_stream_resampler,
@@ -22,15 +24,15 @@ from pipecat.audio.utils import (
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
-    EndFrame, 
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
     InterruptionFrame,
-    StartFrame
+    StartFrame,
 )
-from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.serializers.base_serializer import FrameSerializer
+
 
 class FrameSerializerType(Enum):
     """There only one serialization format in for Asterisk WebSocket channel.
@@ -38,14 +40,16 @@ class FrameSerializerType(Enum):
     Parameters:
         MIXED: Binary and text serialization format.
     """
+
     MIXED = "mixed"
+
 
 class AsteriskWsFrameSerializer(FrameSerializer):
     """Serializer for Asterisk WebSocket channel frames.
-    
+
     This serializer handles converting between Pipecat frames and Asterisk WebSocket
-    channel. It provides raw audio conversion (BINARY), and basic signalling(TEXT): 
-        Asterisk to pipecat: 
+    channel. It provides raw audio conversion (BINARY), and basic signalling(TEXT):
+        Asterisk to pipecat:
             - when DTMF detected on Asterisk websocket channel we send InputDTMFFrame to pipecat.
         Pipecat to Asterisk:
             - when an EndFrame or CancelFrame is processed we send HANGUP to Asterisk websocket channel.
@@ -59,13 +63,11 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             asterisk_sample_rate: Sample rate used by Asterisk, defaults to 8000 Hz.
             encoding: Audio encoding (e.g., "ulaw", "alaw").
         """
+
         asterisk_sample_rate: int = 8000
         encoding: str = "ulaw"
 
-    def __init__(
-        self,
-        params: AsteriskWsFrameSerializer.InputParams | None = None,
-    ):
+    def __init__(self, params: Optional[InputParams] = None):
         """Initialize the AsteriskFrameSerializer.
 
         Args:
@@ -77,17 +79,19 @@ class AsteriskWsFrameSerializer(FrameSerializer):
         self._output_resampler = create_stream_resampler()
 
         self._encoders = {
-                "ulaw": pcm_to_ulaw,
-                "alaw": pcm_to_alaw,
-            }
+            "ulaw": pcm_to_ulaw,
+            "alaw": pcm_to_alaw,
+        }
 
         self._decoders = {
-                "ulaw": ulaw_to_pcm,
-                "alaw": alaw_to_pcm,
-            }
+            "ulaw": ulaw_to_pcm,
+            "alaw": alaw_to_pcm,
+        }
         self._pipeline_sample_rate = 0  # Pipeline input rate populated during setup
         self._media_buffering_started = False
-
+        self._asterisk_command_format = (
+            "plain-text"  # or "json", determined upon receiving MEDIA_START event from Asterisk
+        )
 
     @property
     def type(self) -> FrameSerializerType:
@@ -101,13 +105,13 @@ class AsteriskWsFrameSerializer(FrameSerializer):
 
     async def setup(self, frame: StartFrame):
         """Initialize the serializer with startup configuration.
+
         Defined to set the pipeline input sample rate for resampling.
 
         Args:
             frame: StartFrame containing initialization parameters.
         """
         self._pipeline_sample_rate = frame.audio_in_sample_rate
-
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Convert a frame to its serialized representation.
@@ -118,7 +122,6 @@ class AsteriskWsFrameSerializer(FrameSerializer):
         Returns:
             Serialized frame data as string, bytes, or None if serialization fails.
         """
-        
         if isinstance(frame, AudioRawFrame):
             data = frame.audio
 
@@ -140,22 +143,35 @@ class AsteriskWsFrameSerializer(FrameSerializer):
                 return None
 
             # Asterisk media WebSocket channels can require "START_MEDIA_BUFFERING" to enable audio buffering before sending it to Asterisk core.
-            # When media buffering is enabled, we can send raw binary audio in messages of arbitrary sizes, and Asterisk will frame them properly 
-            # and it will generate silence to the channel if the buffer is empty and there is no audio to send. 
+            # When media buffering is enabled, we can send raw binary audio in messages of arbitrary sizes, and Asterisk will frame them properly
+            # and it will generate silence to the channel if the buffer is empty and there is no audio to send.
             # For our use case, it is crucial, as we can send audio frames of arbitrary sizes from Pipecat to Asterisk without worrying about framing.
-            # Without media buffering enabled, Asterisk expects audio frames of specific sizes and timings, which complicates the implementation a lot, 
+            # Without media buffering enabled, Asterisk expects audio frames of specific sizes and timings, which complicates the implementation a lot,
             # and probably not a good idea in general for TCP-based transports such as websockets.
             # Therefore, we always send the "START_MEDIA_BUFFERING" command on before the first audio frame we send to Asterisk.
             if not self._media_buffering_started:
                 self._media_buffering_started = True
-                return ("START_MEDIA_BUFFERING", serialized_data)
+                command = (
+                    "START_MEDIA_BUFFERING"
+                    if self._asterisk_command_format == "plain-text"
+                    else '{"command": "START_MEDIA_BUFFERING"}'
+                )
+                return (command, serialized_data)
 
             return serialized_data
-        
+
         elif isinstance(frame, InterruptionFrame):
-            return "FLUSH_MEDIA"
+            return (
+                "FLUSH_MEDIA"
+                if self._asterisk_command_format == "plain-text"
+                else '{"command": "FLUSH_MEDIA"}'
+            )
         elif isinstance(frame, (EndFrame, CancelFrame)):
-            return "HANGUP"
+            return (
+                "HANGUP"
+                if self._asterisk_command_format == "plain-text"
+                else '{"command": "HANGUP"}'
+            )
 
         # Return None for unhandled frames
         return None
@@ -169,14 +185,13 @@ class AsteriskWsFrameSerializer(FrameSerializer):
         Returns:
             Reconstructed Frame object, or None if deserialization fails.
         """
-
         if isinstance(data, bytes):
             # If data is bytes, it's audio data
             try:
                 decoder = self._decoders[self._params.encoding.strip().lower()]
             except KeyError as e:
                 raise ValueError(f"Unsupported encoding: {self._params.encoding}") from e
-            
+
             deserialized_data = await decoder(
                 data,
                 self._params.asterisk_sample_rate,
@@ -188,7 +203,7 @@ class AsteriskWsFrameSerializer(FrameSerializer):
                 return None
 
             audio_frame = InputAudioRawFrame(
-                audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
+                audio=deserialized_data, num_channels=1, sample_rate=self._pipeline_sample_rate
             )
 
             return audio_frame
@@ -209,15 +224,18 @@ class AsteriskWsFrameSerializer(FrameSerializer):
                             logger.warning(f"Invalid DTMF digit received: {digit}")
                             return None
                 if message.get("event") == "MEDIA_START":
+                    self._asterisk_command_format = "json"
                     # Media start event, can be ignored or handled as needed
                     # There are a few potentially usefult fields provided by Asterisk in the MEDIA_START event message:
                     #   connection_id: A UUID that will be set on the MEDIA_WEBSOCKET_CONNECTION_ID channel variable.
                     #   channel: The channel name.
                     #   channel_id: The channel's unique id.
                     #   format: The format set on the channel.
-                    #   optimal_frame_size: Sending media to Asterisk of this size, or a multiple of this size, ensures the channel driver can properly retime and reframe the media for the best caller experience.
+                    #   optimal_frame_size: Sending media to Asterisk of this size, or a multiple of this size,
+                    #                       ensures the channel driver can properly retime and reframe the media for the best caller experience.
                     #   ptime: The packetization rate in milliseconds.
-                    #   channel_variables: An object containing the variables currently set on the channel.
+                    #   channel_variables: An object containing the variables currently set on the channel. This can be especially useful for grabbing
+                    #                      custom variables set in the dialplan.
                     logger.info(f"Received MEDIA_START event from Asterisk: {message}")
                     return None
                 else:
