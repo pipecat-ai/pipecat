@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.frames.frames import (
+    AssistantImageRawFrame,
     AudioRawFrame,
     Frame,
     FunctionCallCancelFrame,
@@ -43,7 +44,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -992,11 +993,25 @@ class GoogleLLMService(LLMService):
                                     )
                                 )
                             elif part.inline_data and part.inline_data.data:
+                                # Here we assume that inline_data is an image.
                                 image = Image.open(io.BytesIO(part.inline_data.data))
-                                frame = OutputImageRawFrame(
-                                    image=image.tobytes(), size=image.size, format="RGB"
+                                # NOTE: Gemini 3 Pro Image seems to always give
+                                # JPEGs. It expects us to send back the
+                                # original JPEG data in the context, along with
+                                # the corresponding thought signature. JPEG
+                                # happens to be the format our universal
+                                # context uses for images, so we can just pass
+                                # it through as-is.
+                                await self.push_frame(
+                                    AssistantImageRawFrame(
+                                        image=image.tobytes(),
+                                        size=image.size,
+                                        format="RGB",
+                                        original_jpeg=part.inline_data.data
+                                        if part.inline_data.mime_type == "image/jpeg"
+                                        else None,
+                                    )
                                 )
-                                await self.push_frame(frame)
 
                             # Handle Gemini thought signatures.
                             #
@@ -1022,13 +1037,12 @@ class GoogleLLMService(LLMService):
                                 if part.function_call:
                                     bookmark["function_call"] = function_call_id
                                 elif part.inline_data and part.inline_data.data:
-                                    # NOTE: missing feature: we don't store
-                                    # inline_data messages (like generated
-                                    # images) in context today, so this thought
-                                    # signature is not fully supported yet.
-                                    # (A conversation with
-                                    # "gemini-3-pro-image-preview" doesn't work
-                                    # today due to the missing context.)
+                                    # With Gemini 3 Pro (where sending the
+                                    # thought signature is required for images)
+                                    # this is the JPEG-encoded image data that
+                                    # we sent to be written to the context
+                                    # as-is, so it is usable as a bookmark (it
+                                    # will match the context data).
                                     bookmark["inline_data"] = part.inline_data
                                 elif part.text is not None:
                                     # Account for Gemini 3 Pro trailing

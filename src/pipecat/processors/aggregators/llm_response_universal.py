@@ -24,6 +24,7 @@ from pipecat.audio.interruptions.base_interruption_strategy import BaseInterrupt
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    AssistantImageRawFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -663,6 +664,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_function_call_cancel(frame)
         elif isinstance(frame, UserImageRawFrame):
             await self._handle_user_image_frame(frame)
+        elif isinstance(frame, AssistantImageRawFrame):
+            await self._handle_assistant_image_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_aggregation()
             await self.push_frame(frame, direction)
@@ -826,6 +829,24 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)
+
+    async def _handle_assistant_image_frame(self, frame: AssistantImageRawFrame):
+        logger.debug(f"{self} Appending AssistantImageRawFrame to LLM context (size: {frame.size})")
+
+        if frame.original_jpeg:
+            await self._context.add_image_frame_message(
+                format="JPEG",
+                size=frame.size,  # Technically doesn't matter, since already encoded
+                image=frame.original_jpeg,
+                role="assistant",
+            )
+        else:
+            await self._context.add_image_frame_message(
+                format=frame.format,
+                size=frame.size,
+                image=frame.image,
+                role="assistant",
+            )
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
         self._started += 1

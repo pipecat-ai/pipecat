@@ -556,7 +556,10 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         if (
             hasattr(part, "inline_data")
             and part.inline_data
-            and part.inline_data.data == bookmark_inline_data.data
+            # Comparing length should be good enough for matching inline data,
+            # especially since we're already matching thought signatures in
+            # strict message order. Comparing actual data is expensive.
+            and len(part.inline_data.data) == len(bookmark_inline_data.data)
         ):
             logger.trace(f"Thought signature inline data match")
             return True
