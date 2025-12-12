@@ -151,6 +151,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     for part in obj["parts"]:
                         if "inline_data" in part:
                             part["inline_data"]["data"] = "..."
+                        if "thought_signature" in part:
+                            part["thought_signature"] = "..."
             except Exception as e:
                 logger.debug(f"Error: {e}")
             messages_for_logging.append(obj)

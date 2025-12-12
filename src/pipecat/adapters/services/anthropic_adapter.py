@@ -94,6 +94,8 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     for item in msg["content"]:
                         if item["type"] == "image":
                             item["source"]["data"] = "..."
+                        if item["type"] == "thinking" and item.get("signature"):
+                            item["signature"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
