@@ -868,6 +868,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        await super()._update_settings(settings)
+        # Update voice settings for the next context creation
+        self._voice_settings = self._set_voice_settings()
+
     def _reset_state(self):
         """Reset internal state variables."""
         self._cumulative_time = 0
