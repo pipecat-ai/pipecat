@@ -932,7 +932,7 @@ class GoogleLLMService(LLMService):
         reasoning_tokens = 0
 
         grounding_metadata = None
-        search_result = ""
+        accumulated_text = ""
 
         try:
             # Generate content using either OpenAILLMContext or universal LLMContext
@@ -943,7 +943,6 @@ class GoogleLLMService(LLMService):
             )
 
             function_calls = []
-            previous_part = None
             async for chunk in response:
                 # Stop TTFB metrics after the first chunk
                 await self.stop_ttfb_metrics()
@@ -966,6 +965,7 @@ class GoogleLLMService(LLMService):
                 for candidate in chunk.candidates:
                     if candidate.content and candidate.content.parts:
                         for part in candidate.content.parts:
+                            function_call_id = None
                             if part.text:
                                 if part.thought:
                                     # Gemini emits fully-formed thoughts rather
@@ -975,29 +975,20 @@ class GoogleLLMService(LLMService):
                                     await self.push_frame(LLMThoughtTextFrame(part.text))
                                     await self.push_frame(LLMThoughtEndFrame())
                                 else:
-                                    search_result += part.text
+                                    accumulated_text += part.text
                                     await self.push_frame(LLMTextFrame(part.text))
                             elif part.function_call:
                                 function_call = part.function_call
-                                id = function_call.id or str(uuid.uuid4())
-                                logger.debug(f"Function call: {function_call.name}:{id}")
+                                function_call_id = function_call.id or str(uuid.uuid4())
+                                logger.debug(
+                                    f"Function call: {function_call.name}:{function_call_id}"
+                                )
                                 function_calls.append(
                                     FunctionCallFromLLM(
                                         context=context,
-                                        tool_call_id=id,
+                                        tool_call_id=function_call_id,
                                         function_name=function_call.name,
                                         arguments=function_call.args or {},
-                                        append_extra_context_messages=[
-                                            self.get_llm_adapter().create_llm_specific_message(
-                                                {
-                                                    "type": "fn_thought_signature",
-                                                    "signature": part.thought_signature,
-                                                    "tool_call_id": id,
-                                                }
-                                            )
-                                        ]
-                                        if part.thought_signature
-                                        else None,
                                     )
                                 )
                             elif part.inline_data and part.inline_data.data:
@@ -1007,14 +998,14 @@ class GoogleLLMService(LLMService):
                                 )
                                 await self.push_frame(frame)
 
-                            # With Gemini 3 Pro (and, contrary to Google's
-                            # docs, other models models, too, especially when
-                            # functions are involved in the conversation),
-                            # thought signatures can be associated with any
-                            # kind of Part, not just function calls.
+                            # Handle Gemini thought signatures.
                             #
-                            # They should always be included in the last
-                            # response Part. (*)
+                            # - Gemini 2.5: they appear on function_call Parts,
+                            # and then (surprisingly) on the last(*) Part of
+                            # model responses following the first function_call
+                            # in a conversation.
+                            # - Gemini 3 Pro: they appear on the last(*) Part
+                            # of model responses, regardless of Part type.
                             #
                             # (*) Since we're using the streaming API, though,
                             # where text Parts may be split across multiple
@@ -1022,34 +1013,44 @@ class GoogleLLMService(LLMService):
                             # signatures may actually appear with the first
                             # chunk (Gemini 2.5) or in a trailing empty-text
                             # chunk (Gemini 3 Pro).
-                            if part.thought_signature and not part.function_call:
+                            if part.thought_signature:
                                 # Save a "bookmark" for the signature, so we
-                                # can later stick it in the right place in
-                                # context when sending it back to the LLM to
-                                # continue the conversation.
+                                # can later be sure we've put it in the right
+                                # place in context when sending the context
+                                # back to the LLM to continue the conversation.
                                 bookmark = {}
-                                if part.inline_data and part.inline_data.data:
-                                    bookmark["inline_data"] = {"inline_data": part.inline_data}
+                                if part.function_call:
+                                    bookmark["function_call"] = function_call_id
+                                elif part.inline_data and part.inline_data.data:
+                                    # NOTE: missing feature: we don't store
+                                    # inline_data messages (like generated
+                                    # images) in context today, so this thought
+                                    # signature is not fully supported yet.
+                                    # (A conversation with
+                                    # "gemini-3-pro-image-preview" doesn't work
+                                    # today due to the missing context.)
+                                    bookmark["inline_data"] = part.inline_data
                                 elif part.text is not None:
                                     # Account for Gemini 3 Pro trailing
-                                    # empty-text chunk by using search_result,
-                                    # which accumulates all text so far.
-                                    bookmark["text"] = search_result
-                                await self.push_frame(
-                                    LLMMessagesAppendFrame(
-                                        [
-                                            self.get_llm_adapter().create_llm_specific_message(
-                                                {
-                                                    "type": "non_fn_thought_signature",
-                                                    "signature": part.thought_signature,
-                                                    "bookmark": bookmark,
-                                                }
-                                            )
-                                        ]
+                                    # empty-text chunk by using all the text
+                                    # seen so far in this response's chunks.
+                                    bookmark["text"] = accumulated_text
+                                else:
+                                    logger.warning("Thought signature found on unhandled Part type")
+                                if bookmark:
+                                    await self.push_frame(
+                                        LLMMessagesAppendFrame(
+                                            [
+                                                self.get_llm_adapter().create_llm_specific_message(
+                                                    {
+                                                        "type": "thought_signature",
+                                                        "signature": part.thought_signature,
+                                                        "bookmark": bookmark,
+                                                    }
+                                                )
+                                            ]
+                                        )
                                     )
-                                )
-
-                            previous_part = part
 
                     if (
                         candidate.grounding_metadata
@@ -1098,7 +1099,7 @@ class GoogleLLMService(LLMService):
         finally:
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(
-                    search_result=search_result,
+                    search_result=accumulated_text,
                     origins=grounding_metadata["origins"],
                     rendered_content=grounding_metadata["rendered_content"],
                 )

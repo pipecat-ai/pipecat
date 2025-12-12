@@ -740,10 +740,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             }
         )
 
-        # Append to context any specified extra context messages
-        if frame.append_extra_context_messages:
-            self._context.add_messages(frame.append_extra_context_messages)
-
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):

@@ -1197,16 +1197,12 @@ class FunctionCallFromLLM:
         tool_call_id: A unique identifier for the function call.
         arguments: The arguments to pass to the function.
         context: The LLM context when the function call was made.
-        append_extra_context_messages: Optional extra messages to append to the
-            context after the function call message. Used to add Google
-            function-call-related thought signatures to the context.
     """
 
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any]
     context: Any
-    append_extra_context_messages: Optional[List["LLMContextMessage"]] = None
 
 
 @dataclass
@@ -1745,16 +1741,12 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
         tool_call_id: Unique identifier for this function call.
         arguments: Arguments passed to the function.
         cancel_on_interruption: Whether to cancel this call if interrupted.
-        append_extra_context_messages: Optional extra messages to append to the
-            context after the function call message. Used to add Google
-            function-call-related thought signatures to the context.
     """
 
     function_name: str
     tool_call_id: str
     arguments: Any
     cancel_on_interruption: bool = False
-    append_extra_context_messages: Optional[List["LLMContextMessage"]] = None
 
 
 @dataclass
