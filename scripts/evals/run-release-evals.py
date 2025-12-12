@@ -116,8 +116,6 @@ TESTS_07 = [
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
     # Needs a Krisp license.
     # ("07p-interruptible-krisp.py", EVAL_SIMPLE_MATH),
-    # Needs GPU resources.
-    # ("07u-interruptible-ultravox.py", EVAL_SIMPLE_MATH),
 ]
 
 TESTS_12 = [

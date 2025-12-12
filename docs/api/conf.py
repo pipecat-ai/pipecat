@@ -61,9 +61,6 @@ autodoc_mock_imports = [
     # OpenCV - sometimes has import issues during docs build
     "cv2",
     # Heavy ML packages excluded from ReadTheDocs
-    # ultravox dependencies
-    "vllm",
-    "vllm.engine.arg_utils",
     # local-smart-turn dependencies
     "coremltools",
     "coremltools.models",

@@ -1,0 +1,1 @@
+- Removed the deprecated VLLM-based open source Ultravox STT service.
