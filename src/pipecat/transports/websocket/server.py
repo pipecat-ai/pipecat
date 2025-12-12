@@ -398,7 +398,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
                 return
 
             # Backwards compatible: serializers historically return a single str/bytes.
-            # Some protocols require sending a provisional message[s] before sending media, 
+            # Some protocols require sending a provisional message[s] before sending media,
             # e.g. to enable audio buffering on Asterisk websocket channel a TEXT message "START_MEDIA_BUFFERING" is required
             # before sending BINARY audio, so we also accept a sequence of payloads.
             if isinstance(payload, (list, tuple)):
