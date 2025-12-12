@@ -15,11 +15,20 @@ import asyncio
 import traceback
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Sequence, Tuple, Type
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 
 from loguru import logger
 
-from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     CancelFrame,
@@ -38,6 +47,8 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
+from pipecat.turns.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.turns.base_speaking_strategy import BaseSpeakingStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
@@ -184,7 +195,8 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
-        self._interruption_strategies: List[BaseInterruptionStrategy] = []
+        self._interruption_strategies: List["BaseInterruptionStrategy"] = []
+        self._speaking_strategies: List["BaseSpeakingStrategy"] = []
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -341,13 +353,22 @@ class FrameProcessor(BaseObject):
         return self._report_only_initial_ttfb
 
     @property
-    def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
+    def interruption_strategies(self) -> Sequence["BaseInterruptionStrategy"]:
         """Get the interruption strategies for this processor.
 
         Returns:
             Sequence of interruption strategies.
         """
         return self._interruption_strategies
+
+    @property
+    def speaking_strategies(self) -> Sequence["BaseSpeakingStrategy"]:
+        """Get the interruption strategies for this processor.
+
+        Returns:
+            Sequence of interruption strategies.
+        """
+        return self._speaking_strategies
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -763,6 +784,7 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = frame.enable_metrics
         self._enable_usage_metrics = frame.enable_usage_metrics
         self._interruption_strategies = frame.interruption_strategies
+        self._speaking_strategies = frame.speaking_strategies
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
 
         self.__create_process_task()

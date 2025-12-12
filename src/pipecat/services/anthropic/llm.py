@@ -29,7 +29,6 @@ from pipecat.adapters.services.anthropic_adapter import (
     AnthropicLLMInvocationParams,
 )
 from pipecat.frames.frames import (
-    ErrorFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
