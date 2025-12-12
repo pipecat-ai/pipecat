@@ -453,6 +453,7 @@ class GladiaSTTService(STTService):
                     try:
                         self._websocket = websocket
                         self._connection_active = True
+                        self._reconnection_attempts = 0
                         logger.debug(f"{self} Connected to Gladia WebSocket")
 
                         # Send buffered audio if any
