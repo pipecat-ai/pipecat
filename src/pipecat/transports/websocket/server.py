@@ -401,7 +401,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             # Some protocols require sending a provisional message[s] before sending media,
             # e.g. to enable audio buffering on Asterisk websocket channel a TEXT message "START_MEDIA_BUFFERING" is required
             # before sending BINARY audio, so we also accept a sequence of payloads.
-            if isinstance(payload, (list, tuple)):
+            if isinstance(payload, tuple):
                 for part in payload:
                     if part:
                         await self._websocket.send(part)

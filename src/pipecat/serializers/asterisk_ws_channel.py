@@ -35,7 +35,7 @@ from pipecat.serializers.base_serializer import FrameSerializer
 
 
 class FrameSerializerType(Enum):
-    """There only one serialization format in for Asterisk WebSocket channel.
+    """There only one serialization format in for Asterisk WebSocket channel MIXED.
 
     Parameters:
         MIXED: Binary and text serialization format.
@@ -73,10 +73,19 @@ class AsteriskWsFrameSerializer(FrameSerializer):
         Args:
             params: Configuration parameters.
         """
-        self._params = params or AsteriskWsFrameSerializer.InputParams()
-
+        self._asterisk_command_format = None  # Will be set to "json" or "plain-text" after receiving the first MEDIA_START event
         self._input_resampler = create_stream_resampler()
+        self._media_buffering_started = False
         self._output_resampler = create_stream_resampler()
+        self._params = params or AsteriskWsFrameSerializer.InputParams()
+        self._pipeline_sample_rate = 0  # Will be populated during setup
+
+        self._asterisk_event_handlers = {
+            "MEDIA_START": self._handle_media_start,
+            "MEDIA_XOFF": self._handle_media_xoff,
+            "MEDIA_XON": self._handle_media_xon,
+            "DTMF_END": self._handle_dtmf_end,
+        }
 
         self._encoders = {
             "ulaw": pcm_to_ulaw,
@@ -87,11 +96,78 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             "ulaw": ulaw_to_pcm,
             "alaw": alaw_to_pcm,
         }
-        self._pipeline_sample_rate = 0  # Pipeline input rate populated during setup
-        self._media_buffering_started = False
-        self._asterisk_command_format = (
-            "plain-text"  # or "json", determined upon receiving MEDIA_START event from Asterisk
+
+    # Asterisk event handlers
+    def _handle_media_start(self, message: dict):
+        """MEDIA_START event handler.
+
+        MEDIA_START event is the first event we receive from Asterisk, we use it in deserialize method to identity which message format is used by Asterisk (json of plain-text).
+        But besides that, it can be ignored, no mandatory action required. However, there are a few potentially useful parameters provided by Asterisk in the MEDIA_START event message:
+          connection_id: A UUID that will be set on the MEDIA_WEBSOCKET_CONNECTION_ID channel variable.
+          channel: The channel name on Asterisk.
+          channel_id: The channel's unique id on Asterisk.
+          format: The audio format set on the channel.
+          optimal_frame_size: The optimal frame size from Astersisk's perspective. It's not important as we always use media buffering, Asterisk will reframe and retime the audio as needed.
+          ptime: The packetization rate in milliseconds. It's not important as we always use media buffering, Asterisk will reframe and retime the audio as needed.
+          channel_variables: An object containing the variables currently set on the channel. This can be very handy for moving data from dialplan variables to the pipeline.
+
+        Args:
+            message: The dictionary representing of the MEDIA_START event message from Asterisk.
+        """
+        logger.info(f"Received MEDIA_START event from Asterisk: {message}")
+        return None
+
+    def _handle_media_xoff(self, message: dict):
+        """MEDIA_XOFF event handler.
+
+        The Asterisk's channel driver will send this event to the app when the frame queue length reaches the high water (XOFF) level.
+        The app should then pause sending media. Any media sent after this has a high probability of being dropped.
+        Asterisk buffer is ~1000 frames by 20ms (160 bytes for ulaw/alaw at 8000Hz), so it's ~20 seconds of audio or 160KB,
+        but the messages is sent when the buffer reaches the high water mark of ~900 frames.
+        Currently, we don't have flow control implemented yet, so we just log the event.
+
+        Args:
+            message: The dictionary representing of the MEDIA_XOFF event message from Asterisk.
+        """
+        logger.info(
+            f"Received MEDIA_XOFF event from Asterisk: {message}. Oops, we don't have flow control implemented yet, probably Asterisk will drop the following audio frames."
         )
+        return None
+
+    def _handle_media_xon(self, message: dict):
+        """MEDIA_XON event handler.
+
+        The Asterisk's channel driver will send this event to the app when the frame queue length drops below the low water (XON) level.
+        The app can then resume sending media.
+
+        Args:
+            message: The dictionary representing of the MEDIA_XON event message from Asterisk.
+        """
+        logger.info(
+            f"Received MEDIA_XON event from Asterisk: {message}. Asterisk audio buffer is ready to receive audio again."
+        )
+        return None
+
+    def _handle_dtmf_end(self, message: dict) -> Optional[InputDTMFFrame]:
+        """DTMF_END event handler.
+
+        Handles DTMF_END events from Asterisk and converts them to InputDTMFFrame.
+
+        Args:
+            message: The dictionary representing of the DTMF_END event message from Asterisk.
+
+        Returns:
+            An InputDTMFFrame if a valid DTMF digit is found, otherwise None.
+        """
+        digit = message.get("digit")
+        if digit:
+            try:
+                return InputDTMFFrame(KeypadEntry(digit))
+            except ValueError:
+                # Handle case where string doesn't match any enum value
+                logger.warning(f"Invalid DTMF digit received: {digit}")
+                return None
+        return None
 
     @property
     def type(self) -> FrameSerializerType:
@@ -114,7 +190,7 @@ class AsteriskWsFrameSerializer(FrameSerializer):
         self._pipeline_sample_rate = frame.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
-        """Convert a frame to its serialized representation.
+        """Convert a frame to its serialized representation sutable for Asterisk WebSocket channel.
 
         Args:
             frame: The frame to serialize.
@@ -142,13 +218,14 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             if serialized_data is None or len(serialized_data) == 0:
                 return None
 
-            # Asterisk media WebSocket channels can require "START_MEDIA_BUFFERING" to enable audio buffering before sending it to Asterisk core.
+            # Asterisk media WebSocket channels require "START_MEDIA_BUFFERING" to enable audio buffering before sending it to Asterisk core.
             # When media buffering is enabled, we can send raw binary audio in messages of arbitrary sizes, and Asterisk will frame them properly
             # and it will generate silence to the channel if the buffer is empty and there is no audio to send.
-            # For our use case, it is crucial, as we can send audio frames of arbitrary sizes from Pipecat to Asterisk without worrying about framing.
+            # For our use case, it is crucial, as we can send audio frames of arbitrary sizes from Pipecat to Asterisk without worrying about framing/timing.
             # Without media buffering enabled, Asterisk expects audio frames of specific sizes and timings, which complicates the implementation a lot,
             # and probably not a good idea in general for TCP-based transports such as websockets.
             # Therefore, we always send the "START_MEDIA_BUFFERING" command on before the first audio frame we send to Asterisk.
+
             if not self._media_buffering_started:
                 self._media_buffering_started = True
                 command = (
@@ -209,6 +286,41 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             return audio_frame
 
         elif isinstance(data, str):
+            # Identify the format of signalling event from Asterisk websocket channel message based
+            # on the first message in the channel: "MEDIA_START", it might be json or plain-text
+            if self._asterisk_command_format is None and "MEDIA_START" in data:
+                try:
+                    message = json.loads(data)
+                    if message.get("event") == "MEDIA_START":
+                        self._asterisk_command_format = "json"
+                except json.JSONDecodeError:
+                    self._asterisk_command_format = "plain-text"
+
+            # Parse the message based on the identified format
+            event = {}
+            if self._asterisk_command_format == "plain-text":
+                event_entries = data.split(" ")
+                event["event"] = event_entries[0]
+                for entry in event_entries[1:]:
+                    if ":" in entry:
+                        key, value = entry.split(":", 1)
+                        event[key] = value
+            else:
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        f'"MEDIA_START" was in json-format, but we failed to parse the following Asterisk websocket message as JSON: {data}'
+                    )
+                    return None
+
+            handler = self._asterisk_event_handlers.get(event.get("event"))
+            if handler:
+                return handler(event)
+            else:
+                # we don't have a handler for this type of event
+                return None
+
             # if data is str, is't a signalling event, but there are two underlying formats in Asterisk websocket channel's messages.
             # Formats: f(json) and f(plain-text) are defined on Asterisk websocket channel's dialsting parameters.
             # Try to decode as json if fails, try to decode as plain text event
@@ -223,7 +335,7 @@ class AsteriskWsFrameSerializer(FrameSerializer):
                             # Handle case where string doesn't match any enum value
                             logger.warning(f"Invalid DTMF digit received: {digit}")
                             return None
-                if message.get("event") == "MEDIA_START":
+                elif message.get("event") == "MEDIA_START":
                     self._asterisk_command_format = "json"
                     # Media start event, can be ignored or handled as needed
                     # There are a few potentially usefult fields provided by Asterisk in the MEDIA_START event message:
@@ -237,6 +349,19 @@ class AsteriskWsFrameSerializer(FrameSerializer):
                     #   channel_variables: An object containing the variables currently set on the channel. This can be especially useful for grabbing
                     #                      custom variables set in the dialplan.
                     logger.info(f"Received MEDIA_START event from Asterisk: {message}")
+                    return None
+
+                elif message.get("event") == "MEDIA_XOFF":
+                    # The Asterisk's channel driver will send this event to the app when the frame queue length reaches the high water (XOFF) level.
+                    # The app should then pause sending media. Any media sent after this has a high probability of being dropped.
+                    logger.info(
+                        f"Received MEDIA_XOFF event from Asterisk: {message}. Oops, we don't have flow control implemented yet, probably Asterisk will drop the following audio."
+                    )
+                    return None
+                elif message.get("event") == "MEDIA_XON":
+                    logger.info(
+                        f"Received MEDIA_XON event from Asterisk: {message}. Asterisk audio buffer is ready to receive audio again."
+                    )
                     return None
                 else:
                     return None
