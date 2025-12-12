@@ -242,6 +242,8 @@ class HumeSTSService(LLMService):
                     text=content, user_id="", timestamp=time_now_iso8601(), result=message
                 )
             )
+        elif msg_type == "user_interruption":
+            await self.push_frame(StartInterruptionFrame())
         elif msg_type == "chat_metadata":
             logger.info(f"Hume chat metadata: {message}")
         elif msg_type == "error":

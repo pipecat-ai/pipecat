@@ -305,9 +305,7 @@ class OjinPersonaService(FrameProcessor):
                         initialized_frame,
                         direction=FrameDirection.DOWNSTREAM,
                     )
-                    await self.push_frame(
-                        initialized_frame, direction=FrameDirection.UPSTREAM
-                    )
+                    await self.push_frame(initialized_frame, direction=FrameDirection.UPSTREAM)
             else:
                 # Avoid getting frames that are not suposed to be part of the speak (remainings of old speech)
                 if self._state == PersonaState.IDLE:
@@ -427,27 +425,23 @@ class OjinPersonaService(FrameProcessor):
         silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
 
         start_ts = time.perf_counter()
+        frame_duration = 1.0 / self.fps
+        next_frame_time = start_ts + frame_duration
         self._played_frame_idx = -1
 
         while True:
-            elapsed_time = time.perf_counter() - start_ts
-            next_frame_idx = int(elapsed_time * self.fps)
+            # Sleep for most of the wait time
+            now = time.perf_counter()
+            sleep_time = next_frame_time - now - 0.01
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
 
-            # Wait for next frame time
-            if next_frame_idx <= self._current_frame_idx:
-                next_frame_time = (self._current_frame_idx + 1) / self.fps
-                waiting_time = next_frame_time - elapsed_time - 0.005
-                await asyncio.sleep(max(0, waiting_time))
+            # Spin lock for precise timing until target time
+            while time.perf_counter() < next_frame_time:
+                pass
 
-                # Spin lock for precise timing
-                elapsed_time = time.perf_counter() - start_ts
-                next_frame_idx = self._current_frame_idx + 1
-                calculated_frame_idx = int(elapsed_time * self.fps)
-                while calculated_frame_idx < next_frame_idx:
-                    elapsed_time = time.perf_counter() - start_ts
-                    calculated_frame_idx = int(elapsed_time * self.fps)
-
-            self._current_frame_idx = next_frame_idx
+            self._current_frame_idx += 1
+            next_frame_time += frame_duration
 
             # Determine which frame to play
             image_bytes = None
@@ -486,8 +480,8 @@ class OjinPersonaService(FrameProcessor):
 
             else:
                 if self._num_speech_frames_played > 0:
-                    logger.debug(f"frame missed: {self._current_frame_idx}")
-                    self._current_frame_idx -= 1
+                    logger.debug(f"frame missed: {self._played_frame_idx + 1}")
+                    # self._current_frame_idx -= 1
                     await asyncio.sleep(0.005)
                     continue
 
