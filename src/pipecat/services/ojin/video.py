@@ -300,7 +300,9 @@ class OjinVideoService(FrameProcessor):
                     self._run_loop_task = self.create_task(self._run_loop())
 
                     # Notify that we're ready
-                    initialized_frame = OjinVideoServiceInitializedFrame(session_data=self._session_data)
+                    initialized_frame = OjinVideoServiceInitializedFrame(
+                        session_data=self._session_data
+                    )
                     await self.push_frame(
                         initialized_frame,
                         direction=FrameDirection.DOWNSTREAM,
@@ -474,7 +476,9 @@ class OjinVideoService(FrameProcessor):
                     await self.push_frame(OjinFirstFramePlayedFrame(), FrameDirection.DOWNSTREAM)
 
                 # Check if this was the last speech frame
-                if video_frame.is_final and len(self._speech_frames) == 0:
+                if (
+                    video_frame.is_final or self._state == OjinVideoServiceState.INTERRUPTING
+                ) and len(self._speech_frames) == 0:
                     logger.info("Last speech frame played, transitioning to IDLE")
                     await self.set_state(OjinVideoServiceState.IDLE)
 
