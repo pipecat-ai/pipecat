@@ -18,7 +18,9 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
@@ -96,9 +98,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             params=SpeechmaticsSTTService.InputParams(
                 language=Language.EN,
                 enable_vad=True,
-                enable_diarization=True,
+                preset="adaptive",
                 focus_speakers=["S1"],
-                end_of_utterance_silence_trigger=0.5,
                 speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
                 speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
             ),
