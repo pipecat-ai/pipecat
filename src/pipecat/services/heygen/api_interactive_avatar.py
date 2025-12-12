@@ -16,6 +16,8 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.services.heygen.base_api import BaseAvatarApi, StandardSessionResponse
+
 
 class AvatarQuality(str, Enum):
     """Enum representing different avatar quality levels."""
@@ -136,7 +138,7 @@ class HeygenApiError(Exception):
         self.response_text = response_text
 
 
-class HeyGenApi:
+class HeyGenApi(BaseAvatarApi):
     """HeyGen Streaming API client."""
 
     BASE_URL = "https://api.heygen.com/v1"
@@ -193,8 +195,8 @@ class HeyGenApi:
             logger.error(f"Network error while calling HeyGen API: {str(e)}")
             raise
 
-    async def new_session(self, request_data: NewSessionRequest) -> HeyGenSession:
-        """Create a new streaming session.
+    async def new_session(self, request_data: NewSessionRequest) -> StandardSessionResponse:
+        """Create a new streaming session and start it immediately.
 
         https://docs.heygen.com/reference/new-session
 
@@ -202,7 +204,7 @@ class HeyGenApi:
             request_data: Session configuration parameters.
 
         Returns:
-            Session information, including ID and access token.
+            StandardSessionResponse: Standardized session information with HeyGen raw response.
         """
         params = {
             "quality": request_data.quality,
@@ -225,9 +227,21 @@ class HeyGenApi:
         session_info = await self._request("/streaming.new", params)
         print("heygen session info", session_info)
 
-        return HeyGenSession.model_validate(session_info)
+        heygen_session = HeyGenSession.model_validate(session_info)
 
-    async def start_session(self, session_id: str) -> Any:
+        await self._start_session(heygen_session.session_id)
+
+        # Convert to standardized response
+        return StandardSessionResponse(
+            session_id=heygen_session.session_id,
+            access_token=heygen_session.access_token,
+            livekit_url=heygen_session.url,
+            livekit_agent_token=heygen_session.livekit_agent_token,
+            ws_url=heygen_session.realtime_endpoint,
+            raw_response=heygen_session,
+        )
+
+    async def _start_session(self, session_id: str) -> Any:
         """Start the streaming session.
 
         https://docs.heygen.com/reference/start-session
