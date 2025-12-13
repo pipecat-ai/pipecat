@@ -160,7 +160,7 @@ class SmallWebRTCRequestHandler:
         self,
         request: SmallWebRTCRequest,
         webrtc_connection_callback: Callable[[Any], Awaitable[None]],
-    ) -> None:
+    ) -> Optional[Dict[str, str]]:
         """Handle a SmallWebRTC request and resolve the pending answer.
 
         This method will:
@@ -175,6 +175,10 @@ class SmallWebRTCRequestHandler:
                 SDP, type, and optionally a `pc_id`.
             webrtc_connection_callback (Callable[[Any], Awaitable[None]]): An
                 asynchronous callback function that is invoked with the WebRTC connection.
+
+        Returns:
+            Dictionary containing SDP answer, type, and peer connection ID,
+            or None if no answer is available.
 
         Raises:
             HTTPException: If connection mode constraints are violated
