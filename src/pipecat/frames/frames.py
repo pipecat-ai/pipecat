@@ -947,7 +947,7 @@ class CancelFrame(SystemFrame):
         reason: Optional reason for pushing a cancel frame.
     """
 
-    reason: Optional[str] = None
+    reason: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(reason: {self.reason})"
@@ -1537,7 +1537,7 @@ class EndTaskFrame(TaskFrame):
         reason: Optional reason for pushing an end frame.
     """
 
-    reason: Optional[str] = None
+    reason: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(reason: {self.reason})"
@@ -1555,7 +1555,7 @@ class CancelTaskFrame(TaskFrame):
         reason: Optional reason for pushing a cancel frame.
     """
 
-    reason: Optional[str] = None
+    reason: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(reason: {self.reason})"
@@ -1634,7 +1634,7 @@ class EndFrame(ControlFrame):
         reason: Optional reason for pushing an end frame.
     """
 
-    reason: Optional[str] = None
+    reason: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(reason: {self.reason})"
