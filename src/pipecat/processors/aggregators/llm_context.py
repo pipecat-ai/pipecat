@@ -150,15 +150,17 @@ class LLMContext:
 
         Args:
             role: The role of this message (defaults to "user").
-            format: Image format (e.g., 'RGB', 'RGBA').
+            format: Image format (e.g., 'RGB', 'RGBA', or, if already encoded,
+                the MIME type like 'image/jpeg').
             size: Image dimensions as (width, height) tuple.
             image: Raw image bytes.
             text: Optional text to include with the image.
         """
+        # Format is a mime type: image is already encoded
+        image_already_encoded = format.startswith("image/")
 
         def encode_image():
-            if format == "JPEG":
-                # Already JPEG-encoded
+            if image_already_encoded:
                 bytes = image
             else:
                 # Encode to JPEG
@@ -170,7 +172,7 @@ class LLMContext:
 
         encoded_image = await asyncio.to_thread(encode_image)
 
-        url = f"data:image/jpeg;base64,{encoded_image}"
+        url = f"data:{format if image_already_encoded else 'image/jpeg'};base64,{encoded_image}"
 
         return LLMContext.create_image_url_message(role=role, url=url, text=text)
 
@@ -351,8 +353,8 @@ class LLMContext:
         """Add a message containing an image frame.
 
         Args:
-            format: Image format (e.g., 'RGB', 'RGBA', or, if already
-                JPEG-encoded, "JPEG").
+            format: Image format (e.g., 'RGB', 'RGBA', or, if already encoded,
+                the MIME type like 'image/jpeg').
             size: Image dimensions as (width, height) tuple.
             image: Raw image bytes.
             text: Optional text to include with the image.

@@ -399,11 +399,14 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 if c["type"] == "text":
                     parts.append(Part(text=c["text"]))
                 elif c["type"] == "image_url" and c["image_url"]["url"].startswith("data:"):
+                    # Extract MIME type from data URL (format: "data:image/jpeg;base64,...")
+                    url = c["image_url"]["url"]
+                    mime_type = url.split(":")[1].split(";")[0]
                     parts.append(
                         Part(
                             inline_data=Blob(
-                                mime_type="image/jpeg",
-                                data=base64.b64decode(c["image_url"]["url"].split(",")[1]),
+                                mime_type=mime_type,
+                                data=base64.b64decode(url.split(",")[1]),
                             )
                         )
                     )

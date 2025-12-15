@@ -479,11 +479,16 @@ class GoogleLLMContext(OpenAILLMContext):
                 if c["type"] == "text":
                     parts.append(Part(text=c["text"]))
                 elif c["type"] == "image_url":
+                    # Extract MIME type from data URL (format: "data:image/jpeg;base64,...")
+                    url = c["image_url"]["url"]
+                    mime_type = (
+                        url.split(":")[1].split(";")[0] if url.startswith("data:") else "image/jpeg"
+                    )
                     parts.append(
                         Part(
                             inline_data=Blob(
-                                mime_type="image/jpeg",
-                                data=base64.b64decode(c["image_url"]["url"].split(",")[1]),
+                                mime_type=mime_type,
+                                data=base64.b64decode(url.split(",")[1]),
                             )
                         )
                     )
@@ -995,21 +1000,13 @@ class GoogleLLMService(LLMService):
                             elif part.inline_data and part.inline_data.data:
                                 # Here we assume that inline_data is an image.
                                 image = Image.open(io.BytesIO(part.inline_data.data))
-                                # NOTE: Gemini 3 Pro Image seems to always give
-                                # JPEGs. It expects us to send back the
-                                # original JPEG data in the context, along with
-                                # the corresponding thought signature. JPEG
-                                # happens to be the format our universal
-                                # context uses for images, so we can just pass
-                                # it through as-is.
                                 await self.push_frame(
                                     AssistantImageRawFrame(
                                         image=image.tobytes(),
                                         size=image.size,
                                         format="RGB",
-                                        original_jpeg=part.inline_data.data
-                                        if part.inline_data.mime_type == "image/jpeg"
-                                        else None,
+                                        original_data=part.inline_data.data,
+                                        original_mime_type=part.inline_data.mime_type,
                                     )
                                 )
 
@@ -1037,12 +1034,6 @@ class GoogleLLMService(LLMService):
                                 if part.function_call:
                                     bookmark["function_call"] = function_call_id
                                 elif part.inline_data and part.inline_data.data:
-                                    # With Gemini 3 Pro (where sending the
-                                    # thought signature is required for images)
-                                    # this is the JPEG-encoded image data that
-                                    # we sent to be written to the context
-                                    # as-is, so it is usable as a bookmark (it
-                                    # will match the context data).
                                     bookmark["inline_data"] = part.inline_data
                                 elif part.text is not None:
                                     # Account for Gemini 3 Pro trailing

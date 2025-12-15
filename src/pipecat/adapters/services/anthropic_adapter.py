@@ -283,11 +283,14 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 # handle image_url -> image conversion
                 if item["type"] == "image_url":
                     if item["image_url"]["url"].startswith("data:"):
+                        # Extract MIME type from data URL (format: "data:image/jpeg;base64,...")
+                        url = item["image_url"]["url"]
+                        mime_type = url.split(":")[1].split(";")[0]
                         item["type"] = "image"
                         item["source"] = {
                             "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": item["image_url"]["url"].split(",")[1],
+                            "media_type": mime_type,
+                            "data": url.split(",")[1],
                         }
                         del item["image_url"]
                     elif item["image_url"]["url"].startswith("http"):

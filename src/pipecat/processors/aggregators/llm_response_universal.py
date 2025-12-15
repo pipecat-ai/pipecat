@@ -833,11 +833,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_assistant_image_frame(self, frame: AssistantImageRawFrame):
         logger.debug(f"{self} Appending AssistantImageRawFrame to LLM context (size: {frame.size})")
 
-        if frame.original_jpeg:
+        if frame.original_data and frame.original_mime_type:
             await self._context.add_image_frame_message(
-                format="JPEG",
+                format=frame.original_mime_type,
                 size=frame.size,  # Technically doesn't matter, since already encoded
-                image=frame.original_jpeg,
+                image=frame.original_data,
                 role="assistant",
             )
         else:
