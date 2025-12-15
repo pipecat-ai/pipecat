@@ -231,8 +231,6 @@ class LLMUserAggregator(LLMContextAggregator):
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
 
-        self._user_speaking = False
-
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -390,11 +388,6 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.broadcast_frame(frame_cls, **kwargs)
 
     async def _trigger_user_turn_start(self, strategy: BaseUserTurnStartStrategy):
-        if self._user_speaking:
-            return
-
-        self._user_speaking = True
-
         # Reset all user turn start strategies to start fresh.
         if self.turn_start_strategies:
             for s in self.turn_start_strategies.user:
@@ -407,11 +400,6 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.broadcast_frame(InterruptionFrame)
 
     async def _trigger_bot_turn_start(self, strategy: BaseBotTurnStartStrategy):
-        if not self._user_speaking:
-            return
-
-        self._user_speaking = False
-
         # Reset all bot turn start strategies to start fresh.
         if self.turn_start_strategies:
             for s in self.turn_start_strategies.bot:
