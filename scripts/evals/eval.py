@@ -85,7 +85,7 @@ class EvalRunner:
         self._log_level = log_level
         self._total_success = 0
         self._tests: List[EvalResult] = []
-        self._queue = asyncio.Queue()
+        self._result_future: Optional[asyncio.Future[bool]] = None
 
         # We to save runner files.
         name = name or f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -103,7 +103,8 @@ class EvalRunner:
         await params.llm.push_frame(EndTaskFrame(reason=result), FrameDirection.UPSTREAM)
 
     async def assert_eval(self, result: bool):
-        await self._queue.put(result)
+        if self._result_future:
+            self._result_future.set_result(result)
 
     async def run_eval(
         self,
@@ -122,6 +123,9 @@ class EvalRunner:
         script_path = self._examples_dir / example_file
 
         start_time = time.time()
+
+        # Create a future to store the eval result.
+        self._result_future = asyncio.get_running_loop().create_future()
 
         try:
             tasks = [
@@ -142,7 +146,8 @@ class EvalRunner:
             logger.error(f"ERROR: Unable to run {example_file}: {e}")
 
         try:
-            result = await asyncio.wait_for(self._queue.get(), timeout=EVAL_RESULT_TIMEOUT_SECS)
+            # Wait for the future to resolve.
+            result = await asyncio.wait_for(self._result_future, timeout=EVAL_RESULT_TIMEOUT_SECS)
         except asyncio.TimeoutError:
             logger.error(f"ERROR: Timeout waiting for eval result.")
             result = False
