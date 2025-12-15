@@ -87,10 +87,19 @@ class LLMContext:
         # Convert tools to ToolsSchema if needed.
         # If the tools are already a ToolsSchema, this is a no-op.
         # Otherwise, we wrap them in a shim ToolsSchema.
-        converted_tools = openai_context.tools
-        if isinstance(converted_tools, list):
+        converted_tools: ToolsSchema | NotGiven
+        raw_tools = openai_context.tools
+        if isinstance(raw_tools, list):
             converted_tools = ToolsSchema(
-                standard_tools=[], custom_tools={AdapterType.SHIM: converted_tools}
+                standard_tools=[], custom_tools={AdapterType.SHIM: raw_tools}
+            )
+        elif isinstance(raw_tools, ToolsSchema):
+            converted_tools = raw_tools
+        elif raw_tools is NOT_GIVEN:
+            converted_tools = NOT_GIVEN
+        else:
+            raise TypeError(
+                f"Unsupported tools type when converting OpenAI context: {type(raw_tools)}"
             )
         return LLMContext(
             messages=openai_context.get_messages(),
@@ -179,13 +188,12 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
+        content = [{"type": "text", "text": text}]
 
         async def encode_audio():
             sample_rate = audio_frames[0].sample_rate
             num_channels = audio_frames[0].num_channels
 
-            content = []
-            content.append({"type": "text", "text": text})
             data = b"".join(frame.audio for frame in audio_frames)
 
             with io.BytesIO() as buffer:
@@ -195,7 +203,7 @@ class LLMContext:
                     wf.setframerate(sample_rate)
                     wf.writeframes(data)
 
-            encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
             return encoded_audio
 
         encoded_audio = await asyncio.to_thread(encode_audio)
