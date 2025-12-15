@@ -30,13 +30,13 @@ EVAL_SIMPLE_MATH = EvalConfig(
 )
 
 EVAL_WEATHER = EvalConfig(
-    prompt="What's the weather in San Francisco (in farhenheit or celsius)?",
-    eval="The user says something specific about the current weather in San Francisco, including the degrees (in farhenheit or celsius).",
+    prompt="What's the weather in San Francisco? Temperature should be in any unit, just pick one.",
+    eval="The user talks about the weather in San Francisco, including the degrees.",
 )
 
 EVAL_ONLINE_SEARCH = EvalConfig(
-    prompt="What's the date right now in London?",
-    eval=f"The user says today is {datetime.now(timezone.utc).strftime('%B %d, %Y')} in London.",
+    prompt="What's the current date in UTC?",
+    eval=f"Current date in UTC is {datetime.now(timezone.utc).strftime('%A, %B %d, %Y')}.",
 )
 
 EVAL_SWITCH_LANGUAGE = EvalConfig(
