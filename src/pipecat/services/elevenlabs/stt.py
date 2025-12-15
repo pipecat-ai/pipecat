@@ -710,6 +710,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         message_type = data.get("message_type")
 
+        error_types = ["transcriber_error", "input_error", "commit_throttled", "transcriber_error", "unaccepted_terms_error", "rate_limited", "queue_overflow", "resource_exhausted", "session_time_limit_exceeded", "chunk_size_exceeded", "insufficient_audio_activity"]
+
         if message_type == "session_started":
             logger.debug(f"ElevenLabs session started: {data}")
 
@@ -731,12 +733,14 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             error_msg = data.get("error", "Authentication error")
             logger.error(f"ElevenLabs auth error: {error_msg}")
             await self.push_error(error_msg=f"Auth error: {error_msg}")
-
         elif message_type == "quota_exceeded_error":
             error_msg = data.get("error", "Quota exceeded")
             logger.error(f"ElevenLabs quota exceeded: {error_msg}")
             await self.push_error(error_msg=f"Quota exceeded: {error_msg}")
-
+        elif message_type in error_types:
+            error_msg = data.get("error", message_type)
+            logger.error(f"ElevenLabs socket error: {error_msg}")
+            await self.push_error(error_msg=f"ElevenLabs socket error: {error_msg}")
         else:
             logger.debug(f"Unknown message type: {message_type}")
 
