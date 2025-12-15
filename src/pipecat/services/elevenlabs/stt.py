@@ -690,8 +690,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _process_messages(self):
-        """Process incoming WebSocket messages."""
+    async def _receive_messages(self):
+        """Continuously receive and process WebSocket messages."""
         async for message in self._get_websocket():
             try:
                 data = json.loads(message)
@@ -700,13 +700,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 logger.warning(f"Received non-JSON message: {message}")
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
-
-    async def _receive_messages(self):
-        """Continuously receive and process WebSocket messages."""
-        try:
-            await self._process_messages()
-        except Exception as e:
-            logger.warning(f"{self} WebSocket connection closed: {e}")
             # Connection closed, will reconnect on next audio chunk
 
     async def _process_response(self, data: dict):
