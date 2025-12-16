@@ -149,8 +149,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "content": "Say hello briefly.",
             }
         )
-        # Replace the above with one of these example prompts to demonstrate
-        # thinking and function calling.
+        # Here is an example prompt conducive to demonstrating thinking and
+        # function calling.
         # This example comes from Gemini docs.
         # messages.append(
         #     {

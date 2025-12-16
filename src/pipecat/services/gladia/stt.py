@@ -23,6 +23,7 @@ from pipecat import __version__ as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -30,7 +31,7 @@ from pipecat.frames.frames import (
     TranslationFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
-from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -175,7 +176,7 @@ class _InputParamsDescriptor:
         return GladiaInputParams
 
 
-class GladiaSTTService(WebsocketSTTService):
+class GladiaSTTService(STTService):
     """Speech-to-Text service using Gladia's API.
 
     This service connects to Gladia's WebSocket API for real-time transcription
@@ -201,6 +202,8 @@ class GladiaSTTService(WebsocketSTTService):
         sample_rate: Optional[int] = None,
         model: str = "solaria-1",
         params: Optional[GladiaInputParams] = None,
+        max_reconnection_attempts: int = 5,
+        reconnection_delay: float = 1.0,
         max_buffer_size: int = 1024 * 1024 * 20,  # 20MB default buffer
         **kwargs,
     ):
@@ -219,6 +222,8 @@ class GladiaSTTService(WebsocketSTTService):
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             model: Model to use for transcription. Defaults to "solaria-1".
             params: Additional configuration parameters for Gladia service.
+            max_reconnection_attempts: Maximum number of reconnection attempts. Defaults to 5.
+            reconnection_delay: Initial delay between reconnection attempts in seconds.
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
             **kwargs: Additional arguments passed to the STTService parent class.
         """
@@ -251,13 +256,16 @@ class GladiaSTTService(WebsocketSTTService):
         self._url = url
         self.set_model_name(model)
         self._params = params
+        self._websocket = None
         self._receive_task = None
         self._keepalive_task = None
         self._settings = {}
 
-        # Session management
+        # Reconnection settings
+        self._max_reconnection_attempts = max_reconnection_attempts
+        self._reconnection_delay = reconnection_delay
+        self._reconnection_attempts = 0
         self._session_url = None
-        self._session_id = None
         self._connection_active = False
 
         # Audio buffer management
@@ -266,8 +274,9 @@ class GladiaSTTService(WebsocketSTTService):
         self._max_buffer_size = max_buffer_size
         self._buffer_lock = asyncio.Lock()
 
-    def __str__(self):
-        return f"{self.name} [{self._session_id}]"
+        # Connection management
+        self._connection_task = None
+        self._should_reconnect = True
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate performance metrics.
@@ -346,7 +355,11 @@ class GladiaSTTService(WebsocketSTTService):
             frame: The start frame triggering service startup.
         """
         await super().start(frame)
-        await self._connect()
+        if self._connection_task:
+            return
+
+        self._should_reconnect = True
+        self._connection_task = self.create_task(self._connection_handler())
 
     async def stop(self, frame: EndFrame):
         """Stop the Gladia STT websocket connection.
@@ -355,8 +368,14 @@ class GladiaSTTService(WebsocketSTTService):
             frame: The end frame triggering service shutdown.
         """
         await super().stop(frame)
+        self._should_reconnect = False
         await self._send_stop_recording()
-        await self._disconnect()
+
+        if self._connection_task:
+            await self.cancel_task(self._connection_task)
+            self._connection_task = None
+
+        await self._cleanup_connection()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Gladia STT websocket connection.
@@ -365,7 +384,13 @@ class GladiaSTTService(WebsocketSTTService):
             frame: The cancel frame triggering service cancellation.
         """
         await super().cancel(frame)
-        await self._disconnect()
+        self._should_reconnect = False
+
+        if self._connection_task:
+            await self.cancel_task(self._connection_task)
+            self._connection_task = None
+
+        await self._cleanup_connection()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Run speech-to-text on audio data.
@@ -387,92 +412,87 @@ class GladiaSTTService(WebsocketSTTService):
                 trim_size = len(self._audio_buffer) - self._max_buffer_size
                 self._audio_buffer = self._audio_buffer[trim_size:]
                 self._bytes_sent = max(0, self._bytes_sent - trim_size)
-                logger.warning(f"{self} Audio buffer exceeded max size, trimmed {trim_size} bytes")
+                logger.warning(f"Audio buffer exceeded max size, trimmed {trim_size} bytes")
 
         # Send audio if connected
         if self._connection_active and self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._send_audio(audio)
             except websockets.exceptions.ConnectionClosed as e:
-                logger.warning(f"{self} Websocket closed while sending audio chunk: {e}")
+                logger.warning(f"Websocket closed while sending audio chunk: {e}")
                 self._connection_active = False
 
         yield None
 
-    async def _connect(self):
-        """Connect to the Gladia service.
+    async def _connection_handler(self):
+        """Handle WebSocket connection with automatic reconnection."""
+        while self._should_reconnect:
+            try:
+                # Initialize session if needed
+                if not self._session_url:
+                    settings = self._prepare_settings()
+                    response = await self._setup_gladia(settings)
+                    self._session_url = response["url"]
+                    self._reconnection_attempts = 0
+                    logger.info(f"Session URL : {self._session_url}")
 
-        Initializes the session if needed and establishes websocket connection.
-        """
-        # Initialize session if needed
-        if not self._session_url:
-            settings = self._prepare_settings()
-            response = await self._setup_gladia(settings)
-            self._session_url = response["url"]
-            self._session_id = response["id"]
-            logger.info(f"{self} Session URL: {self._session_url}")
+                # Connect with automatic reconnection
+                async with websocket_connect(self._session_url) as websocket:
+                    try:
+                        self._websocket = websocket
+                        self._connection_active = True
+                        logger.debug(f"{self} Connected to Gladia WebSocket")
 
-        await self._connect_websocket()
+                        # Send buffered audio if any
+                        await self._send_buffered_audio()
 
-        if self._websocket and not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+                        # Start tasks
+                        self._receive_task = self.create_task(self._receive_task_handler())
+                        self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+                        # Wait for tasks to complete
+                        await asyncio.gather(self._receive_task, self._keepalive_task)
 
-    async def _disconnect(self):
-        """Disconnect from the Gladia service.
+                    except websockets.exceptions.ConnectionClosed as e:
+                        logger.warning(f"WebSocket connection closed: {e}")
+                        self._connection_active = False
 
-        Cleans up tasks and closes websocket connection.
-        """
+                        # Clean up tasks
+                        if self._receive_task:
+                            await self.cancel_task(self._receive_task)
+                        if self._keepalive_task:
+                            await self.cancel_task(self._keepalive_task)
+
+                        # Attempt reconnect using helper
+                        if not await self._maybe_reconnect():
+                            break
+
+            except Exception as e:
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+                self._connection_active = False
+
+                if not self._should_reconnect:
+                    break
+
+                # Reset session URL to get a new one
+                self._session_url = None
+                await asyncio.sleep(self._reconnection_delay)
+
+    async def _cleanup_connection(self):
+        """Clean up connection resources."""
         self._connection_active = False
 
         if self._keepalive_task:
             await self.cancel_task(self._keepalive_task)
             self._keepalive_task = None
 
+        if self._websocket:
+            await self._websocket.close()
+            self._websocket = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
-
-        await self._disconnect_websocket()
-
-    async def _connect_websocket(self):
-        """Establish the websocket connection to Gladia."""
-        try:
-            if self._websocket and self._websocket.state is State.OPEN:
-                return
-
-            logger.debug(f"{self}Connecting to Gladia WebSocket")
-
-            self._websocket = await websocket_connect(self._session_url)
-            self._connection_active = True
-
-            # Reset byte tracking for new connection
-            async with self._buffer_lock:
-                self._bytes_sent = 0
-
-            await self._call_event_handler("on_connected")
-
-            # Send buffered audio if any
-            await self._send_buffered_audio()
-
-            logger.debug(f"{self} Connected to Gladia WebSocket")
-        except Exception as e:
-            await self.push_error(error_msg=f"Unable to connect to Gladia: {e}", exception=e)
-            raise
-
-    async def _disconnect_websocket(self):
-        """Close the websocket connection to Gladia."""
-        try:
-            if self._websocket and self._websocket.state is State.OPEN:
-                logger.debug(f"{self} Disconnecting from Gladia WebSocket")
-                await self._websocket.close()
-        except Exception as e:
-            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
-        finally:
-            self._websocket = None
-            await self._call_event_handler("on_disconnected")
 
     async def _setup_gladia(self, settings: Dict[str, Any]):
         async with aiohttp.ClientSession() as session:
@@ -490,10 +510,10 @@ class GladiaSTTService(WebsocketSTTService):
                 else:
                     error_text = await response.text()
                     logger.error(
-                        f"{self} Gladia error: {response.status}: {error_text or response.reason}"
+                        f"Gladia error: {response.status}: {error_text or response.reason}"
                     )
                     raise Exception(
-                        f"{self} Failed to initialize Gladia session: {response.status} - {error_text}"
+                        f"Failed to initialize Gladia session: {response.status} - {error_text}"
                     )
 
     @traced_stt
@@ -521,26 +541,28 @@ class GladiaSTTService(WebsocketSTTService):
         if self._websocket and self._websocket.state is State.OPEN:
             await self._websocket.send(json.dumps({"type": "stop_recording"}))
 
-    def _get_websocket(self):
-        """Get the current WebSocket connection.
+    async def _keepalive_task_handler(self):
+        """Send periodic empty audio chunks to keep the connection alive."""
+        try:
+            KEEPALIVE_SLEEP = 20
+            while self._connection_active:
+                # Send keepalive (Gladia times out after 30 seconds)
+                await asyncio.sleep(KEEPALIVE_SLEEP)
+                if self._websocket and self._websocket.state is State.OPEN:
+                    # Send an empty audio chunk as keepalive
+                    empty_audio = b""
+                    await self._send_audio(empty_audio)
+                else:
+                    logger.debug("Websocket closed, stopping keepalive")
+                    break
+        except websockets.exceptions.ConnectionClosed:
+            logger.debug("Connection closed during keepalive")
+        except Exception as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
-        Returns:
-            The WebSocket connection.
-
-        Raises:
-            Exception: If WebSocket is not connected.
-        """
-        if self._websocket:
-            return self._websocket
-        raise Exception("Websocket not connected")
-
-    async def _receive_messages(self):
-        """Receive and process websocket messages.
-
-        Continuously processes messages from the websocket connection.
-        """
-        async for message in self._get_websocket():
-            try:
+    async def _receive_task_handler(self):
+        try:
+            async for message in self._websocket:
                 content = json.loads(message)
 
                 # Handle audio chunk acknowledgments
@@ -595,24 +617,26 @@ class GladiaSTTService(WebsocketSTTService):
                                 translation, "", time_now_iso8601(), translated_language
                             )
                         )
-            except json.JSONDecodeError:
-                logger.warning(f"{self} Received non-JSON message: {message}")
-
-    async def _keepalive_task_handler(self):
-        """Send periodic empty audio chunks to keep the connection alive."""
-        try:
-            KEEPALIVE_SLEEP = 20
-            while self._connection_active:
-                # Send keepalive (Gladia times out after 30 seconds)
-                await asyncio.sleep(KEEPALIVE_SLEEP)
-                if self._websocket and self._websocket.state is State.OPEN:
-                    # Send an empty audio chunk as keepalive
-                    empty_audio = b""
-                    await self._send_audio(empty_audio)
-                else:
-                    logger.debug(f"{self} Websocket closed, stopping keepalive")
-                    break
         except websockets.exceptions.ConnectionClosed:
-            logger.debug(f"{self} Connection closed during keepalive")
+            # Expected when closing the connection
+            pass
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+
+    async def _maybe_reconnect(self) -> bool:
+        """Handle exponential backoff reconnection logic."""
+        if not self._should_reconnect:
+            return False
+        self._reconnection_attempts += 1
+        if self._reconnection_attempts > self._max_reconnection_attempts:
+            await self.push_error(
+                error_msg=f"Max reconnection attempts ({self._max_reconnection_attempts}) reached",
+            )
+            self._should_reconnect = False
+            return False
+        delay = self._reconnection_delay * (2 ** (self._reconnection_attempts - 1))
+        logger.debug(
+            f"{self} Reconnecting in {delay} seconds (attempt {self._reconnection_attempts}/{self._max_reconnection_attempts})"
+        )
+        await asyncio.sleep(delay)
+        return True

@@ -29,12 +29,13 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
-from pipecat.services.stt_service import WebsocketSTTService
+from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
+    import websockets
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
@@ -43,7 +44,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class AWSTranscribeSTTService(WebsocketSTTService):
+class AWSTranscribeSTTService(STTService):
     """AWS Transcribe Speech-to-Text service using WebSocket streaming.
 
     Provides real-time speech transcription using AWS Transcribe's streaming API.
@@ -98,6 +99,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             "region": region or os.getenv("AWS_REGION", "us-east-1"),
         }
 
+        self._ws_client = None
+        self._connection_lock = asyncio.Lock()
+        self._connecting = False
         self._receive_task = None
 
     def get_service_encoding(self, encoding: str) -> str:
@@ -119,9 +123,29 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         Args:
             frame: Start frame signaling service initialization.
+
+        Raises:
+            RuntimeError: If WebSocket connection cannot be established after retries.
         """
         await super().start(frame)
-        await self._connect()
+        logger.info("Starting AWS Transcribe service...")
+        retry_count = 0
+        max_retries = 3
+
+        while retry_count < max_retries:
+            try:
+                await self._connect()
+                if self._ws_client and self._ws_client.state is State.OPEN:
+                    logger.info("Successfully established WebSocket connection")
+                    return
+                logger.warning("WebSocket connection not established after connect")
+            except Exception as e:
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+                retry_count += 1
+                if retry_count < max_retries:
+                    await asyncio.sleep(1)  # Wait before retrying
+
+        raise RuntimeError("Failed to establish WebSocket connection after multiple attempts")
 
     async def stop(self, frame: EndFrame):
         """Stop the service and disconnect from AWS Transcribe.
@@ -150,127 +174,140 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         Yields:
             ErrorFrame: If processing fails or connection issues occur.
         """
-        if self._websocket and self._websocket.state is State.OPEN:
-            try:
-                # Format the audio data according to AWS event stream format
-                event_message = build_event_message(audio)
+        try:
+            # Ensure WebSocket is connected
+            if not self._ws_client or self._ws_client.state is State.CLOSED:
+                logger.debug("WebSocket not connected, attempting to reconnect...")
+                try:
+                    await self._connect()
+                except Exception as e:
+                    yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                    return
 
-                # Send the formatted event message
-                await self._websocket.send(event_message)
+            # Format the audio data according to AWS event stream format
+            event_message = build_event_message(audio)
+
+            # Send the formatted event message
+            try:
+                await self._ws_client.send(event_message)
                 # Start metrics after first chunk sent
                 await self.start_processing_metrics()
                 await self.start_ttfb_metrics()
+            except websockets.exceptions.ConnectionClosed as e:
+                logger.warning(f"Connection closed while sending: {e}")
+                await self._disconnect()
+                # Don't yield error here - we'll retry on next frame
             except Exception as e:
-                yield ErrorFrame(error=f"Error sending audio: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                await self._disconnect()
 
-        yield None
+        except Exception as e:
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
+            await self._disconnect()
 
     async def _connect(self):
-        """Connect to the AWS Transcribe service.
+        """Connect to AWS Transcribe with connection state management."""
+        if self._ws_client and self._ws_client.state is State.OPEN and self._receive_task:
+            logger.debug(f"{self} Already connected")
+            return
 
-        Establishes websocket connection and starts receive task.
-        """
-        await self._connect_websocket()
+        async with self._connection_lock:
+            if self._connecting:
+                logger.debug(f"{self} Connection already in progress")
+                return
 
-        if self._websocket and not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+            try:
+                self._connecting = True
+                logger.debug(f"{self} Starting connection process...")
+
+                if self._ws_client:
+                    await self._disconnect()
+
+                language_code = self.language_to_service_language(
+                    Language(self._settings["language"])
+                )
+                if not language_code:
+                    raise ValueError(f"Unsupported language: {self._settings['language']}")
+
+                # Generate random websocket key
+                websocket_key = "".join(
+                    random.choices(
+                        string.ascii_uppercase + string.ascii_lowercase + string.digits, k=20
+                    )
+                )
+
+                # Add required headers
+                additional_headers = {
+                    "Origin": "https://localhost",
+                    "Sec-WebSocket-Key": websocket_key,
+                    "Sec-WebSocket-Version": "13",
+                    "Connection": "keep-alive",
+                }
+
+                # Get presigned URL
+                presigned_url = get_presigned_url(
+                    region=self._credentials["region"],
+                    credentials={
+                        "access_key": self._credentials["aws_access_key_id"],
+                        "secret_key": self._credentials["aws_secret_access_key"],
+                        "session_token": self._credentials["aws_session_token"],
+                    },
+                    language_code=language_code,
+                    media_encoding=self.get_service_encoding(
+                        self._settings["media_encoding"]
+                    ),  # Convert to AWS format
+                    sample_rate=self._settings["sample_rate"],
+                    number_of_channels=self._settings["number_of_channels"],
+                    enable_partial_results_stabilization=True,
+                    partial_results_stability="high",
+                    show_speaker_label=self._settings["show_speaker_label"],
+                    enable_channel_identification=self._settings["enable_channel_identification"],
+                )
+
+                logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
+
+                # Connect with the required headers and settings
+                self._ws_client = await websocket_connect(
+                    presigned_url,
+                    additional_headers=additional_headers,
+                    subprotocols=["mqtt"],
+                    ping_interval=None,
+                    ping_timeout=None,
+                    compression=None,
+                )
+
+                logger.debug(f"{self} WebSocket connected, starting receive task...")
+
+                # Start receive task
+                self._receive_task = self.create_task(self._receive_loop())
+
+                logger.info(f"{self} Successfully connected to AWS Transcribe")
+
+                await self._call_event_handler("on_connected")
+            except Exception as e:
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+                await self._disconnect()
+                raise
+
+            finally:
+                self._connecting = False
 
     async def _disconnect(self):
-        """Disconnect from the AWS Transcribe service.
-
-        Sends end-stream message and cleans up.
-        """
+        """Disconnect from AWS Transcribe."""
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        # Send end-stream message before closing
-        if self._websocket and self._websocket.state is State.OPEN:
-            try:
+        try:
+            if self._ws_client and self._ws_client.state is State.OPEN:
+                # Send end-stream message
                 end_stream = {"message-type": "event", "event": "end"}
-                await self._websocket.send(json.dumps(end_stream))
-            except Exception as e:
-                await self.push_error(error_msg=f"Error sending end-stream: {e}", exception=e)
-
-        await self._disconnect_websocket()
-
-    async def _connect_websocket(self):
-        """Establish the websocket connection to AWS Transcribe."""
-        try:
-            if self._websocket and self._websocket.state is State.OPEN:
-                return
-
-            logger.debug("Connecting to AWS Transcribe WebSocket")
-
-            language_code = self.language_to_service_language(Language(self._settings["language"]))
-            if not language_code:
-                raise ValueError(f"Unsupported language: {self._settings['language']}")
-
-            # Generate random websocket key
-            websocket_key = "".join(
-                random.choices(
-                    string.ascii_uppercase + string.ascii_lowercase + string.digits, k=20
-                )
-            )
-
-            # Add required headers
-            additional_headers = {
-                "Origin": "https://localhost",
-                "Sec-WebSocket-Key": websocket_key,
-                "Sec-WebSocket-Version": "13",
-                "Connection": "keep-alive",
-            }
-
-            # Get presigned URL
-            presigned_url = get_presigned_url(
-                region=self._credentials["region"],
-                credentials={
-                    "access_key": self._credentials["aws_access_key_id"],
-                    "secret_key": self._credentials["aws_secret_access_key"],
-                    "session_token": self._credentials["aws_session_token"],
-                },
-                language_code=language_code,
-                media_encoding=self.get_service_encoding(
-                    self._settings["media_encoding"]
-                ),  # Convert to AWS format
-                sample_rate=self._settings["sample_rate"],
-                number_of_channels=self._settings["number_of_channels"],
-                enable_partial_results_stabilization=True,
-                partial_results_stability="high",
-                show_speaker_label=self._settings["show_speaker_label"],
-                enable_channel_identification=self._settings["enable_channel_identification"],
-            )
-
-            logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
-
-            # Connect with the required headers and settings
-            self._websocket = await websocket_connect(
-                presigned_url,
-                additional_headers=additional_headers,
-                subprotocols=["mqtt"],
-                ping_interval=None,
-                ping_timeout=None,
-                compression=None,
-            )
-
-            await self._call_event_handler("on_connected")
-            logger.info(f"{self} Successfully connected to AWS Transcribe")
+                await self._ws_client.send(json.dumps(end_stream))
+            await self._ws_client.close()
         except Exception as e:
-            await self.push_error(
-                error_msg=f"Unable to connect to AWS Transcribe: {e}", exception=e
-            )
-            raise
-
-    async def _disconnect_websocket(self):
-        """Close the websocket connection to AWS Transcribe."""
-        try:
-            if self._websocket:
-                logger.debug("Disconnecting from AWS Transcribe WebSocket")
-                await self._websocket.close()
-        except Exception as e:
-            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._websocket = None
+            self._ws_client = None
             await self._call_event_handler("on_disconnected")
 
     def language_to_service_language(self, language: Language) -> str | None:
@@ -434,26 +471,16 @@ class AWSTranscribeSTTService(WebsocketSTTService):
     ):
         pass
 
-    def _get_websocket(self):
-        """Get the current WebSocket connection.
+    async def _receive_loop(self):
+        """Background task to receive and process messages from AWS Transcribe."""
+        while True:
+            if not self._ws_client or self._ws_client.state is State.CLOSED:
+                logger.warning(f"{self} WebSocket closed in receive loop")
+                break
 
-        Returns:
-            The WebSocket connection.
-
-        Raises:
-            Exception: If WebSocket is not connected.
-        """
-        if self._websocket:
-            return self._websocket
-        raise Exception("Websocket not connected")
-
-    async def _receive_messages(self):
-        """Receive and process websocket messages.
-
-        Continuously processes messages from the websocket connection.
-        """
-        async for response in self._get_websocket():
             try:
+                response = await self._ws_client.recv()
+
                 headers, payload = decode_event(response)
 
                 if headers.get(":message-type") == "event":
@@ -500,5 +527,11 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 else:
                     logger.debug(f"{self} Other message type received: {headers}")
                     logger.debug(f"{self} Payload: {payload}")
+            except websockets.exceptions.ConnectionClosed as e:
+                await self.push_error(
+                    error_msg=f"WebSocket connection closed in receive loop", exception=e
+                )
+                break
             except Exception as e:
-                logger.warning(f"Error processing message: {e}")
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+                break

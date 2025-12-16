@@ -123,9 +123,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "content": "Say hello briefly.",
             }
         )
-        # Replace the above with one of these example prompts to demonstrate
-        # thinking.
-        # These examples come from Gemini and Anthropic docs.
+        # Here are some example prompts conducive to demonstrating
+        # thinking (picked from Google and Anthropic docs).
         # messages.append(
         #     {
         #         "role": "user",

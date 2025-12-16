@@ -23,7 +23,6 @@ from pipecat.audio.dtmf.utils import load_dtmf_audio
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import create_stream_resampler, is_silence
 from pipecat.frames.frames import (
-    AssistantImageRawFrame,
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -336,10 +335,6 @@ class BaseOutputTransport(FrameProcessor):
             await sender.handle_audio_frame(frame)
         elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
             await sender.handle_image_frame(frame)
-            if isinstance(frame, AssistantImageRawFrame):
-                # This will push it further, to be handled by the assistant
-                # aggregator, say
-                await sender.handle_sync_frame(frame)
         elif isinstance(frame, MixerControlFrame):
             await sender.handle_mixer_control_frame(frame)
         elif frame.pts:
@@ -758,7 +753,7 @@ class BaseOutputTransport(FrameProcessor):
                 await self._handle_frame(frame)
 
                 # If we are not able to write to the transport we shouldn't
-                # push downstream.
+                # pushb downstream.
                 push_downstream = True
 
                 # Try to send audio to the transport.

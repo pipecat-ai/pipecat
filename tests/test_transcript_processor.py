@@ -730,6 +730,9 @@ class TestThoughtTranscription(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(second_message, ThoughtTranscriptionMessage)
         self.assertEqual(second_message.content, "Second consideration")
 
+        # Verify timestamps are different
+        self.assertNotEqual(first_message.timestamp, second_message.timestamp)
+
     async def test_empty_thought_handling(self):
         """Test that empty thoughts are not emitted"""
         processor = AssistantTranscriptProcessor(process_thoughts=True)

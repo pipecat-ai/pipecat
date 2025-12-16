@@ -30,13 +30,13 @@ EVAL_SIMPLE_MATH = EvalConfig(
 )
 
 EVAL_WEATHER = EvalConfig(
-    prompt="What's the weather in San Francisco? Temperature should be in any unit, just pick one.",
-    eval="The user talks about the weather in San Francisco, including the degrees.",
+    prompt="What's the weather in San Francisco (in farhenheit or celsius)?",
+    eval="The user says something specific about the current weather in San Francisco, including the degrees (in farhenheit or celsius).",
 )
 
 EVAL_ONLINE_SEARCH = EvalConfig(
-    prompt="What's the current date in UTC?",
-    eval=f"Current date in UTC is {datetime.now(timezone.utc).strftime('%A, %B %d, %Y')}.",
+    prompt="What's the date right now in London?",
+    eval=f"The user says today is {datetime.now(timezone.utc).strftime('%B %d, %Y')} in London.",
 )
 
 EVAL_SWITCH_LANGUAGE = EvalConfig(
@@ -121,6 +121,8 @@ TESTS_07 = [
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
     # Needs a Krisp license.
     # ("07p-interruptible-krisp.py", EVAL_SIMPLE_MATH),
+    # Needs GPU resources.
+    # ("07u-interruptible-ultravox.py", EVAL_SIMPLE_MATH),
 ]
 
 TESTS_12 = [

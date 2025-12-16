@@ -31,13 +31,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
-    EndTaskFrame,
-    LLMRunFrame,
-    OutputImageRawFrame,
-)
+from pipecat.frames.frames import EndTaskFrame, LLMRunFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -56,7 +50,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 PIPELINE_IDLE_TIMEOUT_SECS = 60
 EVAL_TIMEOUT_SECS = 120
-EVAL_RESULT_TIMEOUT_SECS = 10
 
 EvalPrompt = str | Tuple[str, ImageFile]
 
@@ -85,7 +78,7 @@ class EvalRunner:
         self._log_level = log_level
         self._total_success = 0
         self._tests: List[EvalResult] = []
-        self._result_future: Optional[asyncio.Future[bool]] = None
+        self._queue = asyncio.Queue()
 
         # We to save runner files.
         name = name or f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -95,16 +88,16 @@ class EvalRunner:
         os.makedirs(self._logs_dir, exist_ok=True)
         os.makedirs(self._recordings_dir, exist_ok=True)
 
-    async def function_assert_eval(self, params: FunctionCallParams):
+    async def assert_eval(self, params: FunctionCallParams):
         result = params.arguments["result"]
         reasoning = params.arguments["reasoning"]
         logger.debug(f"🧠 EVAL REASONING(result: {result}): {reasoning}")
+        await self._queue.put(result)
         await params.result_callback(None)
-        await params.llm.push_frame(EndTaskFrame(reason=result), FrameDirection.UPSTREAM)
+        await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
-    async def assert_eval(self, result: bool):
-        if self._result_future:
-            self._result_future.set_result(result)
+    async def assert_eval_false(self):
+        await self._queue.put(False)
 
     async def run_eval(
         self,
@@ -123,9 +116,6 @@ class EvalRunner:
         script_path = self._examples_dir / example_file
 
         start_time = time.time()
-
-        # Create a future to store the eval result.
-        self._result_future = asyncio.get_running_loop().create_future()
 
         try:
             tasks = [
@@ -146,10 +136,8 @@ class EvalRunner:
             logger.error(f"ERROR: Unable to run {example_file}: {e}")
 
         try:
-            # Wait for the future to resolve.
-            result = await asyncio.wait_for(self._result_future, timeout=EVAL_RESULT_TIMEOUT_SECS)
+            result = await asyncio.wait_for(self._queue.get(), timeout=1.0)
         except asyncio.TimeoutError:
-            logger.error(f"ERROR: Timeout waiting for eval result.")
             result = False
 
         if result:
@@ -256,7 +244,7 @@ async def run_eval_pipeline(
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    llm.register_function("eval_function", eval_runner.function_assert_eval)
+    llm.register_function("eval_function", eval_runner.assert_eval)
 
     eval_function = FunctionSchema(
         name="eval_function",
@@ -360,14 +348,7 @@ async def run_eval_pipeline(
 
     @task.event_handler("on_idle_timeout")
     async def on_pipeline_idle_timeout(task):
-        await eval_runner.assert_eval(False)
-
-    @task.event_handler("on_pipeline_finished")
-    async def on_pipeline_finished(task, frame):
-        if isinstance(frame, EndFrame):
-            await eval_runner.assert_eval(frame.reason)
-        elif isinstance(frame, CancelFrame):
-            await eval_runner.assert_eval(False)
+        await eval_runner.assert_eval_false()
 
     # TODO(aleix): We should handle SIGINT and SIGTERM so we can cancel both the
     # eval and the example.
