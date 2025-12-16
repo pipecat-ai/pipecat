@@ -911,6 +911,8 @@ class TTSTextTransformer:
         # 12. Clean special characters (final step after all pattern transformations)
         result = self._clean_special_characters(result)
 
+        result = result.replace("Caccia", "Kotchya")
+
          # 13. Apply pronunciation dictionary with phoneme tags
         result = self.apply_pronunciation_dictionary(result)
 
