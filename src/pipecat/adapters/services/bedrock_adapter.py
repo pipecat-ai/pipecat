@@ -257,14 +257,15 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                 # handle image_url -> image conversion
                 if item["type"] == "image_url":
                     if item["image_url"]["url"].startswith("data:"):
+                        # Extract format from data URL (format: "data:image/jpeg;base64,...")
+                        url = item["image_url"]["url"]
+                        mime_type = url.split(":")[1].split(";")[0]
+                        # Bedrock expects format like "jpeg", "png" etc., not "image/jpeg"
+                        image_format = mime_type.split("/")[1]
                         new_item = {
                             "image": {
-                                "format": "jpeg",
-                                "source": {
-                                    "bytes": base64.b64decode(
-                                        item["image_url"]["url"].split(",")[1]
-                                    )
-                                },
+                                "format": image_format,
+                                "source": {"bytes": base64.b64decode(url.split(",")[1])},
                             }
                         }
                         new_content.append(new_item)

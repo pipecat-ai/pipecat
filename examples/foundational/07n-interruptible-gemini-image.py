@@ -89,6 +89,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash-image",
+        # model="gemini-3-pro-image-preview", # A more powerful model, but slower
     )
 
     messages = [
