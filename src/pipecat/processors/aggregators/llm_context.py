@@ -87,19 +87,10 @@ class LLMContext:
         # Convert tools to ToolsSchema if needed.
         # If the tools are already a ToolsSchema, this is a no-op.
         # Otherwise, we wrap them in a shim ToolsSchema.
-        converted_tools: ToolsSchema | NotGiven
-        raw_tools = openai_context.tools
-        if isinstance(raw_tools, list):
+        converted_tools = openai_context.tools
+        if isinstance(converted_tools, list):
             converted_tools = ToolsSchema(
-                standard_tools=[], custom_tools={AdapterType.SHIM: raw_tools}
-            )
-        elif isinstance(raw_tools, ToolsSchema):
-            converted_tools = raw_tools
-        elif raw_tools is NOT_GIVEN:
-            converted_tools = NOT_GIVEN
-        else:
-            raise TypeError(
-                f"Unsupported tools type when converting OpenAI context: {type(raw_tools)}"
+                standard_tools=[], custom_tools={AdapterType.SHIM: converted_tools}
             )
         return LLMContext(
             messages=openai_context.get_messages(),
