@@ -385,7 +385,7 @@ class RimeTTSService(AudioContextWordTTSService):
             if msg["type"] == "chunk":
                 # Process audio chunk
                 await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,

@@ -651,15 +651,21 @@ class WordTTSService(TTSService):
         """
         super().__init__(**kwargs)
         self._initial_word_timestamp = -1
+        self._initial_word_times = []
         self._words_task = None
         self._llm_response_started: bool = False
 
-    def start_word_timestamps(self):
+    async def start_word_timestamps(self):
         """Start tracking word timestamps from the current time."""
         if self._initial_word_timestamp == -1:
             self._initial_word_timestamp = self.get_clock().get_time()
+            # If we cached some initial word times (because we didn't receive
+            # audio), let's add them now.
+            if self._initial_word_times:
+                await self._add_word_timestamps(self._initial_word_times)
+                self._initial_word_times = []
 
-    def reset_word_timestamps(self):
+    async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
         self._initial_word_timestamp = -1
 
@@ -669,8 +675,12 @@ class WordTTSService(TTSService):
         Args:
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
         """
-        for word, timestamp in word_times:
-            await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
+        if self._initial_word_timestamp == -1:
+            # Cache word timestamps and don't add them until we have started
+            # (i.e. we have some audio).
+            self._initial_word_times.extend(word_times)
+        else:
+            await self._add_word_timestamps(word_times)
 
     async def start(self, frame: StartFrame):
         """Start the word TTS service.
@@ -716,7 +726,7 @@ class WordTTSService(TTSService):
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         self._llm_response_started = False
-        self.reset_word_timestamps()
+        await self.reset_word_timestamps()
 
     def _create_words_task(self):
         if not self._words_task:
@@ -728,13 +738,17 @@ class WordTTSService(TTSService):
             await self.cancel_task(self._words_task)
             self._words_task = None
 
+    async def _add_word_timestamps(self, word_times: List[Tuple[str, float]]):
+        for word, timestamp in word_times:
+            await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
+
     async def _words_task_handler(self):
         last_pts = 0
         while True:
             frame = None
             (word, timestamp) = await self._words_queue.get()
             if word == "Reset" and timestamp == 0:
-                self.reset_word_timestamps()
+                await self.reset_word_timestamps()
                 if self._llm_response_started:
                     self._llm_response_started = False
                     frame = LLMFullResponseEndFrame()

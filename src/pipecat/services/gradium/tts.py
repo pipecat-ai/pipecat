@@ -253,7 +253,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
             if msg["type"] == "audio":
                 # Process audio chunk
                 await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["audio"]),
                     sample_rate=self.sample_rate,
