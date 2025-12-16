@@ -63,9 +63,9 @@ class TTSTextTransformer:
     DAY_THE_ATTACHED_PATTERN = r'\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+the([0-9]{1,2})(st|nd|rd|th)?\b'
 
     # Attached date patterns (no space between month and day)
-    DATE_LONG_ATTACHED_PATTERN = r'\b(January|February|March|April|May|June|July|August|September|October|November|December)([0-9]{1,2})\b'
-    DATE_SHORT_ATTACHED_PATTERN = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)(\.?)([0-9]{1,2})\b'
-    
+    DATE_LONG_ATTACHED_PATTERN = r'\b(January|February|March|...|December)([0-9]{1,2})(st|nd|rd|th)?\b'
+    DATE_SHORT_ATTACHED_PATTERN = r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(\.?)([0-9]{1,2})(st|nd|rd|th)?\b'
+
     # Standalone ordinal patterns  
     ORDINAL_TEXT_PATTERN = r'\b([0-9]{1,2})(st|nd|rd|th)\b'
     
