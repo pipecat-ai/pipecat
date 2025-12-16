@@ -187,13 +187,12 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
+        content = [{"type": "text", "text": text}]
 
         async def encode_audio():
             sample_rate = audio_frames[0].sample_rate
             num_channels = audio_frames[0].num_channels
 
-            content = []
-            content.append({"type": "text", "text": text})
             data = b"".join(frame.audio for frame in audio_frames)
 
             with io.BytesIO() as buffer:
@@ -203,7 +202,7 @@ class LLMContext:
                     wf.setframerate(sample_rate)
                     wf.writeframes(data)
 
-            encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
             return encoded_audio
 
         encoded_audio = await asyncio.to_thread(encode_audio)
