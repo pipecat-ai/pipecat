@@ -245,7 +245,7 @@ class HumeTTSService(WordTTSService):
 
         # Start TTS sequence if not already started
         if not self._started:
-            self.start_word_timestamps()
+            await self.start_word_timestamps()
             yield TTSStartedFrame()
             self._started = True
 

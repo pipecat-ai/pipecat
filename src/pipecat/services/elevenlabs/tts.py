@@ -617,7 +617,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
 
                 audio = base64.b64decode(msg["audio"])
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
@@ -1047,7 +1047,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
                 # Start TTS sequence if not already started
                 if not self._started:
-                    self.start_word_timestamps()
+                    await self.start_word_timestamps()
                     yield TTSStartedFrame()
                     self._started = True
 
