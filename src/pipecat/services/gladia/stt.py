@@ -257,6 +257,7 @@ class GladiaSTTService(WebsocketSTTService):
 
         # Session management
         self._session_url = None
+        self._session_id = None
         self._connection_active = False
 
         # Audio buffer management
@@ -264,6 +265,9 @@ class GladiaSTTService(WebsocketSTTService):
         self._bytes_sent = 0
         self._max_buffer_size = max_buffer_size
         self._buffer_lock = asyncio.Lock()
+
+    def __str__(self):
+        return f"{self.name} [{self._session_id}]"
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate performance metrics.
@@ -383,14 +387,14 @@ class GladiaSTTService(WebsocketSTTService):
                 trim_size = len(self._audio_buffer) - self._max_buffer_size
                 self._audio_buffer = self._audio_buffer[trim_size:]
                 self._bytes_sent = max(0, self._bytes_sent - trim_size)
-                logger.warning(f"Audio buffer exceeded max size, trimmed {trim_size} bytes")
+                logger.warning(f"{self} Audio buffer exceeded max size, trimmed {trim_size} bytes")
 
         # Send audio if connected
         if self._connection_active and self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._send_audio(audio)
             except websockets.exceptions.ConnectionClosed as e:
-                logger.warning(f"Websocket closed while sending audio chunk: {e}")
+                logger.warning(f"{self} Websocket closed while sending audio chunk: {e}")
                 self._connection_active = False
 
         yield None
@@ -405,7 +409,8 @@ class GladiaSTTService(WebsocketSTTService):
             settings = self._prepare_settings()
             response = await self._setup_gladia(settings)
             self._session_url = response["url"]
-            logger.info(f"Session URL : {self._session_url}")
+            self._session_id = response["id"]
+            logger.info(f"{self} Session URL: {self._session_url}")
 
         await self._connect_websocket()
 
@@ -438,10 +443,15 @@ class GladiaSTTService(WebsocketSTTService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            logger.debug("Connecting to Gladia WebSocket")
+            logger.debug(f"{self}Connecting to Gladia WebSocket")
 
             self._websocket = await websocket_connect(self._session_url)
             self._connection_active = True
+
+            # Reset byte tracking for new connection
+            async with self._buffer_lock:
+                self._bytes_sent = 0
+
             await self._call_event_handler("on_connected")
 
             # Send buffered audio if any
@@ -456,7 +466,7 @@ class GladiaSTTService(WebsocketSTTService):
         """Close the websocket connection to Gladia."""
         try:
             if self._websocket and self._websocket.state is State.OPEN:
-                logger.debug("Disconnecting from Gladia WebSocket")
+                logger.debug(f"{self} Disconnecting from Gladia WebSocket")
                 await self._websocket.close()
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
@@ -480,10 +490,10 @@ class GladiaSTTService(WebsocketSTTService):
                 else:
                     error_text = await response.text()
                     logger.error(
-                        f"Gladia error: {response.status}: {error_text or response.reason}"
+                        f"{self} Gladia error: {response.status}: {error_text or response.reason}"
                     )
                     raise Exception(
-                        f"Failed to initialize Gladia session: {response.status} - {error_text}"
+                        f"{self} Failed to initialize Gladia session: {response.status} - {error_text}"
                     )
 
     @traced_stt
@@ -586,7 +596,7 @@ class GladiaSTTService(WebsocketSTTService):
                             )
                         )
             except json.JSONDecodeError:
-                logger.warning(f"Received non-JSON message: {message}")
+                logger.warning(f"{self} Received non-JSON message: {message}")
 
     async def _keepalive_task_handler(self):
         """Send periodic empty audio chunks to keep the connection alive."""
@@ -600,9 +610,9 @@ class GladiaSTTService(WebsocketSTTService):
                     empty_audio = b""
                     await self._send_audio(empty_audio)
                 else:
-                    logger.debug("Websocket closed, stopping keepalive")
+                    logger.debug(f"{self} Websocket closed, stopping keepalive")
                     break
         except websockets.exceptions.ConnectionClosed:
-            logger.debug("Connection closed during keepalive")
+            logger.debug(f"{self} Connection closed during keepalive")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
