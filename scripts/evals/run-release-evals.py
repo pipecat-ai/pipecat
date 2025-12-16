@@ -86,6 +86,7 @@ TESTS_07 = [
     ("07-interruptible-cartesia-http.py", EVAL_SIMPLE_MATH),
     ("07a-interruptible-speechmatics.py", EVAL_SIMPLE_MATH),
     ("07aa-interruptible-soniox.py", EVAL_SIMPLE_MATH),
+    ("07ab-interruptible-inworld.py", EVAL_SIMPLE_MATH),
     ("07ab-interruptible-inworld-http.py", EVAL_SIMPLE_MATH),
     ("07ac-interruptible-asyncai.py", EVAL_SIMPLE_MATH),
     ("07ac-interruptible-asyncai-http.py", EVAL_SIMPLE_MATH),

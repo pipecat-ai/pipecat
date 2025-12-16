@@ -6,7 +6,6 @@
 
 import os
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -21,11 +20,11 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.inworld.tts import InworldHttpTTSService
+from pipecat.services.inworld.tts import InworldTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -33,6 +32,7 @@ from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
+
 
 transport_params = {
     "daily": lambda: DailyParams(
@@ -59,77 +59,74 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
-    async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        tts = InworldHttpTTSService(
-            api_key=os.getenv("INWORLD_API_KEY", ""),
-            aiohttp_session=session,
-            voice_id="Ashley",
-            model="inworld-tts-1",
-            # Set to False for non-streaming mode or True for streaming mode.
-            streaming=True,
-        )
+    tts = InworldTTSService(
+        api_key=os.getenv("INWORLD_API_KEY", ""),
+        voice_id="Ashley",
+        model="inworld-tts-1",
+        temperature=1.1,
+    )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
-            },
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful AI demonstrating Inworld AI's TTS. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a friendly and helpful way.",
+        },
+    ]
+
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(context)
+
+    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            rtvi,
+            stt,
+            context_aggregator.user(),
+            llm,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
         ]
+    )
 
-        context = LLMContext(messages)
-        context_aggregator = LLMContextAggregatorPair(context)
-
-        rtvi = RTVIProcessor()
-
-        pipeline = Pipeline(
-            [
-                transport.input(),
-                rtvi,
-                stt,
-                context_aggregator.user(),
-                llm,
-                tts,
-                transport.output(),
-                context_aggregator.assistant(),
-            ]
-        )
-
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        observers=[
+            RTVIObserver(rtvi),
+            DebugLogObserver(
+                frame_types={
+                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
+                }
             ),
-            observers=[
-                RTVIObserver(rtvi),
-                DebugLogObserver(
-                    frame_types={
-                        TTSTextFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
-                    }
-                ),
-            ],
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+        ],
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info("Client connected")
-            # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMRunFrame()])
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info("Client connected")
+        # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info("Client disconnected")
-            await task.cancel()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("Client disconnected")
+        await task.cancel()
 
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-        await runner.run(task)
+    await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):
