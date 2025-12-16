@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     StartFrame,
 )
@@ -61,11 +62,11 @@ class AsteriskWsFrameSerializer(FrameSerializer):
 
         Parameters:
             asterisk_sample_rate: Sample rate used by Asterisk, defaults to 8000 Hz.
-            encoding: Audio encoding (e.g., "ulaw", "alaw").
+            encoding: Audio encoding (e.g., "ulaw", "alaw", "slin").
         """
 
         asterisk_sample_rate: int = 8000
-        encoding: str = "ulaw"
+        encoding: str = None  # None means autodetect from Asterisk MEDIA_START event
 
     def __init__(self, params: Optional[InputParams] = None):
         """Initialize the AsteriskFrameSerializer.
@@ -87,14 +88,20 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             "DTMF_END": self._handle_dtmf_end,
         }
 
+        async def raw_media_passthrough(data, in_sr, out_sr, resampler):
+            """Pass through raw media without any conversion but resample if needed."""
+            return await resampler.resample(data, in_sr, out_sr)
+
         self._encoders = {
             "ulaw": pcm_to_ulaw,
             "alaw": pcm_to_alaw,
+            "slin": raw_media_passthrough,
         }
 
         self._decoders = {
             "ulaw": ulaw_to_pcm,
             "alaw": alaw_to_pcm,
+            "slin": raw_media_passthrough,
         }
 
     # Asterisk event handlers
@@ -102,7 +109,8 @@ class AsteriskWsFrameSerializer(FrameSerializer):
         """MEDIA_START event handler.
 
         MEDIA_START event is the first event we receive from Asterisk, we use it in deserialize method to identity which message format is used by Asterisk (json of plain-text).
-        But besides that, it can be ignored, no mandatory action required. However, there are a few potentially useful parameters provided by Asterisk in the MEDIA_START event message:
+        But besides that, if the encoding is not defined, we attempt to detect it from the MEDIA_START event.
+        There are a few potentially useful parameters provided by Asterisk in the MEDIA_START event message:
           connection_id: A UUID that will be set on the MEDIA_WEBSOCKET_CONNECTION_ID channel variable.
           channel: The channel name on Asterisk.
           channel_id: The channel's unique id on Asterisk.
@@ -110,12 +118,45 @@ class AsteriskWsFrameSerializer(FrameSerializer):
           optimal_frame_size: The optimal frame size from Astersisk's perspective. It's not important as we always use media buffering, Asterisk will reframe and retime the audio as needed.
           ptime: The packetization rate in milliseconds. It's not important as we always use media buffering, Asterisk will reframe and retime the audio as needed.
           channel_variables: An object containing the variables currently set on the channel. This can be very handy for moving data from dialplan variables to the pipeline.
+        So we send MEDIA_START event object to the pipeline as InputTransportMessageFrame.
 
         Args:
             message: The dictionary representing of the MEDIA_START event message from Asterisk.
         """
         logger.info(f"Received MEDIA_START event from Asterisk: {message}")
-        return None
+        logger.info(
+            f"Optional frame size for TTS: {message.get('optimal_frame_size')} bytes, ptime: {message.get('ptime')} ms, you might want to adjust your output trnasport parameters accordingly."
+        )
+        if self._params.encoding is None:
+            logger.info(
+                "Encoding is not provided, detecting Asterisk audio encoding from MEDIA_START event..."
+            )
+
+            format = message.get("format", "").strip().lower()
+            if format.startswith(
+                "slin"
+            ):  # asterisk slin format are like "slin12" or "slin16" .. "slin192"
+                _, bitrate = format.split("slin")
+                format = "slin"
+
+            if format in self._decoders:
+                self._params.encoding = format
+                logger.info(f"Detected Asterisk audio encoding: {self._params.encoding}")
+                if format.startswith("slin"):
+                    if bitrate:
+                        self._params.asterisk_sample_rate = int(bitrate) * 1000
+                    else:
+                        # in asterisk 'slin' assumes 8000 Hz if bitrate if not specified
+                        self._params.asterisk_sample_rate = 8000
+
+                    logger.info(
+                        f"Detected Asterisk audio format 'slin{bitrate}', setting asterisk_sample_rate to {self._params.asterisk_sample_rate}"
+                    )
+            else:
+                raise ValueError(
+                    f"Unsupported or missing audio encoding in Asterisk MEDIA_START event: {format}"
+                )
+        return InputTransportMessageFrame(message=message)
 
     def _handle_media_xoff(self, message: dict):
         """MEDIA_XOFF event handler.
@@ -320,69 +361,3 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             else:
                 # we don't have a handler for this type of event
                 return None
-
-            # if data is str, is't a signalling event, but there are two underlying formats in Asterisk websocket channel's messages.
-            # Formats: f(json) and f(plain-text) are defined on Asterisk websocket channel's dialsting parameters.
-            # Try to decode as json if fails, try to decode as plain text event
-            try:
-                message = json.loads(data)
-                if message.get("event") == "DTMF_END":
-                    digit = message.get("digit")
-                    if digit:
-                        try:
-                            return InputDTMFFrame(KeypadEntry(digit))
-                        except ValueError:
-                            # Handle case where string doesn't match any enum value
-                            logger.warning(f"Invalid DTMF digit received: {digit}")
-                            return None
-                elif message.get("event") == "MEDIA_START":
-                    self._asterisk_command_format = "json"
-                    # Media start event, can be ignored or handled as needed
-                    # There are a few potentially usefult fields provided by Asterisk in the MEDIA_START event message:
-                    #   connection_id: A UUID that will be set on the MEDIA_WEBSOCKET_CONNECTION_ID channel variable.
-                    #   channel: The channel name.
-                    #   channel_id: The channel's unique id.
-                    #   format: The format set on the channel.
-                    #   optimal_frame_size: Sending media to Asterisk of this size, or a multiple of this size,
-                    #                       ensures the channel driver can properly retime and reframe the media for the best caller experience.
-                    #   ptime: The packetization rate in milliseconds.
-                    #   channel_variables: An object containing the variables currently set on the channel. This can be especially useful for grabbing
-                    #                      custom variables set in the dialplan.
-                    logger.info(f"Received MEDIA_START event from Asterisk: {message}")
-                    return None
-
-                elif message.get("event") == "MEDIA_XOFF":
-                    # The Asterisk's channel driver will send this event to the app when the frame queue length reaches the high water (XOFF) level.
-                    # The app should then pause sending media. Any media sent after this has a high probability of being dropped.
-                    logger.info(
-                        f"Received MEDIA_XOFF event from Asterisk: {message}. Oops, we don't have flow control implemented yet, probably Asterisk will drop the following audio."
-                    )
-                    return None
-                elif message.get("event") == "MEDIA_XON":
-                    logger.info(
-                        f"Received MEDIA_XON event from Asterisk: {message}. Asterisk audio buffer is ready to receive audio again."
-                    )
-                    return None
-                else:
-                    return None
-
-            except json.JSONDecodeError:
-                # Not a JSON message, try to decode as plain text event
-                if "DTMF_END" in data:
-                    # Example plain text DTMF_END message: "DTMF_END 5 duration=500"
-                    parts = data.split(" ")
-                    if len(parts) >= 2:
-                        for part in parts[1:]:
-                            if part.startswith("digit:"):
-                                _, digit = part.split("digit:")
-                                digit = digit.strip()
-                                break
-                        try:
-                            return InputDTMFFrame(KeypadEntry(digit))
-                        except ValueError:
-                            # Handle case where string doesn't match any enum value
-                            logger.warning(f"Invalid DTMF digit received from Asterisk: {digit}")
-                            return None
-                    else:
-                        logger.warning(f"Malformed DTMF_END message from Asterisk: {data}")
-                        return None
