@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
-## [0.0.98] - 2025-12-12
-
-### Changed
-
-- Updated `SpeechmaticsSTTService` to use new Python Voice SDK with improved VAD,
-  Smart Turn capabilities, and brings dramatic improvements to latency without
-  any impact on accuracy.
-
 ## [0.0.97] - 2025-12-05
 
 ### Added
