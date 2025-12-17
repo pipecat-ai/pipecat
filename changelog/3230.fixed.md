@@ -1,1 +1,0 @@
-- Fixed the return type for `SmallWebRTCRequestHandler.handle_web_request()` function.
