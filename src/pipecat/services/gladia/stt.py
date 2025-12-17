@@ -19,7 +19,7 @@ from typing import Any, AsyncGenerator, Dict, Literal, Optional
 import aiohttp
 from loguru import logger
 
-from pipecat import __version__ as pipecat_version
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -299,7 +299,7 @@ class GladiaSTTService(WebsocketSTTService):
 
         # Add custom_metadata if provided
         settings["custom_metadata"] = dict(self._params.custom_metadata or {})
-        settings["custom_metadata"]["pipecat"] = pipecat_version
+        settings["custom_metadata"]["pipecat"] = pipecat_version()
 
         # Add endpointing parameters if provided
         if self._params.endpointing is not None:
