@@ -217,6 +217,7 @@ directory = "changelog"
 start_string = "<!-- towncrier release notes start -->\n"
 template = "changelog/_template.md.j2"
 title_format = "## [{version}] - {project_date}"
+issue_format = "[#{issue}](https://github.com/pipecat-ai/pipecat/pull/{issue})"
 underlines = ["", "", ""]
 wrap = true
 
