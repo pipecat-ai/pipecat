@@ -235,7 +235,7 @@ class SmallWebRTCClient:
 
         # We are always resampling it for 16000 if the sample_rate that we receive is bigger than that.
         # otherwise we face issues with Silero VAD
-        self._pipecat_resampler = AudioResampler("s16", "mono", 16000)
+        self._pipecat_resampler = AudioResampler("s16", "mono", 48000)
 
         @self._webrtc_connection.event_handler("connected")
         async def on_connected(connection: SmallWebRTCConnection):
@@ -366,31 +366,16 @@ class SmallWebRTCClient:
                 await asyncio.sleep(0.01)
                 continue
 
-            if frame.sample_rate > self._in_sample_rate:
-                resampled_frames = self._pipecat_resampler.resample(frame)
-                for resampled_frame in resampled_frames:
-                    # 16-bit PCM bytes
-                    pcm_array = resampled_frame.to_ndarray().astype(np.int16)
-                    pcm_bytes = pcm_array.tobytes()
-                    del pcm_array  # free NumPy array immediately
-
-                    audio_frame = InputAudioRawFrame(
-                        audio=pcm_bytes,
-                        sample_rate=resampled_frame.sample_rate,
-                        num_channels=self._audio_in_channels,
-                    )
-                    del pcm_bytes  # reference kept in audio_frame
-
-                    yield audio_frame
-            else:
+            resampled_frames = self._pipecat_resampler.resample(frame)
+            for resampled_frame in resampled_frames:
                 # 16-bit PCM bytes
-                pcm_array = frame.to_ndarray().astype(np.int16)
+                pcm_array = resampled_frame.to_ndarray().astype(np.int16)
                 pcm_bytes = pcm_array.tobytes()
                 del pcm_array  # free NumPy array immediately
 
                 audio_frame = InputAudioRawFrame(
                     audio=pcm_bytes,
-                    sample_rate=frame.sample_rate,
+                    sample_rate=resampled_frame.sample_rate,
                     num_channels=self._audio_in_channels,
                 )
                 del pcm_bytes  # reference kept in audio_frame
