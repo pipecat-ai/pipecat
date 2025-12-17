@@ -877,7 +877,9 @@ class InworldTTSService(AudioContextWordTTSService):
                         logger.debug(f"{self}: Creating new context {self._context_id}")
                         await self.create_audio_context(self._context_id)
                         await self._send_context(self._context_id)
-                        logger.debug(f"{self}: Context created and sent to server: {self._context_id}")
+                        logger.debug(
+                            f"{self}: Context created and sent to server: {self._context_id}"
+                        )
                     elif not self.audio_context_available(self._context_id):
                         # Context exists on server but local tracking was removed
                         logger.debug(f"{self}: Recreating local audio context {self._context_id}")
