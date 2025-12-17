@@ -64,13 +64,13 @@ def EVAL_VISION_IMAGE(*, eval_speaks_first: bool = False):
 
 EVAL_VOICEMAIL = EvalConfig(
     prompt="Please leave a message.",
-    eval="The user leaves a voicemail message.",
+    eval="The user provides a reasonable voicemail message.",
     eval_speaks_first=True,
 )
 
 EVAL_CONVERSATION = EvalConfig(
     prompt="Hello, this is Mark.",
-    eval="The user acknowledges the greeting.",
+    eval="The user provides any reasonable conversational response to the greeting.",
     eval_speaks_first=True,
 )
 

@@ -1423,7 +1423,7 @@ class RTVIProcessor(FrameProcessor):
 
         Args:
             about: Optional information about the bot to include in the ready message.
-                   If left as None, the pipecat library and version will be used.
+                   If left as None, the Pipecat library and version will be used.
         """
         self._bot_ready = True
         # Only call the (deprecated) _update_config method if the we're using a
