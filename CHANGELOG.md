@@ -18,37 +18,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added additional functionality related to "thinking", for Google and
   Anthropic LLMs.
 
-    1. New typed parameters for Google and Anthropic LLMs that control the
-       models' thinking behavior (like how much thinking to do, and whether to
-       output thoughts or thought summaries):
-       - `AnthropicLLMService.ThinkingConfig`
-       - `GoogleLLMService.ThinkingConfig`
-    2. New frames for representing thoughts output by LLMs:
-       - `LLMThoughtStartFrame`
-       - `LLMThoughtTextFrame`
-       - `LLMThoughtEndFrame`
-    3. A generic mechanism for recording LLM thoughts to context, used
-       specifically to support Anthropic, whose thought signatures are expected
-       to appear alongside the text of the thoughts within assistant context
-       messages. See:
-       - `LLMThoughtEndFrame.signature`
-       - `LLMAssistantAggregator` handling of the above field
-       - `AnthropicLLMAdapter` handling of `"thought"` context messages
-    4. Google-specific logic for inserting thought signatures into the context,
-       to help maintain thinking continuity in a chain of LLM calls. See:
-       - `GoogleLLMService` sending `LLMMessagesAppendFrame`s to add
-         LLM-specific
-         `"thought_signature"` messages to context
-       - `GeminiLLMAdapter` handling of `"thought_signature"` messages
-    5. An expansion of `TranscriptProcessor` to process LLM thoughts in
-       addition to user and assistant utterances. See:
-       - `TranscriptProcessor(process_thoughts=True)` (defaults to `False`)
-       - `ThoughtTranscriptionMessage`, which is now also emitted with the
-         `"on_transcript_update"` event
-  (PR [#3175](https://github.com/pipecat-ai/pipecat/pull/3175))
+  1. New typed parameters for Google and Anthropic LLMs that control the
+     models' thinking behavior (like how much thinking to do, and whether to
+     output thoughts or thought summaries):
+     - `AnthropicLLMService.ThinkingConfig`
+     - `GoogleLLMService.ThinkingConfig`
+  2. New frames for representing thoughts output by LLMs:
+     - `LLMThoughtStartFrame`
+     - `LLMThoughtTextFrame`
+     - `LLMThoughtEndFrame`
+  3. A generic mechanism for recording LLM thoughts to context, used
+     specifically to support Anthropic, whose thought signatures are expected
+     to appear alongside the text of the thoughts within assistant context
+     messages. See:
+     - `LLMThoughtEndFrame.signature`
+     - `LLMAssistantAggregator` handling of the above field
+     - `AnthropicLLMAdapter` handling of `"thought"` context messages
+  4. Google-specific logic for inserting thought signatures into the context,
+     to help maintain thinking continuity in a chain of LLM calls. See:
+     - `GoogleLLMService` sending `LLMMessagesAppendFrame`s to add
+       LLM-specific
+       `"thought_signature"` messages to context
+     - `GeminiLLMAdapter` handling of `"thought_signature"` messages
+  5. An expansion of `TranscriptProcessor` to process LLM thoughts in
+     addition to user and assistant utterances. See:
+     - `TranscriptProcessor(process_thoughts=True)` (defaults to `False`)
+     - `ThoughtTranscriptionMessage`, which is now also emitted with the
+       `"on_transcript_update"` event
+       (PR [#3175](https://github.com/pipecat-ai/pipecat/pull/3175))
 
 - Data and control frames can now be marked as non-interruptible by using the
- `UninterruptibleFrame` mixin. Frames marked as `UninterruptibleFrame` will
+  `UninterruptibleFrame` mixin. Frames marked as `UninterruptibleFrame` will
   not be interrupted during processing, and any queued frames of this type will
   be retained in the internal queues. This is useful when you need ordered
   frames (data or control) that should not be discarded or cancelled due to
@@ -67,28 +67,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added to `AWSNovaSonicLLMService` functionality related to the new (and now
   default) Nova 2 Sonic model (`"amazon.nova-2-sonic-v1:0"`):
-    - Added the `endpointing_sensitivity` parameter to control how quickly the
-      model decides the user has stopped speaking.
-    - Made the assistant-response-trigger hack a no-op. It's only needed for
-      the older Nova Sonic model.
-  (PR [#3212](https://github.com/pipecat-ai/pipecat/pull/3212))
+
+  - Added the `endpointing_sensitivity` parameter to control how quickly the
+    model decides the user has stopped speaking.
+  - Made the assistant-response-trigger hack a no-op. It's only needed for
+    the older Nova Sonic model.
+    (PR [#3212](https://github.com/pipecat-ai/pipecat/pull/3212))
 
 - [Ultravox Realtime](https://docs.ultravox.ai) is now a supported
   speech-to-speech service.
-    - Added `UltravoxRealtimeLLMService` for the integration.
-    - Added `49-ultravox-realtime.py` example (with tool calling).
-  (PR [#3227](https://github.com/pipecat-ai/pipecat/pull/3227))
+
+  - Added `UltravoxRealtimeLLMService` for the integration.
+  - Added `49-ultravox-realtime.py` example (with tool calling).
+    (PR [#3227](https://github.com/pipecat-ai/pipecat/pull/3227))
 
 - Added Daily PSTN dial-in support to the development runner with `--dialin`
   flag. This includes:
 
-    - `/daily-dialin-webhook` endpoint that handles incoming Daily PSTN webhooks
-    - Automatic Daily room creation with SIP configuration
-    - `DialinSettings` and `DailyDialinRequest` types in `pipecat.runner.types`
-      for type-safe dial-in data
-    - The runner now mimics Pipecat Cloud's dial-in webhook handling for local
-      development
-  (PR [#3235](https://github.com/pipecat-ai/pipecat/pull/3235))
+  - `/daily-dialin-webhook` endpoint that handles incoming Daily PSTN webhooks
+  - Automatic Daily room creation with SIP configuration
+  - `DialinSettings` and `DailyDialinRequest` types in `pipecat.runner.types`
+    for type-safe dial-in data
+  - The runner now mimics Pipecat Cloud's dial-in webhook handling for local
+    development
+    (PR [#3235](https://github.com/pipecat-ai/pipecat/pull/3235))
 
 - Add Gladia session id to logs for `GladiaSTTService`.
   (PR [#3236](https://github.com/pipecat-ai/pipecat/pull/3236))
@@ -128,13 +130,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   APIs (Interactive Avatar and Live Avatar).
   Using them is as simple as specifying the `service_type` when creating the
   `HeyGenVideoService` and the `HeyGenTransport`:
-    ```python
-    heyGen = HeyGenVideoService(
-        api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
-        service_type=ServiceType.LIVE_AVATAR,
-        session=session,
-    )
-    ```
+
+  ```python
+  heyGen = HeyGenVideoService(
+      api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
+      service_type=ServiceType.LIVE_AVATAR,
+      session=session,
+  )
+  ```
+
   (PR [#3210](https://github.com/pipecat-ai/pipecat/pull/3210))
 
 - Made `"amazon.nova-2-sonic-v1:0"` the new default model for
@@ -148,9 +152,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (PR [#3214](https://github.com/pipecat-ai/pipecat/pull/3214))
 
 - Updated default models for:
-    - `GeminiLiveLLMService` to `gemini-2.5-flash-native-audio-preview-12-2025`.
-    - `GeminiLiveVertexLLMService` to `gemini-live-2.5-flash-native-audio`.
-  (PR [#3228](https://github.com/pipecat-ai/pipecat/pull/3228))
+
+  - `GeminiLiveLLMService` to `gemini-2.5-flash-native-audio-preview-12-2025`.
+  - `GeminiLiveVertexLLMService` to `gemini-live-2.5-flash-native-audio`.
+    (PR [#3228](https://github.com/pipecat-ai/pipecat/pull/3228))
 
 - Changed the `reason` field in `EndFrame`, `CancelFrame`, `EndTaskFrame`, and
   `CancelTaskFrame` from `str` to `Any` to indicate that it can hold values
@@ -160,33 +165,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated websocket STT services to use the `WebsocketSTTService` base class.
   This base class manages the websocket connection and handles reconnects.
   Updated services:
-    - `AssemblyAISTTService`
-    - `AWSTranscribeSTTService`
-    - `GladiaSTTService`
-    - `SonioxSTTService`
-  (PR [#3236](https://github.com/pipecat-ai/pipecat/pull/3236))
+
+  - `AssemblyAISTTService`
+  - `AWSTranscribeSTTService`
+  - `GladiaSTTService`
+  - `SonioxSTTService`
+    (PR [#3236](https://github.com/pipecat-ai/pipecat/pull/3236))
 
 - Changed Inworld's TTS service implementations:
-    - Previously, the HTTP implementation was named `InworldTTSService`. That
-      has been moved to `InworldHttpTTSService`. This service now supports
-      word-timestamp alignment data in both streaming and non-streaming modes.
-    - Updated the `InworldTTSService` class to use Inworld's Websocket API.
-      This class now has support for word-timestamp alignment data and tracks
-      contexts for each user turn.
-  (PR [#3239](https://github.com/pipecat-ai/pipecat/pull/3239))
+
+  - Previously, the HTTP implementation was named `InworldTTSService`. That
+    has been moved to `InworldHttpTTSService`. This service now supports
+    word-timestamp alignment data in both streaming and non-streaming modes.
+  - Updated the `InworldTTSService` class to use Inworld's Websocket API.
+    This class now has support for word-timestamp alignment data and tracks
+    contexts for each user turn.
+    (PR [#3239](https://github.com/pipecat-ai/pipecat/pull/3239))
 
 - ⚠️ Breaking change: `WordTTSService.start_word_timestamps()` and
-    `WordTTSService.reset_word_timestamps()` are now async.
+  `WordTTSService.reset_word_timestamps()` are now async.
   (PR [#3240](https://github.com/pipecat-ai/pipecat/pull/3240))
 
 - Updated the current RTVI version to 1.1.0 to reflect recent additions and
   deprecations.
-    - New RTVI Messages: `send-text` and `bot-output`
-    - Deprecated Messages: `append-to-context` and `bot-transcription`
-  (PR [#3248](https://github.com/pipecat-ai/pipecat/pull/3248))
+
+  - New RTVI Messages: `send-text` and `bot-output`
+  - Deprecated Messages: `append-to-context` and `bot-transcription`
+    (PR [#3248](https://github.com/pipecat-ai/pipecat/pull/3248))
 
 - `MoondreamService` now pushes `VisionFullResponseStartFrame`,
-   `VisionFullResponseEndFrame` and `VisionTextFrame`.
+  `VisionFullResponseEndFrame` and `VisionTextFrame`.
   (PR [#3252](https://github.com/pipecat-ai/pipecat/pull/3252))
 
 ### Deprecated
