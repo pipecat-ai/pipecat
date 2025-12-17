@@ -13,9 +13,14 @@ Dograh API endpoint, abstracting away provider-specific implementations.
 from pipecat.services.dograh.llm import DograhLLMService
 from pipecat.services.dograh.stt import DograhSTTService
 from pipecat.services.dograh.tts import DograhTTSService
+from pipecat.services.dograh.tts_cache import CachedTTSData, TTSCacheManager
+from pipecat.services.dograh.tts_cache_warmer import ElevenLabsCacheWarmer
 
 __all__ = [
     "DograhLLMService",
     "DograhSTTService",
     "DograhTTSService",
+    "ElevenLabsCacheWarmer",
+    "TTSCacheManager",
+    "CachedTTSData",
 ]
