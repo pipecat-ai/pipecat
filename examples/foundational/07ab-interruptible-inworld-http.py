@@ -67,8 +67,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             aiohttp_session=session,
             voice_id="Ashley",
             model="inworld-tts-1",
-            # Set to False for non-streaming mode or True for streaming mode.
             streaming=True,
+            params=InworldHttpTTSService.InputParams(enable_word_timestamps=True)
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))

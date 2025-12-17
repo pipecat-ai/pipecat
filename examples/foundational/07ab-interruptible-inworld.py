@@ -63,9 +63,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = InworldTTSService(
         api_key=os.getenv("INWORLD_API_KEY", ""),
-        voice_id="Ashley",
-        model="inworld-tts-1",
-        temperature=1.1,
+        voice_id="Edward",
+        model="inworld-tts-1.5-max",
+        params=InworldTTSService.InputParams(buffer_char_threshold=100),
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
