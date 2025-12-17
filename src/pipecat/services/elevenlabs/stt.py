@@ -710,8 +710,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         message_type = data.get("message_type")
 
-        error_types = ["transcriber_error", "input_error", "commit_throttled", "transcriber_error", "unaccepted_terms_error", "rate_limited", "queue_overflow", "resource_exhausted", "session_time_limit_exceeded", "chunk_size_exceeded", "insufficient_audio_activity"]
-
         if message_type == "session_started":
             logger.debug(f"ElevenLabs session started: {data}")
 
@@ -724,23 +722,24 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         elif message_type == "committed_transcript_with_timestamps":
             await self._on_committed_transcript_with_timestamps(data)
 
-        elif message_type == "error":
-            error_msg = data.get("error", "Unknown error")
-            logger.error(f"ElevenLabs error: {error_msg}")
+        elif message_type in (
+            "error",
+            "auth_error",
+            "quota_exceeded_error",
+            "transcriber_error",
+            "input_error",
+            "commit_throttled",
+            "transcriber_error",
+            "unaccepted_terms_error",
+            "rate_limited",
+            "queue_overflow",
+            "resource_exhausted",
+            "session_time_limit_exceeded",
+            "chunk_size_exceeded",
+            "insufficient_audio_activity",
+        ):
+            error_msg = data.get("error", f"Unknown error - {message_type}")
             await self.push_error(error_msg=f"Error: {error_msg}")
-
-        elif message_type == "auth_error":
-            error_msg = data.get("error", "Authentication error")
-            logger.error(f"ElevenLabs auth error: {error_msg}")
-            await self.push_error(error_msg=f"Auth error: {error_msg}")
-        elif message_type == "quota_exceeded_error":
-            error_msg = data.get("error", "Quota exceeded")
-            logger.error(f"ElevenLabs quota exceeded: {error_msg}")
-            await self.push_error(error_msg=f"Quota exceeded: {error_msg}")
-        elif message_type in error_types:
-            error_msg = data.get("error", message_type)
-            logger.error(f"ElevenLabs socket error: {error_msg}")
-            await self.push_error(error_msg=f"ElevenLabs socket error: {error_msg}")
         else:
             logger.debug(f"Unknown message type: {message_type}")
 
