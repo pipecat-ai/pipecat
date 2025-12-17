@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 
 from loguru import logger
 
-from pipecat import __version__ as pipecat_version
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -254,7 +254,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             ws_url = self._build_ws_url()
             headers = {
                 "Authorization": self._api_key,
-                "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version})",
+                "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version()})",
             }
             self._websocket = await websocket_connect(
                 ws_url,
