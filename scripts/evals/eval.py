@@ -358,10 +358,6 @@ async def run_eval_pipeline(
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    @task.event_handler("on_idle_timeout")
-    async def on_pipeline_idle_timeout(task):
-        await eval_runner.assert_eval(False)
-
     @task.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(task, frame):
         if isinstance(frame, EndFrame):
