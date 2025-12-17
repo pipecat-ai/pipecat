@@ -30,7 +30,7 @@ EVAL_SIMPLE_MATH = EvalConfig(
 )
 
 EVAL_WEATHER = EvalConfig(
-    prompt="What's the weather in San Francisco? Temperature should be in any unit, just pick one.",
+    prompt="What's the weather in San Francisco? Temperature should be in fahrenheits.",
     eval="The user talks about the weather in San Francisco, including the degrees.",
 )
 
