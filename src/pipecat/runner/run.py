@@ -171,6 +171,7 @@ def _create_server_app(
     esp32_mode: bool = False,
     whatsapp_enabled: bool = False,
     folder: Optional[str] = None,
+    dialin_enabled: bool = False,
 ):
     """Create FastAPI app with transport-specific routes."""
     app = FastAPI()
@@ -189,7 +190,7 @@ def _create_server_app(
         if whatsapp_enabled:
             _setup_whatsapp_routes(app)
     elif transport_type == "daily":
-        _setup_daily_routes(app)
+        _setup_daily_routes(app, dialin_enabled=dialin_enabled)
     elif transport_type in TELEPHONY_TRANSPORTS:
         _setup_telephony_routes(app, transport_type=transport_type, proxy=proxy)
     else:
@@ -533,8 +534,13 @@ def _setup_whatsapp_routes(app: FastAPI):
     _add_lifespan_to_app(app, whatsapp_lifespan)
 
 
-def _setup_daily_routes(app: FastAPI):
-    """Set up Daily-specific routes."""
+def _setup_daily_routes(app: FastAPI, dialin_enabled: bool = False):
+    """Set up Daily-specific routes.
+
+    Args:
+        app: FastAPI application instance
+        dialin_enabled: If True, adds /daily-dialin-webhook endpoint for PSTN dial-in handling
+    """
 
     @app.get("/")
     async def create_room_and_start_agent():
@@ -638,6 +644,116 @@ def _setup_daily_routes(app: FastAPI):
         asyncio.create_task(bot_module.bot(runner_args))
 
         return result
+
+    if dialin_enabled:
+
+        @app.post("/daily-dialin-webhook")
+        async def handle_dialin_webhook(request: Request):
+            """Handle incoming Daily PSTN dial-in webhook.
+
+            This endpoint mimics Pipecat Cloud's dial-in webhook handler.
+            It receives Daily webhook data, creates a SIP-enabled room, and starts the bot.
+
+            Expected webhook payload::
+
+                {
+                    "From": "+15551234567",
+                    "To": "+15559876543",
+                    "callId": "uuid-call-id",
+                    "callDomain": "uuid-call-domain",
+                    "sipHeaders": {...}  // optional
+                }
+
+            Returns::
+
+                {
+                    "dailyRoom": "https://...",
+                    "dailyToken": "...",
+                    "sessionId": "uuid"
+                }
+            """
+            logger.debug("Received Daily dial-in webhook")
+
+            try:
+                data = await request.json()
+                logger.debug(f"Webhook data: {data}")
+            except Exception as e:
+                logger.error(f"Failed to parse webhook data: {e}")
+                raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+            # Handle webhook verification test (sent by Daily when configuring webhook)
+            if data.get("test") or data.get("Test"):
+                logger.debug("Webhook verification test received")
+                return {"status": "OK"}
+
+            # Validate required fields
+            if not all(key in data for key in ["From", "To", "callId", "callDomain"]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required fields: From, To, callId, callDomain",
+                )
+
+            import aiohttp
+
+            from pipecat.runner.daily import configure
+            from pipecat.runner.types import DailyDialinRequest, DialinSettings
+
+            # Create Daily room with SIP capabilities
+            async with aiohttp.ClientSession() as session:
+                try:
+                    room_config = await configure(session, sip_caller_phone=data.get("From"))
+                except Exception as e:
+                    logger.error(f"Failed to create Daily room: {e}")
+                    raise HTTPException(
+                        status_code=500, detail=f"Failed to create Daily room: {str(e)}"
+                    )
+
+            # Get Daily API URL from environment, fallback to production
+            daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
+
+            # Get Daily API key from environment
+            daily_api_key = os.getenv("DAILY_API_KEY")
+            if not daily_api_key:
+                logger.error("DAILY_API_KEY not found in environment")
+                raise HTTPException(
+                    status_code=500, detail="DAILY_API_KEY not configured on server"
+                )
+
+            # Prepare dial-in settings matching Pipecat Cloud structure
+            dialin_settings = DialinSettings(
+                call_id=data.get("callId"),
+                call_domain=data.get("callDomain"),
+                To=data.get("To"),
+                From=data.get("From"),
+                sip_headers=data.get("sipHeaders"),
+            )
+
+            # Create request body matching Pipecat Cloud payload
+            request_body = DailyDialinRequest(
+                dialin_settings=dialin_settings,
+                daily_api_key=daily_api_key,
+                daily_api_url=daily_api_url,
+            )
+
+            # Start bot with dial-in context
+            bot_module = _get_bot_module()
+            runner_args = DailyRunnerArguments(
+                room_url=room_config.room_url,
+                token=room_config.token,
+                body=request_body.model_dump(),
+            )
+
+            asyncio.create_task(bot_module.bot(runner_args))
+
+            # Generate session ID
+            session_id = str(uuid.uuid4())
+
+            # Return response matching Pipecat Cloud format
+            return {
+                "dailyRoom": room_config.room_url,
+                "dailyToken": room_config.token,
+                "sessionId": session_id,
+            }
 
 
 def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
@@ -813,6 +929,12 @@ def main():
         default=False,
         help="Ensure requried WhatsApp environment variables are present",
     )
+    parser.add_argument(
+        "--dialin",
+        action="store_true",
+        default=False,
+        help="Enable Daily PSTN dial-in webhook handling (requires Daily transport)",
+    )
 
     args = parser.parse_args()
 
@@ -830,6 +952,11 @@ def main():
     # Validate ESP32 requirements
     if args.esp32 and args.host == "localhost":
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
+        return
+
+    # Validate dial-in requirements
+    if args.dialin and args.transport != "daily":
+        logger.error("--dialin flag only works with Daily transport (-t daily)")
         return
 
     # Log level
@@ -860,7 +987,13 @@ def main():
     elif args.transport == "daily":
         print()
         print(f"🚀 Bot ready!")
-        print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
+        if args.dialin:
+            print(
+                f"   → Daily dial-in webhook: http://{args.host}:{args.port}/daily-dialin-webhook"
+            )
+            print(f"   → Configure this URL in your Daily phone number settings")
+        else:
+            print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
         print()
 
     RUNNER_DOWNLOADS_FOLDER = args.folder
@@ -875,6 +1008,7 @@ def main():
         esp32_mode=args.esp32,
         whatsapp_enabled=args.whatsapp,
         folder=args.folder,
+        dialin_enabled=args.dialin,
     )
 
     # Run the server
