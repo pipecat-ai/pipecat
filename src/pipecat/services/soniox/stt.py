@@ -177,6 +177,7 @@ class SonioxSTTService(WebsocketSTTService):
 
         self._receive_task = None
         self._keepalive_task = None
+        self._ttfb_reported = False
 
     async def start(self, frame: StartFrame):
         """Start the Soniox STT websocket connection.
@@ -222,7 +223,9 @@ class SonioxSTTService(WebsocketSTTService):
         Yields:
             Frame: None (transcription results come via WebSocket callbacks).
         """
+        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
+        self._ttfb_reported = False
         if self._websocket and self._websocket.state is State.OPEN:
             await self._websocket.send(audio)
         await self.stop_processing_metrics()
@@ -392,6 +395,10 @@ class SonioxSTTService(WebsocketSTTService):
                     else:
                         # Got at least one token, so we can reset the auto finalize delay.
                         self._last_tokens_received = time.time()
+                        # Report TTFB on first token received
+                        if not self._ttfb_reported:
+                            await self.stop_ttfb_metrics()
+                            self._ttfb_reported = True
 
                 # We will only send the final tokens after we get the "endpoint" event.
                 non_final_transcription = []
