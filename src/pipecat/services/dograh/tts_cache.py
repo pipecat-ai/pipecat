@@ -146,9 +146,6 @@ class TTSCacheManager:
         }
 
         key_str = json.dumps(key_data, sort_keys=True)
-
-        logger.debug(f"key_str: {key_str}")
-
         key_hash = hashlib.sha256(key_str.encode()).hexdigest()
 
         return f"{self.CACHE_PREFIX}{key_hash}"

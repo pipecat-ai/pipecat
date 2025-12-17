@@ -210,8 +210,6 @@ class ElevenLabsCacheWarmer:
                 settings=self._get_cache_relevant_settings(),
             )
 
-            logger.debug(f"cache_key for text: {sentence} cache_key: {cache_key}")
-
             # Check if already cached
             if skip_existing and await self._cache_manager.exists(cache_key):
                 logger.info(f"[{i + 1}/{total}] Already cached: {sentence[:50]}...")
