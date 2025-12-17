@@ -85,6 +85,7 @@ class SonioxInputParams(BaseModel):
         audio_format: Audio format to use for transcription.
         num_channels: Number of channels to use for transcription.
         language_hints: List of language hints to use for transcription.
+        language_hints_strict: If true, strictly enforce language hints (only transcribe in provided languages).
         context: Customization for transcription. String for models with context_version 1 and ContextObject for models with context_version 2.
         enable_speaker_diarization: Whether to enable speaker diarization. Tokens are annotated with speaker IDs.
         enable_language_identification: Whether to enable language identification. Tokens are annotated with language IDs.
@@ -97,6 +98,7 @@ class SonioxInputParams(BaseModel):
     num_channels: Optional[int] = 1
 
     language_hints: Optional[List[Language]] = None
+    language_hints_strict: Optional[bool] = None
     context: Optional[SonioxContextObject | str] = None
 
     enable_speaker_diarization: Optional[bool] = False
@@ -316,6 +318,7 @@ class SonioxSTTService(WebsocketSTTService):
                 "enable_endpoint_detection": enable_endpoint_detection,
                 "sample_rate": self.sample_rate,
                 "language_hints": _prepare_language_hints(self._params.language_hints),
+                "language_hints_strict": self._params.language_hints_strict,
                 "context": context,
                 "enable_speaker_diarization": self._params.enable_speaker_diarization,
                 "enable_language_identification": self._params.enable_language_identification,
