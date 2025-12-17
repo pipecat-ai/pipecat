@@ -303,7 +303,7 @@ class AnthropicLLMService(LLMService):
         # LLM completion
         response = await self._client.beta.messages.create(**params)
 
-        return response.content[0].text
+        return next((block.text for block in response.content if hasattr(block, "text")), None)
 
     def create_context_aggregator(
         self,
