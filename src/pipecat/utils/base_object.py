@@ -13,6 +13,7 @@ and async cleanup for all Pipecat components.
 
 import asyncio
 import inspect
+import traceback
 from abc import ABC
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -187,7 +188,11 @@ class BaseObject(ABC):
             else:
                 handler(self, *args, **kwargs)
         except Exception as e:
-            logger.error(f"Exception in event handler {event_name}: {e}")
+            tb = traceback.extract_tb(e.__traceback__)
+            last = tb[-1]
+            logger.error(
+                f"Uncaught exception in event handler '{event_name}' ({last.filename}:{last.lineno}): {e}"
+            )
 
     def _event_task_finished(self, task: asyncio.Task):
         """Clean up completed event handler tasks.
