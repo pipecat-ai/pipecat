@@ -9,7 +9,7 @@
 import asyncio
 import os
 import time
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Optional
 
 from dotenv import load_dotenv
 from loguru import logger
