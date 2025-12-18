@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from loguru import logger
 
-from pipecat.services.dograh.tts_cache import CachedTTSData, TTSCacheManager
+from pipecat.services.tts_cache import CachedTTSData, TTSCacheManager
 
 try:
     import websockets
