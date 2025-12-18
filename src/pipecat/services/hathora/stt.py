@@ -6,102 +6,126 @@
 
 """[Hathora-hosted](https://models.hathora.dev) speech-to-text services."""
 
+import base64
 import os
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 import aiohttp
-from loguru import logger
 
 from pipecat.frames.frames import (
     ErrorFrame,
+    Frame,
     TranscriptionFrame,
 )
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
-class ParakeetTDTSTTService(SegmentedSTTService):
-    """Parakeet TDT is a multilingual automatic speech recognition model
-    with word-level timestamps.
+from .utils import ConfigOption
 
-    This service uses the Hathora-hosted Parakeet model via the HTTP API.
 
-    [Documentation](https://models.hathora.dev/model/nvidia-parakeet-tdt-0.6b-v3)
+class HathoraSTTService(SegmentedSTTService):
+    """This service supports several different speech-to-text models hosted by Hathora.
+
+    [Documentation](https://models.hathora.dev)
     """
 
     def __init__(
         self,
         *,
-        base_url = None,
-        api_key = None,
-        start_time: Optional[int] = None,
-        end_time: Optional[int] = None,
+        model: str,
+        language: Optional[str] = None,
+        model_config: Optional[list[ConfigOption]] = None,
+        base_url: str = "https://api.models.hathora.dev/inference/v1/stt",
+        api_key: Optional[str] = None,
         **kwargs,
     ):
-        """Initialize the Hathora-hosted Parakeet STT service.
+        """Initialize the Hathora STT service.
 
         Args:
-            base_url: Base URL for the Hathora Parakeet STT API.
+            model: Model to use; find available models
+                [here](https://models.hathora.dev).
+            language: Language code (if supported by model).
+            model_config: Some models support additional config, refer to
+                [docs](https://models.hathora.dev) for each model to see
+                what is supported.
+            base_url: Base API URL for the Hathora STT service.
             api_key: API key for authentication with the Hathora service;
-                provisiion one [here](https://models.hathora.dev/tokens).
-            start_time: Start time in seconds for the time window.
-            end_time: End time in seconds for the time window.
+                provision one [here](https://models.hathora.dev/tokens).
+            **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(
             **kwargs,
         )
+        self._model = model
+        self._language = language
+        self._model_config = model_config
         self._base_url = base_url
-        self._api_key = api_key
-        self._start_time = start_time
-        self._end_time = end_time
+        self._api_key = api_key or os.getenv("HATHORA_API_KEY")
 
-    def can_generate_metrics(self) -> bool:
-        return True
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
 
-    async def run_stt(self, audio: bytes):
+    @traced_stt
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Run speech-to-text on the provided audio data.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: Frames containing transcription results (typically TextFrame).
+        """
         try:
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
             url = f"{self._base_url}"
 
-            url_query_params = []
-            if self._start_time is not None:
-                url_query_params.append(f"start_time={self._start_time}")
-            if self._end_time is not None:
-                url_query_params.append(f"end_time={self._end_time}")
-            url_query_params.append(f"sample_rate={self.sample_rate}")
+            payload = {
+                "model": self._model,
+            }
 
-            if len(url_query_params) > 0:
-                url += "?" + "&".join(url_query_params)
+            if self._language is not None:
+                payload["language"] = self._language
+            if self._model_config is not None:
+                payload["model_config"] = [
+                    {"name": option.name, "value": option.value} for option in self._model_config
+                ]
 
-            api_key = self._api_key or os.getenv("HATHORA_API_KEY")
-
-            form_data = aiohttp.FormData()
-            form_data.add_field("file", audio, filename="audio.wav", content_type="application/octet-stream")
+            base64_audio = base64.b64encode(audio).decode("utf-8")
+            payload["audio"] = base64_audio
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    data=form_data,
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    json=payload,
                 ) as resp:
                     response = await resp.json()
 
             if response and "text" in response:
                 text = response["text"].strip()
                 if text:  # Only yield non-empty text
-                    await self.stop_ttfb_metrics()
-                    await self.stop_processing_metrics()
-                    logger.debug(f"Transcription: [{text}]")
+                    # Hathora's API currently doesn't return language info
+                    # so we default to the requested language or "en"
+                    response_language = self._language or "en"
+                    await self._handle_transcription(text, True, response_language)
                     yield TranscriptionFrame(
                         text,
                         self._user_id,
                         time_now_iso8601(),
-                        Language("en"), # TODO: the parakeet hathora API doesn't accept a language but says it's multilingual
+                        Language(response_language),
                         result=response,
                     )
 
+            await self.stop_ttfb_metrics()
+            await self.stop_processing_metrics()
+
         except Exception as e:
-            logger.error(f"Hathora error: {e}")
-            yield ErrorFrame(f"Hathora error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
