@@ -3986,6 +3986,9 @@ rime = [
 riva = [
     { name = "nvidia-riva-client" },
 ]
+rnnoise = [
+    { name = "pyrnnoise" },
+]
 runner = [
     { name = "fastapi" },
     { name = "pipecat-ai-small-webrtc-prebuilt" },
@@ -4154,6 +4157,7 @@ requires-dist = [
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.10.1" },
     { name = "pyloudnorm", specifier = "~=0.1.1" },
+    { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.2.0" },
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "resampy", specifier = "~=0.4.3" },
@@ -4175,7 +4179,8 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper", "rnnoise"]
+
 
 [package.metadata.requires-dev]
 dev = [
@@ -4772,6 +4777,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f7/16/6b4fbdd1fef59a0292cbb99f790b44983e390321eccbc5921b4d161da5d1/pyright-1.1.406.tar.gz", hash = "sha256:c4872bc58c9643dac09e8a2e74d472c62036910b3bd37a32813989ef7576ea2c", size = 4113151, upload-time = "2025-10-02T01:04:45.488Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f6/a2/e309afbb459f50507103793aaef85ca4348b66814c86bc73908bdeb66d12/pyright-1.1.406-py3-none-any.whl", hash = "sha256:1d81fb43c2407bf566e97e57abb01c811973fdb21b2df8df59f870f688bdca71", size = 5980982, upload-time = "2025-10-02T01:04:43.137Z" },
+]
+
+[[package]]
+name = "pyrnnoise"
+version = "0.2.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "soundfile" },
+    { name = "soxr" },
+    { name = "tqdm" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/5a/d7433a898cc3c8cf9621f74d8671b052511811d9db263cf79cb224e463dc/pyrnnoise-0.2.7-py3-none-macosx_14_0_universal2.whl", hash = "sha256:fec5305080d2edfdc74b0f8beb8243a59e9a4a55a54db0ef8564510568a9eefe", size = 13366079, upload-time = "2024-10-02T12:26:46.199Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/a0/d624dfcbdb94a57047d17c923a2bfc7dfa170458b6a38f97868d89d6d284/pyrnnoise-0.2.7-py3-none-manylinux1_x86_64.whl", hash = "sha256:ce54addc6c4ff3c8a4c48e9e4d14640ca175c39b06a63b44da3f3a34d3ba8895", size = 13261826, upload-time = "2024-10-02T12:26:50.98Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/26/eed8b1dfd122c1523e4cafd0ff19bf4b59a79fe6a791a486a3fa3712e070/pyrnnoise-0.2.7-py3-none-win_amd64.whl", hash = "sha256:8451f98c715e2ce834a405162f7b14c30d730c4dd95ed3c5faecbb92257f8dd2", size = 13255252, upload-time = "2024-10-02T12:28:43.187Z" },
 ]
 
 [[package]]
