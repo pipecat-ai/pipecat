@@ -9,7 +9,7 @@
 import asyncio
 import os
 import time
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -86,8 +86,7 @@ class SpeechmaticsSTTService(STTService):
 
             language: Language code for transcription. Defaults to `Language.EN`.
 
-
-            preset: Preset configuration for the STT engine. Defaults to "conversation_adaptive".
+            preset: Preset configuration for the STT engine. Defaults to "adaptive".
 
             enable_vad: Enable VAD to trigger end of utterance detection. This should be used
                 without any other VAD enabled in the agent and will emit the speaker started
@@ -201,7 +200,7 @@ class SpeechmaticsSTTService(STTService):
         language: Language | str = Language.EN
 
         # Preset
-        preset: str = "adaptive"
+        preset: str | None = "adaptive"
 
         # VAD / turn endpointing
         enable_vad: bool = False
@@ -281,7 +280,7 @@ class SpeechmaticsSTTService(STTService):
         *,
         api_key: str | None = None,
         base_url: str | None = None,
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         params: InputParams | None = None,
         **kwargs,
     ):
@@ -470,7 +469,10 @@ class SpeechmaticsSTTService(STTService):
     def _prepare_config(self, params: InputParams) -> VoiceAgentConfig:
         """Parse the InputParams into VoiceAgentConfig."""
         # Preset
-        config = VoiceAgentConfigPreset.load(params.preset)
+        if params.preset:
+            config = VoiceAgentConfigPreset.load(params.preset)
+        else:
+            config = VoiceAgentConfig()
 
         # Override for external trigger
         if not params.enable_vad:
