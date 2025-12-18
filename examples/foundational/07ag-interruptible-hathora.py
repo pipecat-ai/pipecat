@@ -21,8 +21,8 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.hathora.stt import ParakeetSTTService
-from pipecat.services.hathora.tts import ChatterboxTTSService, KokoroTTSService
+from pipecat.services.hathora.stt import HathoraSTTService
+from pipecat.services.hathora.tts import HathoraTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -38,13 +38,19 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -52,23 +58,13 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    # See https://models.hathora.dev/model/nvidia-parakeet-tdt-0.6b-v3
-    stt = ParakeetTDTSTTService(
-        base_url="https://app-1c7bebb9-6977-4101-9619-833b251b86d1.app.hathora.dev/v1/transcribe",
-        api_key=os.getenv("HATHORA_API_KEY")
+    stt = HathoraSTTService(
+        model="nvidia-parakeet-tdt-0.6b-v3",
     )
 
-    # See https://models.hathora.dev/model/hexgrad-kokoro-82m
-    tts = KokoroTTSService(
-        base_url="https://app-01312daf-6e53-4b9d-a4ad-13039f35adc4.app.hathora.dev/synthesize",
-        api_key=os.getenv("HATHORA_API_KEY"),
+    tts = HathoraTTSService(
+        model="hexgrad-kokoro-82m",
     )
-
-    # See https://models.hathora.dev/model/resemble-ai-chatterbox
-    # tts = ChatterboxTTSService(
-    #     base_url="https://app-efbc8fe2-df55-4f96-bbe3-74f6ea9d986b.app.hathora.dev/v1/generate",
-    #     api_key=os.getenv("HATHORA_API_KEY")
-    # )
 
     # See https://models.hathora.dev/model/qwen3-30b-a3b
     llm = OpenAILLMService(
