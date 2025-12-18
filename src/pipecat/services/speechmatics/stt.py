@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat import __version__ as pipecat_version
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
@@ -86,8 +86,6 @@ class SpeechmaticsSTTService(STTService):
 
             language: Language code for transcription. Defaults to `Language.EN`.
 
-            output_locale: Output locale for transcription, e.g. `Language.EN_GB`.
-                Defaults to None.
 
             preset: Preset configuration for the STT engine. Defaults to "conversation_adaptive".
 
@@ -201,7 +199,6 @@ class SpeechmaticsSTTService(STTService):
         # Service configuration
         domain: str | None = None
         language: Language | str = Language.EN
-        output_locale: Language | str | None = None
 
         # Preset
         preset: str = "adaptive"
@@ -284,7 +281,7 @@ class SpeechmaticsSTTService(STTService):
         *,
         api_key: str | None = None,
         base_url: str | None = None,
-        sample_rate: int = 16000,
+        sample_rate: Optional[int] = None,
         params: InputParams | None = None,
         **kwargs,
     ):
@@ -295,7 +292,7 @@ class SpeechmaticsSTTService(STTService):
                 `SPEECHMATICS_API_KEY` if not provided.
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
                 or defaults to `wss://eu2.rt.speechmatics.com/v2`.
-            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            sample_rate: Optional audio sample rate in Hz.
             params: Optional[InputParams]: Input parameters for the service.
             **kwargs: Additional arguments passed to STTService.
         """
@@ -314,7 +311,7 @@ class SpeechmaticsSTTService(STTService):
             raise ValueError("Missing Speechmatics base URL")
 
         # Default params
-        params = params or self.InputParams()
+        params = params or SpeechmaticsSTTService.InputParams()
 
         # Deprecation check
         self._check_deprecated_args(kwargs, params)
@@ -371,15 +368,13 @@ class SpeechmaticsSTTService(STTService):
 
     async def stop(self, frame: EndFrame):
         """Called when the session ends."""
-        if self._stt_msg_task and not self._stt_msg_task.done():
-            self._stt_msg_task.cancel()
+        self.cancel_task(self._stt_msg_task)
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
-        if self._stt_msg_task and not self._stt_msg_task.done():
-            self._stt_msg_task.cancel()
+        self.cancel_task(self._stt_msg_task)
         await super().cancel(frame)
         await self._disconnect()
 
@@ -394,13 +389,13 @@ class SpeechmaticsSTTService(STTService):
         logger.debug(f"{self} connecting to Speechmatics STT service")
 
         # Update the audio sample rate
-        self._config.sample_rate = self._sample_rate
+        self._config.sample_rate = self.sample_rate
 
         # STT client
         self._client: VoiceAgentClient = VoiceAgentClient(
             api_key=self._api_key,
             url=self._base_url,
-            app=f"pipecat/{pipecat_version}",
+            app=f"pipecat/{pipecat_version()}",
             config=self._config,
         )
 
@@ -433,10 +428,8 @@ class SpeechmaticsSTTService(STTService):
             await self._client.connect()
             logger.debug(f"{self} connected")
         except Exception as e:
-            err_msg = f"{self} error connecting: {e}"
-            logger.error(err_msg)
             self._client = None
-            await self.push_error(ErrorFrame(error=err_msg, fatal=True))
+            await self.push_error(error_msg=f"Error connecting to STT service: {e}", exception=e)
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service.
@@ -452,7 +445,7 @@ class SpeechmaticsSTTService(STTService):
         except asyncio.TimeoutError:
             logger.warning(f"{self} timeout while closing Speechmatics client connection")
         except Exception as e:
-            logger.error(f"{self} error closing Speechmatics client: {e}")
+            await self.push_error(error_msg=f"Error closing Speechmatics client: {e}", exception=e)
         finally:
             self._client = None
             await self._call_event_handler("on_disconnected")
@@ -488,9 +481,7 @@ class SpeechmaticsSTTService(STTService):
         # Language + domain
         config.language = self._language_to_speechmatics_language(params.language)
         config.domain = params.domain
-        config.output_locale = self._locale_to_speechmatics_locale(
-            params.language, params.output_locale
-        )
+        config.output_locale = self._locale_to_speechmatics_locale(config.language, params.language)
 
         # Speaker config
         config.speaker_config = SpeakerFocusConfig(
@@ -793,8 +784,7 @@ class SpeechmaticsSTTService(STTService):
                 await self._client.send_audio(audio)
             yield None
         except Exception as e:
-            logger.error(f"{self} Speechmatics error: {e}")
-            yield ErrorFrame(f"{self} Speechmatics error: {e}", fatal=False)
+            yield ErrorFrame(f"Speechmatics error: {e}")
             await self._disconnect()
 
     async def _emit_metrics(self, processing_time: float) -> None:
@@ -891,7 +881,7 @@ class SpeechmaticsSTTService(STTService):
         }
 
         # Get the language code
-        result = BASE_LANGUAGES.get(language)
+        result = resolve_language(language, BASE_LANGUAGES, use_base_code=True)
 
         # Fail if language is not supported
         if not result:
@@ -900,11 +890,11 @@ class SpeechmaticsSTTService(STTService):
         # Return the language code
         return result
 
-    def _locale_to_speechmatics_locale(self, language_code: str, locale: Language) -> str | None:
-        """Convert a Language enum to a Speechmatics language code.
+    def _locale_to_speechmatics_locale(self, base_code: str, locale: Language) -> str | None:
+        """Convert a Language enum to a Speechmatics language / locale code.
 
         Args:
-            language_code: The language code.
+            base_code: The language code.
             locale: The Language enum to convert.
 
         Returns:
@@ -919,14 +909,16 @@ class SpeechmaticsSTTService(STTService):
             },
         }
 
+        # Ensure language code is in the map
+        if "-" not in str(locale) or base_code not in LOCALES:
+            return None
+
         # Get the locale code
-        result = LOCALES.get(language_code, {}).get(locale)
+        result = LOCALES.get(base_code).get(locale, None)
 
         # Fail if locale is not supported
         if not result:
-            logger.warning(
-                f"{self} Unsupported output locale: {locale}, defaulting to {language_code}"
-            )
+            logger.warning(f"{self} Unsupported output locale: {locale}, defaulting to {base_code}")
 
         # Return the locale code
         return result
@@ -960,8 +952,8 @@ class SpeechmaticsSTTService(STTService):
             ("language", "language"),
             ("language_code", "language"),
             ("domain", "domain"),
-            ("output_locale", "output_locale"),
-            ("output_locale_code", "output_locale"),
+            ("output_locale", None),
+            ("output_locale_code", None),
             ("enable_partials", None),
             ("max_delay", "max_delay"),
             ("chunk_size", None),
