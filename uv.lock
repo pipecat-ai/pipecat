@@ -1146,13 +1146,13 @@ wheels = [
 
 [[package]]
 name = "daily-python"
-version = "0.22.0"
+version = "0.23.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/db/d6c311ba760123a9987a9ae291171c9a6af11ee4dbefdb661d65e2ac13a2/daily_python-0.22.0-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:2ef7591a7929c5d9e5ea78329ea049d2f313bd3d2d289f5f4ecce4bb3799c3d0", size = 13526264, upload-time = "2025-11-20T05:52:04.134Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/47/f1f6d893e7aab4b2e3d3b20d0dd8fbf31c7a71597d274aae1d288e36fac3/daily_python-0.22.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:0fbc8467c471ce536dc6214a24cc28cbc38ff61113b1714e09d0eafc2741fc5a", size = 12041400, upload-time = "2025-11-20T05:52:06.419Z" },
-    { url = "https://files.pythonhosted.org/packages/9d/c9/8f26944cd55ece2ab9c076fae5c1fcf4fdc8639ea6f2b861566d26ad9e00/daily_python-0.22.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:b8aa9531b0fa2852b41935697d184be86318eaee3b35f49e0b5714e53cdb524a", size = 14147194, upload-time = "2025-11-20T05:52:08.4Z" },
-    { url = "https://files.pythonhosted.org/packages/a8/02/d86f4cee39bcdb112d83e2cf12345d7a974cbad5dafb350788148644f16b/daily_python-0.22.0-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:8f49fceee92830aaf53a65053f332504b2cc62af79c38edb9bce8707c9fa4b0c", size = 14654605, upload-time = "2025-11-20T05:52:10.639Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/3b/0f1465833787db21933caf9db0c4e45d10a31f477c2ae08ebe3edf31764d/daily_python-0.23.0-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:74998c9aabeccf8306def27219eb943df5a268f26ba7e25e0a105ced9425591a", size = 13450473, upload-time = "2025-12-18T03:21:50.488Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/ca/7a9b581d411101454855c21559b1c9d9d58b6c527480548bba03e00a5641/daily_python-0.23.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:ce80746f5cba434371a9cb9995d8c4ec19d1490bd993b7dfd35356d81bd68425", size = 11988100, upload-time = "2025-12-18T03:21:53.265Z" },
+    { url = "https://files.pythonhosted.org/packages/40/eb/15303b6ae2cdc5c591d6629d162085037697ca519d57751408c66f775991/daily_python-0.23.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:21a59b1730ae047f2335b9fdcf8ebb9fe05c3768dc4239ec955461f3f78476b0", size = 14094021, upload-time = "2025-12-18T03:21:55.606Z" },
+    { url = "https://files.pythonhosted.org/packages/65/b9/f063e4854ba6e4edeea46e082720b7af82fb3cbf27e60efce63dbe34fe6d/daily_python-0.23.0-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:00b22041ef85556cc06262f9b8e39b686bdf37d50219d07542d7a2f9c3d413d4", size = 14616886, upload-time = "2025-12-18T03:21:58.084Z" },
 ]
 
 [[package]]
@@ -4088,7 +4088,7 @@ requires-dist = [
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = "~=1.42.0" },
     { name = "cartesia", marker = "extra == 'cartesia'", specifier = "~=2.0.3" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
-    { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.22.0" },
+    { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.23.0" },
     { name = "deepgram-sdk", marker = "extra == 'deepgram'", specifier = "~=4.7.0" },
     { name = "docstring-parser", specifier = "~=0.16" },
     { name = "einops", marker = "extra == 'moondream'", specifier = "~=0.8.0" },
@@ -4179,8 +4179,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper", "rnnoise"]
-
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
