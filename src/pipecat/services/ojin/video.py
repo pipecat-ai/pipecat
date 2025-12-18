@@ -503,15 +503,22 @@ class OjinVideoService(FrameProcessor):
                 # else:
                 #     logger.debug(f"Playing idle frame {self._played_frame_idx}")
 
-            # Output frame and audio
+            # Output frame and audio with synchronized PTS
+            # PTS in nanoseconds based on frame index and fps
+            frame_pts = int((self._played_frame_idx / self.fps) * 1_000_000_000)
+
             image_frame = OutputImageRawFrame(
                 image=image_bytes, size=self._settings.image_size, format="RGB"
             )
+            image_frame.pts = frame_pts
+
             audio_frame = OutputAudioRawFrame(
                 audio=audio_bytes,
                 sample_rate=OJIN_PERSONA_SAMPLE_RATE,
                 num_channels=1,
             )
+            audio_frame.pts = frame_pts  # Same PTS ensures sync
+
             await self.push_frame(image_frame)
             await self.push_frame(audio_frame)
 
