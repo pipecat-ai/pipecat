@@ -47,7 +47,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
-    LLMContextMessage,
     LLMSpecificMessage,
 )
 from pipecat.processors.aggregators.llm_response import (

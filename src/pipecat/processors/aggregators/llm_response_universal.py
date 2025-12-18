@@ -57,9 +57,6 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
 from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
@@ -80,6 +77,20 @@ class LLMUserAggregatorParams:
     """
 
     enable_user_speaking_frames: bool = True
+
+
+@dataclass
+class LLMAssistantAggregatorParams:
+    """Parameters for configuring LLM assistant aggregation behavior.
+
+    Parameters:
+        expect_stripped_words: Whether to expect and handle stripped words
+            in text frames by adding spaces between tokens. This parameter is
+            ignored when used with the newer LLMAssistantAggregator, which
+            handles word spacing automatically.
+    """
+
+    expect_stripped_words: bool = True
 
 
 class LLMContextAggregator(FrameProcessor):
