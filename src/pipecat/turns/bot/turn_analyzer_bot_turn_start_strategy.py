@@ -89,8 +89,10 @@ class TurnAnalyzerBotTurnStartStrategy(BaseBotTurnStartStrategy):
             await self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio(frame)
-        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+        elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            await self._handle_interim_transcription(frame)
 
     async def _start(self, frame: StartFrame):
         """Process the start frame to configure the turn analyzer."""
@@ -116,10 +118,14 @@ class TurnAnalyzerBotTurnStartStrategy(BaseBotTurnStartStrategy):
         await self._handle_prediction_result(prediction)
         await self._handle_end_of_turn(state)
 
-    async def _handle_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
+    async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
         # We don't really care about the content.
         self._text = frame.text
+        self._event.set()
+
+    async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
+        """Handle user interim transcription."""
         self._event.set()
 
     async def _handle_end_of_turn(self, state: EndOfTurnState):
