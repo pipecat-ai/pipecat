@@ -17,6 +17,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContext,
     LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -69,7 +70,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context, user_params=LLMUserAggregatorParams(enable_user_speaking_frames=False)
+    )
 
     pipeline = Pipeline(
         [

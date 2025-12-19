@@ -30,7 +30,7 @@ from typing import (
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry as NewKeypadEntry
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
@@ -40,6 +40,7 @@ from pipecat.utils.utils import obj_count, obj_id
 if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 
 class DeprecatedKeypadEntry:
@@ -959,6 +960,7 @@ class StartFrame(SystemFrame):
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
     interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
+    turn_start_strategies: Optional["TurnStartStrategies"] = None
     report_only_initial_ttfb: bool = False
 
 
@@ -1091,15 +1093,17 @@ class StartInterruptionFrame(InterruptionFrame):
 
 @dataclass
 class UserStartedSpeakingFrame(SystemFrame):
-    """Frame indicating user has started speaking.
+    """Frame indicating that the user turn has started.
 
-    Emitted by VAD to indicate that a user has started speaking. This can be
-    used for interruptions or other times when detecting that someone is
-    speaking is more important than knowing what they're saying (as you will
-    get with a TranscriptionFrame).
+    Emitted when the user turn starts, which usually means that some
+    transcriptions are already available.
 
     Parameters:
         emulated: Whether this event was emulated rather than detected by VAD.
+
+            .. deprecated:: 0.0.99
+                This field is deprecated and will be removed in a future version.
+
     """
 
     emulated: bool = False
@@ -1107,12 +1111,17 @@ class UserStartedSpeakingFrame(SystemFrame):
 
 @dataclass
 class UserStoppedSpeakingFrame(SystemFrame):
-    """Frame indicating user has stopped speaking.
+    """Frame indicating that the user turn has ended.
 
-    Emitted by the VAD to indicate that a user stopped speaking.
+    Emitted when the user turn ends. This usually coincides with the start of
+    the bot turn.
 
     Parameters:
         emulated: Whether this event was emulated rather than detected by VAD.
+
+            .. deprecated:: 0.0.99
+                This field is deprecated and will be removed in a future version.
+
     """
 
     emulated: bool = False
@@ -1134,6 +1143,9 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
 
     Emitted by internal processors upstream to emulate VAD behavior when a
     user starts speaking.
+
+    .. deprecated:: 0.0.99
+        This frame is deprecated and will be removed in a future version.
     """
 
     pass
@@ -1145,6 +1157,9 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
     Emitted by internal processors upstream to emulate VAD behavior when a
     user stops speaking.
+
+    .. deprecated:: 0.0.99
+        This frame is deprecated and will be removed in a future version.
     """
 
     pass
@@ -1542,7 +1557,7 @@ class SpeechControlParamsFrame(SystemFrame):
     """
 
     vad_params: Optional[VADParams] = None
-    turn_params: Optional[SmartTurnParams] = None
+    turn_params: Optional[BaseTurnParams] = None
 
 
 #

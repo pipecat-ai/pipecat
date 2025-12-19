@@ -316,6 +316,23 @@ wheels = [
 ]
 
 [[package]]
+name = "audiolab"
+version = "0.4.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "av" },
+    { name = "click" },
+    { name = "humanize" },
+    { name = "jinja2" },
+    { name = "smart-open" },
+    { name = "soundfile" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/62/343e39ff6560517ffb02c21796d155df4a019eea235ab7f86e46f8b10a73/audiolab-0.4.7.tar.gz", hash = "sha256:9a4618fd39601d5dd366f5dca3a0d23e6eacf5ee0d824ece2bc74ab15c8342b3", size = 31885, upload-time = "2025-12-19T07:40:13.219Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/ac/7dc51c1a0b15ba9162d9d506a7a9f2589f0258b2810dad0a193cc781b7d6/audiolab-0.4.7-py3-none-any.whl", hash = "sha256:52ea93f0c0950727f6ab79c90d95910ee6b3a608bbe1bcd33ce51530b3de064e", size = 50938, upload-time = "2025-12-19T07:40:12.098Z" },
+]
+
+[[package]]
 name = "audioop-lts"
 version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2048,6 +2065,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cc/3f/2c29224acb2e2df4d2046e4c73ee2662023c58ff5b113c4c1adac0886c43/humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc", size = 360702, upload-time = "2021-09-17T21:40:43.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/0f/310fb31e39e2d734ccaa2c0fb981ee41f7bd5056ce9bc29b2248bd569169/humanfriendly-10.0-py2.py3-none-any.whl", hash = "sha256:1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477", size = 86794, upload-time = "2021-09-17T21:40:39.897Z" },
+]
+
+[[package]]
+name = "humanize"
+version = "4.14.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/43/50033d25ad96a7f3845f40999b4778f753c3901a11808a584fed7c00d9f5/humanize-4.14.0.tar.gz", hash = "sha256:2fa092705ea640d605c435b1ca82b2866a1b601cdf96f076d70b79a855eba90d", size = 82939, upload-time = "2025-10-15T13:04:51.214Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/5b/9512c5fb6c8218332b530f13500c6ff5f3ce3342f35e0dd7be9ac3856fd3/humanize-4.14.0-py3-none-any.whl", hash = "sha256:d57701248d040ad456092820e6fde56c930f17749956ac47f4f655c0c547bfff", size = 132092, upload-time = "2025-10-15T13:04:49.404Z" },
 ]
 
 [[package]]
@@ -4157,7 +4183,7 @@ requires-dist = [
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.10.1" },
     { name = "pyloudnorm", specifier = "~=0.1.1" },
-    { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.2.0" },
+    { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.1" },
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "resampy", specifier = "~=0.4.3" },
@@ -4191,7 +4217,7 @@ dev = [
     { name = "pyright", specifier = ">=1.1.404,<1.2" },
     { name = "pytest", specifier = "~=8.4.1" },
     { name = "pytest-aiohttp", specifier = "==1.1.0" },
-    { name = "pytest-asyncio", specifier = "~=1.1.0" },
+    { name = "pytest-asyncio", specifier = "~=1.3.0" },
     { name = "python-dotenv", specifier = ">=1.0.1,<2.0.0" },
     { name = "ruff", specifier = ">=0.12.11,<1" },
     { name = "setuptools", specifier = "~=78.1.1" },
@@ -4780,18 +4806,19 @@ wheels = [
 
 [[package]]
 name = "pyrnnoise"
-version = "0.2.7"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "audiolab" },
+    { name = "click" },
+    { name = "matplotlib" },
     { name = "numpy" },
-    { name = "soundfile" },
-    { name = "soxr" },
     { name = "tqdm" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/5a/d7433a898cc3c8cf9621f74d8671b052511811d9db263cf79cb224e463dc/pyrnnoise-0.2.7-py3-none-macosx_14_0_universal2.whl", hash = "sha256:fec5305080d2edfdc74b0f8beb8243a59e9a4a55a54db0ef8564510568a9eefe", size = 13366079, upload-time = "2024-10-02T12:26:46.199Z" },
-    { url = "https://files.pythonhosted.org/packages/b5/a0/d624dfcbdb94a57047d17c923a2bfc7dfa170458b6a38f97868d89d6d284/pyrnnoise-0.2.7-py3-none-manylinux1_x86_64.whl", hash = "sha256:ce54addc6c4ff3c8a4c48e9e4d14640ca175c39b06a63b44da3f3a34d3ba8895", size = 13261826, upload-time = "2024-10-02T12:26:50.98Z" },
-    { url = "https://files.pythonhosted.org/packages/ff/26/eed8b1dfd122c1523e4cafd0ff19bf4b59a79fe6a791a486a3fa3712e070/pyrnnoise-0.2.7-py3-none-win_amd64.whl", hash = "sha256:8451f98c715e2ce834a405162f7b14c30d730c4dd95ed3c5faecbb92257f8dd2", size = 13255252, upload-time = "2024-10-02T12:28:43.187Z" },
+    { url = "https://files.pythonhosted.org/packages/59/49/7017ffa14230096e0271bd49dfd9ab60a32bfebe7e71399c2a0e38c6f859/pyrnnoise-0.4.1-py3-none-macosx_15_0_universal2.whl", hash = "sha256:c1fe407729190d0f84f3e3c9d9322ebbd33b27f3f5d9f7217379b71a4dd043e7", size = 13381833, upload-time = "2025-11-25T15:54:06.532Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/24/fb8b7bafb3dd9cbb46e134fa25c9597683c61b42c0133453fefeebeb0066/pyrnnoise-0.4.1-py3-none-manylinux1_x86_64.whl", hash = "sha256:ddd39b45221b65fb235f882a0ce127513a1012d41c5b3ba9dc4e9e991b22c205", size = 13273307, upload-time = "2025-11-25T15:54:04.076Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/8e/eef9b2022fa5b9a111ba31d2f25ccd6e45da3daf16d20352e1fb18fd81dd/pyrnnoise-0.4.1-py3-none-win_amd64.whl", hash = "sha256:440e32359256eb7947e29fb080e800e984ba521fbe89a8b0b2f5dc196965e441", size = 13267076, upload-time = "2025-11-25T15:54:37.547Z" },
 ]
 
 [[package]]
@@ -4828,15 +4855,16 @@ wheels = [
 
 [[package]]
 name = "pytest-asyncio"
-version = "1.1.1"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backports-asyncio-runner", marker = "python_full_version < '3.11'" },
     { name = "pytest" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/1e/2aa43805d4a320a9489d2b99f7877b69f9094c79aa0732159a1415dd6cd4/pytest_asyncio-1.1.1.tar.gz", hash = "sha256:b72d215c38e2c91dbb32f275e0b5be69602d7869910e109360e375129960a649", size = 46590, upload-time = "2025-09-12T06:36:20.834Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/28/de/aba79e9ccdb51b5d0d65c67dd857bd78b00c64723df16b9fc800d8b94ce6/pytest_asyncio-1.1.1-py3-none-any.whl", hash = "sha256:726339d30fcfde24691f589445b9b67d058b311ac632b1d704e97f20f1d878da", size = 14719, upload-time = "2025-09-12T06:36:19.726Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
 ]
 
 [[package]]
@@ -5737,6 +5765,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "smart-open"
+version = "7.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/9a/0a7acb748b86e2922982366d780ca4b16c33f7246fa5860d26005c97e4f3/smart_open-7.5.0.tar.gz", hash = "sha256:f394b143851d8091011832ac8113ea4aba6b92e6c35f6e677ddaaccb169d7cb9", size = 53920, upload-time = "2025-11-08T21:38:40.698Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ad/95/bc978be7ea0babf2fb48a414b6afaad414c6a9e8b1eafc5b8a53c030381a/smart_open-7.5.0-py3-none-any.whl", hash = "sha256:87e695c5148bbb988f15cec00971602765874163be85acb1c9fb8abc012e6599", size = 63940, upload-time = "2025-11-08T21:38:39.024Z" },
 ]
 
 [[package]]

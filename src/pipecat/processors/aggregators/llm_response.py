@@ -67,6 +67,10 @@ from pipecat.utils.time import time_now_iso8601
 class LLMUserAggregatorParams:
     """Parameters for configuring LLM user aggregation behavior.
 
+    .. deprecated:: 0.0.99
+        This class is deprecated, use the new universal `LLMContext` and
+        `LLMContextAggregatorPair`.
+
     Parameters:
         aggregation_timeout: Maximum time in seconds to wait for additional
             transcription content before pushing aggregated result. This
@@ -77,16 +81,25 @@ class LLMUserAggregatorParams:
         enable_emulated_vad_interruptions: When True, allows emulated VAD events
             to interrupt the bot when it's speaking. When False, emulated speech
             is ignored while the bot is speaking.
+        enable_user_speaking_frames: [DO NOT USE] added for temporary backwards
+            compatibility.
+
     """
 
     aggregation_timeout: float = 0.5
     turn_emulated_vad_timeout: float = 0.8
     enable_emulated_vad_interruptions: bool = False
+    # Added for backwards compatibility.
+    enable_user_speaking_frames: bool = True
 
 
 @dataclass
 class LLMAssistantAggregatorParams:
     """Parameters for configuring LLM assistant aggregation behavior.
+
+    .. deprecated:: 0.0.99
+        This class is deprecated, use the new universal `LLMContext` and
+        `LLMContextAggregatorPair`.
 
     Parameters:
         expect_stripped_words: Whether to expect and handle stripped words

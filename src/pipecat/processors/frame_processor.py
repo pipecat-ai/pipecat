@@ -15,7 +15,18 @@ import asyncio
 import traceback
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Sequence, Tuple, Type
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 
 from loguru import logger
 
@@ -40,6 +51,9 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+
+if TYPE_CHECKING:
+    from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 
 class FrameDirection(Enum):
@@ -185,6 +199,7 @@ class FrameProcessor(BaseObject):
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
         self._interruption_strategies: List[BaseInterruptionStrategy] = []
+        self._turn_start_strategies: Optional["TurnStartStrategies"] = None
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -344,10 +359,23 @@ class FrameProcessor(BaseObject):
     def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
         """Get the interruption strategies for this processor.
 
+        .. deprecated:: 0.0.98
+            This function is deprecated, use the new user and bot turn start
+            strategies insted.
+
         Returns:
             Sequence of interruption strategies.
         """
         return self._interruption_strategies
+
+    @property
+    def turn_start_strategies(self) -> Optional["TurnStartStrategies"]:
+        """Get the user and bot turn start strategies for this processor.
+
+        Returns:
+            The user and bot turn start strategies.
+        """
+        return self._turn_start_strategies
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -763,6 +791,7 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = frame.enable_metrics
         self._enable_usage_metrics = frame.enable_usage_metrics
         self._interruption_strategies = frame.interruption_strategies
+        self._turn_start_strategies = frame.turn_start_strategies
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
 
         self.__create_process_task()
