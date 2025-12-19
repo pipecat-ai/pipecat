@@ -78,12 +78,29 @@ class LLMContext:
         from OpenAILLMContext to LLMContext. New user code should use
         LLMContext directly.
 
+        .. deprecated:: 0.0.99
+            `from_openai_context()` is deprecated and will be removed in a future version.
+            Directly use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
+
         Args:
             openai_context: The OpenAI LLM context to convert.
 
         Returns:
             New LLMContext instance with converted messages and settings.
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "from_openai_context() (likely invoked by create_context_aggregator()) is deprecated and will be removed in a future version. "
+                "Directly use the universal LLMContext and LLMContextAggregatorPair instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         # Convert tools to ToolsSchema if needed.
         # If the tools are already a ToolsSchema, this is a no-op.
         # Otherwise, we wrap them in a shim ToolsSchema.

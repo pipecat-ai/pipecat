@@ -8,13 +8,13 @@
 
 import asyncio
 import inspect
+import warnings
 from dataclasses import dataclass
 from typing import (
     Any,
     Awaitable,
     Callable,
     Dict,
-    List,
     Mapping,
     Optional,
     Protocol,
@@ -243,7 +243,21 @@ class LLMService(AIService):
 
         Returns:
             A context aggregator instance.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "create_context_aggregator() is deprecated and will be removed in a future version. "
+                "Use the universal LLMContext and LLMContextAggregatorPair directly instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         pass
 
     async def start(self, frame: StartFrame):
@@ -336,8 +350,6 @@ class LLMService(AIService):
         signature = inspect.signature(handler)
         handler_deprecated = len(signature.parameters) > 1
         if handler_deprecated:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -356,8 +368,6 @@ class LLMService(AIService):
 
         # Start callbacks are now deprecated.
         if start_callback:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -500,8 +510,6 @@ class LLMService(AIService):
             timeout: Optional timeout for the requested image to be added to the LLM context.
 
         """
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(

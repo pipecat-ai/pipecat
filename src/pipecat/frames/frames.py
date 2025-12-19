@@ -487,11 +487,30 @@ class TranslationFrame(TextFrame):
 class OpenAILLMContextAssistantTimestampFrame(DataFrame):
     """Timestamp information for assistant messages in LLM context.
 
+    .. deprecated:: 0.0.99
+        `OpenAILLMContextAssistantTimestampFrame` is deprecated and will be removed in a future version.
+        Use `LLMContextAssistantTimestampFrame` with the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         timestamp: Timestamp when the assistant message was created.
     """
 
     timestamp: str
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "OpenAILLMContextAssistantTimestampFrame is deprecated and will be removed in a future version. "
+                "Use LLMContextAssistantTimestampFrame with the universal LLMContext and LLMContextAggregatorPair instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 # A more universal (LLM-agnostic) name for

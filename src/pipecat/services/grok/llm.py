@@ -36,11 +36,17 @@ class GrokContextAggregatorPair:
     Provides a convenient container for managing both user and assistant
     context aggregators together for Grok LLM interactions.
 
+    .. deprecated:: 0.0.99
+        `GrokContextAggregatorPair` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         _user: The user context aggregator instance.
         _assistant: The assistant context aggregator instance.
     """
 
+    # Aggregators handle deprecation warnings
     _user: OpenAIUserContextAggregator
     _assistant: OpenAIAssistantContextAggregator
 
@@ -196,9 +202,16 @@ class GrokLLMService(OpenAILLMService):
             GrokContextAggregatorPair: A pair of context aggregators, one for
             the user and one for the assistant, encapsulated in an
             GrokContextAggregatorPair.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
+        # Aggregators handle deprecation warnings
         user = OpenAIUserContextAggregator(context, params=user_params)
         assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
+
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)
