@@ -66,7 +66,9 @@ try:
     from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Grok Realtime, you need to `pip install pipecat-ai[grok]`.")
+    logger.error(
+        "In order to use Grok Realtime, you need to `pip install pipecat-ai[grok]`."
+    )
     raise Exception(f"Missing module: {e}")
 
 
@@ -150,8 +152,12 @@ class GrokRealtimeLLMService(LLMService):
                 voice=voice,
                 turn_detection=events.TurnDetection(type="server_vad"),
                 audio=events.AudioConfiguration(
-                    input=events.AudioInputFormat(format=events.PCMAudioFormat(rate=sample_rate)),
-                    output=events.AudioOutputFormat(format=events.PCMAudioFormat(rate=sample_rate)),
+                    input=events.AudioInputFormat(
+                        format=events.PCMAudioFormat(rate=sample_rate)
+                    ),
+                    output=events.AudioOutputFormat(
+                        format=events.PCMAudioFormat(rate=sample_rate)
+                    ),
                 ),
             )
 
@@ -358,7 +364,9 @@ class GrokRealtimeLLMService(LLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            await self.push_error(error_msg=f"Error connecting to Grok: {e}", exception=e)
+            await self.push_error(
+                error_msg=f"Error connecting to Grok: {e}", exception=e
+            )
             self._websocket = None
 
     async def _disconnect(self):
@@ -389,7 +397,9 @@ class GrokRealtimeLLMService(LLMService):
         except Exception as e:
             if self._disconnecting or not self._websocket:
                 return
-            await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
+            await self.push_error(
+                error_msg=f"Error sending client event: {e}", exception=e
+            )
 
     async def _update_settings(self):
         """Update session settings on the server."""
@@ -514,22 +524,13 @@ class GrokRealtimeLLMService(LLMService):
             if evt.item.call_id not in self._pending_function_calls:
                 self._pending_function_calls[evt.item.call_id] = evt.item
 
-        await self._call_event_handler("on_conversation_item_created", evt.item.id, evt.item)
+        await self._call_event_handler(
+            "on_conversation_item_created", evt.item.id, evt.item
+        )
 
         if self._messages_added_manually.get(evt.item.id):
             del self._messages_added_manually[evt.item.id]
             return
-
-        # Check for user transcription in conversation.item.added
-        if evt.item.role == "user" and evt.item.content:
-            for content in evt.item.content:
-                if content.type == "input_audio" and content.transcript:
-                    transcript = content.transcript.strip()
-                    if transcript:
-                        await self.push_frame(
-                            TranscriptionFrame(transcript, "", time_now_iso8601(), result=evt),
-                            FrameDirection.UPSTREAM,
-                        )
 
         if evt.item.role == "assistant":
             self._current_assistant_response = evt.item
@@ -537,7 +538,9 @@ class GrokRealtimeLLMService(LLMService):
 
     async def _handle_evt_input_audio_transcription_completed(self, evt):
         """Handle input audio transcription completed event."""
-        await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
+        await self._call_event_handler(
+            "on_conversation_item_updated", evt.item_id, None
+        )
 
         # Only push transcription if we have actual text (not empty or just whitespace)
         transcript = evt.transcript.strip() if evt.transcript else ""
@@ -573,7 +576,9 @@ class GrokRealtimeLLMService(LLMService):
 
         # Update conversation items
         for item in evt.response.output:
-            await self._call_event_handler("on_conversation_item_updated", item.id, item)
+            await self._call_event_handler(
+                "on_conversation_item_updated", item.id, item
+            )
 
     async def _handle_evt_audio_transcript_delta(self, evt):
         """Handle audio transcript delta event."""
@@ -603,7 +608,9 @@ class GrokRealtimeLLMService(LLMService):
                 await self.run_function_calls(function_calls)
                 logger.debug(f"Processed function call: {evt.name}")
             else:
-                logger.warning(f"No tracked function call found for call_id: {evt.call_id}")
+                logger.warning(
+                    f"No tracked function call found for call_id: {evt.call_id}"
+                )
 
         except Exception as e:
             logger.error(f"Failed to process function call arguments: {e}")
@@ -685,7 +692,9 @@ class GrokRealtimeLLMService(LLMService):
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     if send_new_results:
                         sent_new_result = True
-                        await self._send_tool_result(tool_call_id, message.get("content"))
+                        await self._send_tool_result(
+                            tool_call_id, message.get("content")
+                        )
                     self._completed_tool_calls.add(tool_call_id)
 
         if sent_new_result:
