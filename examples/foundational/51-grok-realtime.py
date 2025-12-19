@@ -52,10 +52,6 @@ from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.grok.realtime.events import (
-    AudioConfiguration,
-    AudioInput,
-    AudioOutput,
-    PCMAudioFormat,
     SessionProperties,
     TurnDetection,
     WebSearchTool,
@@ -184,11 +180,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice="Ara",
         # Enable server-side VAD for automatic turn detection
         turn_detection=TurnDetection(type="server_vad"),
-        # Configure audio format (PCM at 24kHz is recommended)
-        audio=AudioConfiguration(
-            input=AudioInput(format=PCMAudioFormat(rate=24000)),
-            output=AudioOutput(format=PCMAudioFormat(rate=24000)),
-        ),
         # System instructions
         instructions="""You are a helpful and friendly AI assistant powered by Grok.
 
