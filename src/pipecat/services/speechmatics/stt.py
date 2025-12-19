@@ -661,7 +661,11 @@ class SpeechmaticsSTTService(STTService):
 
         # Force finalization
         if isinstance(frame, UserStoppedSpeakingFrame):
-            if not self._enable_vad and self._client is not None:
+            if self._enable_vad:
+                logger.warning(
+                    f"{self} UserStoppedSpeakingFrame received but internal VAD is being used"
+                )
+            elif not self._enable_vad and self._client is not None:
                 self._client.finalize()
 
     async def _send_frames(self, segments: list[dict[str, Any]], finalized: bool = False) -> None:
