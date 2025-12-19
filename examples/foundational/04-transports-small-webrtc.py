@@ -17,7 +17,6 @@ from fastapi.responses import RedirectResponse
 from loguru import logger
 from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -33,6 +32,8 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+from pipecat.turns.bot.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
+from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 load_dotenv(override=True)
 
@@ -61,7 +62,6 @@ async def run_example(webrtc_connection: SmallWebRTCConnection):
             audio_in_enabled=True,
             audio_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-            turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
         ),
     )
 
@@ -101,6 +101,9 @@ async def run_example(webrtc_connection: SmallWebRTCConnection):
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
+            turn_start_strategies=TurnStartStrategies(
+                bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
         ),
     )
 
