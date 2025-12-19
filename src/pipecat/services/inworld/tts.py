@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
+    from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -566,6 +567,13 @@ class InworldTTSService(AudioContextWordTTSService):
 
         return word_times
 
+    @staticmethod
+    def _is_session_paused_error(status: Dict[str, Any]) -> bool:
+        details = status.get("details", [])
+        if isinstance(details, dict):
+            details = [details]
+        return any(detail.get("errorType") == "SESSION_PAUSED" for detail in details)
+
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle an interruption from the Inworld WebSocket TTS service.
 
@@ -646,7 +654,7 @@ class InworldTTSService(AudioContextWordTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Inworld WebSocket TTS")
-                if self._context_id:
+                if self._context_id and self._websocket.state is State.OPEN:
                     try:
                         await self._send_close_context(self._context_id)
                     except Exception:
@@ -683,6 +691,11 @@ class InworldTTSService(AudioContextWordTTSService):
             if status.get("code", 0) != 0:
                 error_msg = status.get("message", "Unknown error")
                 await self.push_error(error_msg=f"Inworld API error: {error_msg}")
+                if self._is_session_paused_error(status):
+                    logger.warning(f"{self} session paused due to inactivity, reconnecting")
+                    if self._started and self._initial_word_timestamp != -1:
+                        await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
+                    return
                 continue
 
             if "error" in msg:
@@ -731,8 +744,22 @@ class InworldTTSService(AudioContextWordTTSService):
             The messages.
         """
         while True:
-            await self._process_messages()
+            try:
+                await self._process_messages()
+            except ConnectionClosedOK as e:
+                logger.debug(f"{self} connection closed normally: {e}")
+            except ConnectionClosedError as e:
+                logger.warning(f"{self} connection closed, but with an error: {e}")
+            except Exception as e:
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+                await self._report_error(ErrorFrame(message))
+
+            if not self._reconnect_on_error:
+                break
+
             # Inworld may disconnect after period of inactivity, so we try to reconnect
+            await self._disconnect_websocket()
             logger.debug(f"{self} Inworld connection was disconnected, reconnecting")
             await self._connect_websocket()
 
