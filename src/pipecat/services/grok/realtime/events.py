@@ -183,9 +183,7 @@ class FunctionTool(BaseModel):
 
 
 # Union type for all Grok tools
-GrokTool = Union[
-    WebSearchTool, XSearchTool, FileSearchTool, FunctionTool, Dict[str, Any]
-]
+GrokTool = Union[WebSearchTool, XSearchTool, FileSearchTool, FunctionTool, Dict[str, Any]]
 
 
 #
@@ -238,9 +236,7 @@ class ItemContent(BaseModel):
         transcript: Transcribed text for audio items.
     """
 
-    type: Literal[
-        "text", "audio", "input_text", "input_audio", "output_text", "output_audio"
-    ]
+    type: Literal["text", "audio", "input_text", "input_audio", "output_text", "output_audio"]
     text: Optional[str] = None
     audio: Optional[str] = None  # base64-encoded audio
     transcript: Optional[str] = None

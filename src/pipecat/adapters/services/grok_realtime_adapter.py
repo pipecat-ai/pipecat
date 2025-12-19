@@ -50,9 +50,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         """Get the identifier used in LLMSpecificMessage instances for Grok Realtime."""
         return "grok-realtime"
 
-    def get_llm_invocation_params(
-        self, context: LLMContext
-    ) -> GrokRealtimeLLMInvocationParams:
+    def get_llm_invocation_params(self, context: LLMContext) -> GrokRealtimeLLMInvocationParams:
         """Get Grok Realtime-specific LLM invocation parameters from a universal LLM context.
 
         Args:
@@ -128,9 +126,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
             elif isinstance(content, list):
                 system_instruction = content[0].get("text")
             if not messages:
-                return self.ConvertedMessages(
-                    messages=[], system_instruction=system_instruction
-                )
+                return self.ConvertedMessages(messages=[], system_instruction=system_instruction)
 
         # Single user message can be sent normally
         if len(messages) == 1 and messages[0].get("role") == "user":
@@ -210,9 +206,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
                 arguments=tc["function"]["arguments"],
             )
 
-        logger.error(
-            f"Unhandled message type in _from_universal_context_message: {message}"
-        )
+        logger.error(f"Unhandled message type in _from_universal_context_message: {message}")
 
     @staticmethod
     def _to_grok_function_format(function: FunctionSchema) -> Dict[str, Any]:
@@ -235,9 +229,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
             },
         }
 
-    def to_provider_tools_format(
-        self, tools_schema: ToolsSchema
-    ) -> List[Dict[str, Any]]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
         """Convert tool schemas to Grok Realtime format.
 
         Supports both standard function tools and Grok-specific tools
@@ -251,9 +243,7 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         """
         # Convert standard function tools
         functions_schema = tools_schema.standard_tools
-        standard_tools = [
-            self._to_grok_function_format(func) for func in functions_schema
-        ]
+        standard_tools = [self._to_grok_function_format(func) for func in functions_schema]
 
         # Support shimmed custom tools for backward compatibility
         shimmed_tools = []

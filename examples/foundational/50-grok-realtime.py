@@ -51,7 +51,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.grok.realtime.events import (
     AudioConfiguration,
     AudioInputFormat,
@@ -63,6 +62,7 @@ from pipecat.services.grok.realtime.events import (
     XSearchTool,
 )
 from pipecat.services.grok.realtime.llm import GrokRealtimeLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -149,9 +149,7 @@ restaurant_function = FunctionSchema(
 )
 
 # Create tools schema with custom functions
-tools = ToolsSchema(
-    standard_tools=[weather_function, time_function, restaurant_function]
-)
+tools = ToolsSchema(standard_tools=[weather_function, time_function, restaurant_function])
 
 
 # --- Transport Configuration ---
@@ -230,9 +228,7 @@ Always be helpful and proactive in offering assistance.""",
     # Register function handlers
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_current_time", get_current_time)
-    llm.register_function(
-        "get_restaurant_recommendation", get_restaurant_recommendation
-    )
+    llm.register_function("get_restaurant_recommendation", get_restaurant_recommendation)
 
     # Create transcript processor for logging
     transcript = TranscriptProcessor()
