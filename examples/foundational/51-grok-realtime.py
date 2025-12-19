@@ -209,7 +209,6 @@ Always be helpful and proactive in offering assistance.""",
         api_key=os.getenv("XAI_API_KEY"),
         session_properties=session_properties,
         start_audio_paused=False,
-        sample_rate=24000,
     )
 
     # Register function handlers
