@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
     UserAudioRawFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
@@ -340,6 +341,13 @@ class UltravoxRealtimeLLMService(LLMService):
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            # This may or may not align with Ultravox's end of user speech detection,
+            # which relies on a more complex endpointing model. In particular it will
+            # yield a seemingly very slow TTFB in the case of endpointing false
+            # negatives. It will be close in the majority of cases though.
+            await self.start_ttfb_metrics()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -462,6 +470,7 @@ class UltravoxRealtimeLLMService(LLMService):
         if not audio:
             return
         if not self._bot_responding:
+            await self.stop_ttfb_metrics()
             await self.push_frame(LLMFullResponseStartFrame())
             await self.push_frame(TTSStartedFrame())
             self._bot_responding = "voice"
@@ -507,6 +516,7 @@ class UltravoxRealtimeLLMService(LLMService):
             await self.push_frame(frame)
         if medium == "text":
             if text:
+                await self.stop_ttfb_metrics()
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.push_frame(TTSStartedFrame())
                 await self.push_frame(TTSTextFrame(text=text, aggregated_by=AggregationType.WORD))
