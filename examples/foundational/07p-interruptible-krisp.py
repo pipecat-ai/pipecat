@@ -9,8 +9,8 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-
 from pipecat.audio.filters.krisp_filter import KrispFilter
+
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
