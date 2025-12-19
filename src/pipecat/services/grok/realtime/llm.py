@@ -152,7 +152,7 @@ class GrokRealtimeLLMService(LLMService):
                 voice=voice,
                 turn_detection=events.TurnDetection(type="server_vad"),
                 audio=events.AudioConfiguration(
-                    input=events.AudioInputFormat(
+                    input=events.AudioInput(
                         format=events.PCMAudioFormat(rate=sample_rate)
                     ),
                     output=events.AudioOutputFormat(

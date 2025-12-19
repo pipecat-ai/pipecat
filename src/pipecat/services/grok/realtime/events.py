@@ -90,8 +90,8 @@ class TurnDetection(BaseModel):
 #
 
 
-class AudioInputFormat(BaseModel):
-    """Audio input format configuration.
+class AudioInput(BaseModel):
+    """Audio input configuration.
 
     Parameters:
         format: The format configuration for input audio.
@@ -118,7 +118,7 @@ class AudioConfiguration(BaseModel):
         output: Configuration for output audio.
     """
 
-    input: Optional[AudioInputFormat] = None
+    input: Optional[AudioInput] = None
     output: Optional[AudioOutputFormat] = None
 
 

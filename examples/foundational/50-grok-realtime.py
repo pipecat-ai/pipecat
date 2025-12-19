@@ -53,7 +53,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.grok.realtime.events import (
     AudioConfiguration,
-    AudioInputFormat,
+    AudioInput,
     AudioOutputFormat,
     PCMAudioFormat,
     SessionProperties,
@@ -149,7 +149,9 @@ restaurant_function = FunctionSchema(
 )
 
 # Create tools schema with custom functions
-tools = ToolsSchema(standard_tools=[weather_function, time_function, restaurant_function])
+tools = ToolsSchema(
+    standard_tools=[weather_function, time_function, restaurant_function]
+)
 
 
 # --- Transport Configuration ---
@@ -190,7 +192,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         turn_detection=TurnDetection(type="server_vad"),
         # Configure audio format (PCM at 24kHz is recommended)
         audio=AudioConfiguration(
-            input=AudioInputFormat(format=PCMAudioFormat(rate=24000)),
+            input=AudioInput(format=PCMAudioFormat(rate=24000)),
             output=AudioOutputFormat(format=PCMAudioFormat(rate=24000)),
         ),
         # System instructions
@@ -228,7 +230,9 @@ Always be helpful and proactive in offering assistance.""",
     # Register function handlers
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_current_time", get_current_time)
-    llm.register_function("get_restaurant_recommendation", get_restaurant_recommendation)
+    llm.register_function(
+        "get_restaurant_recommendation", get_restaurant_recommendation
+    )
 
     # Create transcript processor for logging
     transcript = TranscriptProcessor()
