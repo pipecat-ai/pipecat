@@ -434,9 +434,6 @@ class GrokRealtimeLLMService(LLMService):
                 logger.warning(f"Failed to parse server event: {e}")
                 continue
 
-            # Debug log all received events
-            logger.debug(f"Grok event received: {evt.type}")
-
             if evt.type == "ping":
                 # Ignore ping events (keep-alive)
                 pass
@@ -481,13 +478,11 @@ class GrokRealtimeLLMService(LLMService):
 
     async def _handle_evt_conversation_created(self, evt):
         """Handle conversation.created event - first event after connecting."""
-        logger.debug(f"Grok conversation created: {evt.conversation.id}")
-        # Send session configuration
         await self._update_settings()
 
     async def _handle_evt_response_created(self, evt):
         """Handle response.created event - response generation started."""
-        logger.debug(f"Grok response created: {evt.response.id}")
+        pass
 
     async def _handle_evt_session_updated(self, evt):
         """Handle session.updated event."""
@@ -543,9 +538,6 @@ class GrokRealtimeLLMService(LLMService):
                 if content.type == "input_audio" and content.transcript:
                     transcript = content.transcript.strip()
                     if transcript:
-                        logger.info(
-                            f"[Transcription:user from item.added] {transcript}"
-                        )
                         await self.push_frame(
                             TranscriptionFrame(
                                 transcript, "", time_now_iso8601(), result=evt
@@ -559,9 +551,6 @@ class GrokRealtimeLLMService(LLMService):
 
     async def _handle_evt_input_audio_transcription_completed(self, evt):
         """Handle input audio transcription completed event."""
-        logger.debug(
-            f"Grok transcription received: item_id={evt.item_id}, transcript='{evt.transcript}'"
-        )
         await self._call_event_handler(
             "on_conversation_item_updated", evt.item_id, None
         )
@@ -569,13 +558,10 @@ class GrokRealtimeLLMService(LLMService):
         # Only push transcription if we have actual text (not empty or just whitespace)
         transcript = evt.transcript.strip() if evt.transcript else ""
         if transcript:
-            logger.info(f"[Transcription:user] {transcript}")
             await self.push_frame(
                 TranscriptionFrame(transcript, "", time_now_iso8601(), result=evt),
                 FrameDirection.UPSTREAM,
             )
-        else:
-            logger.debug("Received empty transcription from Grok, skipping frame")
 
     async def _handle_evt_response_done(self, evt):
         """Handle response.done event."""
