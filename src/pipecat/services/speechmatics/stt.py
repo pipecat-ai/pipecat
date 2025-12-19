@@ -88,7 +88,6 @@ class SpeechmaticsSTTService(STTService):
     # Export related classes as class attributes
     TurnDetectionMode = TurnDetectionMode
     AudioEncoding = AudioEncoding
-    EndOfUtteranceMode = EndOfUtteranceMode
     OperatingPoint = OperatingPoint
     SpeakerFocusMode = SpeakerFocusMode
     SpeakerFocusConfig = SpeakerFocusConfig
