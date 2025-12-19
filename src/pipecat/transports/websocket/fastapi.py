@@ -84,17 +84,25 @@ class FastAPIWebsocketClient:
     with support for both binary and text message types.
     """
 
-    def __init__(self, websocket: WebSocket, is_binary: bool, callbacks: FastAPIWebsocketCallbacks):
+    def __init__(
+        self,
+        websocket: WebSocket,
+        is_binary: bool,
+        callbacks: FastAPIWebsocketCallbacks,
+        mixed_mode: bool = False,
+    ):
         """Initialize the WebSocket client.
 
         Args:
             websocket: The FastAPI WebSocket connection.
             is_binary: Whether to use binary message format.
             callbacks: Event callback functions.
+            mixed_mode: Whether to support both binary and text messages (e.g., for Vonage).
         """
         self._websocket = websocket
         self._closing = False
         self._is_binary = is_binary
+        self._mixed_mode = mixed_mode
         self._callbacks = callbacks
         self._leave_counter = 0
 
@@ -112,7 +120,27 @@ class FastAPIWebsocketClient:
         Returns:
             An async iterator yielding bytes or strings based on message type.
         """
+        if self._mixed_mode:
+            # For mixed mode (e.g., Vonage), we need to handle both binary and text messages
+            # We'll use iter_json() which can handle both types
+            return self._receive_mixed()
         return self._websocket.iter_bytes() if self._is_binary else self._websocket.iter_text()
+
+    async def _receive_mixed(self):
+        """Receive both binary and text messages for mixed mode protocols."""
+        while True:
+            try:
+                # Receive raw message to determine type
+                message = await self._websocket.receive()
+                if "bytes" in message:
+                    yield message["bytes"]
+                elif "text" in message:
+                    yield message["text"]
+                else:
+                    # Connection closed or other event
+                    break
+            except Exception:
+                break
 
     async def send(self, data: str | bytes):
         """Send data through the WebSocket connection.
@@ -122,7 +150,13 @@ class FastAPIWebsocketClient:
         """
         try:
             if self._can_send():
-                if self._is_binary:
+                # In mixed mode, determine type from the data itself
+                if self._mixed_mode:
+                    if isinstance(data, bytes):
+                        await self._websocket.send_bytes(data)
+                    else:
+                        await self._websocket.send_text(data)
+                elif self._is_binary:
                     await self._websocket.send_bytes(data)
                 else:
                     await self._websocket.send_text(data)
@@ -511,9 +545,12 @@ class FastAPIWebsocketTransport(BaseTransport):
         )
 
         is_binary = False
+        mixed_mode = False
         if self._params.serializer:
-            is_binary = self._params.serializer.type == FrameSerializerType.BINARY
-        self._client = FastAPIWebsocketClient(websocket, is_binary, self._callbacks)
+            serializer_type = self._params.serializer.type
+            is_binary = serializer_type == FrameSerializerType.BINARY
+            mixed_mode = serializer_type == FrameSerializerType.MIXED
+        self._client = FastAPIWebsocketClient(websocket, is_binary, self._callbacks, mixed_mode)
 
         self._input = FastAPIWebsocketInputTransport(
             self, self._client, self._params, name=self._input_name
