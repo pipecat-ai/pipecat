@@ -521,8 +521,15 @@ class GrokRealtimeLLMService(LLMService):
     async def _handle_evt_conversation_item_added(self, evt):
         """Handle conversation.item.added event."""
         if evt.item.type == "function_call":
+            # Track this function call for when arguments are completed
+            # Only add if not already tracked (prevent duplicates)
             if evt.item.call_id not in self._pending_function_calls:
                 self._pending_function_calls[evt.item.call_id] = evt.item
+            else:
+                # Grok may send multiple conversation.item.added events for the same function call
+                logger.debug(
+                    f"Function call {evt.item.call_id} already tracked, skipping"
+                )
 
         await self._call_event_handler(
             "on_conversation_item_created", evt.item.id, evt.item
