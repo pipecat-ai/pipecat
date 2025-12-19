@@ -155,7 +155,7 @@ class GrokRealtimeLLMService(LLMService):
                     input=events.AudioInput(
                         format=events.PCMAudioFormat(rate=sample_rate)
                     ),
-                    output=events.AudioOutputFormat(
+                    output=events.AudioOutput(
                         format=events.PCMAudioFormat(rate=sample_rate)
                     ),
                 ),

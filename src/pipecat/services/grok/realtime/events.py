@@ -100,8 +100,8 @@ class AudioInput(BaseModel):
     format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
 
 
-class AudioOutputFormat(BaseModel):
-    """Audio output format configuration.
+class AudioOutput(BaseModel):
+    """Audio output configuration.
 
     Parameters:
         format: The format configuration for output audio.
@@ -119,7 +119,7 @@ class AudioConfiguration(BaseModel):
     """
 
     input: Optional[AudioInput] = None
-    output: Optional[AudioOutputFormat] = None
+    output: Optional[AudioOutput] = None
 
 
 #

@@ -54,7 +54,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.grok.realtime.events import (
     AudioConfiguration,
     AudioInput,
-    AudioOutputFormat,
+    AudioOutput,
     PCMAudioFormat,
     SessionProperties,
     TurnDetection,
@@ -193,7 +193,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Configure audio format (PCM at 24kHz is recommended)
         audio=AudioConfiguration(
             input=AudioInput(format=PCMAudioFormat(rate=24000)),
-            output=AudioOutputFormat(format=PCMAudioFormat(rate=24000)),
+            output=AudioOutput(format=PCMAudioFormat(rate=24000)),
         ),
         # System instructions
         instructions="""You are a helpful and friendly AI assistant powered by Grok.
