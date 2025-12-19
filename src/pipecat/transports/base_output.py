@@ -48,7 +48,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
 
-BOT_VAD_STOP_SECS = 0.35
+BOT_VAD_STOP_SECS = 1.0
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -617,8 +617,10 @@ class BaseOutputTransport(FrameProcessor):
             if not self._bot_speaking:
                 return
 
+            time_since_last_speech = time.time() - self._bot_speech_last_time if self._bot_speech_last_time else 0
             logger.debug(
-                f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
+                f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking. "
+                f"Time since last audio frame: {time_since_last_speech:.3f}s"
             )
 
             downstream_frame = BotStoppedSpeakingFrame()
@@ -696,6 +698,10 @@ class BaseOutputTransport(FrameProcessor):
                         self._audio_queue.task_done()
                     except asyncio.TimeoutError:
                         # Notify the bot stopped speaking upstream if necessary.
+                        logger.warning(
+                            f"BOT_VAD_STOP timeout triggered after {vad_stop_secs}s with no audio frames. "
+                            f"Queue size: {self._audio_queue.qsize()}"
+                        )
                         await self._bot_stopped_speaking()
 
             async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
@@ -713,6 +719,10 @@ class BaseOutputTransport(FrameProcessor):
                         # Notify the bot stopped speaking upstream if necessary.
                         diff_time = time.time() - last_frame_time
                         if diff_time > vad_stop_secs:
+                            logger.warning(
+                                f"BOT_VAD_STOP timeout triggered (mixer mode) after {diff_time:.3f}s with no audio frames. "
+                                f"Queue size: {self._audio_queue.qsize()}"
+                            )
                             await self._bot_stopped_speaking()
                         # Generate an audio frame with only the mixer's part.
                         frame = OutputAudioRawFrame(
