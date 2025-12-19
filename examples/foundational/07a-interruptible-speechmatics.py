@@ -77,7 +77,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     TTS Features:
     - Low latency streaming audio synthesis
-    - Multiple voice options available including `sarah`, `theo`, and `megan`
+    - Multiple voice options available including `sarah`, `theo`, `megan` and `jack`
 
     For more information:
     - STT: https://docs.speechmatics.com/rt-api-ref
@@ -90,8 +90,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.getenv("SPEECHMATICS_API_KEY"),
             params=SpeechmaticsSTTService.InputParams(
                 language=Language.EN,
-                enable_diarization=True,
-                preset="fixed",
                 speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
             ),
         )

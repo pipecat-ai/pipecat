@@ -9,6 +9,7 @@
 import asyncio
 import os
 import time
+from enum import Enum
 from typing import Any, AsyncGenerator
 
 from dotenv import load_dotenv
@@ -57,17 +58,23 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-__all__ = [
-    "AdditionalVocabEntry",
-    "EndOfUtteranceMode",
-    "OperatingPoint",
-    "SpeakerFocusConfig",
-    "SpeakerFocusMode",
-    "SpeakerIdentifier",
-]
-
-
 load_dotenv()
+
+
+class TurnDetectionMode(str, Enum):
+    """Endpoint and turn detection handling mode.
+
+    How the STT engine handles the endpointing of speech. If using Pipecat's built-in endpointing,
+    then use `TurnDetectionMode.EXTERNAL` (default).
+
+    To use the STT engine's built-in endpointing, then use `TurnDetectionMode.ADAPTIVE` for simple
+    voice activity detection or `TurnDetectionMode.SMART_TURN` for more advanced ML-based
+    endpointing.
+    """
+
+    EXTERNAL = "external"
+    ADAPTIVE = "adaptive"
+    SMART_TURN = "smart_turn"
 
 
 class SpeechmaticsSTTService(STTService):
@@ -78,6 +85,16 @@ class SpeechmaticsSTTService(STTService):
     and speaker diarization.
     """
 
+    # Export related classes as class attributes
+    TurnDetectionMode = TurnDetectionMode
+    AudioEncoding = AudioEncoding
+    EndOfUtteranceMode = EndOfUtteranceMode
+    OperatingPoint = OperatingPoint
+    SpeakerFocusMode = SpeakerFocusMode
+    SpeakerFocusConfig = SpeakerFocusConfig
+    SpeakerIdentifier = SpeakerIdentifier
+    AdditionalVocabEntry = AdditionalVocabEntry
+
     class InputParams(BaseModel):
         """Configuration parameters for Speechmatics STT service.
 
@@ -86,11 +103,9 @@ class SpeechmaticsSTTService(STTService):
 
             language: Language code for transcription. Defaults to `Language.EN`.
 
-            preset: Preset configuration for the STT engine. Defaults to "adaptive".
-
-            enable_vad: Enable VAD to trigger end of utterance detection. This should be used
-                without any other VAD enabled in the agent and will emit the speaker started
-                and stopped frames. Defaults to False.
+            turn_detection_mode: Endpoint handling, one of `TurnDetectionMode.EXTERNAL`,
+                `TurnDetectionMode.ADAPTIVE` and `TurnDetectionMode.SMART_TURN`.
+                Defaults to `TurnDetectionMode.EXTERNAL`.
 
             speaker_active_format: Formatter for active speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
@@ -199,11 +214,8 @@ class SpeechmaticsSTTService(STTService):
         domain: str | None = None
         language: Language | str = Language.EN
 
-        # Preset
-        preset: str | None = "adaptive"
-
-        # VAD / turn endpointing
-        enable_vad: bool = False
+        # Endpointing mode
+        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.EXTERNAL
 
         # Output formatting
         speaker_active_format: str | None = None
@@ -230,7 +242,6 @@ class SpeechmaticsSTTService(STTService):
         max_delay: float | None = None
         end_of_utterance_silence_trigger: float | None = None
         end_of_utterance_max_delay: float | None = None
-        end_of_utterance_mode: EndOfUtteranceMode | None = None
         punctuation_overrides: dict | None = None
         include_partials: bool | None = None
 
@@ -329,15 +340,10 @@ class SpeechmaticsSTTService(STTService):
             )
 
         # Framework options
-        self._enable_vad: bool = params.enable_vad
+        self._enable_vad: bool = self._config.end_of_utterance_mode != EndOfUtteranceMode.EXTERNAL
         self._speaker_active_format: str = params.speaker_active_format
         self._speaker_passive_format: str = (
             params.speaker_passive_format or params.speaker_active_format
-        )
-
-        # Log the config
-        logger.debug(
-            f"{self} config: {self._config.to_json(exclude_none=True, exclude_defaults=True, exclude_unset=True)}"
         )
 
         # Metrics
@@ -367,13 +373,13 @@ class SpeechmaticsSTTService(STTService):
 
     async def stop(self, frame: EndFrame):
         """Called when the session ends."""
-        self.cancel_task(self._stt_msg_task)
+        await self.cancel_task(self._stt_msg_task)
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
-        self.cancel_task(self._stt_msg_task)
+        await self.cancel_task(self._stt_msg_task)
         await super().cancel(frame)
         await self._disconnect()
 
@@ -469,16 +475,7 @@ class SpeechmaticsSTTService(STTService):
     def _prepare_config(self, params: InputParams) -> VoiceAgentConfig:
         """Parse the InputParams into VoiceAgentConfig."""
         # Preset
-        if params.preset:
-            config = VoiceAgentConfigPreset.load(params.preset)
-        else:
-            config = VoiceAgentConfig()
-
-        # Override for external trigger
-        if not params.enable_vad:
-            params.end_of_utterance_mode = EndOfUtteranceMode.EXTERNAL
-            params.max_delay = 2.0
-            params.end_of_utterance_max_delay = 10.0
+        config = VoiceAgentConfigPreset.load(params.turn_detection_mode.value)
 
         # Language + domain
         config.language = self._language_to_speechmatics_language(params.language)
@@ -502,7 +499,6 @@ class SpeechmaticsSTTService(STTService):
             "max_delay",
             "end_of_utterance_silence_trigger",
             "end_of_utterance_max_delay",
-            "end_of_utterance_mode",
             "punctuation_overrides",
             "include_partials",
             "enable_diarization",
