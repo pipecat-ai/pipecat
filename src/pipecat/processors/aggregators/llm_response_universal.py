@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -300,6 +301,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, SpeechControlParamsFrame):
+            await self._handle_speech_control_params(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -366,6 +369,16 @@ class LLMUserAggregator(LLMContextAggregator):
         self.set_messages(frame.messages)
         if frame.run_llm:
             await self.push_context_frame()
+
+    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
+        if not frame.turn_params:
+            return
+
+        logger.error(
+            f"{self}: turn_analyzer in base input transport is deprecated and "
+            "might result in unexpected behavior. Use PipelineTask's turn_start_strategies with "
+            "TurnAnalyzerBotTurnStartStrategy instead."
+        )
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
