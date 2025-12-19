@@ -156,26 +156,20 @@ tools = ToolsSchema(
 
 # --- Transport Configuration ---
 
-# Grok uses 24kHz audio by default, so we configure the transports to match.
 # Note: We don't need local VAD since Grok has built-in server-side VAD.
+# Audio sample rates are configured via PipelineParams, not transport params.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
-        audio_in_sample_rate=24000,
         audio_out_enabled=True,
-        audio_out_sample_rate=24000,
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
-        audio_in_sample_rate=24000,
         audio_out_enabled=True,
-        audio_out_sample_rate=24000,
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
-        audio_in_sample_rate=24000,
         audio_out_enabled=True,
-        audio_out_sample_rate=24000,
     ),
 }
 
