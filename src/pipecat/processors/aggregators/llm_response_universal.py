@@ -211,19 +211,32 @@ class LLMContextAggregator(FrameProcessor):
 
 
 class LLMUserAggregator(LLMContextAggregator):
-    """User LLM aggregator that processes speech-to-text transcriptions.
+    """User LLM aggregator that aggregates user input during active user turns.
 
-    This aggregator handles the complex logic of aggregating user speech transcriptions
-    from STT services. It manages multiple scenarios including:
+    This aggregator operates within turn boundaries defined by the configured
+    user and bot turn start strategies. User turn start strategies indicate when
+    a user turn begins, while bot turn start strategies signal when the user
+    turn has ended and control transitions to the bot turn.
 
-    - Transcriptions received between VAD events
-    - Transcriptions received outside VAD events
-    - Interim vs final transcriptions
-    - User interruptions during bot speech
-    - Emulated VAD for whispered or short utterances
+    The aggregator collects and aggregates speech-to-text transcriptions that
+    occur while a user turn is active and pushes the final aggregation when the
+    user turn is finished.
 
-    The aggregator uses timeouts to handle cases where transcriptions arrive
-    after VAD events or when no VAD is available.
+    Event handlers available:
+
+    - on_user_turn_started: Called when the user turn starts
+    - on_bot_turn_started: Called when the user turn ends and it is now the bot’s turn
+
+    Example::
+
+        @aggregator.event_handler("on_user_turn_started")
+        async def on_user_turn_started(aggregator, strategy):
+            ...
+
+        @aggregator.event_handler("on_bot_turn_started")
+        async def on_bot_turn_started(aggregator, strategy):
+            ...
+
     """
 
     def __init__(
@@ -238,11 +251,14 @@ class LLMUserAggregator(LLMContextAggregator):
         Args:
             context: The LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
-            **kwargs: Additional arguments. Supports deprecated 'aggregation_timeout'.
+            **kwargs: Additional arguments.
         """
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
         self._user_speaking = False
+
+        self._register_event_handler("on_user_turn_started")
+        self._register_event_handler("on_bot_turn_started")
 
     async def cleanup(self):
         """Clean up processor resources."""
@@ -434,6 +450,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.broadcast_frame(UserStartedSpeakingFrame)
             await self.broadcast_frame(InterruptionFrame)
 
+        await self._call_event_handler("on_user_turn_started", strategy)
+
     async def _trigger_bot_turn_start(self, strategy: BaseBotTurnStartStrategy):
         # Prevent two consecutive bot turn starts.
         if not self._user_speaking:
@@ -450,6 +468,8 @@ class LLMUserAggregator(LLMContextAggregator):
             logger.debug(f"User stopped speaking (bot turn start strategy: {strategy})")
             # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStoppedSpeakingFrame)
+
+        await self._call_event_handler("on_bot_turn_started", strategy)
 
         # Always push context frame.
         await self.push_aggregation()
