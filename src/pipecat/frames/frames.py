@@ -1093,15 +1093,17 @@ class StartInterruptionFrame(InterruptionFrame):
 
 @dataclass
 class UserStartedSpeakingFrame(SystemFrame):
-    """Frame indicating user has started speaking.
+    """Frame indicating that the user turn has started.
 
-    Emitted by VAD to indicate that a user has started speaking. This can be
-    used for interruptions or other times when detecting that someone is
-    speaking is more important than knowing what they're saying (as you will
-    get with a TranscriptionFrame).
+    Emitted when the user turn starts, which usually means that some
+    transcriptions are already available.
 
     Parameters:
         emulated: Whether this event was emulated rather than detected by VAD.
+
+            .. deprecated:: 0.0.99
+                This field is deprecated and will be removed in a future version.
+
     """
 
     emulated: bool = False
@@ -1109,12 +1111,17 @@ class UserStartedSpeakingFrame(SystemFrame):
 
 @dataclass
 class UserStoppedSpeakingFrame(SystemFrame):
-    """Frame indicating user has stopped speaking.
+    """Frame indicating that the user turn has ended.
 
-    Emitted by the VAD to indicate that a user stopped speaking.
+    Emitted when the user turn ends. This usually coincides with the start of
+    the bot turn.
 
     Parameters:
         emulated: Whether this event was emulated rather than detected by VAD.
+
+            .. deprecated:: 0.0.99
+                This field is deprecated and will be removed in a future version.
+
     """
 
     emulated: bool = False

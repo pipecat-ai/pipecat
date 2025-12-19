@@ -407,7 +407,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._params.enable_user_speaking_frames:
             logger.debug(f"User started speaking (user turn start strategy: {strategy})")
             # TODO(aleix): These frames should really come from the top of the pipeline.
-            await self.broadcast_frame(UserStartedSpeakingFrame, emulated=strategy is None)
+            await self.broadcast_frame(UserStartedSpeakingFrame)
             await self.broadcast_frame(InterruptionFrame)
 
     async def _trigger_bot_turn_start(self, strategy: BaseBotTurnStartStrategy):
@@ -419,7 +419,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._params.enable_user_speaking_frames:
             logger.debug(f"User stopped speaking (bot turn start strategy: {strategy})")
             # TODO(aleix): This frame should really come from the top of the pipeline.
-            await self.broadcast_frame(UserStoppedSpeakingFrame, emulated=strategy is None)
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         # Always push context frame.
         await self.push_aggregation()
