@@ -617,7 +617,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
 
                 audio = base64.b64decode(msg["audio"])
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
@@ -868,6 +868,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        await super()._update_settings(settings)
+        # Update voice settings for the next context creation
+        self._voice_settings = self._set_voice_settings()
+
     def _reset_state(self):
         """Reset internal state variables."""
         self._cumulative_time = 0
@@ -1042,7 +1047,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
                 # Start TTS sequence if not already started
                 if not self._started:
-                    self.start_word_timestamps()
+                    await self.start_word_timestamps()
                     yield TTSStartedFrame()
                     self._started = True
 

@@ -23,7 +23,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
@@ -882,6 +881,11 @@ class OpenAIRealtimeLLMService(LLMService):
             OpenAIContextAggregatorPair: A pair of context aggregators, one for
             the user and one for the assistant, encapsulated in an
             OpenAIContextAggregatorPair.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         # Log warning about transcription frame direction change in 0.0.92.
         # We're putting this warning here rather than in the constructor so
@@ -915,7 +919,7 @@ class OpenAIRealtimeLLMService(LLMService):
             "  context = LLMContext(messages, tools)\n"
             "  context_aggregator = LLMContextAggregatorPair(context)\n"
         )
-
+        # from_openai_context handles deprecation warning already
         context = LLMContext.from_openai_context(context)
         assistant_params.expect_stripped_words = False
         return LLMContextAggregatorPair(

@@ -32,7 +32,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
@@ -563,18 +562,18 @@ class InputParams(BaseModel):
         context_window_compression: Context compression settings. Defaults to None.
         thinking: Thinking settings. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-09-2025".
+            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
         enable_affective_dialog: Enable affective dialog, which allows Gemini
             to adapt to expression and tone. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-09-2025".
+            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
             Also note that this setting may require specifying an API version that
             supports it, e.g. HttpOptions(api_version="v1alpha").
         proactivity: Proactivity settings, which allows Gemini to proactively
             decide how to behave, such as whether to avoid responding to
             content that is not relevant. Defaults to None.
             Note that these settings may require specifying a model that
-            supports them, e.g. "gemini-2.5-flash-native-audio-preview-09-2025".
+            supports them, e.g. "gemini-2.5-flash-native-audio-preview-12-2025".
             Also note that this setting may require specifying an API version that
             supports it, e.g. HttpOptions(api_version="v1alpha").
         extra: Additional parameters. Defaults to empty dict.
@@ -615,7 +614,7 @@ class GeminiLiveLLMService(LLMService):
         *,
         api_key: str,
         base_url: Optional[str] = None,
-        model="models/gemini-2.0-flash-live-001",
+        model="models/gemini-2.5-flash-native-audio-preview-12-2025",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
@@ -638,7 +637,7 @@ class GeminiLiveLLMService(LLMService):
                     Please use `http_options` to customize requests made by the
                     API client.
 
-            model: Model identifier to use. Defaults to "models/gemini-2.0-flash-live-001".
+            model: Model identifier to use. Defaults to "models/gemini-2.5-flash-native-audio-preview-12-2025".
             voice_id: TTS voice identifier. Defaults to "Charon".
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
@@ -1772,7 +1771,13 @@ class GeminiLiveLLMService(LLMService):
 
         Returns:
             A pair of user and assistant context aggregators.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # from_openai_context handles deprecation warning
         context = LLMContext.from_openai_context(context)
         assistant_params.expect_stripped_words = False
         return LLMContextAggregatorPair(

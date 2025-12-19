@@ -54,7 +54,7 @@ aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.2.0; python_version>='3.12'" ]
 azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "pipecat-ai[websockets-base]" ]
 cerebras = []
-daily = [ "daily-python~=0.22.0" ]
+daily = [ "daily-python~=0.23.0" ]
 deepgram = [ "deepgram-sdk~=4.7.0", "pipecat-ai[websockets-base]" ]
 deepseek = []
 elevenlabs = [ "pipecat-ai[websockets-base]" ]
@@ -87,6 +87,7 @@ neuphonic = [ "pipecat-ai[websockets-base]" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 nvidia = [ "nvidia-riva-client~=2.21.1" ]
 openai = [ "pipecat-ai[websockets-base]" ]
+rnnoise = [ "pyrnnoise~=0.4.1" ]
 openpipe = [ "openpipe>=4.50.0,<6" ]
 openrouter = []
 perplexity = []
@@ -109,7 +110,7 @@ strands = [ "strands-agents>=1.9.1,<2" ]
 tavus=[]
 together = []
 tracing = [ "opentelemetry-sdk>=1.33.0", "opentelemetry-api>=1.33.0", "opentelemetry-instrumentation>=0.54b0" ]
-ultravox = [ "transformers>=4.48.0", "vllm>=0.9.0" ]
+ultravox = [ "pipecat-ai[websockets-base]" ]
 webrtc = [ "aiortc>=1.13.0,<2", "opencv-python>=4.11.0.86,<5" ]
 websocket = [ "pipecat-ai[websockets-base]", "fastapi>=0.115.6,<0.122.0" ]
 websockets-base = [ "websockets>=13.1,<16.0" ]
@@ -124,7 +125,7 @@ dev = [
     "pre-commit~=4.2.0",
     "pyright>=1.1.404,<1.2",
     "pytest~=8.4.1",
-    "pytest-asyncio~=1.1.0",
+    "pytest-asyncio~=1.3.0",
     "pytest-aiohttp==1.1.0",
     "ruff>=0.12.11,<1",
     "setuptools~=78.1.1",
@@ -217,6 +218,7 @@ directory = "changelog"
 start_string = "<!-- towncrier release notes start -->\n"
 template = "changelog/_template.md.j2"
 title_format = "## [{version}] - {project_date}"
+issue_format = "[#{issue}](https://github.com/pipecat-ai/pipecat/pull/{issue})"
 underlines = ["", "", ""]
 wrap = true
 

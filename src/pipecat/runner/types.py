@@ -11,9 +11,48 @@ information to bot functions.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import WebSocket
+from pydantic import BaseModel
+
+
+class DialinSettings(BaseModel):
+    """Dial-in settings from the Daily webhook.
+
+    This model matches the structure sent by Pipecat Cloud and Daily.co webhooks
+    for incoming PSTN/SIP calls.
+
+    Parameters:
+        call_id: Unique identifier for the call (UUID representing sessionId in SIP Network)
+        call_domain: Daily domain for the call (UUID representing Daily Domain on SIP Network)
+        To: The dialed phone number (optional)
+        From: The caller's phone number (optional)
+        sip_headers: Optional SIP headers from the call
+    """
+
+    call_id: str
+    call_domain: str
+    To: Optional[str] = None
+    From: Optional[str] = None
+    sip_headers: Optional[Dict[str, str]] = None
+
+
+class DailyDialinRequest(BaseModel):
+    """Request data for Daily PSTN dial-in requests.
+
+    This is the structure passed in runner_args.body for dial-in calls.
+    It matches the payload structure from Pipecat Cloud's dial-in webhook handler.
+
+    Parameters:
+        dialin_settings: Dial-in configuration including call_id, call_domain, To, From
+        daily_api_key: Daily API key for pinlessCallUpdate (required for dial-in)
+        daily_api_url: Daily API URL (staging or production)
+    """
+
+    dialin_settings: DialinSettings
+    daily_api_key: str
+    daily_api_url: str
 
 
 @dataclass

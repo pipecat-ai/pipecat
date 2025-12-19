@@ -2651,6 +2651,7 @@ class DailyTransport(BaseTransport):
 
         text = message["text"]
         timestamp = message["timestamp"]
+        track_type = message.get("trackType", None)
         raw_response = message.get("rawResponse", {})
         is_final = raw_response.get("is_final", False)
         try:
@@ -2669,6 +2670,7 @@ class DailyTransport(BaseTransport):
                 language,
                 result=message,
             )
+        frame.transport_source = track_type
 
         if self._input:
             await self._input.push_transcription_frame(frame)
