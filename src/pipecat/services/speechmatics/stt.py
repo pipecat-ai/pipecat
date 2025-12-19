@@ -154,47 +154,42 @@ class SpeechmaticsSTTService(STTService):
             audio_encoding: Audio encoding format. Defaults to AudioEncoding.PCM_S16LE.
 
             operating_point: Operating point for transcription accuracy vs. latency tradeoff. It is
-                recommended to use OperatingPoint.ENHANCED for most use cases. Default to preset.
+                recommended to use OperatingPoint.ENHANCED for most use cases. Default to enhanced.
 
             max_delay: Maximum delay in seconds for transcription. This forces the STT engine to
                 speed up the processing of transcribed words and reduces the interval between partial
-                and final results. Lower values can have an impact on accuracy. Default to preset.
+                and final results. Lower values can have an impact on accuracy.
 
             end_of_utterance_silence_trigger: Maximum delay in seconds for end of utterance trigger.
                 The delay is used to wait for any further transcribed words before emitting the final
-                word frames. The value must be lower than max_delay. Default to preset.
+                word frames. The value must be lower than max_delay.
 
             end_of_utterance_max_delay: Maximum delay in seconds for end of utterance delay.
                 The delay is used to wait for any further transcribed words before emitting the final
                 word frames. The value must be greater than end_of_utterance_silence_trigger.
-                Default to preset.
 
             punctuation_overrides: Punctuation overrides. This allows you to override the punctuation
                 in the STT engine. This is useful for languages that use different punctuation
-                than English. See documentation for more information. Default to preset.
+                than English. See documentation for more information.
 
             include_partials: Include partial segment fragments (words) in the output of
                 AddPartialSegment messages. Partial fragments from the STT will always be used for
                 speaker activity detection. This setting is used only for the formatted text output
-                of individual segments. Default to preset.
+                of individual segments.
 
             enable_diarization: Enable speaker diarization. When enabled, the STT engine will
                 determine and attribute words to unique speakers. The speaker_sensitivity
                 parameter can be used to adjust the sensitivity of diarization.
-                Default to preset.
 
             speaker_sensitivity: Diarization sensitivity. A higher value increases the sensitivity
                 of diarization and helps when two or more speakers have similar voices.
-                Default to preset.
 
             max_speakers: Maximum number of speakers to detect. This forces the STT engine to cluster
                 words into a fixed number of speakers. It should not be used to limit the number of
                 speakers, unless it is clear that there will only be a known number of speakers.
-                Default to preset.
 
             prefer_current_speaker: Prefer current speaker ID. When set to true, groups of words close
                 together are given extra weight to be identified as the same speaker.
-                Default to preset.
 
             extra_params: Extra parameters to pass to the STT engine. This is a dictionary of
                 additional parameters that can be used to configure the STT engine.
