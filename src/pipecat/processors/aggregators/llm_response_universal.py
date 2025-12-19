@@ -241,6 +241,7 @@ class LLMUserAggregator(LLMContextAggregator):
         """
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
+        self._user_speaking = False
 
     async def cleanup(self):
         """Clean up processor resources."""
@@ -251,9 +252,11 @@ class LLMUserAggregator(LLMContextAggregator):
         """Reset the aggregation state and interruption strategies."""
         await super().reset()
 
-        if self.turn_start_strategies:
+        if self.turn_start_strategies and self.turn_start_strategies.user:
             for s in self.turn_start_strategies.user:
                 await s.reset()
+
+        if self.turn_start_strategies and self.turn_start_strategies.bot:
             for s in self.turn_start_strategies.bot:
                 await s.reset()
 
@@ -313,20 +316,19 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.push_context_frame()
 
     async def _start(self, frame: StartFrame):
-        if not self.turn_start_strategies:
-            return
+        if self.turn_start_strategies and self.turn_start_strategies.user:
+            for s in self.turn_start_strategies.user:
+                await s.setup(self.task_manager)
+                s.add_event_handler("on_push_frame", self._on_push_frame)
+                s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+                s.add_event_handler("on_user_turn_started", self._on_user_turn_started)
 
-        for s in self.turn_start_strategies.user:
-            await s.setup(self.task_manager)
-            s.add_event_handler("on_push_frame", self._on_push_frame)
-            s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
-            s.add_event_handler("on_user_turn_started", self._on_user_turn_started)
-
-        for s in self.turn_start_strategies.bot:
-            await s.setup(self.task_manager)
-            s.add_event_handler("on_push_frame", self._on_push_frame)
-            s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
-            s.add_event_handler("on_bot_turn_started", self._on_bot_turn_started)
+        if self.turn_start_strategies and self.turn_start_strategies.bot:
+            for s in self.turn_start_strategies.bot:
+                await s.setup(self.task_manager)
+                s.add_event_handler("on_push_frame", self._on_push_frame)
+                s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+                s.add_event_handler("on_bot_turn_started", self._on_bot_turn_started)
 
     async def _stop(self, frame: EndFrame):
         await self._cleanup()
@@ -335,17 +337,20 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._cleanup()
 
     async def _cleanup(self):
-        if self.turn_start_strategies:
+        if self.turn_start_strategies and self.turn_start_strategies.user:
             for s in self.turn_start_strategies.user:
                 await s.cleanup()
+
+        if self.turn_start_strategies and self.turn_start_strategies.bot:
             for s in self.turn_start_strategies.bot:
                 await s.cleanup()
 
     async def _turn_start_strategies_process_frame(self, frame: Frame):
-        if self.turn_start_strategies:
+        if self.turn_start_strategies and self.turn_start_strategies.user:
             for strategy in self.turn_start_strategies.user:
                 await strategy.process_frame(frame)
 
+        if self.turn_start_strategies and self.turn_start_strategies.bot:
             for strategy in self.turn_start_strategies.bot:
                 await strategy.process_frame(frame)
 
@@ -399,8 +404,14 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.broadcast_frame(frame_cls, **kwargs)
 
     async def _trigger_user_turn_start(self, strategy: BaseUserTurnStartStrategy):
+        # Prevent two consecutive user turn starts.
+        if self._user_speaking:
+            return
+
+        self._user_speaking = True
+
         # Reset all user turn start strategies to start fresh.
-        if self.turn_start_strategies:
+        if self.turn_start_strategies and self.turn_start_strategies.user:
             for s in self.turn_start_strategies.user:
                 await s.reset()
 
@@ -411,8 +422,14 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.broadcast_frame(InterruptionFrame)
 
     async def _trigger_bot_turn_start(self, strategy: BaseBotTurnStartStrategy):
+        # Prevent two consecutive bot turn starts.
+        if not self._user_speaking:
+            return
+
+        self._user_speaking = False
+
         # Reset all bot turn start strategies to start fresh.
-        if self.turn_start_strategies:
+        if self.turn_start_strategies and self.turn_start_strategies.bot:
             for s in self.turn_start_strategies.bot:
                 await s.reset()
 
