@@ -170,14 +170,6 @@ class SpeechmaticsSTTService(STTService):
                 word frames. The value must be greater than end_of_utterance_silence_trigger.
                 Default to preset.
 
-            end_of_utterance_mode: End of utterance delay mode. When ADAPTIVE is used, the delay
-                can be adjusted on the content of what the most recent speaker has said, such as
-                rate of speech and whether they have any pauses or disfluencies. When FIXED is used,
-                the delay is fixed to the value of `end_of_utterance_silence_trigger`. Use of EXTERNAL
-                disables end of utterance detection and uses end_of_utterance_max_delay as a fallback timer.
-                SMART_TURN uses a combination of silence detection, adaptive delay and smart turn detection
-                using machine learning to determine the end of turn. Default to preset.
-
             punctuation_overrides: Punctuation overrides. This allows you to override the punctuation
                 in the STT engine. This is useful for languages that use different punctuation
                 than English. See documentation for more information. Default to preset.
@@ -961,6 +953,8 @@ class SpeechmaticsSTTService(STTService):
             ("text_format", "speaker_active_format"),
             ("max_speakers", "max_speakers"),
             ("transcription_config", None),
+            ("enable_vad", None),
+            ("end_of_utterance_mode", None),
         ]
 
         # Show warnings + migrate the arguments
