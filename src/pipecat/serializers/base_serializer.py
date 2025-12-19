@@ -18,10 +18,12 @@ class FrameSerializerType(Enum):
     Parameters:
         BINARY: Binary serialization format for compact representation.
         TEXT: Text-based serialization format for human-readable output.
+        MIXED: Mixed format supporting both binary and text messages (e.g., Vonage).
     """
 
     BINARY = "binary"
     TEXT = "text"
+    MIXED = "mixed"
 
 
 class FrameSerializer(ABC):
