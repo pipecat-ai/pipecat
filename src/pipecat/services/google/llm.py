@@ -93,7 +93,14 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
 
     Extends OpenAI user context aggregator to handle Google AI's specific
     Content and Part message format for user messages.
+
+    .. deprecated:: 0.0.99
+        `OpenAIUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
+
+    # Super handles deprecation warning
 
     async def handle_aggregation(self, aggregation: str):
         """Add the aggregated user text to the context as a Google Content message.
@@ -109,7 +116,14 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
 
     Extends OpenAI assistant context aggregator to handle Google AI's specific
     Content and Part message format for assistant responses and function calls.
+
+    .. deprecated:: 0.0.99
+        `GoogleAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
+
+    # Super handles deprecation warning
 
     async def handle_aggregation(self, aggregation: str):
         """Handle aggregated assistant text response.
@@ -207,11 +221,17 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
 class GoogleContextAggregatorPair:
     """Pair of Google context aggregators for user and assistant messages.
 
+    .. deprecated:: 0.0.99
+        `GoogleContextAggregatorPair` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         _user: User context aggregator for handling user messages.
         _assistant: Assistant context aggregator for handling assistant responses.
     """
 
+    # Aggregators handle deprecation warnings
     _user: GoogleUserContextAggregator
     _assistant: GoogleAssistantContextAggregator
 
@@ -237,6 +257,11 @@ class GoogleLLMContext(OpenAILLMContext):
 
     This class handles conversion between OpenAI-style messages and Google AI's
     Content/Part format, including system messages, function calls, and media.
+
+    .. deprecated:: 0.0.99
+        `GoogleLLMContext` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -252,6 +277,7 @@ class GoogleLLMContext(OpenAILLMContext):
             tools: Available tools/functions for the model.
             tool_choice: Tool choice configuration.
         """
+        # Super handles deprecation warning
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self.system_message = None
 
@@ -1225,11 +1251,18 @@ class GoogleLLMService(LLMService):
             the user and one for the assistant, encapsulated in an
             GoogleContextAggregatorPair.
 
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
         if isinstance(context, OpenAILLMContext):
             context = GoogleLLMContext.upgrade_to_google(context)
+
+        # Aggregators handle deprecation warnings
         user = GoogleUserContextAggregator(context, params=user_params)
         assistant = GoogleAssistantContextAggregator(context, params=assistant_params)
+
         return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
