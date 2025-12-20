@@ -633,6 +633,26 @@ class ResponseAudioDone(ServerEvent):
     item_id: str
 
 
+class ResponseFunctionCallArgumentsDelta(ServerEvent):
+    """Event containing incremental function call arguments.
+
+    Parameters:
+        type: Event type, always "response.function_call_arguments.delta".
+        response_id: ID of the response.
+        item_id: ID of the conversation item.
+        call_id: ID of the function call.
+        delta: Incremental function arguments as JSON.
+        previous_item_id: ID of the previous item, if any.
+    """
+
+    type: Literal["response.function_call_arguments.delta"]
+    response_id: Optional[str] = None
+    item_id: Optional[str] = None
+    call_id: str
+    delta: str
+    previous_item_id: Optional[str] = None
+
+
 class ResponseFunctionCallArgumentsDone(ServerEvent):
     """Event indicating function call arguments are complete.
 
@@ -824,6 +844,7 @@ _server_event_types = {
     "response.output_audio_transcript.done": ResponseAudioTranscriptDone,
     "response.output_audio.delta": ResponseAudioDelta,
     "response.output_audio.done": ResponseAudioDone,
+    "response.function_call_arguments.delta": ResponseFunctionCallArgumentsDelta,
     "response.function_call_arguments.done": ResponseFunctionCallArgumentsDone,
     "response.done": ResponseDone,
 }
