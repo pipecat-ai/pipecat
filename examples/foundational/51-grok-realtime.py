@@ -206,7 +206,7 @@ Always be helpful and proactive in offering assistance.""",
 
     # Create the Grok Realtime LLM service
     llm = GrokRealtimeLLMService(
-        api_key=os.getenv("XAI_API_KEY"),
+        api_key=os.getenv("GROK_API_KEY"),
         session_properties=session_properties,
         start_audio_paused=False,
     )
