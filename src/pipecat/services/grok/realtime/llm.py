@@ -460,6 +460,9 @@ class GrokRealtimeLLMService(LLMService):
                 await self._handle_evt_speech_stopped(evt)
             elif evt.type == "response.output_audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
+            elif evt.type == "response.function_call_arguments.delta":
+                # Function call arguments streaming - we wait for the .done event
+                pass
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
