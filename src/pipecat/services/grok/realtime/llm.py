@@ -107,7 +107,6 @@ class GrokRealtimeLLMService(LLMService):
         self,
         *,
         api_key: str,
-        voice: events.GrokVoice = "Ara",
         base_url: str = "wss://api.x.ai/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
@@ -117,12 +116,15 @@ class GrokRealtimeLLMService(LLMService):
 
         Args:
             api_key: xAI API key for authentication.
-            voice: Voice to use for responses. Options: Ara, Rex, Sal, Eve, Leo.
-                Defaults to "Ara".
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.x.ai/v1/realtime".
             session_properties: Configuration properties for the realtime session.
-                If None, uses default SessionProperties with the specified voice.
+                If None, uses default SessionProperties with voice "Ara".
+                To set a different voice, configure it in session_properties:
+
+                    session_properties = events.SessionProperties(voice="Rex")
+
+                Available voices: Ara, Rex, Sal, Eve, Leo.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             **kwargs: Additional arguments passed to parent LLMService.
         """
@@ -130,20 +132,11 @@ class GrokRealtimeLLMService(LLMService):
 
         self.api_key = api_key
         self.base_url = base_url
-        self._voice = voice
 
         # Initialize session_properties
-        if session_properties:
-            self._session_properties = session_properties
-            # Ensure voice is set
-            if not self._session_properties.voice:
-                self._session_properties.voice = voice
-        else:
-            self._session_properties = events.SessionProperties(
-                voice=voice,
-                turn_detection=events.TurnDetection(type="server_vad"),
-                # Audio config will be set in start() based on PipelineParams
-            )
+        self._session_properties: events.SessionProperties = (
+            session_properties or events.SessionProperties()
+        )
 
         self._audio_input_paused = start_audio_paused
         self._websocket = None

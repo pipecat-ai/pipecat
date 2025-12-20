@@ -205,7 +205,9 @@ class SessionProperties(BaseModel):
     Parameters:
         instructions: System instructions for the assistant.
         voice: The voice the model uses to respond. Options: Ara, Rex, Sal, Eve, Leo.
-        turn_detection: Configuration for turn detection, or None for manual.
+            Defaults to "Ara".
+        turn_detection: Configuration for turn detection. Defaults to server-side VAD.
+            Set to None for manual turn detection.
         audio: Configuration for input and output audio.
         tools: Available tools for the assistant (web_search, x_search, file_search, function).
     """
@@ -215,7 +217,9 @@ class SessionProperties(BaseModel):
 
     instructions: Optional[str] = None
     voice: Optional[GrokVoice] = "Ara"
-    turn_detection: Optional[TurnDetection] = None
+    turn_detection: Optional[TurnDetection] = Field(
+        default_factory=lambda: TurnDetection(type="server_vad")
+    )
     audio: Optional[AudioConfiguration] = None
     # Tools can be ToolsSchema when provided by user, or list of dicts for API
     tools: Optional[ToolsSchema | List[GrokTool]] = None
