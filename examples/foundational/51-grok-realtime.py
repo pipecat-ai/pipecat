@@ -25,7 +25,6 @@ Usage:
     python 50-grok-realtime.py --transport daily
 """
 
-import asyncio
 import os
 from datetime import datetime
 
@@ -37,7 +36,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
 # Note: Grok has built-in server-side VAD, so we don't need local VAD
 # from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
 )

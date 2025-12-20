@@ -27,14 +27,12 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
-    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
-    LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     TranscriptionFrame,
@@ -57,7 +55,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
@@ -114,7 +111,6 @@ class GrokRealtimeLLMService(LLMService):
         base_url: str = "wss://api.x.ai/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
-        sample_rate: int = 24000,
         **kwargs,
     ):
         """Initialize the Grok Realtime Voice Agent LLM service.
@@ -128,18 +124,15 @@ class GrokRealtimeLLMService(LLMService):
             session_properties: Configuration properties for the realtime session.
                 If None, uses default SessionProperties with the specified voice.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
-            sample_rate: Audio sample rate in Hz. Supported: 8000, 16000, 21050, 24000,
-                32000, 44100, 48000. Defaults to 24000.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         super().__init__(base_url=base_url, **kwargs)
 
         self.api_key = api_key
         self.base_url = base_url
-        self._sample_rate = sample_rate
         self._voice = voice
 
-        # Initialize session_properties with voice and audio config
+        # Initialize session_properties
         if session_properties:
             self._session_properties = session_properties
             # Ensure voice is set
@@ -149,10 +142,7 @@ class GrokRealtimeLLMService(LLMService):
             self._session_properties = events.SessionProperties(
                 voice=voice,
                 turn_detection=events.TurnDetection(type="server_vad"),
-                audio=events.AudioConfiguration(
-                    input=events.AudioInput(format=events.PCMAudioFormat(rate=sample_rate)),
-                    output=events.AudioOutput(format=events.PCMAudioFormat(rate=sample_rate)),
-                ),
+                # Audio config will be set in start() based on PipelineParams
             )
 
         self._audio_input_paused = start_audio_paused
@@ -192,6 +182,50 @@ class GrokRealtimeLLMService(LLMService):
         """
         self._audio_input_paused = paused
 
+    def _get_configured_sample_rate(self, direction: str) -> Optional[int]:
+        """Get manually configured sample rate for input or output.
+
+        Args:
+            direction: Either "input" or "output".
+
+        Returns:
+            Configured sample rate or None if not manually configured.
+            For PCMU/PCMA formats, returns 8000 Hz (G.711 standard).
+        """
+        if not self._session_properties.audio:
+            return None
+
+        audio_config = (
+            self._session_properties.audio.input
+            if direction == "input"
+            else self._session_properties.audio.output
+        )
+
+        if audio_config and audio_config.format:
+            # PCM format has configurable rate
+            if hasattr(audio_config.format, "rate"):
+                return audio_config.format.rate
+            # PCMU/PCMA formats are fixed at 8000 Hz (G.711 standard)
+            elif audio_config.format.type in ("audio/pcmu", "audio/pcma"):
+                return 8000
+
+        return None
+
+    def _get_output_sample_rate(self) -> int:
+        """Get the output sample rate from session properties.
+
+        Returns:
+            Output sample rate in Hz.
+
+        Note:
+            This assumes start() has been called, which guarantees
+            session_properties.audio.output exists.
+        """
+        rate = self._get_configured_sample_rate("output")
+        if rate is None:
+            raise RuntimeError("Output sample rate not configured.")
+        return rate
+
     def _is_turn_detection_enabled(self) -> bool:
         """Check if server-side VAD is enabled."""
         if self._session_properties.turn_detection:
@@ -230,7 +264,7 @@ class GrokRealtimeLLMService(LLMService):
     ) -> int:
         """Calculate audio duration in milliseconds based on PCM audio parameters."""
         if sample_rate is None:
-            sample_rate = self._sample_rate
+            sample_rate = self._get_output_sample_rate()
         samples = total_bytes / bytes_per_sample
         duration_seconds = samples / sample_rate
         return int(duration_seconds * 1000)
@@ -260,6 +294,23 @@ class GrokRealtimeLLMService(LLMService):
             frame: The start frame triggering service initialization.
         """
         await super().start(frame)
+
+        # Ensure audio configuration exists with both input and output
+        if not self._session_properties.audio:
+            self._session_properties.audio = events.AudioConfiguration()
+
+        # Fill in missing input configuration
+        if not self._session_properties.audio.input:
+            self._session_properties.audio.input = events.AudioInput(
+                format=events.PCMAudioFormat(rate=frame.audio_in_sample_rate)
+            )
+
+        # Fill in missing output configuration
+        if not self._session_properties.audio.output:
+            self._session_properties.audio.output = events.AudioOutput(
+                format=events.PCMAudioFormat(rate=frame.audio_out_sample_rate)
+            )
+
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -501,7 +552,7 @@ class GrokRealtimeLLMService(LLMService):
 
         frame = TTSAudioRawFrame(
             audio=audio,
-            sample_rate=self._sample_rate,
+            sample_rate=self._get_output_sample_rate(),
             num_channels=1,
         )
         await self.push_frame(frame)
