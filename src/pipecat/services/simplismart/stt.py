@@ -9,6 +9,8 @@ import httpx
 from pydantic import BaseModel
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+import io
+import wave
 
 class SimplismartSTTService(STTService):
     """Simplismart Speech-to-Text service that generates text from audio.
@@ -74,6 +76,7 @@ class SimplismartSTTService(STTService):
             "Authorization": f"Bearer {api_key}"
         }
         self._params = params or SimplismartSTTService.InputParams()
+        self.sr = sample_rate
 
     @traced_stt
     async def _handle_transcription(
@@ -84,7 +87,17 @@ class SimplismartSTTService(STTService):
 
     async def run_stt(self, audio: bytes) -> TranscriptionFrame:
         # Build kwargs dict with only set parameters
-        audio_b64 = base64.b64encode(audio).decode("utf-8")
+
+        wav_buf = io.BytesIO()
+        with wave.open(wav_buf, "wb") as wf:
+            wf.setnchannels(1)      # mono
+            wf.setsampwidth(2)      # 16-bit PCM
+            wf.setframerate(self.sr)  # MUST match your PCM source
+            wf.writeframes(audio)
+
+        wav_bytes = wav_buf.getvalue()
+
+        audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
         payload = self._params.model_dump()
         payload["audio_data"] = audio_b64
 
@@ -104,7 +117,7 @@ class SimplismartSTTService(STTService):
 
         await self._handle_transcription(text, True, language)
 
-        return TranscriptionFrame(
+        yield TranscriptionFrame(
             text,
             self._user_id,
             time_now_iso8601(),
