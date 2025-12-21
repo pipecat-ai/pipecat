@@ -2,17 +2,13 @@
 
 from typing import Optional
 import base64
-from pipecat.frames.frames import TranscriptionFrame
 from pipecat.transcriptions.language import Language
-from pipecat.services.stt_service import STTService
 import httpx
 from pydantic import BaseModel
-from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-import io
-import wave
+from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
 
-class SimplismartSTTService(STTService):
+class SimplismartSTTService(BaseWhisperSTTService):
     """Simplismart Speech-to-Text service that generates text from audio.
 
     Uses Simplismart's transcription API to convert audio to text. Requires an Simplismart API key
@@ -70,7 +66,11 @@ class SimplismartSTTService(STTService):
             sample_rate: (Optional) Audio sample rate in Hz, or None for auto-detection.
             **kwargs: Additional arguments forwarded to the parent STTService class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            model=model,
+            api_key=api_key,
+            base_url=base_url
+        )
         self._base_url = base_url
         self.headers = {
             "Authorization": f"Bearer {api_key}"
@@ -78,48 +78,19 @@ class SimplismartSTTService(STTService):
         self._params = params or SimplismartSTTService.InputParams()
         self.sr = sample_rate
 
-    @traced_stt
-    async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
-
-    async def run_stt(self, audio: bytes) -> TranscriptionFrame:
+    async def _transcribe(self, audio: bytes) -> Transcription:
         # Build kwargs dict with only set parameters
 
-        wav_buf = io.BytesIO()
-        with wave.open(wav_buf, "wb") as wf:
-            wf.setnchannels(1)      # mono
-            wf.setsampwidth(2)      # 16-bit PCM
-            wf.setframerate(self.sr)  # MUST match your PCM source
-            wf.writeframes(audio)
-
-        wav_bytes = wav_buf.getvalue()
-
-        audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
+        audio_b64 = base64.b64encode(audio).decode("utf-8")
         payload = self._params.model_dump()
         payload["audio_data"] = audio_b64
 
-        await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
-
         response = httpx.post(self._base_url, json=payload, headers = self.headers)
-
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
 
         response_json = response.json()
         text = response_json["transcription"]
         text = "".join(text)
-        
-        language = response_json["info"]["language"]
 
-        await self._handle_transcription(text, True, language)
-
-        yield TranscriptionFrame(
-            text,
-            self._user_id,
-            time_now_iso8601(),
-            language=language
+        return Transcription(
+            text=text
         )
