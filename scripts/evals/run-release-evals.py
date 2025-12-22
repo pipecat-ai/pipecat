@@ -30,7 +30,7 @@ EVAL_SIMPLE_MATH = EvalConfig(
 )
 
 EVAL_WEATHER = EvalConfig(
-    prompt="What's the weather in San Francisco? Temperature should be in any unit, just pick one.",
+    prompt="What's the weather in San Francisco? Temperature should be in fahrenheits.",
     eval="The user talks about the weather in San Francisco, including the degrees.",
 )
 
@@ -64,19 +64,25 @@ def EVAL_VISION_IMAGE(*, eval_speaks_first: bool = False):
 
 EVAL_VOICEMAIL = EvalConfig(
     prompt="Please leave a message.",
-    eval="The user leaves a voicemail message.",
+    eval="The user provides a reasonable voicemail message.",
     eval_speaks_first=True,
 )
 
 EVAL_CONVERSATION = EvalConfig(
     prompt="Hello, this is Mark.",
-    eval="The user acknowledges the greeting.",
+    eval="The user provides any reasonable conversational response to the greeting.",
     eval_speaks_first=True,
 )
 
 EVAL_FLIGHT_STATUS = EvalConfig(
     prompt="Check the status of flight AA100.",
     eval="The user says something about the status of flight AA100, such as whether it's on time or delayed.",
+)
+
+EVAL_ORDER = EvalConfig(
+    prompt="I'd like to order a chocolate iced doughnut and a regular brewed coffee.",
+    eval="The user acknowledges the order of a chocolate iced doughnut and regular brewed coffee.",
+    eval_speaks_first=True,
 )
 
 
@@ -215,6 +221,11 @@ TESTS_49 = [
     ("49d-thinking-functions-google.py", EVAL_FLIGHT_STATUS),
 ]
 
+
+TESTS_50 = [
+    ("50-ultravox-realtime.py", EVAL_ORDER),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -228,6 +239,7 @@ TESTS = [
     *TESTS_43,
     *TESTS_44,
     *TESTS_49,
+    *TESTS_50,
 ]
 
 

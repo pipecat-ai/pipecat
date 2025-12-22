@@ -260,15 +260,21 @@ async def run_eval_pipeline(
 
     eval_function = FunctionSchema(
         name="eval_function",
-        description="Called when the user answers a question.",
+        description=(
+            "Determines whether the user's response satisfies the evaluation "
+            "criteria defined for the current prompt or interaction."
+        ),
         properties={
             "result": {
                 "type": "boolean",
-                "description": "Whether the answer is correct or not",
+                "description": "Whether the user's response meets the evaluation criteria.",
             },
             "reasoning": {
                 "type": "string",
-                "description": "Why the answer was considered correct or invalid",
+                "description": (
+                    "A concise explanation of how the user's response did or did "
+                    "not satisfy the evaluation criteria."
+                ),
             },
         },
         required=["result", "reasoning"],
@@ -290,9 +296,9 @@ async def run_eval_pipeline(
         "Ignore greetings, comments, non-answers, or requests for clarification."
     )
     if eval_config.eval_speaks_first:
-        system_prompt = f"You are an evaluation agent, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. Numerical word answers are allowed. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
     else:
-        system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. Numerical word answers are allowed. First, ask one question: {example_prompt}. {common_system_prompt}"
 
     messages = [
         {
@@ -357,10 +363,6 @@ async def run_eval_pipeline(
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
-
-    @task.event_handler("on_idle_timeout")
-    async def on_pipeline_idle_timeout(task):
-        await eval_runner.assert_eval(False)
 
     @task.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(task, frame):

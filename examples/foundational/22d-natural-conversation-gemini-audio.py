@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseStartFrame,
-    LLMRunFrame,
     StartFrame,
     SystemFrame,
     TextFrame,

@@ -8,13 +8,13 @@
 
 import asyncio
 import inspect
+import warnings
 from dataclasses import dataclass
 from typing import (
     Any,
     Awaitable,
     Callable,
     Dict,
-    List,
     Mapping,
     Optional,
     Protocol,
@@ -47,7 +47,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
-    LLMContextMessage,
     LLMSpecificMessage,
 )
 from pipecat.processors.aggregators.llm_response import (
@@ -132,9 +131,6 @@ class FunctionCallRunnerItem:
         tool_call_id: A unique identifier for the function call.
         arguments: The arguments for the function.
         context: The LLM context.
-        append_extra_context_messages: Optional extra messages to append to the
-            context after the function call message. Used to add Google
-            function-call-related thought signatures to the context.
         run_llm: Optional flag to control LLM execution after function call.
     """
 
@@ -143,7 +139,6 @@ class FunctionCallRunnerItem:
     tool_call_id: str
     arguments: Mapping[str, Any]
     context: OpenAILLMContext | LLMContext
-    append_extra_context_messages: Optional[List[LLMContextMessage]] = None
     run_llm: Optional[bool] = None
 
 
@@ -247,7 +242,21 @@ class LLMService(AIService):
 
         Returns:
             A context aggregator instance.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "create_context_aggregator() is deprecated and will be removed in a future version. "
+                "Use the universal LLMContext and LLMContextAggregatorPair directly instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         pass
 
     async def start(self, frame: StartFrame):
@@ -340,8 +349,6 @@ class LLMService(AIService):
         signature = inspect.signature(handler)
         handler_deprecated = len(signature.parameters) > 1
         if handler_deprecated:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -360,8 +367,6 @@ class LLMService(AIService):
 
         # Start callbacks are now deprecated.
         if start_callback:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -465,7 +470,6 @@ class LLMService(AIService):
                     tool_call_id=function_call.tool_call_id,
                     arguments=function_call.arguments,
                     context=function_call.context,
-                    append_extra_context_messages=function_call.append_extra_context_messages,
                 )
             )
 
@@ -505,8 +509,6 @@ class LLMService(AIService):
             timeout: Optional timeout for the requested image to be added to the LLM context.
 
         """
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
@@ -590,7 +592,6 @@ class LLMService(AIService):
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
             arguments=runner_item.arguments,
-            append_extra_context_messages=runner_item.append_extra_context_messages,
             cancel_on_interruption=item.cancel_on_interruption,
         )
 

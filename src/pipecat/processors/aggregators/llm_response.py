@@ -12,6 +12,7 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 """
 
 import asyncio
+import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Set
@@ -66,6 +67,10 @@ from pipecat.utils.time import time_now_iso8601
 class LLMUserAggregatorParams:
     """Parameters for configuring LLM user aggregation behavior.
 
+    .. deprecated:: 0.0.99
+        This class is deprecated, use the new universal `LLMContext` and
+        `LLMContextAggregatorPair`.
+
     Parameters:
         aggregation_timeout: Maximum time in seconds to wait for additional
             transcription content before pushing aggregated result. This
@@ -76,16 +81,25 @@ class LLMUserAggregatorParams:
         enable_emulated_vad_interruptions: When True, allows emulated VAD events
             to interrupt the bot when it's speaking. When False, emulated speech
             is ignored while the bot is speaking.
+        enable_user_speaking_frames: [DO NOT USE] added for temporary backwards
+            compatibility.
+
     """
 
     aggregation_timeout: float = 0.5
     turn_emulated_vad_timeout: float = 0.8
     enable_emulated_vad_interruptions: bool = False
+    # Added for backwards compatibility.
+    enable_user_speaking_frames: bool = True
 
 
 @dataclass
 class LLMAssistantAggregatorParams:
     """Parameters for configuring LLM assistant aggregation behavior.
+
+    .. deprecated:: 0.0.99
+        This class is deprecated, use the new universal `LLMContext` and
+        `LLMContextAggregatorPair`.
 
     Parameters:
         expect_stripped_words: Whether to expect and handle stripped words
@@ -175,6 +189,11 @@ class BaseLLMResponseAggregator(FrameProcessor):
 
     The aggregators keep a store (e.g. message list or LLM context) of the current
     conversation, storing messages from both users and the bot.
+
+    .. deprecated:: 0.0.99
+        `BaseLLMResponseAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(self, **kwargs):
@@ -182,7 +201,21 @@ class BaseLLMResponseAggregator(FrameProcessor):
 
         Args:
             **kwargs: Additional arguments passed to parent FrameProcessor.
+
+        .. deprecated:: 0.0.99
+            `BaseLLMResponseAggregator` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                f"{self.__class__.__name__} (likely created with create_context_aggregator()) is deprecated and will be removed in a future version. "
+                "Use the universal LLMContext and LLMContextAggregatorPair instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         super().__init__(**kwargs)
 
     @property
@@ -274,6 +307,11 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     This aggregator maintains conversation state using an OpenAILLMContext and
     pushes OpenAILLMContextFrame objects as aggregation frames. It provides
     common functionality for context-based conversation management.
+
+    .. deprecated:: 0.0.99
+        `LLMContextResponseAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(self, *, context: OpenAILLMContext, role: str, **kwargs):
@@ -283,7 +321,13 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
             context: The OpenAI LLM context to use for conversation storage.
             role: The role this aggregator represents (e.g. "user", "assistant").
             **kwargs: Additional arguments passed to parent class.
+
+        .. deprecated:: 0.0.99
+            `LLMContextResponseAggregator` is deprecated and will be removed in a future version.
+            Use the universal `LLMUserAggregator` and `LLMAssistantAggregator` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # Super handles deprecation warning
         super().__init__(**kwargs)
         self._context = context
         self._role = role
@@ -326,8 +370,6 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         Returns:
             LLMContextFrame containing the current context.
         """
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
@@ -400,6 +442,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     The aggregator uses timeouts to handle cases where transcriptions arrive
     after VAD events or when no VAD is available.
+
+    .. deprecated:: 0.0.99
+        `LLMUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -415,15 +462,19 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             context: The OpenAI LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments. Supports deprecated 'aggregation_timeout'.
+
+        .. deprecated:: 0.0.99
+            `LLMUserContextAggregator` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # Super handles deprecation warning
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
         self._vad_params: Optional[VADParams] = None
         self._turn_params: Optional[SmartTurnParams] = None
 
         if "aggregation_timeout" in kwargs:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -746,6 +797,11 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
     The aggregator manages function calls in progress and coordinates between
     text generation and tool execution phases of LLM responses.
+
+    .. deprecated:: 0.0.99
+        `LLMAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -761,13 +817,17 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             context: The OpenAI LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments. Supports deprecated 'expect_stripped_words'.
+
+        .. deprecated:: 0.0.99
+            `LLMAssistantContextAggregator` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # Super handles deprecation warning
         super().__init__(context=context, role="assistant", **kwargs)
         self._params = params or LLMAssistantAggregatorParams()
 
         if "expect_stripped_words" in kwargs:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -1039,8 +1099,6 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments passed to parent class.
         """
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
@@ -1086,8 +1144,6 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments passed to parent class.
         """
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(

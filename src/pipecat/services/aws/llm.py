@@ -78,11 +78,17 @@ class AWSBedrockContextAggregatorPair:
     Provides convenient access to both user and assistant context aggregators
     for AWS Bedrock LLM operations.
 
+    .. deprecated:: 0.0.99
+        `AWSBedrockContextAggregatorPair` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         _user: The user context aggregator instance.
         _assistant: The assistant context aggregator instance.
     """
 
+    # Aggregators handle deprecation warnings
     _user: "AWSBedrockUserContextAggregator"
     _assistant: "AWSBedrockAssistantContextAggregator"
 
@@ -109,6 +115,11 @@ class AWSBedrockLLMContext(OpenAILLMContext):
     Extends OpenAI LLM context to handle AWS Bedrock's specific message format
     and system message handling. Manages conversion between OpenAI and Bedrock
     message formats.
+
+    .. deprecated:: 0.0.99
+        `AWSBedrockLLMContext` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -127,6 +138,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
             tool_choice: Tool selection strategy or specific tool choice.
             system: System message content for AWS Bedrock.
         """
+        # Super handles deprecation warning
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self.system = system
 
@@ -589,11 +601,17 @@ class AWSBedrockUserContextAggregator(LLMUserContextAggregator):
     Handles aggregation of user messages and frames for AWS Bedrock format.
     Inherits all functionality from the base LLM user context aggregator.
 
+    .. deprecated:: 0.0.99
+        `AWSBedrockUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Args:
         context: The LLM context to aggregate messages into.
         params: Configuration parameters for the aggregator.
     """
 
+    # Super handles deprecation warning
     pass
 
 
@@ -603,10 +621,17 @@ class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
     Handles aggregation of assistant responses and function calls for AWS Bedrock
     format, including tool use and tool result handling.
 
+    .. deprecated:: 0.0.99
+        `AWSBedrockAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Args:
         context: The LLM context to aggregate messages into.
         params: Configuration parameters for the aggregator.
     """
+
+    # Super handles deprecation warning
 
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         """Handle function call in progress frame.
@@ -840,15 +865,13 @@ class AWSBedrockLLMService(LLMService):
             messages = context.messages
             system = getattr(context, "system", None)  # [{"text": "system message"}]
 
-        # Determine if we're using Claude or Nova based on model ID
-        model_id = self.model_name
-
-        # Prepare request parameters
+        # Prepare request parameters using the same method as streaming
         inference_config = self._build_inference_config()
 
         request_params = {
-            "modelId": model_id,
+            "modelId": self.model_name,
             "messages": messages,
+            "additionalModelRequestFields": self._settings["additional_model_request_fields"],
         }
 
         if inference_config:
@@ -926,14 +949,20 @@ class AWSBedrockLLMService(LLMService):
             the user and one for the assistant, encapsulated in an
             AWSBedrockContextAggregatorPair.
 
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
         if isinstance(context, OpenAILLMContext):
             context = AWSBedrockLLMContext.from_openai_context(context)
 
+        # Aggregators handle deprecation warnings
         user = AWSBedrockUserContextAggregator(context, params=user_params)
         assistant = AWSBedrockAssistantContextAggregator(context, params=assistant_params)
+
         return AWSBedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
     def _create_no_op_tool(self):

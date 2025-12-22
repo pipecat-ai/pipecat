@@ -12,7 +12,7 @@ import httpx
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat import __version__
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -43,7 +43,7 @@ HUME_SAMPLE_RATE = 48_000  # Hume TTS streams at 48 kHz
 # Tracking headers for Hume API requests
 DEFAULT_HEADERS = {
     "X-Hume-Client-Name": "pipecat",
-    "X-Hume-Client-Version": __version__,
+    "X-Hume-Client-Version": pipecat_version(),
 }
 
 
@@ -245,7 +245,7 @@ class HumeTTSService(WordTTSService):
 
         # Start TTS sequence if not already started
         if not self._started:
-            self.start_word_timestamps()
+            await self.start_word_timestamps()
             yield TTSStartedFrame()
             self._started = True
 

@@ -23,8 +23,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import WebsocketSTTService
@@ -221,9 +221,9 @@ class CartesiaSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             await self.start_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize command to flush the transcription session
             if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send("finalize")

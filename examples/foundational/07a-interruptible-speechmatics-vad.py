@@ -15,9 +15,6 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMUserAggregatorParams,
-)
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -76,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     4. Text-to-Speech (TTS)
        - Low latency streaming audio synthesis
-       - Multiple voice options available including `sarah`, `theo`, and `megan`
+       - Multiple voice options available including `sarah`, `theo`, `megan` and `jack`
 
     5. Configuration Options
        - `operating_point` parameter defaults to `ENHANCED` for optimal accuracy
@@ -95,10 +92,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.getenv("SPEECHMATICS_API_KEY"),
             params=SpeechmaticsSTTService.InputParams(
                 language=Language.EN,
-                enable_vad=True,
-                enable_diarization=True,
-                focus_speakers=["S1"],
-                end_of_utterance_silence_trigger=0.5,
+                turn_detection_mode=SpeechmaticsSTTService.TurnDetectionMode.ADAPTIVE,
+                # focus_speakers=["S1"],
                 speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
                 speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
             ),
@@ -132,10 +127,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
 
         context = LLMContext(messages)
-        context_aggregator = LLMContextAggregatorPair(
-            context,
-            user_params=LLMUserAggregatorParams(aggregation_timeout=0.005),
-        )
+        context_aggregator = LLMContextAggregatorPair(context)
 
         pipeline = Pipeline(
             [

@@ -71,9 +71,9 @@ def build_agent(model_id: str, max_tokens: int):
     @tool
     def check_weather(location: str) -> str:
         if location.lower() == "san francisco":
-            return "The weather in San Francisco is sunny and 30 degrees."
+            return "The weather in San Francisco is sunny and 75 degrees."
         elif location.lower() == "sydney":
-            return "The weather in Sydney is cloudy and 20 degrees."
+            return "The weather in Sydney is cloudy and 60 degrees."
         else:
             return "I'm not sure about the weather in that location."
 

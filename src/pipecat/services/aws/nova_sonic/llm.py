@@ -1231,7 +1231,13 @@ class AWSNovaSonicLLMService(LLMService):
 
         Returns:
             A pair of user and assistant context aggregators.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # from_openai_context handles deprecation warning
         context = LLMContext.from_openai_context(context)
         return LLMContextAggregatorPair(
             context, user_params=user_params, assistant_params=assistant_params

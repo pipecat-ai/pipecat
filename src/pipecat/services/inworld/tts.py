@@ -249,7 +249,7 @@ class InworldHttpTTSService(WordTTSService):
             await self.start_ttfb_metrics()
 
             if not self._started:
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
                 yield TTSStartedFrame()
                 self._started = True
 
@@ -736,7 +736,7 @@ class InworldTTSService(AudioContextWordTTSService):
             if audio_b64:
                 logger.debug(f"{self}: Processing audio chunk for context {ctx_id}")
                 await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
                 audio = base64.b64decode(audio_b64)
                 if len(audio) > 44 and audio.startswith(b"RIFF"):
                     audio = audio[44:]
