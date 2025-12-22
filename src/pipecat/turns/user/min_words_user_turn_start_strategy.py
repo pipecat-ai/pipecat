@@ -8,7 +8,13 @@
 
 from loguru import logger
 
-from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    TranscriptionFrame,
+)
 from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
@@ -33,12 +39,14 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         super().__init__()
         self._min_words = min_words
         self._use_interim = use_interim
+        self._bot_speaking = False
         self._text = ""
 
     async def reset(self):
         """Reset the strategy to its initial state."""
         await super().reset()
         self._text = ""
+        self._bot_speaking = False
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect the start of a user turn.
@@ -51,10 +59,34 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         await super().process_frame(frame)
 
-        if isinstance(frame, TranscriptionFrame):
+        if isinstance(frame, BotStartedSpeakingFrame):
+            await self._handle_bot_started_speaking(frame)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking(frame)
+        elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
         elif isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
             await self._handle_interim_transcription(frame)
+
+    async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
+        """Handle bot started speaking frame.
+
+        If the bot is speaking we want to interrupt using min words.
+
+        Args:
+            frame: The frame to be processed.
+        """
+        self._bot_speaking = True
+
+    async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
+        """Handle bot started speaking frame.
+
+        If the bot is not speaking we want to interrupt if we get a single word.
+
+        Args:
+            frame: The frame to be processed.
+        """
+        self._bot_speaking = False
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle a completed transcription frame and check word count.
@@ -64,11 +96,14 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         self._text += frame.text
 
+        min_words = self._min_words if self._bot_speaking else 1
+
         word_count = len(self._text.split())
-        should_trigger = word_count >= self._min_words
+        should_trigger = word_count >= min_words
 
         logger.debug(
-            f"{self} should_trigger={should_trigger} num_spoken_words={word_count} min_words={self._min_words}"
+            f"{self} should_trigger={should_trigger} num_spoken_words={word_count} "
+            f"min_words={min_words} bot_speaking={self._bot_speaking}"
         )
 
         if should_trigger:
@@ -80,11 +115,14 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         Args:
             frame: The interim transcription frame to be processed.
         """
+        min_words = self._min_words if self._bot_speaking else 1
+
         word_count = len(frame.text.split())
-        should_trigger = word_count >= self._min_words
+        should_trigger = word_count >= min_words
 
         logger.debug(
-            f"{self} interim=True should_trigger={should_trigger} num_spoken_words={word_count} min_words={self._min_words}"
+            f"{self} interim=True should_trigger={should_trigger} num_spoken_words={word_count} "
+            f"min_words={min_words} bot_speaking={self._bot_speaking}"
         )
 
         if should_trigger:

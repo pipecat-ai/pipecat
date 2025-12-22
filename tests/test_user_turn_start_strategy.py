@@ -21,7 +21,7 @@ from pipecat.turns.user.vad_user_turn_start_strategy import VADUserTurnStartStra
 
 
 class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
-    async def test_only_transcriptions(self):
+    async def test_bot_speaking_transcriptions(self):
         strategy = MinWordsUserTurnStartStrategy(min_words=2)
 
         should_start = None
@@ -31,6 +31,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
             nonlocal should_start
             should_start = True
 
+        await strategy.process_frame(BotStartedSpeakingFrame())
         await strategy.process_frame(TranscriptionFrame(text="Hello", user_id="cat", timestamp=""))
         self.assertFalse(should_start)
 
@@ -43,6 +44,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
         await strategy.reset()
 
+        await strategy.process_frame(BotStartedSpeakingFrame())
         await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
         self.assertFalse(should_start)
 
@@ -51,7 +53,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(should_start)
 
-    async def test_only_interim_transcriptions(self):
+    async def test_bot_speaking_interim_transcriptions(self):
         strategy = MinWordsUserTurnStartStrategy(min_words=2)
 
         should_start = None
@@ -61,17 +63,19 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
             nonlocal should_start
             should_start = True
 
+        await strategy.process_frame(BotStartedSpeakingFrame())
         await strategy.process_frame(
             InterimTranscriptionFrame(text="Hello", user_id="cat", timestamp="")
         )
         self.assertFalse(should_start)
 
+        await strategy.process_frame(BotStartedSpeakingFrame())
         await strategy.process_frame(
             InterimTranscriptionFrame(text="Hello there!", user_id="cat", timestamp="")
         )
         self.assertTrue(should_start)
 
-    async def test_all_transcriptions(self):
+    async def test_bot_speaking_all_transcriptions(self):
         strategy = MinWordsUserTurnStartStrategy(min_words=2)
 
         should_start = None
@@ -81,6 +85,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
             nonlocal should_start
             should_start = True
 
+        await strategy.process_frame(BotStartedSpeakingFrame())
         await strategy.process_frame(
             InterimTranscriptionFrame(text="Hello", user_id="cat", timestamp="")
         )
@@ -88,6 +93,34 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
 
         await strategy.process_frame(
             TranscriptionFrame(text="Hello there!", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)
+
+    async def test_bot_not_speaking_transcriptions(self):
+        strategy = MinWordsUserTurnStartStrategy(min_words=2)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(TranscriptionFrame(text="Hello", user_id="cat", timestamp=""))
+        self.assertTrue(should_start)
+
+    async def test_bot_not_speaking_interim_transcriptions(self):
+        strategy = MinWordsUserTurnStartStrategy(min_words=2)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(
+            InterimTranscriptionFrame(text="Hello", user_id="cat", timestamp="")
         )
         self.assertTrue(should_start)
 

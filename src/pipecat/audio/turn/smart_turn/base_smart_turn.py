@@ -19,7 +19,6 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, BaseTurnParams, EndOfTurnState
 from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
