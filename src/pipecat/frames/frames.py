@@ -514,9 +514,15 @@ class OpenAILLMContextAssistantTimestampFrame(DataFrame):
             )
 
 
-# A more universal (LLM-agnostic) name for
-# OpenAILLMContextAssistantTimestampFrame, matching LLMContext
-LLMContextAssistantTimestampFrame = OpenAILLMContextAssistantTimestampFrame
+@dataclass
+class LLMContextAssistantTimestampFrame(DataFrame):
+    """Timestamp information for assistant messages in LLM context.
+
+    Parameters:
+        timestamp: Timestamp when the assistant message was created.
+    """
+
+    timestamp: str
 
 
 @dataclass
