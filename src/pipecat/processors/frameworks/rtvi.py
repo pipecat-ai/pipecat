@@ -78,6 +78,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi_protocol_v1 import RTVI
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
@@ -86,10 +87,10 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.string import match_endofsentence
 
-RTVI_PROTOCOL_VERSION = "1.1.0"
-
-RTVI_MESSAGE_LABEL = "rtvi-ai"
-RTVIMessageLiteral = Literal["rtvi-ai"]
+##############
+# Pre 1.0 Protocols NOW DEPRECATED. All 1.0 supported
+# messages and structures are found in rtvi_protocol_v1.py
+##############
 
 ActionResult = Union[bool, int, float, str, list, dict]
 
@@ -237,7 +238,6 @@ class RTVIConfig(BaseModel):
 #
 
 
-# deprecated
 class RTVIUpdateConfig(BaseModel):
     """Request to update RTVI configuration.
 
@@ -298,19 +298,143 @@ class RTVIActionFrame(DataFrame):
     message_id: Optional[str] = None
 
 
-class RTVIRawClientMessageData(BaseModel):
-    """Data structure expected from client messages sent to the RTVI server."""
-
-    t: str
-    d: Optional[Any] = None
+#
+# Pipecat -> Client responses and messages.
+#
 
 
-class RTVIClientMessage(BaseModel):
-    """Cleansed data structure for client messages for handling."""
+class RTVIBotReadyDataDeprecated(RTVI.BotReadyData):
+    """Data for bot ready notification.
 
-    msg_id: str
-    type: str
-    data: Optional[Any] = None
+    Contains protocol version and initial configuration.
+    """
+
+    # The config field is deprecated and will not be included if
+    # the client's rtvi version is 1.0.0 or higher.
+    config: Optional[List[RTVIServiceConfig]] = None
+
+
+class RTVIDescribeConfigData(BaseModel):
+    """Data for describing available RTVI configuration.
+
+    Contains the list of available services and their options.
+
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
+    """
+
+    config: List[RTVIService]
+
+
+class RTVIDescribeConfig(BaseModel):
+    """Message describing available RTVI configuration.
+
+    Sent in response to a describe-config request.
+
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
+    """
+
+    label: RTVI.MessageLiteral = RTVI.MESSAGE_LABEL
+    type: Literal["config-available"] = "config-available"
+    id: str
+    data: RTVIDescribeConfigData
+
+
+class RTVIDescribeActionsData(BaseModel):
+    """Data for describing available RTVI actions.
+
+    Contains the list of available actions that can be executed.
+
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
+    """
+
+    actions: List[RTVIAction]
+
+
+class RTVIDescribeActions(BaseModel):
+    """Message describing available RTVI actions.
+
+    Sent in response to a describe-actions request.
+
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
+    """
+
+    label: RTVI.MessageLiteral = RTVI.MESSAGE_LABEL
+    type: Literal["actions-available"] = "actions-available"
+    id: str
+    data: RTVIDescribeActionsData
+
+
+class RTVIConfigResponse(BaseModel):
+    """Response containing current RTVI configuration.
+
+    Sent in response to a get-config request.
+
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
+    """
+
+    label: RTVI.MessageLiteral = RTVI.MESSAGE_LABEL
+    type: Literal["config"] = "config"
+    id: str
+    data: RTVIConfig
+
+
+class RTVIActionResponseData(BaseModel):
+    """Data for an RTVI action response.
+
+    Contains the result of executing an action.
+
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
+    """
+
+    result: ActionResult
+
+
+class RTVIActionResponse(BaseModel):
+    """Response to an RTVI action execution.
+
+    Sent after successfully executing an action.
+
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
+    """
+
+    label: RTVI.MessageLiteral = RTVI.MESSAGE_LABEL
+    type: Literal["action-response"] = "action-response"
+    id: str
+    data: RTVIActionResponseData
+
+
+### End of Deprecated Messages ###
+
+# -- RTVI Frame Definitions --
+
+
+@dataclass
+class RTVIServerMessageFrame(SystemFrame):
+    """A frame for sending server messages to the client.
+
+    Parameters:
+        data: The message data to send to the client.
+    """
+
+    data: Any
+
+    def __str__(self):
+        """String representation of the RTVI server message frame."""
+        return f"{self.name}(data: {self.data})"
 
 
 @dataclass
@@ -341,563 +465,6 @@ class RTVIServerResponseFrame(SystemFrame):
     client_msg: RTVIClientMessageFrame
     data: Optional[Any] = None
     error: Optional[str] = None
-
-
-class RTVIRawServerResponseData(BaseModel):
-    """Data structure for server responses to client messages."""
-
-    t: str
-    d: Optional[Any] = None
-
-
-class RTVIServerResponse(BaseModel):
-    """The RTVI-formatted message response from the server to the client.
-
-    This message is used to respond to custom messages sent by the client.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["server-response"] = "server-response"
-    id: str
-    data: RTVIRawServerResponseData
-
-
-class RTVIMessage(BaseModel):
-    """Base RTVI message structure.
-
-    Represents the standard format for RTVI protocol messages.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: str
-    id: str
-    data: Optional[Dict[str, Any]] = None
-
-
-#
-# Pipecat -> Client responses and messages.
-#
-
-
-class RTVIErrorResponseData(BaseModel):
-    """Data for an RTVI error response.
-
-    Contains the error message to send back to the client.
-    """
-
-    error: str
-
-
-class RTVIErrorResponse(BaseModel):
-    """RTVI error response message.
-
-    RTVI Formatted error response message for relaying failed client requests.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["error-response"] = "error-response"
-    id: str
-    data: RTVIErrorResponseData
-
-
-class RTVIErrorData(BaseModel):
-    """Data for an RTVI error event.
-
-    Contains error information including whether it's fatal.
-    """
-
-    error: str
-    fatal: bool  # Indicates the pipeline has stopped due to this error
-
-
-class RTVIError(BaseModel):
-    """RTVI error event message.
-
-    RTVI Formatted error message for relaying errors in the pipeline.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["error"] = "error"
-    data: RTVIErrorData
-
-
-class RTVIDescribeConfigData(BaseModel):
-    """Data for describing available RTVI configuration.
-
-    Contains the list of available services and their options.
-
-    .. deprecated:: 0.0.75
-        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-        Use custom client and server messages instead.
-    """
-
-    config: List[RTVIService]
-
-
-class RTVIDescribeConfig(BaseModel):
-    """Message describing available RTVI configuration.
-
-    Sent in response to a describe-config request.
-
-    .. deprecated:: 0.0.75
-        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-        Use custom client and server messages instead.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["config-available"] = "config-available"
-    id: str
-    data: RTVIDescribeConfigData
-
-
-class RTVIDescribeActionsData(BaseModel):
-    """Data for describing available RTVI actions.
-
-    Contains the list of available actions that can be executed.
-
-    .. deprecated:: 0.0.75
-        Actions have been removed as part of the RTVI protocol 1.0.0.
-        Use custom client and server messages instead.
-    """
-
-    actions: List[RTVIAction]
-
-
-class RTVIDescribeActions(BaseModel):
-    """Message describing available RTVI actions.
-
-    Sent in response to a describe-actions request.
-
-    .. deprecated:: 0.0.75
-        Actions have been removed as part of the RTVI protocol 1.0.0.
-        Use custom client and server messages instead.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["actions-available"] = "actions-available"
-    id: str
-    data: RTVIDescribeActionsData
-
-
-class RTVIConfigResponse(BaseModel):
-    """Response containing current RTVI configuration.
-
-    Sent in response to a get-config request.
-
-    .. deprecated:: 0.0.75
-        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-        Use custom client and server messages instead.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["config"] = "config"
-    id: str
-    data: RTVIConfig
-
-
-class RTVIActionResponseData(BaseModel):
-    """Data for an RTVI action response.
-
-    Contains the result of executing an action.
-
-    .. deprecated:: 0.0.75
-        Actions have been removed as part of the RTVI protocol 1.0.0.
-        Use custom client and server messages instead.
-    """
-
-    result: ActionResult
-
-
-class RTVIActionResponse(BaseModel):
-    """Response to an RTVI action execution.
-
-    Sent after successfully executing an action.
-
-    .. deprecated:: 0.0.75
-        Actions have been removed as part of the RTVI protocol 1.0.0.
-        Use custom client and server messages instead.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["action-response"] = "action-response"
-    id: str
-    data: RTVIActionResponseData
-
-
-class AboutClientData(BaseModel):
-    """Data about the RTVI client.
-
-    Contains information about the client, including which RTVI library it
-    is using, what platform it is on and any additional details, if available.
-    """
-
-    library: str
-    library_version: Optional[str] = None
-    platform: Optional[str] = None
-    platform_version: Optional[str] = None
-    platform_details: Optional[Any] = None
-
-
-class RTVIClientReadyData(BaseModel):
-    """Data format of client ready messages.
-
-    Contains the RTVIprotocol version and client information.
-    """
-
-    version: str
-    about: AboutClientData
-
-
-class RTVIBotReadyData(BaseModel):
-    """Data for bot ready notification.
-
-    Contains protocol version and initial configuration.
-    """
-
-    version: str
-    # The config field is deprecated and will not be included if
-    # the client's rtvi version is 1.0.0 or higher.
-    config: Optional[List[RTVIServiceConfig]] = None
-    about: Optional[Mapping[str, Any]] = None
-
-
-class RTVIBotReady(BaseModel):
-    """Message indicating bot is ready for interaction.
-
-    Sent after bot initialization is complete.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-ready"] = "bot-ready"
-    id: str
-    data: RTVIBotReadyData
-
-
-class RTVILLMFunctionCallMessageData(BaseModel):
-    """Data for LLM function call notification.
-
-    Contains function call details including name, ID, and arguments.
-    """
-
-    function_name: str
-    tool_call_id: str
-    args: Mapping[str, Any]
-
-
-class RTVILLMFunctionCallMessage(BaseModel):
-    """Message notifying of an LLM function call.
-
-    Sent when the LLM makes a function call.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["llm-function-call"] = "llm-function-call"
-    data: RTVILLMFunctionCallMessageData
-
-
-class RTVISendTextOptions(BaseModel):
-    """Options for sending text input to the LLM.
-
-    Contains options for how the pipeline should process the text input.
-    """
-
-    run_immediately: bool = True
-    audio_response: bool = True
-
-
-class RTVISendTextData(BaseModel):
-    """Data format for sending text input to the LLM.
-
-    Contains the text content to send and any options for how the pipeline should process it.
-
-    """
-
-    content: str
-    options: Optional[RTVISendTextOptions] = None
-
-
-class RTVIAppendToContextData(BaseModel):
-    """Data format for appending messages to the context.
-
-    Contains the role, content, and whether to run the message immediately.
-
-    .. deprecated:: 0.0.85
-        The RTVI message, append-to-context, has been deprecated. Use send-text
-        or custom client and server messages instead.
-    """
-
-    role: Literal["user", "assistant"] | str
-    content: Any
-    run_immediately: bool = False
-
-
-class RTVIAppendToContext(BaseModel):
-    """RTVI Message format to append content to the LLM context."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["append-to-context"] = "append-to-context"
-    data: RTVIAppendToContextData
-
-
-class RTVILLMFunctionCallStartMessageData(BaseModel):
-    """Data for LLM function call start notification.
-
-    Contains the function name being called.
-    """
-
-    function_name: str
-
-
-class RTVILLMFunctionCallStartMessage(BaseModel):
-    """Message notifying that an LLM function call has started.
-
-    Sent when the LLM begins a function call.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["llm-function-call-start"] = "llm-function-call-start"
-    data: RTVILLMFunctionCallStartMessageData
-
-
-class RTVILLMFunctionCallResultData(BaseModel):
-    """Data for LLM function call result.
-
-    Contains function call details and result.
-    """
-
-    function_name: str
-    tool_call_id: str
-    arguments: dict
-    result: dict | str
-
-
-class RTVIBotLLMStartedMessage(BaseModel):
-    """Message indicating bot LLM processing has started."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-llm-started"] = "bot-llm-started"
-
-
-class RTVIBotLLMStoppedMessage(BaseModel):
-    """Message indicating bot LLM processing has stopped."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-llm-stopped"] = "bot-llm-stopped"
-
-
-class RTVIBotTTSStartedMessage(BaseModel):
-    """Message indicating bot TTS processing has started."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-tts-started"] = "bot-tts-started"
-
-
-class RTVIBotTTSStoppedMessage(BaseModel):
-    """Message indicating bot TTS processing has stopped."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-tts-stopped"] = "bot-tts-stopped"
-
-
-class RTVITextMessageData(BaseModel):
-    """Data for text-based RTVI messages.
-
-    Contains text content.
-    """
-
-    text: str
-
-
-class RTVIBotOutputMessageData(RTVITextMessageData):
-    """Data for bot output RTVI messages.
-
-    Extends RTVITextMessageData to include metadata about the output.
-    """
-
-    spoken: bool = False  # Indicates if the text has been spoken by TTS
-    aggregated_by: AggregationType | str
-    # Indicates what form the text is in (e.g., by word, sentence, etc.)
-
-
-class RTVIBotOutputMessage(BaseModel):
-    """Message containing bot output text.
-
-    An event meant to holistically represent what the bot is outputting,
-    along with metadata about the output and if it has been spoken.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-output"] = "bot-output"
-    data: RTVIBotOutputMessageData
-
-
-class RTVIBotTranscriptionMessage(BaseModel):
-    """Message containing bot transcription text.
-
-    Sent when the bot's speech is transcribed.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-transcription"] = "bot-transcription"
-    data: RTVITextMessageData
-
-
-class RTVIBotLLMTextMessage(BaseModel):
-    """Message containing bot LLM text output.
-
-    Sent when the bot's LLM generates text.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-llm-text"] = "bot-llm-text"
-    data: RTVITextMessageData
-
-
-class RTVIBotTTSTextMessage(BaseModel):
-    """Message containing bot TTS text output.
-
-    Sent when text is being processed by TTS.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-tts-text"] = "bot-tts-text"
-    data: RTVITextMessageData
-
-
-class RTVIAudioMessageData(BaseModel):
-    """Data for audio-based RTVI messages.
-
-    Contains audio data and metadata.
-    """
-
-    audio: str
-    sample_rate: int
-    num_channels: int
-
-
-class RTVIBotTTSAudioMessage(BaseModel):
-    """Message containing bot TTS audio output.
-
-    Sent when the bot's TTS generates audio.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-tts-audio"] = "bot-tts-audio"
-    data: RTVIAudioMessageData
-
-
-class RTVIUserTranscriptionMessageData(BaseModel):
-    """Data for user transcription messages.
-
-    Contains transcription text and metadata.
-    """
-
-    text: str
-    user_id: str
-    timestamp: str
-    final: bool
-
-
-class RTVIUserTranscriptionMessage(BaseModel):
-    """Message containing user transcription.
-
-    Sent when user speech is transcribed.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["user-transcription"] = "user-transcription"
-    data: RTVIUserTranscriptionMessageData
-
-
-class RTVIUserLLMTextMessage(BaseModel):
-    """Message containing user text input for LLM.
-
-    Sent when user text is processed by the LLM.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["user-llm-text"] = "user-llm-text"
-    data: RTVITextMessageData
-
-
-class RTVIUserStartedSpeakingMessage(BaseModel):
-    """Message indicating user has started speaking."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["user-started-speaking"] = "user-started-speaking"
-
-
-class RTVIUserStoppedSpeakingMessage(BaseModel):
-    """Message indicating user has stopped speaking."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
-
-
-class RTVIBotStartedSpeakingMessage(BaseModel):
-    """Message indicating bot has started speaking."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-started-speaking"] = "bot-started-speaking"
-
-
-class RTVIBotStoppedSpeakingMessage(BaseModel):
-    """Message indicating bot has stopped speaking."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-stopped-speaking"] = "bot-stopped-speaking"
-
-
-class RTVIMetricsMessage(BaseModel):
-    """Message containing performance metrics.
-
-    Sent to provide performance and usage metrics.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["metrics"] = "metrics"
-    data: Mapping[str, Any]
-
-
-class RTVIServerMessage(BaseModel):
-    """Generic server message.
-
-    Used for custom server-to-client messages.
-    """
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["server-message"] = "server-message"
-    data: Any
-
-
-class RTVIAudioLevelMessageData(BaseModel):
-    """Data format for sending audio levels."""
-
-    value: float
-
-
-class RTVIUserAudioLevelMessage(BaseModel):
-    """Message indicating user audio level."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["user-audio-level"] = "user-audio-level"
-    data: RTVIAudioLevelMessageData
-
-
-class RTVIBotAudioLevelMessage(BaseModel):
-    """Message indicating bot audio level."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["bot-audio-level"] = "bot-audio-level"
-    data: RTVIAudioLevelMessageData
-
-
-class RTVISystemLogMessage(BaseModel):
-    """Message including a system log."""
-
-    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["system-log"] = "system-log"
-    data: RTVITextMessageData
 
 
 @dataclass
@@ -1057,7 +624,7 @@ class RTVIObserver(BaseObserver):
 
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""
-        message = RTVISystemLogMessage(data=RTVITextMessageData(text=message))
+        message = RTVI.SystemLogMessage(data=RTVI.TextMessageData(text=message))
         await self.send_rtvi_message(message)
 
     async def cleanup(self):
@@ -1119,15 +686,15 @@ class RTVIObserver(BaseObserver):
         ):
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
-            await self.send_rtvi_message(RTVIBotLLMStartedMessage())
+            await self.send_rtvi_message(RTVI.BotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame) and self._params.bot_llm_enabled:
-            await self.send_rtvi_message(RTVIBotLLMStoppedMessage())
+            await self.send_rtvi_message(RTVI.BotLLMStoppedMessage())
         elif isinstance(frame, LLMTextFrame) and self._params.bot_llm_enabled:
             await self._handle_llm_text_frame(frame)
         elif isinstance(frame, TTSStartedFrame) and self._params.bot_tts_enabled:
-            await self.send_rtvi_message(RTVIBotTTSStartedMessage())
+            await self.send_rtvi_message(RTVI.BotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
-            await self.send_rtvi_message(RTVIBotTTSStoppedMessage())
+            await self.send_rtvi_message(RTVI.BotTTSStoppedMessage())
         elif isinstance(frame, AggregatedTextFrame) and (
             self._params.bot_output_enabled or self._params.bot_tts_enabled
         ):
@@ -1140,7 +707,7 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
         elif isinstance(frame, RTVIServerMessageFrame):
-            message = RTVIServerMessage(data=frame.data)
+            message = RTVI.ServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerResponseFrame):
             if frame.error is not None:
@@ -1152,7 +719,7 @@ class RTVIObserver(BaseObserver):
             diff_time = curr_time - self._last_user_audio_level
             if diff_time > self._params.audio_level_period_secs:
                 level = calculate_audio_volume(frame.audio, frame.sample_rate)
-                message = RTVIUserAudioLevelMessage(data=RTVIAudioLevelMessageData(value=level))
+                message = RTVI.UserAudioLevelMessage(data=RTVI.AudioLevelMessageData(value=level))
                 await self.send_rtvi_message(message)
                 self._last_user_audio_level = curr_time
         elif isinstance(frame, TTSAudioRawFrame) and self._params.bot_audio_level_enabled:
@@ -1160,7 +727,7 @@ class RTVIObserver(BaseObserver):
             diff_time = curr_time - self._last_bot_audio_level
             if diff_time > self._params.audio_level_period_secs:
                 level = calculate_audio_volume(frame.audio, frame.sample_rate)
-                message = RTVIBotAudioLevelMessage(data=RTVIAudioLevelMessageData(value=level))
+                message = RTVI.BotAudioLevelMessage(data=RTVI.AudioLevelMessageData(value=level))
                 await self.send_rtvi_message(message)
                 self._last_bot_audio_level = curr_time
 
@@ -1171,9 +738,9 @@ class RTVIObserver(BaseObserver):
         """Handle user speaking interruption frames."""
         message = None
         if isinstance(frame, UserStartedSpeakingFrame):
-            message = RTVIUserStartedSpeakingMessage()
+            message = RTVI.UserStartedSpeakingMessage()
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            message = RTVIUserStoppedSpeakingMessage()
+            message = RTVI.UserStoppedSpeakingMessage()
 
         if message:
             await self.send_rtvi_message(message)
@@ -1182,9 +749,9 @@ class RTVIObserver(BaseObserver):
         """Handle bot speaking event frames."""
         message = None
         if isinstance(frame, BotStartedSpeakingFrame):
-            message = RTVIBotStartedSpeakingMessage()
+            message = RTVI.BotStartedSpeakingMessage()
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            message = RTVIBotStoppedSpeakingMessage()
+            message = RTVI.BotStoppedSpeakingMessage()
 
         if message:
             await self.send_rtvi_message(message)
@@ -1206,18 +773,18 @@ class RTVIObserver(BaseObserver):
 
         isTTS = isinstance(frame, TTSTextFrame)
         if self._params.bot_output_enabled:
-            message = RTVIBotOutputMessage(
-                data=RTVIBotOutputMessageData(text=text, spoken=isTTS, aggregated_by=type)
+            message = RTVI.BotOutputMessage(
+                data=RTVI.BotOutputMessageData(text=text, spoken=isTTS, aggregated_by=type)
             )
             await self.send_rtvi_message(message)
 
         if isTTS and self._params.bot_tts_enabled:
-            tts_message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=text))
+            tts_message = RTVI.BotTTSTextMessage(data=RTVI.TextMessageData(text=text))
             await self.send_rtvi_message(tts_message)
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
-        message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
+        message = RTVI.BotLLMTextMessage(data=RTVI.TextMessageData(text=frame.text))
         await self.send_rtvi_message(message)
 
         # TODO (mrkb): Remove all this logic when we fully deprecate bot-transcription messages.
@@ -1225,7 +792,9 @@ class RTVIObserver(BaseObserver):
 
         if match_endofsentence(self._bot_transcription) and len(self._bot_transcription) > 0:
             await self.send_rtvi_message(
-                RTVIBotTranscriptionMessage(data=RTVITextMessageData(text=self._bot_transcription))
+                RTVI.BotTranscriptionMessage(
+                    data=RTVI.TextMessageData(text=self._bot_transcription)
+                )
             )
             self._bot_transcription = ""
 
@@ -1233,14 +802,14 @@ class RTVIObserver(BaseObserver):
         """Handle user transcription frames."""
         message = None
         if isinstance(frame, TranscriptionFrame):
-            message = RTVIUserTranscriptionMessage(
-                data=RTVIUserTranscriptionMessageData(
+            message = RTVI.UserTranscriptionMessage(
+                data=RTVI.UserTranscriptionMessageData(
                     text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=True
                 )
             )
         elif isinstance(frame, InterimTranscriptionFrame):
-            message = RTVIUserTranscriptionMessage(
-                data=RTVIUserTranscriptionMessageData(
+            message = RTVI.UserTranscriptionMessage(
+                data=RTVI.UserTranscriptionMessageData(
                     text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp, final=False
                 )
             )
@@ -1265,7 +834,7 @@ class RTVIObserver(BaseObserver):
             if hasattr(message, "role") and message.role == "user" and hasattr(message, "parts"):
                 text = "".join(part.text for part in message.parts if hasattr(part, "text"))
                 if text:
-                    rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
+                    rtvi_message = RTVI.UserLLMTextMessage(data=RTVI.TextMessageData(text=text))
                     await self.send_rtvi_message(rtvi_message)
 
             # Handle OpenAI format (original implementation)
@@ -1276,7 +845,7 @@ class RTVIObserver(BaseObserver):
                         text = " ".join(item["text"] for item in content if "text" in item)
                     else:
                         text = content
-                    rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
+                    rtvi_message = RTVI.UserLLMTextMessage(data=RTVI.TextMessageData(text=text))
                     await self.send_rtvi_message(rtvi_message)
 
         except Exception as e:
@@ -1303,21 +872,21 @@ class RTVIObserver(BaseObserver):
                     metrics["characters"] = []
                 metrics["characters"].append(d.model_dump(exclude_none=True))
 
-        message = RTVIMetricsMessage(data=metrics)
+        message = RTVI.MetricsMessage(data=metrics)
         await self.send_rtvi_message(message)
 
     async def _send_server_response(self, frame: RTVIServerResponseFrame):
         """Send a response to the client for a specific request."""
-        message = RTVIServerResponse(
+        message = RTVI.ServerResponse(
             id=str(frame.client_msg.msg_id),
-            data=RTVIRawServerResponseData(t=frame.client_msg.type, d=frame.data),
+            data=RTVI.RawServerResponseData(t=frame.client_msg.type, d=frame.data),
         )
         await self.send_rtvi_message(message)
 
     async def _send_error_response(self, frame: RTVIServerResponseFrame):
         """Send a response to the client for a specific request."""
-        message = RTVIErrorResponse(
-            id=str(frame.client_msg.msg_id), data=RTVIErrorResponseData(error=frame.error)
+        message = RTVI.ErrorResponse(
+            id=str(frame.client_msg.msg_id), data=RTVI.ErrorResponseData(error=frame.error)
         )
         await self.send_rtvi_message(message)
 
@@ -1449,17 +1018,17 @@ class RTVIProcessor(FrameProcessor):
 
     async def send_server_message(self, data: Any):
         """Send a server message to the client."""
-        message = RTVIServerMessage(data=data)
+        message = RTVI.ServerMessage(data=data)
         await self._send_server_message(message)
 
-    async def send_server_response(self, client_msg: RTVIClientMessage, data: Any):
+    async def send_server_response(self, client_msg: RTVI.ClientMessage, data: Any):
         """Send a server response for a given client message."""
-        message = RTVIServerResponse(
-            id=client_msg.msg_id, data=RTVIRawServerResponseData(t=client_msg.type, d=data)
+        message = RTVI.ServerResponse(
+            id=client_msg.msg_id, data=RTVI.RawServerResponseData(t=client_msg.type, d=data)
         )
         await self._send_server_message(message)
 
-    async def send_error_response(self, client_msg: RTVIClientMessage, error: str):
+    async def send_error_response(self, client_msg: RTVI.ClientMessage, error: str):
         """Send an error response for a given client message."""
         await self._send_error_response(id=client_msg.msg_id, error=error)
 
@@ -1478,7 +1047,7 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(frame)
 
-    async def handle_message(self, message: RTVIMessage):
+    async def handle_message(self, message: RTVI.Message):
         """Handle an incoming RTVI message.
 
         Args:
@@ -1492,12 +1061,12 @@ class RTVIProcessor(FrameProcessor):
         Args:
             params: The function call parameters.
         """
-        fn = RTVILLMFunctionCallMessageData(
+        fn = RTVI.LLMFunctionCallMessageData(
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
             args=params.arguments,
         )
-        message = RTVILLMFunctionCallMessage(data=fn)
+        message = RTVI.LLMFunctionCallMessage(data=fn)
         await self.push_transport_message(message, exclude_none=False)
 
     async def handle_function_call_start(
@@ -1523,8 +1092,8 @@ class RTVIProcessor(FrameProcessor):
                 DeprecationWarning,
             )
 
-        fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
-        message = RTVILLMFunctionCallStartMessage(data=fn)
+        fn = RTVI.LLMFunctionCallStartMessageData(function_name=function_name)
+        message = RTVI.LLMFunctionCallStartMessage(data=fn)
         await self.push_transport_message(message, exclude_none=False)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -1615,23 +1184,23 @@ class RTVIProcessor(FrameProcessor):
         """Handle an incoming transport message frame."""
         try:
             transport_message = frame.message
-            if transport_message.get("label") != RTVI_MESSAGE_LABEL:
+            if transport_message.get("label") != RTVI.MESSAGE_LABEL:
                 logger.warning(f"Ignoring not RTVI message: {transport_message}")
                 return
-            message = RTVIMessage.model_validate(transport_message)
+            message = RTVI.Message.model_validate(transport_message)
             await self._message_queue.put(message)
         except ValidationError as e:
             await self.send_error(f"Invalid RTVI transport message: {e}")
             logger.warning(f"Invalid RTVI transport message: {e}")
 
-    async def _handle_message(self, message: RTVIMessage):
+    async def _handle_message(self, message: RTVI.Message):
         """Handle a parsed RTVI message."""
         try:
             match message.type:
                 case "client-ready":
                     data = None
                     try:
-                        data = RTVIClientReadyData.model_validate(message.data)
+                        data = RTVI.ClientReadyData.model_validate(message.data)
                     except ValidationError:
                         # Not all clients have been updated to RTVI 1.0.0.
                         # For now, that's okay, we just log their info as unknown.
@@ -1650,23 +1219,23 @@ class RTVIProcessor(FrameProcessor):
                 case "disconnect-bot":
                     await self.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
                 case "client-message":
-                    data = RTVIRawClientMessageData.model_validate(message.data)
+                    data = RTVI.RawClientMessageData.model_validate(message.data)
                     await self._handle_client_message(message.id, data)
                 case "action":
-                    action = RTVIActionRun.model_validate(message.data)
-                    action_frame = RTVIActionFrame(message_id=message.id, rtvi_action_run=action)
+                    action = RTVI.ActionRun.model_validate(message.data)
+                    action_frame = RTVI.ActionFrame(message_id=message.id, rtvi_action_run=action)
                     await self._action_queue.put(action_frame)
                 case "llm-function-call-result":
-                    data = RTVILLMFunctionCallResultData.model_validate(message.data)
+                    data = RTVI.LLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
                 case "send-text":
-                    data = RTVISendTextData.model_validate(message.data)
+                    data = RTVI.SendTextData.model_validate(message.data)
                     await self._handle_send_text(data)
                 case "append-to-context":
                     logger.warning(
                         f"The append-to-context message is deprecated, use send-text instead."
                     )
-                    data = RTVIAppendToContextData.model_validate(message.data)
+                    data = RTVI.AppendToContextData.model_validate(message.data)
                     await self._handle_update_context(data)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
@@ -1681,7 +1250,7 @@ class RTVIProcessor(FrameProcessor):
             await self._send_error_response(message.id, f"Exception processing message: {e}")
             logger.warning(f"Exception processing message: {e}")
 
-    async def _handle_client_ready(self, request_id: str, data: RTVIClientReadyData | None):
+    async def _handle_client_ready(self, request_id: str, data: RTVI.ClientReadyData | None):
         """Handle the client-ready message from the client."""
         version = data.version if data else None
         logger.debug(f"Received client-ready: version {version}")
@@ -1814,9 +1383,9 @@ class RTVIProcessor(FrameProcessor):
         await self._update_config(RTVIConfig(config=data.config), data.interrupt)
         await self._handle_get_config(request_id)
 
-    async def _handle_send_text(self, data: RTVISendTextData):
+    async def _handle_send_text(self, data: RTVI.SendTextData):
         """Handle a send-text message from the client."""
-        opts = data.options if data.options is not None else RTVISendTextOptions()
+        opts = data.options if data.options is not None else RTVI.SendTextOptions()
         if opts.run_immediately:
             await self.interrupt_bot()
         cur_llm_skip_tts = self._llm_skip_tts
@@ -1834,7 +1403,7 @@ class RTVIProcessor(FrameProcessor):
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)
 
-    async def _handle_update_context(self, data: RTVIAppendToContextData):
+    async def _handle_update_context(self, data: RTVI.AppendToContextData):
         if data.run_immediately:
             await self.interrupt_bot()
         frame = LLMMessagesAppendFrame(
@@ -1843,7 +1412,7 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(frame)
 
-    async def _handle_client_message(self, msg_id: str, data: RTVIRawClientMessageData):
+    async def _handle_client_message(self, msg_id: str, data: RTVI.RawClientMessageData):
         """Handle a client message frame."""
         if not data:
             await self._send_error_response(msg_id, "Malformed client message")
@@ -1854,7 +1423,7 @@ class RTVIProcessor(FrameProcessor):
         await self.push_frame(frame)
         await self._call_event_handler(
             "on_client_message",
-            RTVIClientMessage(
+            RTVI.ClientMessage(
                 msg_id=msg_id,
                 type=data.t,
                 data=data.d,
@@ -1896,29 +1465,35 @@ class RTVIProcessor(FrameProcessor):
             about: Optional information about the bot to include in the ready message.
                    If left as None, the pipecat library and version will be used.
         """
-        config = None
-        if self._client_version and self._client_version[0] < 1:
-            config = self._config.config
         if not about:
             about = {"library": "pipecat-ai", "library_version": f"{pipecat_version()}"}
-        message = RTVIBotReady(
-            id=self._client_ready_id,
-            data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, about=about, config=config),
-        )
+        if self._client_version and self._client_version[0] < 1:
+            config = self._config.config
+            message = RTVI.BotReady(
+                id=self._client_ready_id,
+                data=RTVI.BotReadyDataDeprecated(
+                    version=RTVI.PROTOCOL_VERSION, about=about, config=config
+                ),
+            )
+        else:
+            message = RTVI.BotReady(
+                id=self._client_ready_id,
+                data=RTVI.BotReadyData(version=RTVI.PROTOCOL_VERSION, about=about),
+            )
         await self.push_transport_message(message)
 
-    async def _send_server_message(self, message: RTVIServerMessage | RTVIServerResponse):
+    async def _send_server_message(self, message: RTVI.ServerMessage | RTVI.ServerResponse):
         """Send a message or response to the client."""
         await self.push_transport_message(message)
 
     async def _send_error_frame(self, frame: ErrorFrame):
         """Send an error frame as an RTVI error message."""
-        message = RTVIError(data=RTVIErrorData(error=frame.error, fatal=frame.fatal))
+        message = RTVI.Error(data=RTVI.ErrorData(error=frame.error, fatal=frame.fatal))
         await self.push_transport_message(message)
 
     async def _send_error_response(self, id: str, error: str):
         """Send an error response message."""
-        message = RTVIErrorResponse(id=id, data=RTVIErrorResponseData(error=error))
+        message = RTVI.ErrorResponse(id=id, data=RTVI.ErrorResponseData(error=error))
         await self.push_transport_message(message)
 
     def _action_id(self, service: str, action: str) -> str:
