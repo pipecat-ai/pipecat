@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
+from pipecat.turns.bot.timeout_bot_turn_start_strategy import TimeoutBotTurnStartStrategy
 from pipecat.turns.bot.transcription_bot_turn_start_strategy import (
     TranscriptionBotTurnStartStrategy,
 )
@@ -31,7 +32,7 @@ class TurnStartStrategies:
     defaults are used:
 
         user: [VADUserTurnStartStrategy, TranscriptionUserTurnStartStrategy]
-         bot: [TranscriptionBotTurnStartStrategy]
+         bot: [TranscriptionBotTurnStartStrategy, TimeoutBotTurnStartStrategy]
 
     Attributes:
         user: A list of user turn start strategies used to detect when the
@@ -48,4 +49,4 @@ class TurnStartStrategies:
         if not self.user:
             self.user = [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
         if not self.bot:
-            self.bot = [TranscriptionBotTurnStartStrategy()]
+            self.bot = [TranscriptionBotTurnStartStrategy(), TimeoutBotTurnStartStrategy()]

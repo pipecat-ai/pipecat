@@ -13,12 +13,14 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.turns.bot.timeout_bot_turn_start_strategy import TimeoutBotTurnStartStrategy
 from pipecat.turns.bot.transcription_bot_turn_start_strategy import (
     TranscriptionBotTurnStartStrategy,
 )
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
+USER_TURN_TIMEOUT = 0.2
 
 
 class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
@@ -473,4 +475,39 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         # Transcription comes after user stopped speaking, we need to wait for
         # at least the aggregation timeout.
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+
+
+class TestTimeoutBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.task_manager = TaskManager()
+        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def test_timeout_user_speaking(self):
+        strategy = TimeoutBotTurnStartStrategy(timeout=USER_TURN_TIMEOUT)
+        await strategy.setup(self.task_manager)
+
+        should_start = None
+
+        @strategy.event_handler("on_bot_turn_started")
+        async def on_bot_turn_started(strategy):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        await asyncio.sleep(USER_TURN_TIMEOUT + 0.1)
+        self.assertFalse(should_start)
+
+    async def test_timeout_user_not_speaking(self):
+        strategy = TimeoutBotTurnStartStrategy(timeout=USER_TURN_TIMEOUT)
+        await strategy.setup(self.task_manager)
+
+        should_start = None
+
+        @strategy.event_handler("on_bot_turn_started")
+        async def on_bot_turn_started(strategy):
+            nonlocal should_start
+            should_start = True
+
+        await asyncio.sleep(USER_TURN_TIMEOUT + 0.1)
         self.assertTrue(should_start)
