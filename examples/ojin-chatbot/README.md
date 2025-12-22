@@ -62,3 +62,12 @@ The project relies on:
 - **Ojin** – For speech to video generation. [https://ojin.ai/](https://ojin.ai/)
 - **Hume** – For Speech to Speech service covering STT/LLM/TTS in a single service. [https://hume.ai/](https://hume.ai/)
 - **Tkinter** – For local audio input and output and video output.
+
+## NOTE
+
+This example currently requires headphones because the transports used lack echo cancellation. To use it without headphones, switch to a transport with built-in echo cancellation, such as `LiveKit` or `Daily`.
+
+
+## In-Depth
+
+If you want to check the API in more depth you can read through the `OJIN_WEBSOCKET_API.md` file, it's not required but gives a general idea about how the internal websocket protocol works.

@@ -141,7 +141,6 @@ async def main():
 
     persona = OjinVideoService(
         OjinVideoServiceSettings(
-            ws_url=os.getenv("OJIN_REALTIME_API_URL", "wss://models.ojin.ai/realtime"),
             api_key=os.getenv("OJIN_API_KEY", ""),
             config_id=os.getenv("OJIN_CONFIG_ID", ""),
         )
@@ -171,6 +170,12 @@ async def main():
         ),
     )
 
+    # Handle window close - cancel task to stop pipeline gracefully
+    def on_closing():
+        asyncio.get_event_loop().create_task(task.cancel())
+
+    tk_root.protocol("WM_DELETE_WINDOW", on_closing)
+
     # messages.append({"role": "system", "content": "Please introduce yourself to the user."})
     # await task.queue_frames([context_aggregator.user().get_context_frame()])
 
@@ -178,6 +183,8 @@ async def main():
 
     try:
         await runner.run(task)
+    except asyncio.CancelledError:
+        pass  # Expected when window is closed
     finally:
         # Clean up the Tkinter update task
         if "tk_update_task" in locals():
