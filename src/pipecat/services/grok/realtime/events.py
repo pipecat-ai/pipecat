@@ -205,7 +205,9 @@ class SessionProperties(BaseModel):
     Parameters:
         instructions: System instructions for the assistant.
         voice: The voice the model uses to respond. Options: Ara, Rex, Sal, Eve, Leo.
-        turn_detection: Configuration for turn detection, or None for manual.
+            Defaults to "Ara".
+        turn_detection: Configuration for turn detection. Defaults to server-side VAD.
+            Set to None for manual turn detection.
         audio: Configuration for input and output audio.
         tools: Available tools for the assistant (web_search, x_search, file_search, function).
     """
@@ -215,7 +217,9 @@ class SessionProperties(BaseModel):
 
     instructions: Optional[str] = None
     voice: Optional[GrokVoice] = "Ara"
-    turn_detection: Optional[TurnDetection] = None
+    turn_detection: Optional[TurnDetection] = Field(
+        default_factory=lambda: TurnDetection(type="server_vad")
+    )
     audio: Optional[AudioConfiguration] = None
     # Tools can be ToolsSchema when provided by user, or list of dicts for API
     tools: Optional[ToolsSchema | List[GrokTool]] = None
@@ -629,6 +633,26 @@ class ResponseAudioDone(ServerEvent):
     item_id: str
 
 
+class ResponseFunctionCallArgumentsDelta(ServerEvent):
+    """Event containing incremental function call arguments.
+
+    Parameters:
+        type: Event type, always "response.function_call_arguments.delta".
+        response_id: ID of the response.
+        item_id: ID of the conversation item.
+        call_id: ID of the function call.
+        delta: Incremental function arguments as JSON.
+        previous_item_id: ID of the previous item, if any.
+    """
+
+    type: Literal["response.function_call_arguments.delta"]
+    response_id: Optional[str] = None
+    item_id: Optional[str] = None
+    call_id: str
+    delta: str
+    previous_item_id: Optional[str] = None
+
+
 class ResponseFunctionCallArgumentsDone(ServerEvent):
     """Event indicating function call arguments are complete.
 
@@ -820,6 +844,7 @@ _server_event_types = {
     "response.output_audio_transcript.done": ResponseAudioTranscriptDone,
     "response.output_audio.delta": ResponseAudioDelta,
     "response.output_audio.done": ResponseAudioDone,
+    "response.function_call_arguments.delta": ResponseFunctionCallArgumentsDelta,
     "response.function_call_arguments.done": ResponseFunctionCallArgumentsDone,
     "response.done": ResponseDone,
 }
