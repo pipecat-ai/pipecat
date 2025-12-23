@@ -24,6 +24,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 try:
+    import websockets
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
@@ -489,6 +490,7 @@ class InworldTTSService(AudioContextWordTTSService):
         }
 
         self._receive_task = None
+        self._keepalive_task = None
         self._context_id = None
         self._started = False
         self._flush_complete_event: Optional[asyncio.Event] = None
@@ -667,6 +669,47 @@ class InworldTTSService(AudioContextWordTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
+    async def _keepalive_task_handler(self):
+        """Send periodic keepalive messages to maintain WebSocket connection.
+
+        Inworld closes WebSocket connections after 10 minutes of inactivity.
+        This sends messages every 30 seconds to prevent timeout.
+        """
+        KEEPALIVE_SLEEP = 30
+        while True:
+            await asyncio.sleep(KEEPALIVE_SLEEP)
+            try:
+                if self._websocket and self._websocket.state is State.OPEN:
+                    if self._context_id:
+                        # Send keepalive with active context ID
+                        msg = {"send_text": {"text": ""}, "contextId": self._context_id}
+                        await self._websocket.send(json.dumps(msg))
+                    else:
+                        # No active context - create temporary one, send text, close it
+                        keepalive_ctx = str(uuid.uuid4())
+                        # Create context
+                        create_msg = {
+                            "create": {
+                                "voiceId": self._settings["voiceId"],
+                                "modelId": self._settings["modelId"],
+                                "audioConfig": self._settings["audioConfig"],
+                            },
+                            "contextId": keepalive_ctx,
+                        }
+                        await self._websocket.send(json.dumps(create_msg))
+                        # Send empty text
+                        text_msg = {"send_text": {"text": ""}, "contextId": keepalive_ctx}
+                        await self._websocket.send(json.dumps(text_msg))
+                        # Close the temporary context
+                        close_msg = {"close_context": {}, "contextId": keepalive_ctx}
+                        await self._websocket.send(json.dumps(close_msg))
+            except websockets.ConnectionClosed as e:
+                logger.warning(f"{self} keepalive error: {e}")
+                break
+            except Exception as e:
+                logger.warning(f"{self} keepalive error: {e}")
+                break
+
     async def _connect(self):
         """Connect to the Inworld WebSocket TTS service.
 
@@ -677,12 +720,19 @@ class InworldTTSService(AudioContextWordTTSService):
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
+        if self._websocket and not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+
     async def _disconnect(self):
         """Disconnect from the Inworld WebSocket TTS service.
 
         Returns:
             The websocket.
         """
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None

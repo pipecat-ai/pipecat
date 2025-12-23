@@ -107,7 +107,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 }
             ),
         ],
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        idle_timeout_secs=3000,
     )
 
     @transport.event_handler("on_client_connected")
