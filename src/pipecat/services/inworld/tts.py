@@ -666,12 +666,8 @@ class InworldTTSService(AudioContextWordTTSService):
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
-    async def _process_messages(self):
-        """Process incoming WebSocket messages from Inworld.
-
-        Returns:
-            The messages.
-        """
+    async def _receive_messages(self):
+        """Handle incoming WebSocket messages from Inworld."""
         async for message in self._get_websocket():
             try:
                 msg = json.loads(message)
@@ -760,18 +756,6 @@ class InworldTTSService(AudioContextWordTTSService):
                 if ctx_id and self.audio_context_available(ctx_id):
                     await self.remove_audio_context(ctx_id)
                 await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
-
-    async def _receive_messages(self):
-        """Receive messages from the Inworld WebSocket TTS service with auto-reconnect.
-
-        Returns:
-            The messages.
-        """
-        while True:
-            await self._process_messages()
-            # Inworld may disconnect after period of inactivity, so we try to reconnect
-            logger.debug(f"{self} Inworld connection was disconnected, reconnecting")
-            await self._connect_websocket()
 
     async def _send_context(self, context_id: str):
         """Send a context to the Inworld WebSocket TTS service.
