@@ -38,15 +38,19 @@ class PiperTTSService(TTSService):
         # When using Piper, the sample rate of the generated audio depends on the
         # voice model being used.
         sample_rate: Optional[int] = None,
+        voice: str | None = None,
+        speed: int = 0,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
 
         Args:
-            base_url: Base URL for the Piper TTS HTTP server.
-            aiohttp_session: aiohttp ClientSession for making HTTP requests.
-            sample_rate: Output sample rate. If None, uses the voice model's native rate.
-            **kwargs: Additional arguments passed to the parent TTSService.
+                base_url: Base URL for the Piper TTS HTTP server.
+                aiohttp_session: aiohttp ClientSession for making HTTP requests.
+                sample_rate: Output sample rate. If None, uses the voice model's native rate.
+                voice: Voice model to use for synthesis.
+                speed: Speed adjustment for speech synthesis.
+                **kwargs: Additional arguments passed to the parent TTSService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
@@ -57,12 +61,14 @@ class PiperTTSService(TTSService):
         self._base_url = base_url
         self._session = aiohttp_session
         self._settings = {"base_url": base_url}
+        self.voice = voice
+        self.speed = speed
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
         Returns:
-            True, as Piper service supports metrics generation.
+                True, as Piper service supports metrics generation.
         """
         return True
 
@@ -74,7 +80,7 @@ class PiperTTSService(TTSService):
             text: The text to convert to speech.
 
         Yields:
-            Frame: Audio frames containing the synthesized speech and status frames.
+                Frame: Audio frames containing the synthesized speech and status frames.
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
         headers = {
@@ -84,7 +90,13 @@ class PiperTTSService(TTSService):
             await self.start_ttfb_metrics()
 
             async with self._session.post(
-                self._base_url, json={"text": text}, headers=headers
+                self._base_url,
+                json={
+                    "text": text,
+                    "voice": self.voice,
+                    "length_scale": self.speed,
+                },
+                headers=headers,
             ) as response:
                 if response.status != 200:
                     error = await response.text()
