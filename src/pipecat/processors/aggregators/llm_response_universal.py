@@ -390,10 +390,20 @@ class LLMUserAggregator(LLMContextAggregator):
         if not frame.turn_params:
             return
 
-        logger.error(
-            f"{self}: turn_analyzer in base input transport is deprecated and "
-            "might result in unexpected behavior. Use PipelineTask's turn_start_strategies with "
-            "TurnAnalyzerBotTurnStartStrategy instead."
+        logger.warning(
+            f"{self}: `turn_analyzer` in base input transport is deprecated and "
+            "might result in unexpected behavior. Use `PipelineTask`'s `turn_start_strategies` with "
+            "`TurnAnalyzerBotTurnStartStrategy` instead.:\n\n"
+            "    task = PipelineTask(\n"
+            "        pipeline,\n"
+            "        params=PipelineParams(\n"
+            "            ...,\n"
+            "            turn_start_strategies=TurnStartStrategies(\n"
+            "                bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]\n"
+            "            ),\n"
+            "        ),\n"
+            "        ...,\n"
+            "    )"
         )
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
