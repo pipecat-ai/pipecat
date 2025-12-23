@@ -39,7 +39,7 @@ class PiperTTSService(TTSService):
         # voice model being used.
         sample_rate: Optional[int] = None,
         voice: str | None = None,
-        speed: int = 0,
+        speed: int = 1,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
