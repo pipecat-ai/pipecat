@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 <!-- towncrier release notes start -->
+## [Unreleased]
+
+### Changed
+
+- Enhanced interruption handling in `AsyncAITTSService` by supporting multi-context WebSocket sessions for more robust context management.
+
+### Fixed
+
+- Corrected TTFB metric calculation in `AsyncAIHttpTTSService`.
 
 ## [0.0.99] - 2026-01-13
 
