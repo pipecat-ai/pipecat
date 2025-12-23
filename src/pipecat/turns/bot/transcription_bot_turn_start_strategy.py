@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Transcription time-based speaking strategy."""
+"""Transcription time-based bot turn start strategy."""
 
 import asyncio
 from typing import Optional
