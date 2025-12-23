@@ -266,7 +266,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._cleanup()
 
     async def reset(self):
-        """Reset the aggregation state and interruption strategies."""
+        """Reset the aggregation state and turn start strategies."""
         await super().reset()
 
         if self.turn_start_strategies and self.turn_start_strategies.user:

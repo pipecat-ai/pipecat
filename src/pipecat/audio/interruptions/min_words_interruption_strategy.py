@@ -42,7 +42,8 @@ class MinWordsInterruptionStrategy(BaseInterruptionStrategy):
             warnings.simplefilter("always")
             warnings.warn(
                 "'pipecat.audio.interruptions' is deprecated. "
-                "Use the new interruption and speaking strategies.",
+                "Use `pipecat.turns.user.MinWordsUserTurnStartStrategy` with `PipelineTask`'s "
+                "new `turn_start_strategies` parameter instead.",
                 DeprecationWarning,
             )
 

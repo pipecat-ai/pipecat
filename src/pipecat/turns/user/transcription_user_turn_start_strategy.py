@@ -21,12 +21,12 @@ class TranscriptionUserTurnStartStrategy(BaseUserTurnStartStrategy):
     """
 
     def __init__(self):
-        """Initialize the base interruption strategy."""
+        """Initialize transcription-based user turn start strategy."""
         super().__init__()
         self._bot_speaking = False
 
     async def reset(self):
-        """Reset the interruption strategy."""
+        """Reset the strategy to its initial state."""
         await super().reset()
         self._bot_speaking = False
 
