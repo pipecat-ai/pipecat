@@ -319,9 +319,23 @@ class FrameProcessor(BaseObject):
     def interruptions_allowed(self):
         """Check if interruptions are allowed for this processor.
 
+        .. deprecated:: 0.0.99
+            Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.
+
         Returns:
             True if interruptions are allowed.
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`FrameProcessor.interruptions_allowed` is deprecated. "
+                "Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         return self._allow_interruptions
 
     @property
