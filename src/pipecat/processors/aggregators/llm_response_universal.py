@@ -287,18 +287,6 @@ class LLMUserAggregator(LLMContextAggregator):
         await super().cleanup()
         await self._cleanup()
 
-    async def reset(self):
-        """Reset the aggregation state and turn start strategies."""
-        await super().reset()
-
-        if self.turn_start_strategies and self.turn_start_strategies.user:
-            for s in self.turn_start_strategies.user:
-                await s.reset()
-
-        if self.turn_start_strategies and self.turn_start_strategies.bot:
-            for s in self.turn_start_strategies.bot:
-                await s.reset()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for user speech aggregation and context management.
 
