@@ -65,6 +65,7 @@ from pipecat.processors.aggregators.llm_context import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
 from pipecat.turns.mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.turns.turn_start_strategies import TurnStartStrategies
 from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
@@ -80,12 +81,14 @@ class LLMUserAggregatorParams:
             interruption frames. This is enabled by default, but you may want
             to disable it if another component (e.g., an STT service) is already
             generating these frames.
+        turn_start_strategies: User and bot turn start strategies.
         user_mute_strategies: List of user mute strategies.
         user_turn_end_timeout: Time in seconds to wait before considering the
             user's turn finished and starting the bot turn.
     """
 
     enable_user_speaking_frames: bool = True
+    turn_start_strategies: Optional[TurnStartStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_end_timeout: float = 5.0
 
@@ -271,6 +274,9 @@ class LLMUserAggregator(LLMContextAggregator):
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
 
+        # Initialize default user and bot turn start strategies.
+        self._turn_start_strategies = self._params.turn_start_strategies or TurnStartStrategies()
+
         self._vad_user_speaking = False
 
         self._user_turn = False
@@ -362,15 +368,15 @@ class LLMUserAggregator(LLMContextAggregator):
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
 
-        if self.turn_start_strategies and self.turn_start_strategies.user:
-            for s in self.turn_start_strategies.user:
+        if self._turn_start_strategies.user:
+            for s in self._turn_start_strategies.user:
                 await s.setup(self.task_manager)
                 s.add_event_handler("on_push_frame", self._on_push_frame)
                 s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
                 s.add_event_handler("on_user_turn_started", self._on_user_turn_started)
 
-        if self.turn_start_strategies and self.turn_start_strategies.bot:
-            for s in self.turn_start_strategies.bot:
+        if self._turn_start_strategies.bot:
+            for s in self._turn_start_strategies.bot:
                 await s.setup(self.task_manager)
                 s.add_event_handler("on_push_frame", self._on_push_frame)
                 s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
@@ -390,12 +396,12 @@ class LLMUserAggregator(LLMContextAggregator):
         for s in self._params.user_mute_strategies:
             await s.cleanup()
 
-        if self.turn_start_strategies and self.turn_start_strategies.user:
-            for s in self.turn_start_strategies.user:
+        if self._turn_start_strategies.user:
+            for s in self._turn_start_strategies.user:
                 await s.cleanup()
 
-        if self.turn_start_strategies and self.turn_start_strategies.bot:
-            for s in self.turn_start_strategies.bot:
+        if self._turn_start_strategies.bot:
+            for s in self._turn_start_strategies.bot:
                 await s.cleanup()
 
     async def _maybe_mute_frame(self, frame: Frame):
@@ -427,12 +433,12 @@ class LLMUserAggregator(LLMContextAggregator):
         return should_mute_frame
 
     async def _turn_start_strategies_process_frame(self, frame: Frame):
-        if self.turn_start_strategies and self.turn_start_strategies.user:
-            for strategy in self.turn_start_strategies.user:
+        if self._turn_start_strategies.user:
+            for strategy in self._turn_start_strategies.user:
                 await strategy.process_frame(frame)
 
-        if self.turn_start_strategies and self.turn_start_strategies.bot:
-            for strategy in self.turn_start_strategies.bot:
+        if self._turn_start_strategies.bot:
+            for strategy in self._turn_start_strategies.bot:
                 await strategy.process_frame(frame)
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
@@ -454,17 +460,21 @@ class LLMUserAggregator(LLMContextAggregator):
 
         logger.warning(
             f"{self}: `turn_analyzer` in base input transport is deprecated and "
-            "might result in unexpected behavior. Use `PipelineTask`'s `turn_start_strategies` with "
-            "`TurnAnalyzerBotTurnStartStrategy` instead.:\n\n"
-            "    task = PipelineTask(\n"
-            "        pipeline,\n"
-            "        params=PipelineParams(\n"
+            "might result in unexpected behavior. Use `LLMUserAggregator`'s new `turn_start_strategies` "
+            "parameter with `TurnAnalyzerBotTurnStartStrategy` instead:\n"
+            "\n"
+            "    context_aggregator = LLMContextAggregatorPair(\n"
+            "        context,\n"
+            "        user_params=LLMUserAggregatorParams(\n"
             "            ...,\n"
             "            turn_start_strategies=TurnStartStrategies(\n"
-            "                bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]\n"
-            "            ),\n"
+            "                bot=[\n"
+            "                    TurnAnalyzerBotTurnStartStrategy(\n"
+            "                        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams())\n"
+            "                    )\n"
+            "                ],\n"
+            "            )\n"
             "        ),\n"
-            "        ...,\n"
             "    )"
         )
 
@@ -528,8 +538,8 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_end_timeout_event.set()
 
         # Reset all user turn start strategies to start fresh.
-        if self.turn_start_strategies and self.turn_start_strategies.user:
-            for s in self.turn_start_strategies.user:
+        if self._turn_start_strategies.user:
+            for s in self._turn_start_strategies.user:
                 await s.reset()
 
         if self._params.enable_user_speaking_frames:
@@ -549,8 +559,8 @@ class LLMUserAggregator(LLMContextAggregator):
         self._user_turn_end_timeout_event.set()
 
         # Reset all bot turn start strategies to start fresh.
-        if self.turn_start_strategies and self.turn_start_strategies.bot:
-            for s in self.turn_start_strategies.bot:
+        if self._turn_start_strategies.bot:
+            for s in self._turn_start_strategies.bot:
                 await s.reset()
 
         if self._params.enable_user_speaking_frames:
