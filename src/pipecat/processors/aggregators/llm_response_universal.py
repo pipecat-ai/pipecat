@@ -15,7 +15,7 @@ import asyncio
 import json
 import warnings
 from abc import abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Set, Type
 
 from loguru import logger
@@ -31,6 +31,8 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    InputAudioRawFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
@@ -62,6 +64,7 @@ from pipecat.processors.aggregators.llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
+from pipecat.turns.mute.base_user_mute_strategy import BaseUserMuteStrategy
 from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
@@ -77,11 +80,13 @@ class LLMUserAggregatorParams:
             interruption frames. This is enabled by default, but you may want
             to disable it if another component (e.g., an STT service) is already
             generating these frames.
+        user_mute_strategies: List of user mute strategies.
         user_turn_end_timeout: Time in seconds to wait before considering the
             user's turn finished and starting the bot turn.
     """
 
     enable_user_speaking_frames: bool = True
+    user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_end_timeout: float = 5.0
 
 
@@ -269,6 +274,7 @@ class LLMUserAggregator(LLMContextAggregator):
         self._vad_user_speaking = False
 
         self._user_turn = False
+        self._user_is_muted = False
         self._user_turn_end_timeout_event = asyncio.Event()
         self._user_turn_end_timeout_task: Optional[asyncio.Task] = None
 
@@ -301,6 +307,9 @@ class LLMUserAggregator(LLMContextAggregator):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
+
+        if await self._maybe_mute_frame(frame):
+            return
 
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
@@ -362,6 +371,9 @@ class LLMUserAggregator(LLMContextAggregator):
                 self._user_turn_end_timeout_task_handler()
             )
 
+        for s in self._params.user_mute_strategies:
+            await s.setup(self.task_manager)
+
         if self.turn_start_strategies and self.turn_start_strategies.user:
             for s in self.turn_start_strategies.user:
                 await s.setup(self.task_manager)
@@ -387,6 +399,9 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.cancel_task(self._user_turn_end_timeout_task)
             self._user_turn_end_timeout_task = None
 
+        for s in self._params.user_mute_strategies:
+            await s.cleanup()
+
         if self.turn_start_strategies and self.turn_start_strategies.user:
             for s in self.turn_start_strategies.user:
                 await s.cleanup()
@@ -394,6 +409,34 @@ class LLMUserAggregator(LLMContextAggregator):
         if self.turn_start_strategies and self.turn_start_strategies.bot:
             for s in self.turn_start_strategies.bot:
                 await s.cleanup()
+
+    async def _maybe_mute_frame(self, frame: Frame):
+        should_mute_frame = self._user_is_muted and isinstance(
+            frame,
+            (
+                InterruptionFrame,
+                VADUserStartedSpeakingFrame,
+                VADUserStoppedSpeakingFrame,
+                UserStartedSpeakingFrame,
+                UserStoppedSpeakingFrame,
+                InputAudioRawFrame,
+                InterimTranscriptionFrame,
+                TranscriptionFrame,
+            ),
+        )
+
+        if should_mute_frame:
+            logger.trace(f"{frame.name} suppressed - user currently muted")
+
+        should_mute_next_time = False
+        for s in self._params.user_mute_strategies:
+            should_mute_next_time |= await s.process_frame(frame)
+
+        if should_mute_next_time != self._user_is_muted:
+            logger.debug(f"{self}: user is now {'muted' if should_mute_next_time else 'unmuted'}")
+            self._user_is_muted = should_mute_next_time
+
+        return should_mute_frame
 
     async def _turn_start_strategies_process_frame(self, frame: Frame):
         if self.turn_start_strategies and self.turn_start_strategies.user:
