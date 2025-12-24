@@ -38,9 +38,8 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
-    from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
+    from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
-    from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 
 class DeprecatedKeypadEntry:
@@ -958,7 +957,7 @@ class StartFrame(SystemFrame):
         interruption_strategies: List of interruption handling strategies.
 
             .. deprecated:: 0.0.99
-                Use the `turn_start_strategies` instead.
+                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
 
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
     """
@@ -970,7 +969,6 @@ class StartFrame(SystemFrame):
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
     interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
-    turn_start_strategies: Optional["TurnStartStrategies"] = None
     report_only_initial_ttfb: bool = False
 
 

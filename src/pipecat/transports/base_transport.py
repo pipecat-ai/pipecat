@@ -115,7 +115,7 @@ class TransportParams(BaseModel):
         turn_analyzer: Turn-taking analyzer instance for conversation management.
 
             .. deprecated:: 0.0.99
-                The `turn_analyzer` parameter is deprecated, use `PipelineTask`'s
+                The `turn_analyzer` parameter is deprecated, use `LLMUSerAggregator`'s
                 new `turn_start_strategies` parameter instead.
     """
 

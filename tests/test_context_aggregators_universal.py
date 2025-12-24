@@ -10,7 +10,6 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     FunctionCallFromLLM,
-    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
@@ -25,7 +24,6 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.task import PipelineParams
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregator,
@@ -202,7 +200,12 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         user_aggregator = LLMUserAggregator(
             context,
-            params=LLMUserAggregatorParams(user_turn_end_timeout=USER_TURN_END_TIMEOUT),
+            params=LLMUserAggregatorParams(
+                turn_start_strategies=TurnStartStrategies(
+                    bot=[TranscriptionBotTurnStartStrategy(timeout=TRANSCRIPTION_TIMEOUT)],
+                ),
+                user_turn_end_timeout=USER_TURN_END_TIMEOUT,
+            ),
         )
 
         timeout = False
@@ -231,11 +234,6 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
-            pipeline_params=PipelineParams(
-                turn_start_strategies=TurnStartStrategies(
-                    bot=[TranscriptionBotTurnStartStrategy(timeout=TRANSCRIPTION_TIMEOUT)],
-                )
-            ),
         )
 
         # The transcription strategy should kick-in before the user turn end timeout.
