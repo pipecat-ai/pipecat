@@ -60,10 +60,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = InworldTTSService(
-        api_key=os.getenv("INWORLD_API_KEY", ""),
-        voice_id="Ashley",
-        model="inworld-tts-1",
-        temperature=1.1,
+        api_key=os.getenv("INWORLD_API_KEY", ""), voice_id="Edward", model="inworld-tts-1"
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -110,7 +107,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 }
             ),
         ],
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        idle_timeout_secs=3000,
     )
 
     @transport.event_handler("on_client_connected")
