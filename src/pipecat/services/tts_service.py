@@ -901,12 +901,11 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             self._bot_speaking = False
 
 
-class AudioContextWordTTSService(WebsocketWordTTSService):
-    """Websocket-based TTS service with word timestamps and audio context management.
+class AudioContextTTSService(WebsocketService):
+    """Base class for websocket-based TTS services with audio context management.
 
-    This is a base class for websocket-based TTS services that support word
-    timestamps and also allow correlating the generated audio with the requested
-    text.
+    This is a base class for websocket-based TTS services that allow correlating
+    the generated audio with the requested text through audio contexts.
 
     Each request could be multiple sentences long which are grouped by
     context. For this to work, the TTS service needs to support handling
@@ -917,13 +916,14 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
     audio from context ID "A" will be played first.
     """
 
-    def __init__(self, **kwargs):
-        """Initialize the Audio Context Word TTS service.
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+        """Initialize the Audio Context TTS service.
 
         Args:
-            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
+            reconnect_on_error: Whether to automatically reconnect on websocket errors.
+            **kwargs: Additional arguments passed to the parent WebsocketService.
         """
-        super().__init__(**kwargs)
+        super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
 
@@ -1064,3 +1064,23 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
                 break
+
+
+class AudioContextWordTTSService(AudioContextTTSService, WebsocketWordTTSService):
+    """Websocket-based TTS service with word timestamps and audio context management.
+
+    This is a base class for websocket-based TTS services that support word
+    timestamps and also allow correlating the generated audio with the requested
+    text through audio contexts.
+
+    Combines the audio context management capabilities of AudioContextTTSService
+    with the word timestamp functionality of WebsocketWordTTSService.
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize the Audio Context Word TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to parent classes.
+        """
+        super().__init__(**kwargs)
