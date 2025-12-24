@@ -7,6 +7,12 @@
 import unittest
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    FunctionCallFromLLM,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMContextFrame,
     LLMMessagesAppendFrame,
@@ -29,6 +35,8 @@ from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.bot.transcription_bot_turn_start_strategy import (
     TranscriptionBotTurnStartStrategy,
 )
+from pipecat.turns.mute.first_speech_user_mute_strategy import FirstSpeechUserMuteStrategy
+from pipecat.turns.mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
 from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 USER_TURN_END_TIMEOUT = 0.2
@@ -233,3 +241,58 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
         # The transcription strategy should kick-in before the user turn end timeout.
         self.assertTrue(bot_turn)
         self.assertFalse(timeout)
+
+    async def test_user_mute_strategies(self):
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_mute_strategies=[
+                    FirstSpeechUserMuteStrategy(),
+                    FunctionCallUserMuteStrategy(),
+                ]
+            ),
+        )
+
+        user_turn = False
+
+        @user_aggregator.event_handler("on_user_turn_started")
+        async def on_user_turn_started(aggregator, strategy):
+            nonlocal user_turn
+            user_turn = True
+
+        pipeline = Pipeline([user_aggregator])
+
+        frames_to_send = [
+            # Bot is speaking, user should be muted.
+            BotStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
+            # Function call is executing, user should be muted.
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="fn_1", tool_call_id="1", arguments={}, context=None
+                    )
+                ]
+            ),
+            SleepFrame(),
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            FunctionCallResultFrame(
+                function_name="fn_1", tool_call_id="1", arguments={}, result={}
+            ),
+            SleepFrame(),
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+        )
+
+        # The user mute strategies should have muted the user.
+        self.assertFalse(user_turn)
