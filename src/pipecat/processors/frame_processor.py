@@ -190,10 +190,11 @@ class FrameProcessor(BaseObject):
         self._observer: Optional[BaseObserver] = None
 
         # Other properties
-        self._allow_interruptions = False
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
+        # Other properties (deprecated)
+        self._allow_interruptions = False
         self._interruption_strategies: List[BaseInterruptionStrategy] = []
 
         # Indicates whether we have received the StartFrame.
