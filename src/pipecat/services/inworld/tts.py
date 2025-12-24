@@ -774,7 +774,10 @@ class InworldTTSService(AudioContextWordTTSService):
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
                     if self._context_id:
-                        keepalive_message = {"send_text": {"text": ""}, "contextId": self._context_id}
+                        keepalive_message = {
+                            "send_text": {"text": ""},
+                            "contextId": self._context_id,
+                        }
                         logger.trace(f"Sending keepalive for context {self._context_id}")
                     else:
                         keepalive_message = {"send_text": {"text": ""}}
