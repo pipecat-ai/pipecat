@@ -555,6 +555,11 @@ class LLMService(AIService):
             self._function_call_tasks[task] = runner_item
             task.add_done_callback(self._function_call_task_finished)
 
+        # Wait for all parallel function calls to complete before returning.
+        # Using return_exceptions=True to prevent one failing task from canceling others.
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _run_sequential_function_calls(self, runner_items: Sequence[FunctionCallRunnerItem]):
         # Enqueue all function calls for background execution.
         for runner_item in runner_items:
