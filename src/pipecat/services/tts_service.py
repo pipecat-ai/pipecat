@@ -201,6 +201,10 @@ class TTSService(AIService):
 
         self._processing_text: bool = False
 
+        # Flag to indicate if this service handles its own processing metrics
+        # (for async streaming services where audio arrives via separate callback)
+        self._async_processing_metrics: bool = False
+
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_connection_error")
@@ -576,7 +580,10 @@ class TTSService(AIService):
         # or when we received an LLMFullResponseEndFrame
         self._processing_text = True
 
-        await self.start_processing_metrics()
+        # Only start processing metrics if the service doesn't handle its own
+        # (async streaming services handle metrics in their receive callbacks)
+        if not self._async_processing_metrics:
+            await self.start_processing_metrics()
 
         # Process all filters.
         for filter in self._text_filters:
@@ -584,7 +591,8 @@ class TTSService(AIService):
             text = await filter.filter(text)
 
         if not text.strip():
-            await self.stop_processing_metrics()
+            if not self._async_processing_metrics:
+                await self.stop_processing_metrics()
             return
 
         # To support use cases that may want to know the text before it's spoken, we
@@ -605,7 +613,9 @@ class TTSService(AIService):
                 transformed_text = await transform(transformed_text, type)
         await self.process_generator(self.run_tts(transformed_text))
 
-        await self.stop_processing_metrics()
+        # Only stop processing metrics if the service doesn't handle its own
+        if not self._async_processing_metrics:
+            await self.stop_processing_metrics()
 
         if self._push_text_frames:
             # In TTS services that support word timestamps, the TTSTextFrames
