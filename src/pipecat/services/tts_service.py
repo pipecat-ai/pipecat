@@ -7,13 +7,14 @@
 """Base classes for Text-to-speech services."""
 
 import asyncio
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import (
     Any,
     AsyncGenerator,
     AsyncIterator,
     Awaitable,
     Callable,
+    Coroutine,
     Dict,
     List,
     Mapping,
@@ -51,6 +52,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
@@ -463,12 +465,7 @@ class TTSService(AIService):
             direction: The direction to push the frame.
         """
         if self._push_silence_after_stop and isinstance(frame, TTSStoppedFrame):
-            silence_num_bytes = int(self._silence_time_s * self.sample_rate * 2)  # 16-bit
-            silence_frame = TTSAudioRawFrame(
-                audio=b"\x00" * silence_num_bytes,
-                sample_rate=self.sample_rate,
-                num_channels=1,
-            )
+            silence_frame = self.silence_frame(self._silence_time_s)
             silence_frame.transport_destination = self._transport_destination
             await self.push_frame(silence_frame)
 
@@ -484,6 +481,20 @@ class TTSService(AIService):
             or isinstance(frame, TTSStoppedFrame)
         ):
             await self._stop_frame_queue.put(frame)
+
+    def silence_frame(self, duration_s: float) -> TTSAudioRawFrame:
+        """Create a frame of silence.
+
+        Args:
+            duration_s: Silence duration in seconds.
+        """
+        silence_num_bytes = int(duration_s * self.sample_rate * 2)  # 16-bit
+
+        return TTSAudioRawFrame(
+            audio=b"\x00" * silence_num_bytes,
+            sample_rate=self.sample_rate,
+            num_channels=1,
+        )
 
     async def _stream_audio_frames_from_iterator(
         self, iterator: AsyncIterator[bytes], *, strip_wav_header: bool
@@ -901,29 +912,15 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             self._bot_speaking = False
 
 
-class AudioContextWordTTSService(WebsocketWordTTSService):
-    """Websocket-based TTS service with word timestamps and audio context management.
+class _AudioContextServiceMixin(ABC):
+    """A service that supports audio contexts.
 
-    This is a base class for websocket-based TTS services that support word
-    timestamps and also allow correlating the generated audio with the requested
-    text.
-
-    Each request could be multiple sentences long which are grouped by
-    context. For this to work, the TTS service needs to support handling
-    multiple requests at once (i.e. multiple simultaneous contexts).
-
-    The audio received from the TTS will be played in context order. That is, if
-    we requested audio for a context "A" and then audio for context "B", the
-    audio from context ID "A" will be played first.
+    This class does not inherit from other service base classes to avoid
+    diamond inheritance.
     """
 
-    def __init__(self, **kwargs):
-        """Initialize the Audio Context Word TTS service.
-
-        Args:
-            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
-        """
-        super().__init__(**kwargs)
+    def __init__(self):
+        """Initialize the service."""
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
 
@@ -976,6 +973,102 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         """
         return context_id in self._contexts
 
+    def _create_audio_context_task(self):
+        if not self._audio_context_task:
+            self._contexts_queue = asyncio.Queue()
+            self._contexts: Dict[str, asyncio.Queue] = {}
+            self._audio_context_task = self.create_task(self._audio_context_task_handler())
+
+    async def _stop_audio_context_task(self):
+        if self._audio_context_task:
+            await self.cancel_task(self._audio_context_task)
+            self._audio_context_task = None
+
+    async def _audio_context_task_handler(self):
+        """In this task we process audio contexts in order."""
+        running = True
+        while running:
+            context_id = await self._contexts_queue.get()
+
+            if context_id:
+                # Process the audio context until the context doesn't have more
+                # audio available (i.e. we find None).
+                await self._handle_audio_context(context_id)
+
+                # We just finished processing the context, so we can safely remove it.
+                del self._contexts[context_id]
+
+                # Append some silence between contexts.
+                SILENCE_BETWEEN_CONTEXTS = 1
+                silence_frame = self.silence_frame(SILENCE_BETWEEN_CONTEXTS)
+                await self.push_frame(silence_frame)
+            else:
+                running = False
+
+            self._contexts_queue.task_done()
+
+    async def _handle_audio_context(self, context_id: str):
+        # If we don't receive any audio during this time, we consider the context finished.
+        AUDIO_CONTEXT_TIMEOUT = 3.0
+        queue = self._contexts[context_id]
+        running = True
+        while running:
+            try:
+                frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
+                if frame:
+                    await self.push_frame(frame)
+                running = frame is not None
+            except asyncio.TimeoutError:
+                # We didn't get audio, so let's consider this context finished.
+                logger.trace(f"{self} time out on audio context {context_id}")
+                break
+
+    @abstractmethod
+    def create_task(self, coroutine: Coroutine) -> asyncio.Task:
+        pass
+
+    @abstractmethod
+    async def cancel_task(self, task: asyncio.Task) -> None:
+        pass
+
+    @abstractmethod
+    async def push_frame(self, frame: Frame) -> None:
+        pass
+
+    @abstractmethod
+    def silence_frame(self, duration_s: float) -> TTSAudioRawFrame:
+        pass
+
+    @property
+    @abstractmethod
+    def task_manager(self) -> BaseTaskManager:
+        pass
+
+
+class AudioContextTTSService(WebsocketTTSService, _AudioContextServiceMixin):
+    """Websocket-based TTS service with audio context management.
+
+    This is a base class for websocket-based TTS services that allow correlating
+    the generated audio with the requested text.
+
+    Each request could be multiple sentences long which are grouped by
+    context. For this to work, the TTS service needs to support handling
+    multiple requests at once (i.e. multiple simultaneous contexts).
+
+    The audio received from the TTS will be played in context order. That is, if
+    we requested audio for a context "A" and then audio for context "B", the
+    audio from context ID "A" will be played first.
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize the Audio Context TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent WebsocketTTSService.
+        """
+        WebsocketTTSService.__init__(self, **kwargs)
+        _AudioContextServiceMixin.__init__(self)
+
     async def start(self, frame: StartFrame):
         """Start the audio context TTS service.
 
@@ -1013,54 +1106,65 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         await self._stop_audio_context_task()
         self._create_audio_context_task()
 
-    def _create_audio_context_task(self):
-        if not self._audio_context_task:
-            self._contexts_queue = asyncio.Queue()
-            self._contexts: Dict[str, asyncio.Queue] = {}
-            self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
-    async def _stop_audio_context_task(self):
+class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextServiceMixin):
+    """Websocket-based TTS service with word timestamps and audio context management.
+
+    This is a base class for websocket-based TTS services that support word
+    timestamps and also allow correlating the generated audio with the requested
+    text.
+
+    Each request could be multiple sentences long which are grouped by
+    context. For this to work, the TTS service needs to support handling
+    multiple requests at once (i.e. multiple simultaneous contexts).
+
+    The audio received from the TTS will be played in context order. That is, if
+    we requested audio for a context "A" and then audio for context "B", the
+    audio from context ID "A" will be played first.
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize the Audio Context Word TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
+        """
+        WebsocketWordTTSService.__init__(self, **kwargs)
+        _AudioContextServiceMixin.__init__(self)
+
+    async def start(self, frame: StartFrame):
+        """Start the audio context TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        self._create_audio_context_task()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the audio context TTS service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
         if self._audio_context_task:
-            await self.cancel_task(self._audio_context_task)
+            # Indicate no more audio contexts are available. this will end the
+            # task cleanly after all contexts have been processed.
+            await self._contexts_queue.put(None)
+            await self.wait_for_task(self._audio_context_task)
             self._audio_context_task = None
 
-    async def _audio_context_task_handler(self):
-        """In this task we process audio contexts in order."""
-        running = True
-        while running:
-            context_id = await self._contexts_queue.get()
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the audio context TTS service.
 
-            if context_id:
-                # Process the audio context until the context doesn't have more
-                # audio available (i.e. we find None).
-                await self._handle_audio_context(context_id)
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._stop_audio_context_task()
 
-                # We just finished processing the context, so we can safely remove it.
-                del self._contexts[context_id]
-
-                # Append some silence between sentences.
-                silence = b"\x00" * self.sample_rate
-                frame = TTSAudioRawFrame(
-                    audio=silence, sample_rate=self.sample_rate, num_channels=1
-                )
-                await self.push_frame(frame)
-            else:
-                running = False
-
-            self._contexts_queue.task_done()
-
-    async def _handle_audio_context(self, context_id: str):
-        # If we don't receive any audio during this time, we consider the context finished.
-        AUDIO_CONTEXT_TIMEOUT = 3.0
-        queue = self._contexts[context_id]
-        running = True
-        while running:
-            try:
-                frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
-                if frame:
-                    await self.push_frame(frame)
-                running = frame is not None
-            except asyncio.TimeoutError:
-                # We didn't get audio, so let's consider this context finished.
-                logger.trace(f"{self} time out on audio context {context_id}")
-                break
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        await super()._handle_interruption(frame, direction)
+        await self._stop_audio_context_task()
+        self._create_audio_context_task()

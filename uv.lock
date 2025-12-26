@@ -4006,6 +4006,9 @@ openpipe = [
 playht = [
     { name = "websockets" },
 ]
+respeecher = [
+    { name = "respeecher" },
+]
 rime = [
     { name = "websockets" },
 ]
@@ -4187,6 +4190,7 @@ requires-dist = [
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "resampy", specifier = "~=0.4.3" },
+    { name = "respeecher", marker = "extra == 'respeecher'", specifier = ">=1.0,<2" },
     { name = "sarvamai", marker = "extra == 'sarvam'", specifier = "==0.1.21" },
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.28.0,<3" },
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=1.0.3" },
@@ -4205,7 +4209,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "respeecher", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -5204,6 +5208,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/29/f1/34be702a69a5d272e844c98cee82351f880985cfbca0cc86378011078497/resampy-0.4.3.tar.gz", hash = "sha256:a0d1c28398f0e55994b739650afef4e3974115edbe96cd4bb81968425e916e47", size = 3080604, upload-time = "2024-03-05T20:36:08.119Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/b9/3b00ac340a1aab3389ebcc52c779914a44aadf7b0cb7a3bf053195735607/resampy-0.4.3-py3-none-any.whl", hash = "sha256:ad2ed64516b140a122d96704e32bc0f92b23f45419e8b8f478e5a05f83edcebd", size = 3076529, upload-time = "2024-03-05T20:36:02.439Z" },
+]
+
+[[package]]
+name = "respeecher"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/a5/9eed1454f3c737733dffbd66c2212ea6a72168442393db6b52c138ba4dc7/respeecher-1.0.1.tar.gz", hash = "sha256:74a1f423d8a5fdd600b1634a1830525a0cb3996252687cc477c76254ce4d79a1", size = 28762, upload-time = "2025-08-25T10:50:53.533Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/bf/adc9d59abfdc6fee22ea8af97088b1713e090d4ab640a53d49e01e38b863/respeecher-1.0.1-py3-none-any.whl", hash = "sha256:7c940791cc310f939b2a9b7dc99f11830402b6b7eb934d7fb0282b38386f1f5c", size = 50565, upload-time = "2025-08-25T10:50:52.537Z" },
 ]
 
 [[package]]
