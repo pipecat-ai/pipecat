@@ -44,6 +44,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.transports.daily.utils import (
+    DailyMeetingTokenParams,
+    DailyMeetingTokenProperties,
     DailyRESTHelper,
     DailyRoomParams,
     DailyRoomProperties,
@@ -76,12 +78,15 @@ class DailyRoomConfig(BaseModel):
 async def configure(
     aiohttp_session: aiohttp.ClientSession,
     *,
+    api_key: Optional[str] = None,
     room_exp_duration: Optional[float] = 2.0,
     token_exp_duration: Optional[float] = 2.0,
     sip_caller_phone: Optional[str] = None,
     sip_enable_video: Optional[bool] = False,
     sip_num_endpoints: Optional[int] = 1,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
+    room_properties: Optional[DailyRoomProperties] = None,
+    token_properties: Optional["DailyMeetingTokenProperties"] = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
 
@@ -91,6 +96,7 @@ async def configure(
 
     Args:
         aiohttp_session: HTTP session for making API requests.
+        api_key: Daily API key.
         room_exp_duration: Room expiration time in hours.
         token_exp_duration: Token expiration time in hours.
         sip_caller_phone: Phone number or identifier for SIP display name.
@@ -99,6 +105,13 @@ async def configure(
         sip_num_endpoints: Number of allowed SIP endpoints.
         sip_codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
+        room_properties: Optional DailyRoomProperties to use instead of building from
+            individual parameters. When provided, this overrides room_exp_duration and
+            SIP-related parameters. If not provided, properties are built from the
+            individual parameters as before.
+        token_properties: Optional DailyMeetingTokenProperties to customize the meeting
+            token. When provided, these properties are passed to the token creation API.
+            Note that room_name, exp, and is_owner will be set automatically.
 
     Returns:
         DailyRoomConfig: Object with room_url, token, and optional sip_endpoint.
@@ -115,17 +128,47 @@ async def configure(
         # SIP-enabled room
         sip_config = await configure(session, sip_caller_phone="+15551234567")
         print(f"SIP endpoint: {sip_config.sip_endpoint}")
+
+        # Custom room properties with recording enabled
+        custom_props = DailyRoomProperties(
+            enable_recording="cloud",
+            max_participants=2,
+        )
+        config = await configure(session, room_properties=custom_props)
     """
     # Check for required API key
-    api_key = os.getenv("DAILY_API_KEY")
+    api_key = api_key or os.getenv("DAILY_API_KEY")
     if not api_key:
         raise Exception(
             "DAILY_API_KEY environment variable is required. "
             "Get your API key from https://dashboard.daily.co/developers"
         )
 
+    # Warn if both room_properties and individual parameters are provided
+    if room_properties is not None:
+        individual_params_provided = any(
+            [
+                room_exp_duration != 2.0,
+                token_exp_duration != 2.0,
+                sip_caller_phone is not None,
+                sip_enable_video is not False,
+                sip_num_endpoints != 1,
+                sip_codecs is not None,
+            ]
+        )
+        if individual_params_provided:
+            logger.warning(
+                "Both room_properties and individual parameters (room_exp_duration, token_exp_duration, "
+                "sip_*) were provided. The room_properties will be used and individual parameters "
+                "will be ignored."
+            )
+
     # Determine if SIP mode is enabled
     sip_enabled = sip_caller_phone is not None
+
+    # If room_properties is provided, check if it has SIP configuration
+    if room_properties and room_properties.sip:
+        sip_enabled = True
 
     daily_rest_helper = DailyRESTHelper(
         daily_api_key=api_key,
@@ -142,7 +185,10 @@ async def configure(
 
         # Create token and return standard format
         expiry_time: float = token_exp_duration * 60 * 60
-        token = await daily_rest_helper.get_token(room_url, expiry_time)
+        token_params = None
+        if token_properties:
+            token_params = DailyMeetingTokenParams(properties=token_properties)
+        token = await daily_rest_helper.get_token(room_url, expiry_time, params=token_params)
         return DailyRoomConfig(room_url=room_url, token=token)
 
     # Create a new room
@@ -150,27 +196,29 @@ async def configure(
     room_name = f"{room_prefix}-{uuid.uuid4().hex[:8]}"
     logger.info(f"Creating new Daily room: {room_name}")
 
-    # Calculate expiration time
-    expiration_time = time.time() + (room_exp_duration * 60 * 60)
+    # Use provided room_properties or build from parameters
+    if room_properties is None:
+        # Calculate expiration time
+        expiration_time = time.time() + (room_exp_duration * 60 * 60)
 
-    # Create room properties
-    room_properties = DailyRoomProperties(
-        exp=expiration_time,
-        eject_at_room_exp=True,
-    )
-
-    # Add SIP configuration if enabled
-    if sip_enabled:
-        sip_params = DailyRoomSipParams(
-            display_name=sip_caller_phone,
-            video=sip_enable_video,
-            sip_mode="dial-in",
-            num_endpoints=sip_num_endpoints,
-            codecs=sip_codecs,
+        # Create room properties
+        room_properties = DailyRoomProperties(
+            exp=expiration_time,
+            eject_at_room_exp=True,
         )
-        room_properties.sip = sip_params
-        room_properties.enable_dialout = True  # Enable outbound calls if needed
-        room_properties.start_video_off = not sip_enable_video  # Voice-only by default
+
+        # Add SIP configuration if enabled
+        if sip_enabled:
+            sip_params = DailyRoomSipParams(
+                display_name=sip_caller_phone,
+                video=sip_enable_video,
+                sip_mode="dial-in",
+                num_endpoints=sip_num_endpoints,
+                codecs=sip_codecs,
+            )
+            room_properties.sip = sip_params
+            room_properties.enable_dialout = True  # Enable outbound calls if needed
+            room_properties.start_video_off = not sip_enable_video  # Voice-only by default
 
     # Create room parameters
     room_params = DailyRoomParams(name=room_name, properties=room_properties)
@@ -182,7 +230,12 @@ async def configure(
 
         # Create meeting token
         token_expiry_seconds = token_exp_duration * 60 * 60
-        token = await daily_rest_helper.get_token(room_url, token_expiry_seconds)
+        token_params = None
+        if token_properties:
+            token_params = DailyMeetingTokenParams(properties=token_properties)
+        token = await daily_rest_helper.get_token(
+            room_url, token_expiry_seconds, params=token_params
+        )
 
         if sip_enabled:
             # Return SIP configuration object

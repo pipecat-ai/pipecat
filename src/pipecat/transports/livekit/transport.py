@@ -29,9 +29,9 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
 )
@@ -68,7 +68,7 @@ DTMF_CODE_MAP = {
 
 
 @dataclass
-class LiveKitTransportMessageFrame(TransportMessageFrame):
+class LiveKitOutputTransportMessageFrame(OutputTransportMessageFrame):
     """Frame for transport messages in LiveKit rooms.
 
     Parameters:
@@ -79,7 +79,7 @@ class LiveKitTransportMessageFrame(TransportMessageFrame):
 
 
 @dataclass
-class LiveKitTransportMessageUrgentFrame(TransportMessageUrgentFrame):
+class LiveKitOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
     """Frame for urgent transport messages in LiveKit rooms.
 
     Parameters:
@@ -87,6 +87,50 @@ class LiveKitTransportMessageUrgentFrame(TransportMessageUrgentFrame):
     """
 
     participant_id: Optional[str] = None
+
+
+@dataclass
+class LiveKitTransportMessageFrame(LiveKitOutputTransportMessageFrame):
+    """Frame for transport messages in LiveKit rooms.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LiveKitTransportMessageFrame is deprecated and will be removed in a future version. "
+                "Instead, use LiveKitOutputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
+@dataclass
+class LiveKitTransportMessageUrgentFrame(LiveKitOutputTransportMessageUrgentFrame):
+    """Frame for urgent transport messages in LiveKit rooms.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LiveKitTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use LiveKitOutputTransportMessageUrgentFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 class LiveKitParams(TransportParams):
@@ -310,10 +354,10 @@ class LiveKitTransportClient:
             logger.error(f"Error sending data: {e}")
 
     async def send_dtmf(self, digit: str):
-        """Send DTMF tone to the room.
+        r"""Send DTMF tone to the room.
 
         Args:
-            digit: The DTMF digit to send (0-9, *, #).
+            digit: The DTMF digit to send (0-9, \*, #).
         """
         if not self._connected:
             return
@@ -329,19 +373,21 @@ class LiveKitTransportClient:
         except Exception as e:
             logger.error(f"Error sending DTMF tone {digit}: {e}")
 
-    async def publish_audio(self, audio_frame: rtc.AudioFrame):
+    async def publish_audio(self, audio_frame: rtc.AudioFrame) -> bool:
         """Publish an audio frame to the room.
 
         Args:
             audio_frame: The LiveKit audio frame to publish.
         """
         if not self._connected or not self._audio_source:
-            return
+            return False
 
         try:
             await self._audio_source.capture_frame(audio_frame)
+            return True
         except Exception as e:
             logger.error(f"Error publishing audio: {e}")
+            return False
 
     def get_participants(self) -> List[str]:
         """Get list of participant IDs in the room.
@@ -675,7 +721,7 @@ class LiveKitInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = LiveKitTransportMessageUrgentFrame(message=message, participant_id=sender)
+        frame = LiveKitOutputTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     async def _audio_in_task_handler(self):
@@ -834,7 +880,9 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await super().cleanup()
         await self._transport.cleanup()
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message to participants.
 
         Args:
@@ -844,19 +892,24 @@ class LiveKitOutputTransport(BaseOutputTransport):
         if isinstance(message, dict):
             # fix message encoding for dict-like messages, e.g. RTVI messages.
             message = json.dumps(message, ensure_ascii=False)
-        if isinstance(frame, (LiveKitTransportMessageFrame, LiveKitTransportMessageUrgentFrame)):
+        if isinstance(
+            frame, (LiveKitOutputTransportMessageFrame, LiveKitOutputTransportMessageUrgentFrame)
+        ):
             await self._client.send_data(message.encode(), frame.participant_id)
         else:
             await self._client.send_data(message.encode())
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the LiveKit room.
 
         Args:
             frame: The audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         livekit_audio = self._convert_pipecat_audio_to_livekit(frame.audio)
-        await self._client.publish_audio(livekit_audio)
+        return await self._client.publish_audio(livekit_audio)
 
     def _supports_native_dtmf(self) -> bool:
         """LiveKit supports native DTMF via telephone events.
@@ -1100,7 +1153,9 @@ class LiveKitTransport(BaseTransport):
             participant_id: Optional specific participant to send to.
         """
         if self._output:
-            frame = LiveKitTransportMessageFrame(message=message, participant_id=participant_id)
+            frame = LiveKitOutputTransportMessageFrame(
+                message=message, participant_id=participant_id
+            )
             await self._output.send_message(frame)
 
     async def send_message_urgent(self, message: str, participant_id: Optional[str] = None):
@@ -1111,7 +1166,7 @@ class LiveKitTransport(BaseTransport):
             participant_id: Optional specific participant to send to.
         """
         if self._output:
-            frame = LiveKitTransportMessageUrgentFrame(
+            frame = LiveKitOutputTransportMessageUrgentFrame(
                 message=message, participant_id=participant_id
             )
             await self._output.send_message(frame)

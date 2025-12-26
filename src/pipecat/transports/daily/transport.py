@@ -16,7 +16,7 @@ import time
 from concurrent.futures import CancelledError as FuturesCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
+from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Tuple
 
 import aiohttp
 from loguru import logger
@@ -30,15 +30,15 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
-    InputTransportMessageUrgentFrame,
+    InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     SpriteFrame,
     StartFrame,
     TranscriptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
@@ -74,7 +74,7 @@ VAD_RESET_PERIOD_MS = 2000
 
 
 @dataclass
-class DailyTransportMessageFrame(TransportMessageFrame):
+class DailyOutputTransportMessageFrame(OutputTransportMessageFrame):
     """Frame for transport messages in Daily calls.
 
     Parameters:
@@ -85,7 +85,7 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 
 
 @dataclass
-class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
+class DailyOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
     """Frame for urgent transport messages in Daily calls.
 
     Parameters:
@@ -96,7 +96,59 @@ class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
 
 
 @dataclass
-class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
+class DailyTransportMessageFrame(DailyOutputTransportMessageFrame):
+    """Frame for transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyOutputTransportMessageFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyTransportMessageFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyOutputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
+@dataclass
+class DailyTransportMessageUrgentFrame(DailyOutputTransportMessageUrgentFrame):
+    """Frame for urgent transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyOutputTransportMessageUrgentFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyOutputTransportMessageUrgentFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
+@dataclass
+class DailyInputTransportMessageFrame(InputTransportMessageFrame):
     """Frame for input urgent transport messages in Daily calls.
 
     Parameters:
@@ -106,15 +158,60 @@ class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
     participant_id: Optional[str] = None
 
 
+class DailyInputTransportMessageUrgentFrame(DailyInputTransportMessageFrame):
+    """Frame for input urgent transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyInputTransportMessageFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyInputTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyInputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
 @dataclass
 class DailyUpdateRemoteParticipantsFrame(ControlFrame):
     """Frame to update remote participants in Daily calls.
+
+    .. deprecated:: 0.0.87
+        `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a future version.
+        Create your own custom frame and use a custom processor to handle it or use, for example,
+        `on_after_push_frame` event instead in the output transport.
 
     Parameters:
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
     remote_participants: Mapping[str, Any] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyUpdateRemoteParticipantsFrame is deprecated and will be removed in a future version."
+                "Instead, create your own custom frame and handle it in the "
+                '`@transport.output().event_handler("on_after_push_frame")` event handler or a '
+                "custom processor.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -322,6 +419,11 @@ class DailyAudioTrack:
     track: CustomAudioTrack
 
 
+# This is just a type alias for the errors returned by daily-python. Right now
+# they are just a string.
+CallClientError = str
+
+
 class DailyTransportClient(EventHandler):
     """Core client for interacting with Daily's API.
 
@@ -454,24 +556,31 @@ class DailyTransportClient(EventHandler):
         """
         return self._out_sample_rate
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ) -> Optional[CallClientError]:
         """Send an application message to participants.
 
         Args:
             frame: The message frame to send.
+
+        Returns:
+            error: An error description or None.
         """
         if not self._joined:
-            return
+            return "Unable to send messages before joining."
 
         participant_id = None
-        if isinstance(frame, (DailyTransportMessageFrame, DailyTransportMessageUrgentFrame)):
+        if isinstance(
+            frame, (DailyOutputTransportMessageFrame, DailyOutputTransportMessageUrgentFrame)
+        ):
             participant_id = frame.participant_id
 
         future = self._get_event_loop().create_future()
         self._client.send_app_message(
             frame.message, participant_id, completion=completion_callback(future)
         )
-        await future
+        return await future
 
     async def read_next_audio_frame(self) -> Optional[InputAudioRawFrame]:
         """Reads the next 20ms audio frame from the virtual speaker."""
@@ -506,11 +615,14 @@ class DailyTransportClient(EventHandler):
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the appropriate audio track.
 
         Args:
             frame: The audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         future = self._get_event_loop().create_future()
 
@@ -526,18 +638,24 @@ class DailyTransportClient(EventHandler):
             audio_source.write_frames(frame.audio, completion=completion_callback(future))
         else:
             logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
-            future.set_result(None)
+            future.set_result(0)
 
-        await future
+        num_frames = await future
+        return num_frames > 0
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the camera device.
 
         Args:
             frame: The image frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
         if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
+            return True
+        return False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client with task manager and event queues.
@@ -634,32 +752,24 @@ class DailyTransportClient(EventHandler):
 
         self._client.set_user_name(self._bot_name)
 
-        try:
-            (data, error) = await self._join()
+        (data, error) = await self._join()
 
-            if not error:
-                self._joined = True
-                self._joining = False
-                # Increment leave counter if we successfully joined.
-                self._leave_counter += 1
-
-                logger.info(f"Joined {self._room_url}")
-
-                if self._params.transcription_enabled:
-                    await self.start_transcription(self._params.transcription_settings)
-
-                await self._callbacks.on_joined(data)
-
-                self._joined_event.set()
-            else:
-                error_msg = f"Error joining {self._room_url}: {error}"
-                logger.error(error_msg)
-                await self._callbacks.on_error(error_msg)
-        except asyncio.TimeoutError:
-            error_msg = f"Time out joining {self._room_url}"
-            logger.error(error_msg)
+        if not error:
+            self._joined = True
             self._joining = False
+            # Increment leave counter if we successfully joined.
+            self._leave_counter += 1
+
+            logger.info(f"Joined {self._room_url}")
+
+            await self._callbacks.on_joined(data)
+
+            self._joined_event.set()
+        else:
+            error_msg = f"Error joining {self._room_url}: {error}"
+            logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
+            self._joining = False
 
     async def _join(self):
         """Execute the actual room join operation."""
@@ -718,7 +828,7 @@ class DailyTransportClient(EventHandler):
             },
         )
 
-        return await asyncio.wait_for(future, timeout=10)
+        return await future
 
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
@@ -737,24 +847,16 @@ class DailyTransportClient(EventHandler):
         # Call callback before leaving.
         await self._callbacks.on_before_leave()
 
-        if self._params.transcription_enabled:
-            await self.stop_transcription()
-
         # Remove any custom tracks, if any.
         for track_name, _ in self._custom_audio_tracks.items():
             await self.remove_custom_audio_track(track_name)
 
-        try:
-            error = await self._leave()
-            if not error:
-                logger.info(f"Left {self._room_url}")
-                await self._callbacks.on_left()
-            else:
-                error_msg = f"Error leaving {self._room_url}: {error}"
-                logger.error(error_msg)
-                await self._callbacks.on_error(error_msg)
-        except asyncio.TimeoutError:
-            error_msg = f"Time out leaving {self._room_url}"
+        error = await self._leave()
+        if not error:
+            logger.info(f"Left {self._room_url}")
+            await self._callbacks.on_left()
+        else:
+            error_msg = f"Error leaving {self._room_url}: {error}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
 
@@ -765,7 +867,7 @@ class DailyTransportClient(EventHandler):
 
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
-        return await asyncio.wait_for(future, timeout=10)
+        return await future
 
     def _cleanup(self):
         """Cleanup the Daily client instance."""
@@ -773,7 +875,7 @@ class DailyTransportClient(EventHandler):
             self._client.release()
             self._client = None
 
-    def participants(self):
+    def participants(self) -> Mapping[str, Any]:
         """Get current participants in the room.
 
         Returns:
@@ -781,7 +883,7 @@ class DailyTransportClient(EventHandler):
         """
         return self._client.participants()
 
-    def participant_counts(self):
+    def participant_counts(self) -> Mapping[str, Any]:
         """Get participant count information.
 
         Returns:
@@ -789,165 +891,173 @@ class DailyTransportClient(EventHandler):
         """
         return self._client.participant_counts()
 
-    async def start_dialout(self, settings):
+    async def start_dialout(self, settings) -> Tuple[str, Optional[CallClientError]]:
         """Start a dial-out call to a phone number.
 
         Args:
             settings: Dial-out configuration settings.
-        """
-        logger.debug(f"Starting dialout: settings={settings}")
 
+        Returns:
+            session_id: Dail-out session ID.
+            error: An error description or None.
+        """
         future = self._get_event_loop().create_future()
         self._client.start_dialout(settings, completion=completion_callback(future))
-        error = await future
-        if error:
-            logger.error(f"Unable to start dialout: {error}")
+        return await future
 
-    async def stop_dialout(self, participant_id):
+    async def stop_dialout(self, participant_id) -> Optional[CallClientError]:
         """Stop a dial-out call for a specific participant.
 
         Args:
             participant_id: ID of the participant to stop dial-out for.
-        """
-        logger.debug(f"Stopping dialout: participant_id={participant_id}")
 
+        Returns:
+            error: An error description or None.
+        """
         future = self._get_event_loop().create_future()
         self._client.stop_dialout(participant_id, completion=completion_callback(future))
-        error = await future
-        if error:
-            logger.error(f"Unable to stop dialout: {error}")
+        return await future
 
-    async def send_dtmf(self, settings):
+    async def send_dtmf(self, settings) -> Optional[CallClientError]:
         """Send DTMF tones during a call.
 
         Args:
             settings: DTMF settings including tones and target session.
+
+        Returns:
+            error: An error description or None.
         """
         session_id = settings.get("sessionId") or self._dial_out_session_id
         if not session_id:
-            logger.error("Unable to send DTMF: 'sessionId' is not set")
-            return
+            return "Can't send DTMF if 'sessionId' is not set"
 
         # Update 'sessionId' field.
         settings["sessionId"] = session_id
 
         future = self._get_event_loop().create_future()
         self._client.send_dtmf(settings, completion=completion_callback(future))
-        await future
+        return await future
 
-    async def sip_call_transfer(self, settings):
+    async def sip_call_transfer(self, settings) -> Optional[CallClientError]:
         """Transfer a SIP call to another destination.
 
         Args:
             settings: SIP call transfer settings.
+
+        Returns:
+            error: An error description or None.
         """
         session_id = (
             settings.get("sessionId") or self._dial_out_session_id or self._dial_in_session_id
         )
         if not session_id:
-            logger.error("Unable to transfer SIP call: 'sessionId' is not set")
-            return
+            return "Can't transfer SIP call if 'sessionId' is not set"
 
         # Update 'sessionId' field.
         settings["sessionId"] = session_id
 
         future = self._get_event_loop().create_future()
         self._client.sip_call_transfer(settings, completion=completion_callback(future))
-        await future
+        return await future
 
-    async def sip_refer(self, settings):
+    async def sip_refer(self, settings) -> Optional[CallClientError]:
         """Send a SIP REFER request.
 
         Args:
             settings: SIP REFER settings.
+
+        Returns:
+            error: An error description or None.
         """
         future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
-        await future
+        return await future
 
-    async def start_recording(self, streaming_settings, stream_id, force_new):
+    async def start_recording(
+        self, streaming_settings, stream_id, force_new
+    ) -> Tuple[str, Optional[CallClientError]]:
         """Start recording the call.
 
         Args:
             streaming_settings: Recording configuration settings.
             stream_id: Unique identifier for the recording stream.
             force_new: Whether to force a new recording session.
-        """
-        logger.debug(
-            f"Starting recording: stream_id={stream_id} force_new={force_new} settings={streaming_settings}"
-        )
 
+        Returns:
+            stream_id: Unique identifier for the recording stream.
+            error: An error description or None.
+        """
         future = self._get_event_loop().create_future()
         self._client.start_recording(
             streaming_settings, stream_id, force_new, completion=completion_callback(future)
         )
-        error = await future
-        if error:
-            logger.error(f"Unable to start recording: {error}")
+        return await future
 
-    async def stop_recording(self, stream_id):
+    async def stop_recording(self, stream_id) -> Optional[CallClientError]:
         """Stop recording the call.
 
         Args:
             stream_id: Unique identifier for the recording stream to stop.
-        """
-        logger.debug(f"Stopping recording: stream_id={stream_id}")
 
+        Returns:
+            error: An error description or None.
+        """
         future = self._get_event_loop().create_future()
         self._client.stop_recording(stream_id, completion=completion_callback(future))
-        error = await future
-        if error:
-            logger.error(f"Unable to stop recording: {error}")
+        return await future
 
-    async def start_transcription(self, settings):
+    async def start_transcription(self, settings) -> Optional[CallClientError]:
         """Start transcription for the call.
 
         Args:
             settings: Transcription configuration settings.
+
+        Returns:
+            error: An error description or None.
         """
         if not self._token:
-            logger.warning("Transcription can't be started without a room token")
-            return
-
-        logger.debug(f"Starting transcription: settings={settings}")
+            return "Transcription can't be started without a room token"
 
         future = self._get_event_loop().create_future()
         self._client.start_transcription(
             settings=self._params.transcription_settings.model_dump(exclude_none=True),
             completion=completion_callback(future),
         )
-        error = await future
-        if error:
-            logger.error(f"Unable to start transcription: {error}")
+        return await future
 
-    async def stop_transcription(self):
-        """Stop transcription for the call."""
+    async def stop_transcription(self) -> Optional[CallClientError]:
+        """Stop transcription for the call.
+
+        Returns:
+            error: An error description or None.
+        """
         if not self._token:
-            return
-
-        logger.debug(f"Stopping transcription")
+            return "Transcription can't be stopped without a room token"
 
         future = self._get_event_loop().create_future()
         self._client.stop_transcription(completion=completion_callback(future))
-        error = await future
-        if error:
-            logger.error(f"Unable to stop transcription: {error}")
+        return await future
 
-    async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
+    async def send_prebuilt_chat_message(
+        self, message: str, user_name: Optional[str] = None
+    ) -> Optional[CallClientError]:
         """Send a chat message to Daily's Prebuilt main room.
 
         Args:
             message: The chat message to send.
             user_name: Optional user name that will appear as sender of the message.
+
+        Returns:
+            error: An error description or None.
         """
         if not self._joined:
-            return
+            return "Can't send message if not joined"
 
         future = self._get_event_loop().create_future()
         self._client.send_prebuilt_chat_message(
             message, user_name=user_name, completion=completion_callback(future)
         )
-        await future
+        return await future
 
     async def capture_participant_transcription(self, participant_id: str):
         """Enable transcription capture for a specific participant.
@@ -1067,38 +1177,51 @@ class DailyTransportClient(EventHandler):
 
         return track
 
-    async def remove_custom_audio_track(self, track_name: str):
+    async def remove_custom_audio_track(self, track_name: str) -> Optional[CallClientError]:
         """Remove a custom audio track.
 
         Args:
             track_name: Name of the custom audio track to remove.
+
+        Returns:
+            error: An error description or None.
         """
         future = self._get_event_loop().create_future()
         self._client.remove_custom_audio_track(
             track_name=track_name,
             completion=completion_callback(future),
         )
-        await future
+        return await future
 
-    async def update_transcription(self, participants=None, instance_id=None):
+    async def update_transcription(
+        self, participants=None, instance_id=None
+    ) -> Optional[CallClientError]:
         """Update transcription settings for specific participants.
 
         Args:
             participants: List of participant IDs to enable transcription for.
             instance_id: Optional transcription instance ID.
+
+        Returns:
+            error: An error description or None.
         """
         future = self._get_event_loop().create_future()
         self._client.update_transcription(
             participants, instance_id, completion=completion_callback(future)
         )
-        await future
+        return await future
 
-    async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+    async def update_subscriptions(
+        self, participant_settings=None, profile_settings=None
+    ) -> Optional[CallClientError]:
         """Update media subscription settings.
 
         Args:
             participant_settings: Per-participant subscription settings.
             profile_settings: Global subscription profile settings.
+
+        Returns:
+            error: An error description or None.
         """
         future = self._get_event_loop().create_future()
         self._client.update_subscriptions(
@@ -1106,32 +1229,42 @@ class DailyTransportClient(EventHandler):
             profile_settings=profile_settings,
             completion=completion_callback(future),
         )
-        await future
+        return await future
 
-    async def update_publishing(self, publishing_settings: Mapping[str, Any]):
+    async def update_publishing(
+        self, publishing_settings: Mapping[str, Any]
+    ) -> Optional[CallClientError]:
         """Update media publishing settings.
 
         Args:
             publishing_settings: Publishing configuration settings.
+
+        Returns:
+            error: An error description or None.
         """
         future = self._get_event_loop().create_future()
         self._client.update_publishing(
             publishing_settings=publishing_settings,
             completion=completion_callback(future),
         )
-        await future
+        return await future
 
-    async def update_remote_participants(self, remote_participants: Mapping[str, Any]):
+    async def update_remote_participants(
+        self, remote_participants: Mapping[str, Any]
+    ) -> Optional[CallClientError]:
         """Update settings for remote participants.
 
         Args:
             remote_participants: Remote participant configuration settings.
+
+        Returns:
+            error: An error description or None.
         """
         future = self._get_event_loop().create_future()
         self._client.update_remote_participants(
             remote_participants=remote_participants, completion=completion_callback(future)
         )
-        await future
+        return await future
 
     #
     #
@@ -1592,7 +1725,7 @@ class DailyInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = DailyInputTransportMessageUrgentFrame(message=message, participant_id=sender)
+        frame = DailyInputTransportMessageFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     #
@@ -1706,10 +1839,13 @@ class DailyInputTransport(BaseInputTransport):
         if render_frame:
             frame = UserImageRawFrame(
                 user_id=participant_id,
-                request=request_frame,
                 image=video_frame.buffer,
                 size=(video_frame.width, video_frame.height),
                 format=video_frame.color_format,
+                text=request_frame.text if request_frame else None,
+                append_to_context=request_frame.append_to_context if request_frame else None,
+                # Deprecated fields below.
+                request=request_frame,
             )
             frame.transport_source = video_source
             await self.push_video_frame(frame)
@@ -1814,13 +1950,17 @@ class DailyOutputTransport(BaseOutputTransport):
         if isinstance(frame, DailyUpdateRemoteParticipantsFrame):
             await self._client.update_remote_participants(frame.remote_participants)
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message to participants.
 
         Args:
             frame: The transport message frame to send.
         """
-        await self._client.send_message(frame)
+        error = await self._client.send_message(frame)
+        if error:
+            logger.error(f"Unable to send message: {error}")
 
     async def register_video_destination(self, destination: str):
         """Register a video output destination.
@@ -1835,24 +1975,33 @@ class DailyOutputTransport(BaseOutputTransport):
 
         Args:
             destination: The destination identifier to register.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         await self._client.register_audio_destination(destination)
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the Daily call.
 
         Args:
             frame: The audio frame to write.
-        """
-        await self._client.write_audio_frame(frame)
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
+        """
+        return await self._client.write_audio_frame(frame)
+
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the Daily call.
 
         Args:
             frame: The video frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
-        await self._client.write_video_frame(frame)
+        return await self._client.write_video_frame(frame)
 
     def _supports_native_dtmf(self) -> bool:
         """Daily supports native DTMF via telephone events.
@@ -2055,7 +2204,7 @@ class DailyTransport(BaseTransport):
         if self._output:
             await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
-    def participants(self):
+    def participants(self) -> Mapping[str, Any]:
         """Get current participants in the room.
 
         Returns:
@@ -2063,7 +2212,7 @@ class DailyTransport(BaseTransport):
         """
         return self._client.participants()
 
-    def participant_counts(self):
+    def participant_counts(self) -> Mapping[str, Any]:
         """Get participant count information.
 
         Returns:
@@ -2071,76 +2220,155 @@ class DailyTransport(BaseTransport):
         """
         return self._client.participant_counts()
 
-    async def start_dialout(self, settings=None):
+    async def start_dialout(self, settings=None) -> Tuple[str, Optional[CallClientError]]:
         """Start a dial-out call to a phone number.
 
         Args:
             settings: Dial-out configuration settings.
-        """
-        await self._client.start_dialout(settings)
 
-    async def stop_dialout(self, participant_id):
+        Returns:
+            session_id: Dail-out session ID.
+            error: An error description or None.
+        """
+        logger.debug(f"Starting dialout: settings={settings}")
+
+        session_id, error = await self._client.start_dialout(settings)
+        if error:
+            logger.error(f"Unable to start dialout: {error}")
+        return session_id, error
+
+    async def stop_dialout(self, participant_id) -> Optional[CallClientError]:
         """Stop a dial-out call for a specific participant.
 
         Args:
             participant_id: ID of the participant to stop dial-out for.
-        """
-        await self._client.stop_dialout(participant_id)
 
-    async def sip_call_transfer(self, settings):
+        Returns:
+            error: An error description or None.
+        """
+        logger.debug(f"Stopping dialout: participant_id={participant_id}")
+
+        error = await self._client.stop_dialout(participant_id)
+        if error:
+            logger.error(f"Unable to stop dialout: {error}")
+        return error
+
+    async def sip_call_transfer(self, settings) -> Optional[CallClientError]:
         """Transfer a SIP call to another destination.
 
         Args:
             settings: SIP call transfer settings.
-        """
-        await self._client.sip_call_transfer(settings)
 
-    async def sip_refer(self, settings):
+        Returns:
+            error: An error description or None.
+        """
+        logger.debug(f"Staring SIP call transfer: settings={settings}")
+
+        error = await self._client.sip_call_transfer(settings)
+        if error:
+            logger.error(f"Unable to transfer SIP call: {error}")
+        return error
+
+    async def sip_refer(self, settings) -> Optional[CallClientError]:
         """Send a SIP REFER request.
 
         Args:
             settings: SIP REFER settings.
-        """
-        await self._client.sip_refer(settings)
 
-    async def start_recording(self, streaming_settings=None, stream_id=None, force_new=None):
+        Returns:
+            error: An error description or None.
+        """
+        logger.debug(f"Staring SIP REFER: settings={settings}")
+
+        error = await self._client.sip_refer(settings)
+        if error:
+            logger.error(f"Unable to perform SIP REFER: {error}")
+        return error
+
+    async def start_recording(
+        self, streaming_settings=None, stream_id=None, force_new=None
+    ) -> Tuple[str, Optional[CallClientError]]:
         """Start recording the call.
 
         Args:
             streaming_settings: Recording configuration settings.
             stream_id: Unique identifier for the recording stream.
             force_new: Whether to force a new recording session.
-        """
-        await self._client.start_recording(streaming_settings, stream_id, force_new)
 
-    async def stop_recording(self, stream_id=None):
+        Returns:
+            stream_id: Unique identifier for the recording stream.
+            error: An error description or None.
+        """
+        logger.debug(
+            f"Starting recording: stream_id={stream_id} force_new={force_new} settings={streaming_settings}"
+        )
+
+        r_id, error = await self._client.start_recording(streaming_settings, stream_id, force_new)
+        if error:
+            logger.error(f"Unable to start recording: {error}")
+        return r_id, error
+
+    async def stop_recording(self, stream_id=None) -> Optional[CallClientError]:
         """Stop recording the call.
 
         Args:
             stream_id: Unique identifier for the recording stream to stop.
-        """
-        await self._client.stop_recording(stream_id)
 
-    async def start_transcription(self, settings=None):
+        Returns:
+            error: An error description or None.
+        """
+        logger.debug(f"Stopping recording: stream_id={stream_id}")
+
+        error = await self._client.stop_recording(stream_id)
+        if error:
+            logger.error(f"Unable to stop recording: {error}")
+        return error
+
+    async def start_transcription(self, settings=None) -> Optional[CallClientError]:
         """Start transcription for the call.
 
         Args:
             settings: Transcription configuration settings.
+
+        Returns:
+            error: An error description or None.
         """
-        await self._client.start_transcription(settings)
+        logger.debug(f"Starting transcription: settings={settings}")
 
-    async def stop_transcription(self):
-        """Stop transcription for the call."""
-        await self._client.stop_transcription()
+        error = await self._client.start_transcription(settings)
+        if error:
+            logger.error(f"Unable to start transcription: {error}")
+        return error
 
-    async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
+    async def stop_transcription(self) -> Optional[CallClientError]:
+        """Stop transcription for the call.
+
+        Returns:
+            error: An error description or None.
+        """
+        logger.debug(f"Stopping transcription")
+
+        error = await self._client.stop_transcription()
+        if error:
+            logger.error(f"Unable to stop transcription: {error}")
+        return error
+
+    async def send_prebuilt_chat_message(
+        self, message: str, user_name: Optional[str] = None
+    ) -> Optional[CallClientError]:
         """Send a chat message to Daily's Prebuilt main room.
 
         Args:
             message: The chat message to send.
             user_name: Optional user name that will appear as sender of the message.
+
+        Returns:
+            error: An error description or None.
         """
-        await self._client.send_prebuilt_chat_message(message, user_name)
+        error = await self._client.send_prebuilt_chat_message(message, user_name)
+        if error:
+            logger.error(f"Unable to send prebuilt chat message: {error}")
+        return error
 
     async def capture_participant_transcription(self, participant_id: str):
         """Enable transcription capture for a specific participant.
@@ -2186,32 +2414,66 @@ class DailyTransport(BaseTransport):
                 participant_id, framerate, video_source, color_format
             )
 
-    async def update_publishing(self, publishing_settings: Mapping[str, Any]):
+    async def update_publishing(
+        self, publishing_settings: Mapping[str, Any]
+    ) -> Optional[CallClientError]:
         """Update media publishing settings.
 
         Args:
             publishing_settings: Publishing configuration settings.
-        """
-        await self._client.update_publishing(publishing_settings=publishing_settings)
 
-    async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+        Returns:
+            error: An error description or None.
+        """
+        logger.debug(f"Updating publishing settings: settings={publishing_settings}")
+
+        error = await self._client.update_publishing(publishing_settings=publishing_settings)
+        if error:
+            logger.error(f"Unable to update publishing settings: {error}")
+        return error
+
+    async def update_subscriptions(
+        self, participant_settings=None, profile_settings=None
+    ) -> Optional[CallClientError]:
         """Update media subscription settings.
 
         Args:
             participant_settings: Per-participant subscription settings.
             profile_settings: Global subscription profile settings.
+
+        Returns:
+            error: An error description or None.
         """
-        await self._client.update_subscriptions(
-            participant_settings=participant_settings, profile_settings=profile_settings
+        logger.debug(
+            f"Updating subscriptions: participant_settings={participant_settings} profile_settings={profile_settings}"
         )
 
-    async def update_remote_participants(self, remote_participants: Mapping[str, Any]):
+        error = await self._client.update_subscriptions(
+            participant_settings=participant_settings, profile_settings=profile_settings
+        )
+        if error:
+            logger.error(f"Unable to update subscription settings: {error}")
+        return error
+
+    async def update_remote_participants(
+        self, remote_participants: Mapping[str, Any]
+    ) -> Optional[CallClientError]:
         """Update settings for remote participants.
 
         Args:
             remote_participants: Remote participant configuration settings.
+
+        Returns:
+            error: An error description or None.
         """
-        await self._client.update_remote_participants(remote_participants=remote_participants)
+        logger.debug(f"Updating remote participants: remote_participants={remote_participants}")
+
+        error = await self._client.update_remote_participants(
+            remote_participants=remote_participants
+        )
+        if error:
+            logger.error(f"Unable to update remote participants: {error}")
+        return error
 
     async def _on_active_speaker_changed(self, participant: Any):
         """Handle active speaker change events."""
@@ -2219,6 +2481,12 @@ class DailyTransport(BaseTransport):
 
     async def _on_joined(self, data):
         """Handle room joined events."""
+        if self._params.transcription_enabled:
+            # We report an error because we are starting transcription
+            # internally and if it fails we need to know.
+            error = await self.start_transcription(self._params.transcription_settings)
+            if error:
+                await self._on_error(f"Unable to start transcription: {error}")
         await self._call_event_handler("on_joined", data)
 
     async def _on_left(self):
@@ -2227,18 +2495,21 @@ class DailyTransport(BaseTransport):
 
     async def _on_before_leave(self):
         """Handle before leave room events."""
+        if self._params.transcription_enabled:
+            # We report an error because we are stopping transcription
+            # internally and if it fails we need to know.
+            error = await self.stop_transcription()
+            if error:
+                await self._on_error(f"Unable to stop transcription: {error}")
         await self._call_event_handler("on_before_leave")
 
     async def _on_error(self, error):
         """Handle error events and push error frames."""
         await self._call_event_handler("on_error", error)
-        # Push error frame to notify the pipeline
-        error_frame = ErrorFrame(error)
-
         if self._input:
-            await self._input.push_error(error_frame)
+            await self._input.push_error(error_msg=error)
         elif self._output:
-            await self._output.push_error(error_frame)
+            await self._output.push_error(error_msg=error)
         else:
             logger.error("Both input and output are None while trying to push error")
             raise Exception("No valid input or output channel to push error")
@@ -2294,7 +2565,7 @@ class DailyTransport(BaseTransport):
             except asyncio.TimeoutError:
                 logger.error(f"Timeout handling dialin-ready event ({url})")
             except Exception as e:
-                logger.exception(f"Error handling dialin-ready event ({url}): {e}")
+                logger.error(f"Error handling dialin-ready event ({url}): {e}")
 
     async def _on_dialin_connected(self, data):
         """Handle dial-in connected events."""
@@ -2380,6 +2651,7 @@ class DailyTransport(BaseTransport):
 
         text = message["text"]
         timestamp = message["timestamp"]
+        track_type = message.get("trackType", None)
         raw_response = message.get("rawResponse", {})
         is_final = raw_response.get("is_final", False)
         try:
@@ -2398,6 +2670,7 @@ class DailyTransport(BaseTransport):
                 language,
                 result=message,
             )
+        frame.transport_source = track_type
 
         if self._input:
             await self._input.push_transcription_frame(frame)

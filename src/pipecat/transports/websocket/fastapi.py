@@ -28,9 +28,9 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
@@ -402,7 +402,9 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             await self._write_frame(frame)
             self._next_send_time = 0
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message frame.
 
         Args:
@@ -410,14 +412,17 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         """
         await self._write_frame(frame)
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebSocket with timing simulation.
 
         Args:
             frame: The output audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         if self._client.is_closing or not self._client.is_connected:
-            return
+            return False
 
         frame = OutputAudioRawFrame(
             audio=frame.audio,
@@ -443,6 +448,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
         # Simulate audio playback with a sleep.
         await self._write_audio_sleep()
+
+        return True
 
     async def _write_frame(self, frame: Frame):
         """Serialize and send a frame through the WebSocket."""

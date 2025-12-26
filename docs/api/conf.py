@@ -50,6 +50,7 @@ autodoc_mock_imports = [
     # Krisp - has build issues on some platforms
     "pipecat_ai_krisp",
     "krisp",
+    "krisp_audio",
     # System-specific GUI libraries
     "_tkinter",
     "tkinter",
@@ -60,9 +61,6 @@ autodoc_mock_imports = [
     # OpenCV - sometimes has import issues during docs build
     "cv2",
     # Heavy ML packages excluded from ReadTheDocs
-    # ultravox dependencies
-    "vllm",
-    "vllm.engine.arg_utils",
     # local-smart-turn dependencies
     "coremltools",
     "coremltools.models",
@@ -118,7 +116,6 @@ def import_core_modules():
         "pipecat.observers",
         "pipecat.runner",
         "pipecat.serializers",
-        "pipecat.sync",
         "pipecat.transcriptions",
         "pipecat.utils",
     ]

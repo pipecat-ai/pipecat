@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     InterruptionFrame,
     StartFrame,
-    STTMuteFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -118,24 +117,16 @@ class STTMuteFilter(FrameProcessor):
         self._first_speech_handled = False
         self._bot_is_speaking = False
         self._function_call_in_progress = False
-        self._is_muted = False  # Initialize as unmuted, will set state on StartFrame if needed
-
-    @property
-    def is_muted(self) -> bool:
-        """Check if STT is currently muted.
-
-        Returns:
-            True if STT is currently muted and audio frames are being suppressed.
-        """
-        return self._is_muted
+        self._is_muted = False
 
     async def _handle_mute_state(self, should_mute: bool):
         """Handle STT muting and interruption control state changes."""
-        if should_mute != self.is_muted:
+        if should_mute != self._is_muted:
             logger.debug(f"STTMuteFilter {'muting' if should_mute else 'unmuting'}")
             self._is_muted = should_mute
-            await self.push_frame(STTMuteFrame(mute=should_mute), FrameDirection.UPSTREAM)
-            await self.push_frame(STTMuteFrame(mute=should_mute), FrameDirection.DOWNSTREAM)
+            # Note: We don't send STTMuteFrame to the STT service itself.
+            # The filter blocks frames locally, but the STT service continues
+            # processing audio to keep streaming connections alive (e.g., Google STT).
 
     async def _should_mute(self) -> bool:
         """Determine if STT should be muted based on current state and strategies."""
@@ -215,7 +206,7 @@ class STTMuteFilter(FrameProcessor):
             ),
         ):
             # Only pass VAD-related frames when not muted
-            if not self.is_muted:
+            if not self._is_muted:
                 await self.push_frame(frame, direction)
             else:
                 logger.trace(f"{frame.__class__.__name__} suppressed - STT currently muted")
@@ -224,5 +215,5 @@ class STTMuteFilter(FrameProcessor):
             await self.push_frame(frame, direction)
 
         # Finally handle mute state change if needed
-        if should_mute is not None and should_mute != self.is_muted:
+        if should_mute is not None and should_mute != self._is_muted:
             await self._handle_mute_state(should_mute)

@@ -10,7 +10,8 @@ import base64
 import json
 import uuid
 import warnings
-from typing import AsyncGenerator, List, Literal, Optional, Union
+from enum import Enum
+from typing import AsyncGenerator, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -28,7 +29,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -48,6 +49,26 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+class GenerationConfig(BaseModel):
+    """Configuration for Cartesia Sonic-3 generation parameters.
+
+    Sonic-3 interprets these parameters as guidance to ensure natural speech.
+    Test against your content for best results.
+
+    Parameters:
+        volume: Volume multiplier for generated speech. Valid range: [0.5, 2.0]. Default is 1.0.
+        speed: Speed multiplier for generated speech. Valid range: [0.6, 1.5]. Default is 1.0.
+        emotion: Single emotion string to guide the emotional tone. Examples include neutral,
+            angry, excited, content, sad, scared. Over 60 emotions are supported. For best
+            results, use with recommended voices: Leo, Jace, Kyle, Gavin, Maya, Tessa, Dana,
+            and Marian.
+    """
+
+    volume: Optional[float] = None
+    speed: Optional[float] = None
+    emotion: Optional[str] = None
+
+
 def language_to_cartesia_language(language: Language) -> Optional[str]:
     """Convert a Language enum to Cartesia language code.
 
@@ -57,35 +78,118 @@ def language_to_cartesia_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding Cartesia language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
+        Language.AR: "ar",
+        Language.BG: "bg",
+        Language.BN: "bn",
+        Language.CS: "cs",
+        Language.DA: "da",
         Language.DE: "de",
         Language.EN: "en",
+        Language.EL: "el",
         Language.ES: "es",
+        Language.FI: "fi",
         Language.FR: "fr",
+        Language.GU: "gu",
+        Language.HE: "he",
         Language.HI: "hi",
+        Language.HR: "hr",
+        Language.HU: "hu",
+        Language.ID: "id",
         Language.IT: "it",
         Language.JA: "ja",
+        Language.KA: "ka",
+        Language.KN: "kn",
         Language.KO: "ko",
+        Language.ML: "ml",
+        Language.MR: "mr",
+        Language.MS: "ms",
         Language.NL: "nl",
+        Language.NO: "no",
+        Language.PA: "pa",
         Language.PL: "pl",
         Language.PT: "pt",
+        Language.RO: "ro",
         Language.RU: "ru",
+        Language.SK: "sk",
         Language.SV: "sv",
+        Language.TA: "ta",
+        Language.TE: "te",
+        Language.TH: "th",
+        Language.TL: "tl",
         Language.TR: "tr",
+        Language.UK: "uk",
+        Language.VI: "vi",
         Language.ZH: "zh",
     }
 
-    result = BASE_LANGUAGES.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
 
-    return result
+class CartesiaEmotion(str, Enum):
+    """Predefined Emotions supported by Cartesia."""
+
+    # Primary emotions supported by Cartesia
+    NEUTRAL = "neutral"
+    ANGRY = "angry"
+    EXCITED = "excited"
+    CONTENT = "content"
+    SAD = "sad"
+    SCARED = "scared"
+    # Additional emotions supported by Cartesia
+    HAPPY = "happy"
+    ENTHUSIASTIC = "enthusiastic"
+    ELATED = "elated"
+    EUPHORIC = "euphoric"
+    TRIUMPHANT = "triumphant"
+    AMAZED = "amazed"
+    SURPRISED = "surprised"
+    FLIRTATIOUS = "flirtatious"
+    JOKING_COMEDIC = "joking/comedic"
+    CURIOUS = "curious"
+    PEACEFUL = "peaceful"
+    SERENE = "serene"
+    CALM = "calm"
+    GRATEFUL = "grateful"
+    AFFECTIONATE = "affectionate"
+    TRUST = "trust"
+    SYMPATHETIC = "sympathetic"
+    ANTICIPATION = "anticipation"
+    MYSTERIOUS = "mysterious"
+    MAD = "mad"
+    OUTRAGED = "outraged"
+    FRUSTRATED = "frustrated"
+    AGITATED = "agitated"
+    THREATENED = "threatened"
+    DISGUSTED = "disgusted"
+    CONTEMPT = "contempt"
+    ENVIOUS = "envious"
+    SARCASTIC = "sarcastic"
+    IRONIC = "ironic"
+    DEJECTED = "dejected"
+    MELANCHOLIC = "melancholic"
+    DISAPPOINTED = "disappointed"
+    HURT = "hurt"
+    GUILTY = "guilty"
+    BORED = "bored"
+    TIRED = "tired"
+    REJECTED = "rejected"
+    NOSTALGIC = "nostalgic"
+    WISTFUL = "wistful"
+    APOLOGETIC = "apologetic"
+    HESITANT = "hesitant"
+    INSECURE = "insecure"
+    CONFUSED = "confused"
+    RESIGNED = "resigned"
+    ANXIOUS = "anxious"
+    PANICKED = "panicked"
+    ALARMED = "alarmed"
+    PROUD = "proud"
+    CONFIDENT = "confident"
+    DISTANT = "distant"
+    SKEPTICAL = "skeptical"
+    CONTEMPLATIVE = "contemplative"
+    DETERMINED = "determined"
 
 
 class CartesiaTTSService(AudioContextWordTTSService):
@@ -101,16 +205,20 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control.
-            emotion: List of emotion controls.
+            speed: Voice speed control for non-Sonic-3 models (literal values).
+            emotion: List of emotion controls for non-Sonic-3 models.
 
                 .. deprecated:: 0.0.68
                         The `emotion` parameter is deprecated and will be removed in a future version.
+
+            generation_config: Generation configuration for Sonic-3 models. Includes volume,
+                speed (numeric), and emotion (string) parameters.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = []
+        generation_config: Optional[GenerationConfig] = None
 
     def __init__(
         self,
@@ -119,7 +227,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         voice_id: str,
         cartesia_version: str = "2025-04-16",
         url: str = "wss://api.cartesia.ai/tts/websocket",
-        model: str = "sonic-2",
+        model: str = "sonic-3",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
@@ -135,12 +243,16 @@ class CartesiaTTSService(AudioContextWordTTSService):
             voice_id: ID of the voice to use for synthesis.
             cartesia_version: API version string for Cartesia service.
             url: WebSocket URL for Cartesia TTS API.
-            model: TTS model to use (e.g., "sonic-2").
+            model: TTS model to use (e.g., "sonic-3").
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             container: Audio container format.
             params: Additional input parameters for voice customization.
             text_aggregator: Custom text aggregator for processing input text.
+
+                .. deprecated:: 0.0.95
+                    Use an LLMTextProcessor before the TTSService for custom text aggregation.
+
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
         """
@@ -159,9 +271,17 @@ class CartesiaTTSService(AudioContextWordTTSService):
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            text_aggregator=text_aggregator or SkipTagsAggregator([("<spell>", "</spell>")]),
+            text_aggregator=text_aggregator,
             **kwargs,
         )
+
+        if not text_aggregator:
+            # Always skip tags added for spelled-out text
+            # Note: This is primarily to support backwards compatibility.
+            #    The preferred way of taking advantage of Cartesia SSML Tags is
+            #    to use an LLMTextProcessor and/or a text_transformer to identify
+            #    and insert these tags for the purpose of the TTS service alone.
+            self._text_aggregator = SkipTagsAggregator([("<spell>", "</spell>")])
 
         params = params or CartesiaTTSService.InputParams()
 
@@ -179,6 +299,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             else "en",
             "speed": params.speed,
             "emotion": params.emotion,
+            "generation_config": params.generation_config,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -214,6 +335,27 @@ class CartesiaTTSService(AudioContextWordTTSService):
             The Cartesia-specific language code, or None if not supported.
         """
         return language_to_cartesia_language(language)
+
+    # A set of Cartesia-specific helpers for text transformations
+    def SPELL(text: str) -> str:
+        """Wrap text in Cartesia spell tag."""
+        return f"<spell>{text}</spell>"
+
+    def EMOTION_TAG(emotion: CartesiaEmotion) -> str:
+        """Convenience method to create an emotion tag."""
+        return f'<emotion value="{emotion}" />'
+
+    def PAUSE_TAG(seconds: float) -> str:
+        """Convenience method to create a pause tag."""
+        return f'<break time="{seconds}s" />'
+
+    def VOLUME_TAG(volume: float) -> str:
+        """Convenience method to create a volume tag."""
+        return f'<volume ratio="{volume}" />'
+
+    def SPEED_TAG(speed: float) -> str:
+        """Convenience method to create a speed tag."""
+        return f'<speed ratio="{speed}" />'
 
     def _is_cjk_language(self, language: str) -> bool:
         """Check if the given language is CJK (Chinese, Japanese, Korean).
@@ -297,6 +439,11 @@ class CartesiaTTSService(AudioContextWordTTSService):
         if self._settings["speed"]:
             msg["speed"] = self._settings["speed"]
 
+        if self._settings["generation_config"]:
+            msg["generation_config"] = self._settings["generation_config"].model_dump(
+                exclude_none=True
+            )
+
         return json.dumps(msg)
 
     async def start(self, frame: StartFrame):
@@ -344,12 +491,13 @@ class CartesiaTTSService(AudioContextWordTTSService):
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
-            logger.debug("Connecting to Cartesia")
+            logger.debug("Connecting to Cartesia TTS")
             self._websocket = await websocket_connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
             )
+            await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -361,10 +509,11 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 logger.debug("Disconnecting from Cartesia")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._context_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
         if self._websocket:
@@ -405,7 +554,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self.add_word_timestamps(processed_timestamps)
             elif msg["type"] == "chunk":
                 await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,
@@ -413,13 +562,12 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 )
                 await self.append_to_audio_context(msg["context_id"], frame)
             elif msg["type"] == "error":
-                logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
+                await self.push_error(error_msg=f"Error: {msg}")
                 self._context_id = None
             else:
-                logger.error(f"{self} error, unknown message type: {msg}")
+                await self.push_error(error_msg=f"Error, unknown message type: {msg}")
 
     async def _receive_messages(self):
         while True:
@@ -457,14 +605,14 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class CartesiaHttpTTSService(TTSService):
@@ -480,23 +628,27 @@ class CartesiaHttpTTSService(TTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control.
-            emotion: List of emotion controls.
+            speed: Voice speed control for non-Sonic-3 models (literal values).
+            emotion: List of emotion controls for non-Sonic-3 models.
 
                 .. deprecated:: 0.0.68
                         The `emotion` parameter is deprecated and will be removed in a future version.
+
+            generation_config: Generation configuration for Sonic-3 models. Includes volume,
+                speed (numeric), and emotion (string) parameters.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = Field(default_factory=list)
+        generation_config: Optional[GenerationConfig] = None
 
     def __init__(
         self,
         *,
         api_key: str,
         voice_id: str,
-        model: str = "sonic-2",
+        model: str = "sonic-3",
         base_url: str = "https://api.cartesia.ai",
         cartesia_version: str = "2024-11-13",
         sample_rate: Optional[int] = None,
@@ -510,7 +662,7 @@ class CartesiaHttpTTSService(TTSService):
         Args:
             api_key: Cartesia API key for authentication.
             voice_id: ID of the voice to use for synthesis.
-            model: TTS model to use (e.g., "sonic-2").
+            model: TTS model to use (e.g., "sonic-3").
             base_url: Base URL for Cartesia HTTP API.
             cartesia_version: API version string for Cartesia service.
             sample_rate: Audio sample rate. If None, uses default.
@@ -537,6 +689,7 @@ class CartesiaHttpTTSService(TTSService):
             else "en",
             "speed": params.speed,
             "emotion": params.emotion,
+            "generation_config": params.generation_config,
         }
         self.set_voice(voice_id)
         self.set_model_name(model)
@@ -630,6 +783,11 @@ class CartesiaHttpTTSService(TTSService):
             if self._settings["speed"]:
                 payload["speed"] = self._settings["speed"]
 
+            if self._settings["generation_config"]:
+                payload["generation_config"] = self._settings["generation_config"].model_dump(
+                    exclude_none=True
+                )
+
             yield TTSStartedFrame()
 
             session = await self._client._get_session()
@@ -645,8 +803,7 @@ class CartesiaHttpTTSService(TTSService):
             async with session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Cartesia API error: {error_text}")
-                    await self.push_error(ErrorFrame(f"Cartesia API error: {error_text}"))
+                    yield ErrorFrame(error=f"Cartesia API error: {error_text}")
                     raise Exception(f"Cartesia API returned status {response.status}: {error_text}")
 
                 audio_data = await response.read()
@@ -662,8 +819,7 @@ class CartesiaHttpTTSService(TTSService):
             yield frame
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

@@ -11,6 +11,7 @@ import unittest
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
@@ -23,6 +24,7 @@ from pipecat.pipeline.base_task import PipelineTaskParams
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import HeartbeatsObserver, run_test
@@ -253,7 +255,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         try:
             await asyncio.wait_for(
-                asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+                task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
         except asyncio.TimeoutError:
@@ -289,7 +291,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await task.queue_frame(TextFrame(text="Hello!"))
         try:
             await asyncio.wait_for(
-                asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+                task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                 timeout=1.0,
             )
         except asyncio.TimeoutError:
@@ -300,11 +302,8 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, idle_timeout_secs=0.2)
-        try:
-            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
-            assert False
-        except asyncio.CancelledError:
-            assert True
+        # This shouldn't freeze, so nothing to check really.
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
 
     async def test_no_idle_task(self):
         identity = IdentityFilter()
@@ -312,7 +311,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         task = PipelineTask(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
         try:
             await asyncio.wait_for(
-                asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+                task.run(PipelineTaskParams(loop=asyncio.get_event_loop())),
                 timeout=0.3,
             )
         except asyncio.TimeoutError:
@@ -331,11 +330,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             ),
             idle_timeout_secs=0.3,
         )
-        try:
-            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
-            assert False
-        except asyncio.CancelledError:
-            assert True
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
 
     async def test_idle_task_event_handler_no_frames(self):
         identity = IdentityFilter()
@@ -350,11 +345,8 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             idle_timeout = True
             await task.cancel()
 
-        try:
-            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
-            assert False
-        except asyncio.CancelledError:
-            assert idle_timeout
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        assert idle_timeout
 
     async def test_idle_task_event_handler_quiet_user(self):
         identity = IdentityFilter()
@@ -392,6 +384,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         idle_timeout_secs = 0.2
         sleep_time_secs = idle_timeout_secs / 2
 
+        # Use the identify filter so the frames just reach the end of the pipeline.
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(
@@ -401,6 +394,12 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         )
 
         async def delayed_frames():
+            """Sending multiple text frames.
+
+            The total amount of elapsed time in this function should be greater
+            than the task idle timeout. If an idle timeout event is triggered it
+            means we haven't detected that the TextFrames have been pushed.
+            """
             await asyncio.sleep(sleep_time_secs)
             await task.queue_frame(TextFrame("Hello Pipecat!"))
             await asyncio.sleep(sleep_time_secs)
@@ -415,11 +414,59 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             asyncio.create_task(delayed_frames()),
         ]
 
-        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
         diff_time = time.time() - start_time
 
         self.assertGreater(diff_time, sleep_time_secs * 3)
+
+        # Wait for the pending tasks to complete.
+        await asyncio.gather(*pending)
+
+    async def test_idle_task_swallowed_frames(self):
+        idle_timeout_secs = 0.2
+        sleep_time_secs = idle_timeout_secs / 2
+
+        # Block all frames (except system frames). Here, we are testing that
+        # generated frames don't trigger an idle timeout (they don't need to
+        # reach the end of the pipeline).
+        filter = FrameFilter(types=())
+        pipeline = Pipeline([filter])
+        task = PipelineTask(
+            pipeline,
+            idle_timeout_secs=idle_timeout_secs,
+            idle_timeout_frames=(TextFrame,),
+        )
+
+        start_time = time.time()
+
+        async def delayed_frames():
+            """Sending multiple text frames.
+
+            The total amount of elapsed time in this function should be greater
+            than the task idle timeout. If an idle timeout event is triggered it
+            means we haven't detected that the TextFrames have been pushed.
+            """
+            await asyncio.sleep(sleep_time_secs)
+            await task.queue_frame(TextFrame("Hello Pipecat!"))
+            await asyncio.sleep(sleep_time_secs)
+            await task.queue_frame(TextFrame("Hello Pipecat!"))
+            await asyncio.sleep(sleep_time_secs)
+            await task.queue_frame(TextFrame("Hello Pipecat!"))
+
+        tasks = [
+            asyncio.create_task(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+            asyncio.create_task(delayed_frames()),
+        ]
+
+        _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+        diff_time = time.time() - start_time
+
+        self.assertGreater(diff_time, sleep_time_secs * 3)
+
+        # Wait for the pending tasks to complete.
+        await asyncio.gather(*pending)
 
     async def test_task_cancel_timeout(self):
         class CancelFilter(FrameProcessor):
@@ -450,3 +497,34 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         except asyncio.CancelledError:
             assert cancelled
+
+    async def test_task_error(self):
+        class ErrorProcessor(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, TextFrame):
+                    await self.push_error(ErrorFrame("Boo!"))
+
+                await self.push_frame(frame, direction)
+
+        error_received = False
+
+        pipeline = Pipeline([ErrorProcessor()])
+        task = PipelineTask(pipeline)
+
+        @task.event_handler("on_pipeline_error")
+        async def on_pipeline_error(task: PipelineTask, frame: ErrorFrame):
+            nonlocal error_received
+            error_received = True
+            await task.cancel()
+
+        await task.queue_frame(TextFrame(text="Hello from Pipecat!"))
+
+        try:
+            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        except asyncio.CancelledError:
+            assert error_received

@@ -6,7 +6,6 @@
 
 """Deepgram speech-to-text service implementation."""
 
-import asyncio
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -14,13 +13,12 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
@@ -233,10 +231,17 @@ class DeepgramSTTService(STTService):
             )
 
         if not await self._connection.start(options=self._settings, addons=self._addons):
-            logger.error(f"{self}: unable to connect to Deepgram")
+            await self.push_error(error_msg=f"Unable to connect to Deepgram")
+        else:
+            headers = {
+                k: v
+                for k, v in self._connection._socket.response.headers.items()
+                if k.startswith("dg-")
+            }
+            logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
 
     async def _disconnect(self):
-        if self._connection.is_connected:
+        if await self._connection.is_connected():
             logger.debug("Disconnecting from Deepgram")
             # Deepgram swallows asyncio.CancelledError internally which prevents
             # proper cancellation propagation. This issue was found with
@@ -256,7 +261,7 @@ class DeepgramSTTService(STTService):
     async def _on_error(self, *args, **kwargs):
         error: ErrorResponse = kwargs["error"]
         logger.warning(f"{self} connection error, will retry: {error}")
-        await self.push_error(ErrorFrame(f"{error}"))
+        await self.push_error(error_msg=f"{error}")
         await self.stop_all_metrics()
         # NOTE(aleix): we don't disconnect (i.e. call finish on the connection)
         # because this triggers more errors internally in the Deepgram SDK. So,
@@ -322,10 +327,10 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame) and not self.vad_enabled:
+        if isinstance(frame, VADUserStartedSpeakingFrame) and not self.vad_enabled:
             # Start metrics if Deepgram VAD is disabled & pipeline VAD has detected speech
             await self.start_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             await self._connection.finalize()
             logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")

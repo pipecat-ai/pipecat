@@ -14,6 +14,7 @@ import io
 import json
 import struct
 import uuid
+import warnings
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -33,7 +34,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -54,7 +55,7 @@ def language_to_playht_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding PlayHT language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AF: "afrikans",
         Language.AM: "amharic",
         Language.AR: "arabic",
@@ -94,21 +95,16 @@ def language_to_playht_language(language: Language) -> Optional[str]:
         Language.ZH: "mandarin",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class PlayHTTTSService(InterruptibleTTSService):
     """PlayHT WebSocket-based text-to-speech service.
+
+    .. deprecated:: 0.0.88
+
+        This class is deprecated and will be removed in a future version.
+        PlayHT is shutting down their API on December 31st, 2025.
 
     Provides real-time text-to-speech synthesis using PlayHT's WebSocket API.
     Supports streaming audio generation with configurable voice engines and
@@ -157,6 +153,15 @@ class PlayHTTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "PlayHT is shutting down their API on December 31st, 2025. "
+                "'PlayHTTTSService' is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         params = params or PlayHTTTSService.InputParams()
 
@@ -254,12 +259,14 @@ class PlayHTTTSService(InterruptibleTTSService):
                 raise ValueError("WebSocket URL is not a string")
 
             self._websocket = await websocket_connect(self._websocket_url)
+
+            await self._call_event_handler("on_connected")
         except ValueError as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -272,10 +279,11 @@ class PlayHTTTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from PlayHT")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
             self._request_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def _get_websocket_url(self):
         """Retrieve WebSocket URL from PlayHT API."""
@@ -341,8 +349,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                             await self.push_frame(TTSStoppedFrame())
                             self._request_id = None
                     elif "error" in msg:
-                        logger.error(f"{self} error: {msg}")
-                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
+                        await self.push_error(error_msg=f"Error: {msg['error']}")
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
@@ -384,7 +391,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(json.dumps(tts_command))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -394,12 +401,16 @@ class PlayHTTTSService(InterruptibleTTSService):
             yield None
 
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
-            yield ErrorFrame(f"{self} error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class PlayHTHttpTTSService(TTSService):
     """PlayHT HTTP-based text-to-speech service.
+
+    .. deprecated:: 0.0.88
+
+        This class is deprecated and will be removed in a future version.
+        PlayHT is shutting down their API on December 31st, 2025.
 
     Provides text-to-speech synthesis using PlayHT's HTTP API for simpler,
     non-streaming synthesis. Suitable for use cases where streaming is not
@@ -454,8 +465,6 @@ class PlayHTHttpTTSService(TTSService):
 
         # Warn about deprecated protocol parameter if explicitly provided
         if protocol:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -463,6 +472,15 @@ class PlayHTHttpTTSService(TTSService):
                     DeprecationWarning,
                     stacklevel=2,
                 )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "PlayHT is shutting down their API on December 31st, 2025. "
+                "'PlayHTHttpTTSService' is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         params = params or PlayHTHttpTTSService.InputParams()
 
@@ -603,7 +621,7 @@ class PlayHTHttpTTSService(TTSService):
                             yield frame
 
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

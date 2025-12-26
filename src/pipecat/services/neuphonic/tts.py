@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -56,7 +56,7 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
     Returns:
         The corresponding Neuphonic language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.DE: "de",
         Language.EN: "en",
         Language.ES: "es",
@@ -69,17 +69,7 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
         Language.ZH: "zh",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
@@ -127,7 +117,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         super().__init__(
             aggregate_sentences=aggregate_sentences,
-            push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
@@ -293,8 +282,10 @@ class NeuphonicTTSService(InterruptibleTTSService):
             headers = {"x-api-key": self._api_key}
 
             self._websocket = await websocket_connect(url, additional_headers=headers)
+
+            await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -307,10 +298,11 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from Neuphonic")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._started = False
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def _receive_messages(self):
         """Receive and process messages from Neuphonic WebSocket."""
@@ -371,14 +363,14 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class NeuphonicHttpTTSService(TTSService):
@@ -542,7 +534,6 @@ class NeuphonicHttpTTSService(TTSService):
                 if response.status != 200:
                     error_text = await response.text()
                     error_message = f"Neuphonic API error: HTTP {response.status} - {error_text}"
-                    logger.error(error_message)
                     yield ErrorFrame(error=error_message)
                     return
 
@@ -572,7 +563,7 @@ class NeuphonicHttpTTSService(TTSService):
                             yield TTSAudioRawFrame(audio_bytes, self.sample_rate, 1)
 
                     except Exception as e:
-                        logger.error(f"Error processing SSE message: {e}")
+                        yield ErrorFrame(error=f"Unknown error occurred: {e}")
                         # Don't yield error frame for individual message failures
                         continue
 
@@ -580,8 +571,7 @@ class NeuphonicHttpTTSService(TTSService):
             logger.debug("TTS generation cancelled")
             raise
         except Exception as e:
-            logger.exception(f"Error in run_tts: {e}")
-            yield ErrorFrame(error=f"Neuphonic TTS error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

@@ -105,7 +105,7 @@ uv run 07-interruptible.py -t twilio -x NGROK_HOST_NAME
 ### Vision & Multimodal
 
 - **[12a-describe-video-gemini-flash.py](./12a-describe-video-gemini-flash.py)**: Bot describes user's video (Video input, Multimodal LLMs)
-- **[26c-gemini-multimodal-live-video.py](./26c-gemini-multimodal-live-video.py)**: Gemini with video input (Streaming video, Function calls)
+- **[26c-gemini-live-video.py](./26c-gemini-live-video.py)**: Gemini with video input (Streaming video, Function calls)
 
 ### Voice & Language
 

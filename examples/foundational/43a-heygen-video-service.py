@@ -10,7 +10,6 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -25,10 +24,12 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.heygen.api import AvatarQuality, NewSessionRequest
+from pipecat.services.heygen.client import ServiceType
 from pipecat.services.heygen.video import HeyGenVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
+from pipecat.turns.bot.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
+from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 load_dotenv(override=True)
 
@@ -45,7 +46,6 @@ transport_params = {
         video_out_height=720,
         video_out_bitrate=2_000_000,  # 2MBps
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -55,7 +55,6 @@ transport_params = {
         video_out_width=1280,
         video_out_height=720,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -73,17 +72,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
         heyGen = HeyGenVideoService(
-            api_key=os.getenv("HEYGEN_API_KEY"),
+            api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
+            service_type=ServiceType.LIVE_AVATAR,
             session=session,
-            session_request=NewSessionRequest(
-                avatar_id="Shawn_Therapist_public", version="v2", quality=AvatarQuality.high
-            ),
         )
 
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Your output will be converted to audio so don't include special characters in your answers. Be succinct and respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
             },
         ]
 
@@ -108,6 +105,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             params=PipelineParams(
                 enable_metrics=True,
                 enable_usage_metrics=True,
+                turn_start_strategies=TurnStartStrategies(
+                    bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+                ),
             ),
             idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         )

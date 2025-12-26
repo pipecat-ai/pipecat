@@ -18,16 +18,18 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.azure.realtime.llm import AzureRealtimeLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai_realtime import (
-    AzureRealtimeLLMService,
+from pipecat.services.openai.realtime.events import (
+    AudioConfiguration,
+    AudioInput,
     InputAudioTranscription,
     SessionProperties,
 )
-from pipecat.services.openai_realtime.events import AudioConfiguration, AudioInput
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -154,10 +156,10 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
-    # Create a standard OpenAI LLM context object using the normal messages format. The
+    # Create a standard LLM context object using the normal messages format. The
     # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
-    context = OpenAILLMContext(
+    context = LLMContext(
         [{"role": "user", "content": "Say hello!"}],
         # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
         #     [
@@ -172,7 +174,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         tools,
     )
 
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

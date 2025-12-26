@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from google.genai.types import Content, Part
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -42,6 +41,8 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.bot.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
+from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 load_dotenv(override=True)
 
@@ -53,7 +54,7 @@ You are a helpful LLM in a WebRTC call. Your goals are to be helpful and brief i
 You are expert at transcribing audio to text. You will receive a mixture of audio and text input. When
 asked to transcribe what the user said, output an exact, word-for-word transcription.
 
-Your output will be converted to audio so don't include special characters in your answers.
+Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
 
 Each time you answer, you should respond in three parts.
 
@@ -201,19 +202,16 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -224,8 +222,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         model="gemini-2.5-flash",
-        # turn on thinking if you want it
-        # params=GoogleLLMService.InputParams(extra={"thinking_config": {"thinking_budget": 4096}}),
+        # force a certain amount of thinking if you want it
+        # params=GoogleLLMService.InputParams(
+        #     thinking=GoogleLLMService.ThinkingConfig(thinking_budget=4096)
+        # ),
     )
 
     tts = GoogleTTSService(
@@ -270,6 +270,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
+            turn_start_strategies=TurnStartStrategies(
+                bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )

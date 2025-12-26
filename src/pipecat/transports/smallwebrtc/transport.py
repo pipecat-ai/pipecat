@@ -15,7 +15,7 @@ import asyncio
 import fractions
 import time
 from collections import deque
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 import numpy as np
 from loguru import logger
@@ -26,13 +26,13 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
-    InputTransportMessageUrgentFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     SpriteFrame,
     StartFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
@@ -66,7 +66,7 @@ class SmallWebRTCCallbacks(BaseModel):
         on_client_disconnected: Called when a client disconnects.
     """
 
-    on_app_message: Callable[[Any], Awaitable[None]]
+    on_app_message: Callable[[Any, str], Awaitable[None]]
     on_client_connected: Callable[[SmallWebRTCConnection], Awaitable[None]]
     on_client_disconnected: Callable[[SmallWebRTCConnection], Awaitable[None]]
 
@@ -254,7 +254,7 @@ class SmallWebRTCClient:
 
         @self._webrtc_connection.event_handler("app-message")
         async def on_app_message(connection: SmallWebRTCConnection, message: Any):
-            await self._handle_app_message(message)
+            await self._handle_app_message(message, connection.pc_id)
 
     def _convert_frame(self, frame_array: np.ndarray, format_name: str) -> np.ndarray:
         """Convert a video frame to RGB format based on the input format.
@@ -399,23 +399,33 @@ class SmallWebRTCClient:
 
             del frame  # free original AudioFrame
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebRTC connection.
 
         Args:
             frame: The audio frame to transmit.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(frame.audio)
+            return True
+        return False
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the WebRTC connection.
 
         Args:
             frame: The video frame to transmit.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
         if self._can_send() and self._video_output_track:
             self._video_output_track.add_video_frame(frame)
+            return True
+        return False
 
     async def setup(self, _params: TransportParams, frame):
         """Set up the client with transport parameters.
@@ -451,7 +461,9 @@ class SmallWebRTCClient:
             await self._webrtc_connection.disconnect()
             await self._handle_peer_disconnected()
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send an application message through the WebRTC connection.
 
         Args:
@@ -502,9 +514,9 @@ class SmallWebRTCClient:
         if not self._closing:
             await self._callbacks.on_client_disconnected(self._webrtc_connection)
 
-    async def _handle_app_message(self, message: Any):
+    async def _handle_app_message(self, message: Any, sender: str):
         """Handle incoming application messages."""
-        await self._callbacks.on_app_message(message)
+        await self._callbacks.on_app_message(message, sender)
 
     def _can_send(self):
         """Check if the connection is ready for sending data."""
@@ -555,7 +567,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_audio_task = None
         self._receive_video_task = None
         self._receive_screen_video_task = None
-        self._image_requests = {}
+        self._image_requests: List[UserImageRequestFrame] = []
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
@@ -645,23 +657,29 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                 if video_frame:
                     await self.push_video_frame(video_frame)
 
-                    # Check if there are any pending image requests and create UserImageRawFrame
-                    if self._image_requests:
-                        for req_id, request_frame in list(self._image_requests.items()):
-                            if request_frame.video_source == video_source:
-                                # Create UserImageRawFrame using the current video frame
-                                image_frame = UserImageRawFrame(
-                                    user_id=request_frame.user_id,
-                                    request=request_frame,
-                                    image=video_frame.image,
-                                    size=video_frame.size,
-                                    format=video_frame.format,
-                                )
-                                image_frame.transport_source = video_source
-                                # Push the frame to the pipeline
-                                await self.push_video_frame(image_frame)
-                                # Remove from pending requests
-                                del self._image_requests[req_id]
+                    # Check if there are any pending image requests and create
+                    # UserImageRawFrame. Use a shallow copy so we can remove
+                    # elements.
+                    for request_frame in self._image_requests[:]:
+                        request_text = request_frame.text if request_frame else None
+                        add_to_context = request_frame.append_to_context if request_frame else None
+                        if request_frame.video_source == video_source:
+                            # Create UserImageRawFrame using the current video frame
+                            image_frame = UserImageRawFrame(
+                                user_id=request_frame.user_id,
+                                image=video_frame.image,
+                                size=video_frame.size,
+                                format=video_frame.format,
+                                text=request_text,
+                                append_to_context=add_to_context,
+                                # Deprecated fields below.
+                                request=request_frame,
+                            )
+                            image_frame.transport_source = video_source
+                            # Push the frame to the pipeline
+                            await self.push_video_frame(image_frame)
+                            # Remove from pending requests
+                            self._image_requests.remove(request_frame)
 
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
@@ -673,7 +691,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             message: The application message to process.
         """
         logger.debug(f"Received app message inside SmallWebRTCInputTransport  {message}")
-        frame = InputTransportMessageUrgentFrame(message=message)
+        frame = InputTransportMessageFrame(message=message)
         await self.push_frame(frame)
 
     # Add this method similar to DailyInputTransport.request_participant_image
@@ -689,8 +707,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         logger.debug(f"Requesting image from participant: {frame.user_id}")
 
         # Store the request
-        request_id = f"{frame.function_name}:{frame.tool_call_id}"
-        self._image_requests[request_id] = frame
+        self._image_requests.append(frame)
 
         # Default to camera if no source specified
         if frame.video_source is None:
@@ -810,7 +827,9 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         await super().cancel(frame)
         await self._client.disconnect()
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message through the WebRTC connection.
 
         Args:
@@ -818,21 +837,27 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         """
         await self._client.send_message(frame)
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebRTC connection.
 
         Args:
             frame: The output audio frame to transmit.
-        """
-        await self._client.write_audio_frame(frame)
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
+        """
+        return await self._client.write_audio_frame(frame)
+
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the WebRTC connection.
 
         Args:
             frame: The output video frame to transmit.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
-        await self._client.write_video_frame(frame)
+        return await self._client.write_video_frame(frame)
 
 
 class SmallWebRTCTransport(BaseTransport):
@@ -919,11 +944,11 @@ class SmallWebRTCTransport(BaseTransport):
         if self._output:
             await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
-    async def _on_app_message(self, message: Any):
+    async def _on_app_message(self, message: Any, sender: str):
         """Handle incoming application messages."""
         if self._input:
             await self._input.push_app_message(message)
-        await self._call_event_handler("on_app_message", message)
+        await self._call_event_handler("on_app_message", message, sender)
 
     async def _on_client_connected(self, webrtc_connection):
         """Handle client connection events."""

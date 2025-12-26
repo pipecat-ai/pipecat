@@ -15,15 +15,17 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     AudioRawFrame,
+    ErrorFrame,
     Frame,
     StartFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
 
@@ -33,6 +35,25 @@ class STTService(AIService):
     Provides common functionality for STT services including audio passthrough,
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
+
+    Event handlers:
+        on_connected: Called when connected to the STT service.
+        on_disconnected: Called when disconnected from the STT service.
+        on_connection_error: Called when a connection to the STT service error occurs.
+
+    Example::
+
+        @stt.event_handler("on_connected")
+        async def on_connected(stt: STTService):
+            logger.debug(f"STT connected")
+
+        @stt.event_handler("on_disconnected")
+        async def on_disconnected(stt: STTService):
+            logger.debug(f"STT disconnected")
+
+        @stt.event_handler("on_connection_error")
+        async def on_connection_error(stt: STTService, error: str):
+            logger.error(f"STT connection error: {error}")
     """
 
     def __init__(
@@ -59,6 +80,10 @@ class STTService(AIService):
         self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
+
+        self._register_event_handler("on_connected")
+        self._register_event_handler("on_disconnected")
+        self._register_event_handler("on_connection_error")
 
     @property
     def is_muted(self) -> bool:
@@ -227,20 +252,15 @@ class SegmentedSTTService(STTService):
         """Process frames, handling VAD events and audio segmentation."""
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
 
-    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
-        if frame.emulated:
-            return
+    async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._user_speaking = True
 
-    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
-        if frame.emulated:
-            return
-
+    async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
 
         content = io.BytesIO()
@@ -283,3 +303,25 @@ class SegmentedSTTService(STTService):
         if not self._user_speaking and len(self._audio_buffer) > self._audio_buffer_size_1s:
             discarded = len(self._audio_buffer) - self._audio_buffer_size_1s
             self._audio_buffer = self._audio_buffer[discarded:]
+
+
+class WebsocketSTTService(STTService, WebsocketService):
+    """Base class for websocket-based STT services.
+
+    Combines STT functionality with websocket connectivity, providing automatic
+    error handling and reconnection capabilities.
+    """
+
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+        """Initialize the Websocket STT service.
+
+        Args:
+            reconnect_on_error: Whether to automatically reconnect on websocket errors.
+            **kwargs: Additional arguments passed to parent classes.
+        """
+        STTService.__init__(self, **kwargs)
+        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+
+    async def _report_error(self, error: ErrorFrame):
+        await self._call_event_handler("on_connection_error", error.error)
+        await self.push_error_frame(error)

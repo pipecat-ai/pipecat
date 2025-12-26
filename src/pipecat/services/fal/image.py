@@ -110,7 +110,6 @@ class FalImageGenService(ImageGenService):
         image_url = response["images"][0]["url"] if response else None
 
         if not image_url:
-            logger.error(f"{self} error: image generation failed")
             yield ErrorFrame("Image generation failed")
             return
 

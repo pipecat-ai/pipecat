@@ -10,24 +10,21 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_core.language_models import FakeStreamingListLLM
 
 from pipecat.frames.frames import (
+    InterruptionFrame,
+    LLMContextAssistantTimestampFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    OpenAILLMContextAssistantTimestampFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMAssistantContextAggregator,
-    LLMUserContextAggregator,
-)
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.processors.frameworks.langchain import LangchainProcessor
 from pipecat.tests.utils import SleepFrame, run_test
@@ -67,25 +64,28 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         proc = LangchainProcessor(chain=chain)
         self.mock_proc = self.MockProcessor("token_collector")
 
-        context = OpenAILLMContext()
-        tma_in = LLMUserContextAggregator(context)
-        tma_out = LLMAssistantContextAggregator(
-            context, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+        context = LLMContext()
+        context_aggregator = LLMContextAggregatorPair(context)
+
+        pipeline = Pipeline(
+            [context_aggregator.user(), proc, self.mock_proc, context_aggregator.assistant()]
         )
 
-        pipeline = Pipeline([tma_in, proc, self.mock_proc, tma_out])
-
         frames_to_send = [
-            UserStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hi World", user_id="user", timestamp="now"),
             SleepFrame(),
-            UserStoppedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=1.0),
         ]
         expected_down_frames = [
+            VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
+            InterruptionFrame,
+            VADUserStoppedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
-            OpenAILLMContextAssistantTimestampFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
         ]
         await run_test(
             pipeline,
@@ -94,4 +94,6 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual("".join(self.mock_proc.token), self.expected_response)
-        self.assertEqual(tma_out.messages[-1]["content"], self.expected_response)
+        self.assertEqual(
+            context_aggregator.assistant().messages[-1]["content"], self.expected_response
+        )

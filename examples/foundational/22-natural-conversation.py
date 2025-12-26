@@ -16,8 +16,9 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.gated_openai_llm_context import GatedOpenAILLMContextAggregator
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.gated_llm_context import GatedLLMContextAggregator
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.filters.null_filter import NullFilter
 from pipecat.processors.filters.wake_notifier_filter import WakeNotifierFilter
 from pipecat.processors.user_idle_processor import UserIdleProcessor
@@ -27,10 +28,10 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair, OpenAILLMService
-from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.utils.sync.event_notifier import EventNotifier
 
 load_dotenv(override=True)
 
@@ -50,8 +51,8 @@ class TurnDetectionLLM(Pipeline):
             },
         ]
 
-        statement_context = OpenAILLMContext(statement_messages)
-        statement_context_aggregator = statement_llm.create_context_aggregator(statement_context)
+        statement_context = LLMContext(statement_messages)
+        statement_context_aggregator = LLMContextAggregatorPair(statement_context)
 
         # We have instructed the LLM to return 'YES' if it thinks the user
         # completed a sentence. So, if it's 'YES' we will return true in this
@@ -72,9 +73,7 @@ class TurnDetectionLLM(Pipeline):
         # This processor keeps the last context and will let it through once the
         # notifier is woken up. We start with the gate open because we send an
         # initial context frame to start the conversation.
-        gated_context_aggregator = GatedOpenAILLMContextAggregator(
-            notifier=notifier, start_open=True
-        )
+        gated_context_aggregator = GatedLLMContextAggregator(notifier=notifier, start_open=True)
 
         # Notify if the user hasn't said anything.
         async def user_idle_notifier(frame):
@@ -143,12 +142,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
-    context = OpenAILLMContext(messages)
-    context_aggregator = llm_main.create_context_aggregator(context)
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     # LLM + turn detection (with an extra LLM as a judge)
     llm = TurnDetectionLLM(llm_main, context_aggregator)
