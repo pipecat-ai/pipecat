@@ -233,6 +233,9 @@ class DeepgramSTTService(STTService):
         if not await self._connection.start(options=self._settings, addons=self._addons):
             await self.push_error(error_msg=f"Unable to connect to Deepgram")
         else:
+            # Start processing metrics when connection is ready to receive audio
+            # (not when speech is detected - that would undercount the processing time)
+            await self.start_processing_metrics()
             headers = {
                 k: v
                 for k, v in self._connection._socket.response.headers.items()
@@ -254,9 +257,13 @@ class DeepgramSTTService(STTService):
             await self._connection.finish()
 
     async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
+        """Start TTFB metrics collection when speech is detected.
+
+        Note: Processing metrics are started when the connection is established
+        (in _connect), not when speech is detected. This ensures we measure the
+        full processing time including any pre-speech latency.
+        """
         await self.start_ttfb_metrics()
-        await self.start_processing_metrics()
 
     async def _on_error(self, *args, **kwargs):
         error: ErrorResponse = kwargs["error"]
