@@ -21,8 +21,9 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
-    FunctionCallInProgressFrame,
+    FunctionCallCancelFrame,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
@@ -116,7 +117,7 @@ class STTMuteFilter(FrameProcessor):
         self._config = config
         self._first_speech_handled = False
         self._bot_is_speaking = False
-        self._function_call_in_progress = False
+        self._function_call_in_progress = set()
         self._is_muted = False
 
     async def _handle_mute_state(self, should_mute: bool):
@@ -176,11 +177,12 @@ class STTMuteFilter(FrameProcessor):
         # Process frames to determine mute state
         if isinstance(frame, StartFrame):
             should_mute = await self._should_mute()
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            self._function_call_in_progress = True
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            for f in frame.function_calls:
+                self._function_call_in_progress.add(f.tool_call_id)
             should_mute = await self._should_mute()
-        elif isinstance(frame, FunctionCallResultFrame):
-            self._function_call_in_progress = False
+        elif isinstance(frame, (FunctionCallCancelFrame, FunctionCallResultFrame)):
+            self._function_call_in_progress.remove(frame.tool_call_id)
             should_mute = await self._should_mute()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_is_speaking = True
