@@ -51,6 +51,10 @@ class STTMuteStrategy(Enum):
         FUNCTION_CALL: Mute STT during function calls to prevent interruptions.
         ALWAYS: Always mute STT when the bot is speaking.
         CUSTOM: Use a custom callback to determine muting logic dynamically.
+
+    .. deprecated:: 0.0.99
+        `STTMuteStrategy` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s new `user_mute_strategies` instead.
     """
 
     FIRST_SPEECH = "first_speech"
@@ -77,6 +81,10 @@ class STTMuteConfig:
     Note:
         MUTE_UNTIL_FIRST_BOT_COMPLETE and FIRST_SPEECH strategies should not be used together
         as they handle the first bot speech differently.
+
+    .. deprecated:: 0.0.99
+        `STTMuteConfig` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s new `user_mute_strategies` instead.
     """
 
     strategies: set[STTMuteStrategy]
@@ -104,6 +112,10 @@ class STTMuteFilter(FrameProcessor):
     feature. When STT is muted, interruptions are automatically disabled by
     suppressing VAD-related frames. This prevents unwanted speech detection
     during bot speech, function calls, or other specified conditions.
+
+    .. deprecated:: 0.0.99
+        `STTMuteFilter` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s new `user_mute_strategies` instead.
     """
 
     def __init__(self, *, config: STTMuteConfig, **kwargs):
@@ -119,6 +131,16 @@ class STTMuteFilter(FrameProcessor):
         self._bot_is_speaking = False
         self._function_call_in_progress = set()
         self._is_muted = False
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`STTMuteFilter` is deprecated and will be removed in a future version. "
+                "Use `LLMUserAggregator`'s new `user_mute_strategies` instead.",
+                DeprecationWarning,
+            )
 
     async def _handle_mute_state(self, should_mute: bool):
         """Handle STT muting and interruption control state changes."""
