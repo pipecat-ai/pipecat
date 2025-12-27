@@ -35,8 +35,8 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.bot.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
-from pipecat.turns.mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
-from pipecat.turns.mute.mute_until_first_bot_complete_user_mute_strategy import (
+from pipecat.turns.mute import (
+    FunctionCallUserMuteStrategy,
     MuteUntilFirstBotCompleteUserMuteStrategy,
 )
 from pipecat.turns.turn_start_strategies import TurnStartStrategies
