@@ -43,10 +43,6 @@ class BaseUserTurnStartStrategy(BaseObject):
             raise RuntimeError(f"{self} user turn start strategy was not properly setup")
         return self._task_manager
 
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        pass
-
     async def setup(self, task_manager: BaseTaskManager):
         """Initialize the strategy with the given task manager.
 
@@ -59,6 +55,10 @@ class BaseUserTurnStartStrategy(BaseObject):
         """Cleanup the strategy."""
         pass
 
+    async def reset(self):
+        """Reset the strategy to its initial state."""
+        pass
+
     async def process_frame(self, frame: Frame):
         """Process an incoming frame.
 
@@ -67,7 +67,6 @@ class BaseUserTurnStartStrategy(BaseObject):
 
         Args:
             frame: The frame to be processed.
-
         """
         pass
 

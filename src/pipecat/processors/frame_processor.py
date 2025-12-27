@@ -359,7 +359,7 @@ class FrameProcessor(BaseObject):
     def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
         """Get the interruption strategies for this processor.
 
-        .. deprecated:: 0.0.98
+        .. deprecated:: 0.0.99
             This function is deprecated, use the new user and bot turn start
             strategies insted.
 
