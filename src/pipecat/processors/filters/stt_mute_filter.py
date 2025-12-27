@@ -120,6 +120,16 @@ class STTMuteFilter(FrameProcessor):
         self._function_call_in_progress = set()
         self._is_muted = False
 
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`STTMuteFilter` is deprecated and will be removed in a future version. "
+                "Use `LLMUserAggregator`'s new `user_mute_strategies` instead.",
+                DeprecationWarning,
+            )
+
     async def _handle_mute_state(self, should_mute: bool):
         """Handle STT muting and interruption control state changes."""
         if should_mute != self._is_muted:
