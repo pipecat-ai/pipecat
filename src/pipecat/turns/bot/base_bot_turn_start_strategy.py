@@ -88,6 +88,13 @@ class BaseBotTurnStartStrategy(BaseObject):
         """
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
-    async def trigger_bot_turn_started(self):
-        """Trigger the `on_bot_turn_started` event."""
-        await self._call_event_handler("on_bot_turn_started")
+    async def trigger_bot_turn_started(self, *, enable_user_speaking_frames: bool = True):
+        """Trigger the `on_bot_turn_started` event.
+
+        Args:
+            enable_user_speaking_frames: If True, the aggregator will emit frames
+                indicating when the user stops speaking. This is enabled by default,
+                but you may want to disable it if another component (e.g., an STT
+                service) is already generating these frames.
+        """
+        await self._call_event_handler("on_bot_turn_started", enable_user_speaking_frames)

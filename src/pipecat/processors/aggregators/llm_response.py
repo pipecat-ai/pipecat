@@ -81,16 +81,11 @@ class LLMUserAggregatorParams:
         enable_emulated_vad_interruptions: When True, allows emulated VAD events
             to interrupt the bot when it's speaking. When False, emulated speech
             is ignored while the bot is speaking.
-        enable_user_speaking_frames: [DO NOT USE] added for temporary backwards
-            compatibility.
-
     """
 
     aggregation_timeout: float = 0.5
     turn_emulated_vad_timeout: float = 0.8
     enable_emulated_vad_interruptions: bool = False
-    # Added for backwards compatibility.
-    enable_user_speaking_frames: bool = True
 
 
 @dataclass

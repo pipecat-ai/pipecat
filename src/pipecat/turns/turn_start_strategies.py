@@ -11,10 +11,12 @@ from typing import List, Optional
 
 from pipecat.turns.bot import (
     BaseBotTurnStartStrategy,
+    ExternalBotTurnStartStrategy,
     TranscriptionBotTurnStartStrategy,
 )
 from pipecat.turns.user import (
     BaseUserTurnStartStrategy,
+    ExternalUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
     VADUserTurnStartStrategy,
 )
@@ -49,3 +51,25 @@ class TurnStartStrategies:
             self.user = [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
         if not self.bot:
             self.bot = [TranscriptionBotTurnStartStrategy()]
+
+
+@dataclass
+class ExternalTurnStartStrategies(TurnStartStrategies):
+    """Default container for external user and bot turn start strategies.
+
+    This class provides a convenience default for configuring external turn
+    control. It preconfigures `TurnStartStrategies` with
+    `ExternalUserTurnStartStrategy` and `ExternalBotTurnStartStrategy`, allowing
+    external processors (such as services) to control when user and bot turns
+    start.
+
+    When using this container, the user aggregator does not push
+    `UserStartedSpeakingFrame` or `UserStoppedSpeakingFrame` frames, and does
+    not generate interruptions. These signals are expected to be provided by an
+    external processor.
+
+    """
+
+    def __post_init__(self):
+        self.user = [ExternalUserTurnStartStrategy()]
+        self.bot = [ExternalBotTurnStartStrategy()]
