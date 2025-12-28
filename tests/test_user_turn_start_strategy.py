@@ -27,7 +27,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, enable_user_speaking_frames):
             nonlocal should_start
             should_start = True
 
@@ -59,7 +59,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, enable_user_speaking_frames):
             nonlocal should_start
             should_start = True
 
@@ -81,7 +81,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, enable_user_speaking_frames):
             nonlocal should_start
             should_start = True
 
@@ -102,7 +102,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, enable_user_speaking_frames):
             nonlocal should_start
             should_start = True
 
@@ -115,7 +115,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, enable_user_speaking_frames):
             nonlocal should_start
             should_start = True
 
@@ -132,7 +132,7 @@ class TestVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, enable_user_speaking_frames):
             nonlocal should_start
             should_start = True
 
@@ -150,7 +150,7 @@ class TestTranscriptionUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, enable_user_speaking_frames):
             nonlocal should_start
             should_start = True
 
