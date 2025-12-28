@@ -30,9 +30,9 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.bot.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
+from pipecat.turns.bot import TurnAnalyzerBotTurnStartStrategy
 from pipecat.turns.turn_start_strategies import TurnStartStrategies
-from pipecat.turns.user.min_words_user_turn_start_strategy import MinWordsUserTurnStartStrategy
+from pipecat.turns.user import MinWordsUserTurnStartStrategy
 
 load_dotenv(override=True)
 

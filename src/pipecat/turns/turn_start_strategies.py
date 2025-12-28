@@ -9,15 +9,15 @@
 from dataclasses import dataclass
 from typing import List, Optional
 
-from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
-from pipecat.turns.bot.transcription_bot_turn_start_strategy import (
+from pipecat.turns.bot import (
+    BaseBotTurnStartStrategy,
     TranscriptionBotTurnStartStrategy,
 )
-from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
-from pipecat.turns.user.transcription_user_turn_start_strategy import (
+from pipecat.turns.user import (
+    BaseUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
 )
-from pipecat.turns.user.vad_user_turn_start_strategy import VADUserTurnStartStrategy
 
 
 @dataclass

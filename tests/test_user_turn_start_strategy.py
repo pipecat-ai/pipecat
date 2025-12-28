@@ -13,11 +13,11 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user.min_words_user_turn_start_strategy import MinWordsUserTurnStartStrategy
-from pipecat.turns.user.transcription_user_turn_start_strategy import (
+from pipecat.turns.user import (
+    MinWordsUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
 )
-from pipecat.turns.user.vad_user_turn_start_strategy import VADUserTurnStartStrategy
 
 
 class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):

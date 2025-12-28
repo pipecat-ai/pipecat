@@ -63,10 +63,10 @@ from pipecat.processors.aggregators.llm_context import (
     NotGiven,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
-from pipecat.turns.mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.turns.bot import BaseBotTurnStartStrategy
+from pipecat.turns.mute import BaseUserMuteStrategy
 from pipecat.turns.turn_start_strategies import TurnStartStrategies
-from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.turns.user import BaseUserTurnStartStrategy
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 

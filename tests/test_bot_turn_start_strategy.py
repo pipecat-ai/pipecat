@@ -13,9 +13,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.bot.transcription_bot_turn_start_strategy import (
-    TranscriptionBotTurnStartStrategy,
-)
+from pipecat.turns.bot import TranscriptionBotTurnStartStrategy
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
