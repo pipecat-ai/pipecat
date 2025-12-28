@@ -408,7 +408,7 @@ class LLMService(AIService):
             function_name: The name of the function handler to remove.
         """
         del self._functions[function_name]
-        if self._start_callbacks[function_name]:
+        if function_name in self._start_callbacks:
             del self._start_callbacks[function_name]
 
     def unregister_direct_function(self, handler: Any):
