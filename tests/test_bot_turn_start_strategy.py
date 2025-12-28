@@ -10,10 +10,13 @@ import unittest
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.turns.bot import TranscriptionBotTurnStartStrategy
+from pipecat.turns.bot.external_bot_turn_start_strategy import ExternalBotTurnStartStrategy
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
@@ -471,4 +474,36 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         # Transcription comes after user stopped speaking, we need to wait for
         # at least the aggregation timeout.
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+
+
+class TestExternalBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
+    async def test_external_strategy(self):
+        strategy = ExternalBotTurnStartStrategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_bot_turn_started")
+        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStoppedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertTrue(should_start)
