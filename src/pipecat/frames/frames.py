@@ -956,6 +956,10 @@ class StartFrame(SystemFrame):
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
         interruption_strategies: List of interruption handling strategies.
+
+            .. deprecated:: 0.0.99
+                Use the `turn_start_strategies` instead.
+
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
     """
 
