@@ -29,7 +29,7 @@ class ExternalBotTurnStartStrategy(BaseBotTurnStartStrategy):
 
     """
 
-    def __init__(self, *, timeout: float = 0.5):
+    def __init__(self, *, timeout: float = 0.2):
         """Initialize the transcription-based bot turn start strategy.
 
         Args:
