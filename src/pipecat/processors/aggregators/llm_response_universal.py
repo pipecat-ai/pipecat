@@ -65,7 +65,7 @@ from pipecat.processors.aggregators.llm_context import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.bot import BaseBotTurnStartStrategy
 from pipecat.turns.mute import BaseUserMuteStrategy
-from pipecat.turns.turn_start_strategies import TurnStartStrategies
+from pipecat.turns.turn_start_strategies import ExternalTurnStartStrategies, TurnStartStrategies
 from pipecat.turns.user import BaseUserTurnStartStrategy
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
@@ -359,9 +359,14 @@ class LLMUserAggregator(LLMContextAggregator):
                 self._user_turn_end_timeout_task_handler()
             )
 
+        await self._setup_turn_start_strategies()
+        await self._setup_user_mute_strategies()
+
+    async def _setup_user_mute_strategies(self):
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
 
+    async def _setup_turn_start_strategies(self):
         if self._turn_start_strategies.user:
             for s in self._turn_start_strategies.user:
                 await s.setup(self.task_manager)
@@ -387,9 +392,10 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.cancel_task(self._user_turn_end_timeout_task)
             self._user_turn_end_timeout_task = None
 
-        for s in self._params.user_mute_strategies:
-            await s.cleanup()
+        await self._cleanup_turn_start_strategies()
+        await self._cleanup_user_mute_strategies()
 
+    async def _cleanup_turn_start_strategies(self):
         if self._turn_start_strategies.user:
             for s in self._turn_start_strategies.user:
                 await s.cleanup()
@@ -397,6 +403,10 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._turn_start_strategies.bot:
             for s in self._turn_start_strategies.bot:
                 await s.cleanup()
+
+    async def _cleanup_user_mute_strategies(self):
+        for s in self._params.user_mute_strategies:
+            await s.cleanup()
 
     async def _maybe_mute_frame(self, frame: Frame):
         should_mute_frame = self._user_is_muted and isinstance(
@@ -471,6 +481,10 @@ class LLMUserAggregator(LLMContextAggregator):
             "        ),\n"
             "    )"
         )
+
+        await self._cleanup_turn_start_strategies()
+        self._turn_start_strategies = ExternalTurnStartStrategies()
+        await self._setup_turn_start_strategies()
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._vad_user_speaking = True
