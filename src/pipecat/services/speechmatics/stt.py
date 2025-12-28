@@ -604,8 +604,8 @@ class SpeechmaticsSTTService(STTService):
             message: the message payload.
         """
         logger.debug(f"{self} StartOfTurn received")
-        await self.push_interruption_task_frame_and_wait()
         await self.broadcast_frame(UserStartedSpeakingFrame)
+        await self.push_interruption_task_frame_and_wait()
         # await self.start_processing_metrics()
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
