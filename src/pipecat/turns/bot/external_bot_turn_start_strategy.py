@@ -29,14 +29,15 @@ class ExternalBotTurnStartStrategy(BaseBotTurnStartStrategy):
 
     """
 
-    def __init__(self, *, timeout: float = 0.5):
+    def __init__(self, *, timeout: float = 0.5, **kwargs):
         """Initialize the external bot turn start strategy.
 
         Args:
             timeout: A short delay used internally to handle consecutive or
                 slightly delayed transcriptions.
+            **kwargs: Additional keyword arguments.
         """
-        super().__init__(enable_user_speaking_frames=False)
+        super().__init__(enable_user_speaking_frames=False, **kwargs)
         self._timeout = timeout
         self._text = ""
         self._user_speaking = False

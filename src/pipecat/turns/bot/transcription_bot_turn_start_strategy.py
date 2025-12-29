@@ -28,14 +28,15 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
     multiple or delayed transcription frames gracefully.
     """
 
-    def __init__(self, *, timeout: float = 0.5):
+    def __init__(self, *, timeout: float = 0.5, **kwargs):
         """Initialize the transcription-based bot turn start strategy.
 
         Args:
             timeout: A short delay used internally to handle consecutive or
                 slightly delayed transcriptions.
+            **kwargs: Additional keyword arguments.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._timeout = timeout
         self._text = ""
         self._vad_user_speaking = False
