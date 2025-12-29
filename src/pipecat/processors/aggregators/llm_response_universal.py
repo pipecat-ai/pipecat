@@ -63,10 +63,10 @@ from pipecat.processors.aggregators.llm_context import (
     NotGiven,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.turns.bot import BaseBotTurnStartStrategy
+from pipecat.turns.bot import BaseBotTurnStartStrategy, BotTurnStartedParams
 from pipecat.turns.mute import BaseUserMuteStrategy
 from pipecat.turns.turn_start_strategies import ExternalTurnStartStrategies, TurnStartStrategies
-from pipecat.turns.user import BaseUserTurnStartStrategy
+from pipecat.turns.user import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
@@ -518,22 +518,14 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _on_user_turn_started(
         self,
         strategy: BaseUserTurnStartStrategy,
-        enable_user_speaking_frames: bool,
+        params: UserTurnStartedParams,
     ):
-        await self._trigger_user_turn_start(
-            strategy,
-            enable_user_speaking_frames=enable_user_speaking_frames,
-        )
+        await self._trigger_user_turn_start(strategy, params)
 
     async def _on_bot_turn_started(
-        self,
-        strategy: BaseBotTurnStartStrategy,
-        enable_user_speaking_frames: bool,
+        self, strategy: BaseBotTurnStartStrategy, params: BotTurnStartedParams
     ):
-        await self._trigger_bot_turn_start(
-            strategy,
-            enable_user_speaking_frames=enable_user_speaking_frames,
-        )
+        await self._trigger_bot_turn_start(strategy, params)
 
     async def _on_push_frame(
         self,
@@ -552,10 +544,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.broadcast_frame(frame_cls, **kwargs)
 
     async def _trigger_user_turn_start(
-        self,
-        strategy: Optional[BaseUserTurnStartStrategy],
-        *,
-        enable_user_speaking_frames: bool,
+        self, strategy: Optional[BaseUserTurnStartStrategy], params: UserTurnStartedParams
     ):
         # Prevent two consecutive user turn starts.
         if self._user_turn:
@@ -571,7 +560,7 @@ class LLMUserAggregator(LLMContextAggregator):
             for s in self._turn_start_strategies.user:
                 await s.reset()
 
-        if enable_user_speaking_frames:
+        if params.enable_user_speaking_frames:
             # TODO(aleix): These frames should really come from the top of the pipeline.
             await self.broadcast_frame(UserStartedSpeakingFrame)
             await self.broadcast_frame(InterruptionFrame)
@@ -579,10 +568,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._call_event_handler("on_user_turn_started", strategy)
 
     async def _trigger_bot_turn_start(
-        self,
-        strategy: Optional[BaseBotTurnStartStrategy],
-        *,
-        enable_user_speaking_frames: bool,
+        self, strategy: Optional[BaseBotTurnStartStrategy], params: BotTurnStartedParams
     ):
         # Prevent two consecutive bot turn starts.
         if not self._user_turn:
@@ -598,7 +584,7 @@ class LLMUserAggregator(LLMContextAggregator):
             for s in self._turn_start_strategies.bot:
                 await s.reset()
 
-        if enable_user_speaking_frames:
+        if params.enable_user_speaking_frames:
             # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
@@ -618,7 +604,9 @@ class LLMUserAggregator(LLMContextAggregator):
             except asyncio.TimeoutError:
                 if self._user_turn and not self._vad_user_speaking:
                     await self._call_event_handler("on_user_turn_end_timeout")
-                    await self._trigger_bot_turn_start(None, enable_user_speaking_frames=True)
+                    await self._trigger_bot_turn_start(
+                        None, BotTurnStartedParams(enable_user_speaking_frames=True)
+                    )
 
 
 class LLMAssistantAggregator(LLMContextAggregator):

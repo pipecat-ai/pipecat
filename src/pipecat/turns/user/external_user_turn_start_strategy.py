@@ -19,6 +19,10 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
     """
 
+    def __init__(self):
+        """Initialize the external user turn start strategy."""
+        super().__init__(enable_user_speaking_frames=False)
+
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect user turn start.
 
@@ -28,4 +32,4 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
         await super().process_frame(frame)
 
         if isinstance(frame, UserStartedSpeakingFrame):
-            await self.trigger_user_turn_started(enable_user_speaking_frames=False)
+            await self.trigger_user_turn_started()

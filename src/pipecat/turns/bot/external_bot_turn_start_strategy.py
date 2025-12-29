@@ -30,13 +30,13 @@ class ExternalBotTurnStartStrategy(BaseBotTurnStartStrategy):
     """
 
     def __init__(self, *, timeout: float = 0.5):
-        """Initialize the transcription-based bot turn start strategy.
+        """Initialize the external bot turn start strategy.
 
         Args:
             timeout: A short delay used internally to handle consecutive or
                 slightly delayed transcriptions.
         """
-        super().__init__()
+        super().__init__(enable_user_speaking_frames=False)
         self._timeout = timeout
         self._text = ""
         self._user_speaking = False
@@ -124,4 +124,4 @@ class ExternalBotTurnStartStrategy(BaseBotTurnStartStrategy):
 
     async def _maybe_trigger_bot_turn_started(self):
         if not self._user_speaking and not self._seen_interim_results and self._text:
-            await self.trigger_bot_turn_started(enable_user_speaking_frames=False)
+            await self.trigger_bot_turn_started()
