@@ -11,12 +11,7 @@ from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.frames.frames import (
-    InterruptionFrame,
-    LLMRunFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-)
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -102,14 +97,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
-
-    @stt.event_handler("on_speech_started")
-    async def on_speech_started(stt, *args, **kwargs):
-        await task.queue_frames([UserStartedSpeakingFrame(), InterruptionFrame()])
-
-    @stt.event_handler("on_utterance_end")
-    async def on_utterance_end(stt, *args, **kwargs):
-        await task.queue_frames([UserStoppedSpeakingFrame()])
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
