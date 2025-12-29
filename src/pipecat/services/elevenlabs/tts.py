@@ -709,11 +709,10 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
                     # If a context ID does not exist, create a new one and
-                    # register it. If an ID exists, that means the Pipeline is
-                    # configured for allow_interruptions=False, so continue
-                    # using the current ID. When interruptions are enabled
-                    # (e.g. allow_interruptions=True), user speech results in
-                    # an interruption, which resets the context ID.
+                    # register it. If an ID exists, that means the Pipeline
+                    # doesn't allow user interruptions, so continue using the
+                    # current ID. When interruptions are allowed, user speech
+                    # results in an interruption, which resets the context ID.
                     if not self._context_id:
                         self._context_id = str(uuid.uuid4())
                     if not self.audio_context_available(self._context_id):
