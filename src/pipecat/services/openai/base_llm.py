@@ -9,6 +9,7 @@
 import asyncio
 import base64
 import json
+import copy
 from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
@@ -99,6 +100,7 @@ class BaseOpenAILLMService(LLMService):
         params: Optional[InputParams] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
+        include_reasoning_details: Optional[bool] = False,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -134,6 +136,7 @@ class BaseOpenAILLMService(LLMService):
         self._retry_on_timeout = retry_on_timeout
         self.set_model_name(model)
         self._full_model_name: str = ""
+        self._include_reasoning_details: bool = bool(include_reasoning_details)
         self._client = self.create_client(
             api_key=api_key,
             base_url=base_url,
@@ -303,10 +306,14 @@ class BaseOpenAILLMService(LLMService):
             f"{self}: Generating chat from LLM-specific context {context.get_messages_for_logging()}"
         )
 
-        messages: List[ChatCompletionMessageParam] = context.get_messages()
+        messages: List[ChatCompletionMessageParam] = copy.deepcopy(context.get_messages())
 
         # base64 encode any images
         for message in messages:
+            if message.get("tool_calls") and not self._include_reasoning_details:
+                for tc in message["tool_calls"]:
+                    if "reasoning_details" in tc:
+                        del tc["reasoning_details"]
             if message.get("mime_type") == "image/jpeg":
                 # Avoid .getvalue() which makes a full copy of BytesIO
                 raw_bytes = message["data"].read()
@@ -352,6 +359,8 @@ class BaseOpenAILLMService(LLMService):
         function_name = ""
         arguments = ""
         tool_call_id = ""
+        reasoning_details_list = []
+        current_reasoning_details: List[Any] = []
 
         await self.start_ttfb_metrics()
 
@@ -394,6 +403,9 @@ class BaseOpenAILLMService(LLMService):
             if not chunk.choices[0].delta:
                 continue
 
+            delta = chunk.choices[0].delta
+            current_reasoning_details.extend(self._extract_reasoning_details(delta))
+
             if chunk.choices[0].delta.tool_calls:
                 # We're streaming the LLM response to enable the fastest response times.
                 # For text, we just yield each chunk as we receive it and count on consumers
@@ -411,9 +423,11 @@ class BaseOpenAILLMService(LLMService):
                     functions_list.append(function_name)
                     arguments_list.append(arguments)
                     tool_id_list.append(tool_call_id)
+                    reasoning_details_list.append(current_reasoning_details)
                     function_name = ""
                     arguments = ""
                     tool_call_id = ""
+                    current_reasoning_details = []
                     func_idx += 1
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
@@ -440,6 +454,7 @@ class BaseOpenAILLMService(LLMService):
             functions_list.append(function_name)
             arguments_list.append(arguments)
             tool_id_list.append(tool_call_id)
+            reasoning_details_list.append(current_reasoning_details)
 
             function_calls = []
 
@@ -455,6 +470,11 @@ class BaseOpenAILLMService(LLMService):
                         arguments=arguments,
                     )
                 )
+
+            if isinstance(context, OpenAILLMContext):
+                for tool_id, details in zip(tool_id_list, reasoning_details_list):
+                    if details:
+                        context.set_reasoning_details(tool_id, details)
 
             await self.run_function_calls(function_calls)
 
@@ -497,3 +517,13 @@ class BaseOpenAILLMService(LLMService):
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
+
+    def _extract_reasoning_details(self, delta: Any) -> List[Any]:
+        details = getattr(delta, "reasoning_details", None)
+        if details is None and hasattr(delta, "model_extra"):
+            details = delta.model_extra.get("reasoning_details")
+        if not details:
+            return []
+        if isinstance(details, list):
+            return details
+        return [details]
