@@ -6,12 +6,33 @@
 
 """Base turn start strategy for determining when the user starts speaking."""
 
+from dataclasses import dataclass
 from typing import Optional, Type
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+
+
+@dataclass
+class UserTurnStartedParams:
+    """Parameters emitted when a user turn starts.
+
+    These parameters are passed to the `on_user_turn_started` event and provide
+    contextual information about how the user turn should be handled by the user
+    aggregator.
+
+    Attributes:
+        enable_user_speaking_frames: Whether the user aggregator should emit
+            frames indicating user speaking state (e.g., user started speaking)
+            during the bot's turn. This is typically enabled by default, but may
+            be disabled when another component (such as an STT service) is already
+            responsible for generating user speaking frames.
+
+    """
+
+    enable_user_speaking_frames: bool
 
 
 class BaseUserTurnStartStrategy(BaseObject):
@@ -28,9 +49,19 @@ class BaseUserTurnStartStrategy(BaseObject):
       - `on_user_turn_started`: Signals that a user turn has started.
     """
 
-    def __init__(self, **kwargs):
-        """Initialize the base user turn start strategy."""
+    def __init__(self, *, enable_user_speaking_frames: bool = True, **kwargs):
+        """Initialize the base user turn start strategy.
+
+        Args:
+            enable_user_speaking_frames: If True, the aggregator will emit frames
+                indicating when the user starts speaking, as well as interruption
+                frames. This is enabled by default, but you may want to disable it
+                if another component (e.g., an STT service) is already generating
+                these frames.
+            **kwargs: Additional keyword arguments.
+        """
         super().__init__(**kwargs)
+        self._enable_user_speaking_frames = enable_user_speaking_frames
         self._task_manager: Optional[BaseTaskManager] = None
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
@@ -90,4 +121,7 @@ class BaseUserTurnStartStrategy(BaseObject):
 
     async def trigger_user_turn_started(self):
         """Trigger the `on_user_turn_started` event."""
-        await self._call_event_handler("on_user_turn_started")
+        await self._call_event_handler(
+            "on_user_turn_started",
+            UserTurnStartedParams(enable_user_speaking_frames=self._enable_user_speaking_frames),
+        )

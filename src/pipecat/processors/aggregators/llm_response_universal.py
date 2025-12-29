@@ -63,10 +63,10 @@ from pipecat.processors.aggregators.llm_context import (
     NotGiven,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.turns.bot import BaseBotTurnStartStrategy
+from pipecat.turns.bot import BaseBotTurnStartStrategy, BotTurnStartedParams
 from pipecat.turns.mute import BaseUserMuteStrategy
-from pipecat.turns.turn_start_strategies import TurnStartStrategies
-from pipecat.turns.user import BaseUserTurnStartStrategy
+from pipecat.turns.turn_start_strategies import ExternalTurnStartStrategies, TurnStartStrategies
+from pipecat.turns.user import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
@@ -76,18 +76,12 @@ class LLMUserAggregatorParams:
     """Parameters for configuring LLM user aggregation behavior.
 
     Parameters:
-        enable_user_speaking_frames: If True, the aggregator will emit frames
-            indicating when the user starts and stops speaking, as well as
-            interruption frames. This is enabled by default, but you may want
-            to disable it if another component (e.g., an STT service) is already
-            generating these frames.
         turn_start_strategies: User and bot turn start strategies.
         user_mute_strategies: List of user mute strategies.
         user_turn_end_timeout: Time in seconds to wait before considering the
             user's turn finished and starting the bot turn.
     """
 
-    enable_user_speaking_frames: bool = True
     turn_start_strategies: Optional[TurnStartStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_end_timeout: float = 5.0
@@ -365,9 +359,14 @@ class LLMUserAggregator(LLMContextAggregator):
                 self._user_turn_end_timeout_task_handler()
             )
 
+        await self._setup_turn_start_strategies()
+        await self._setup_user_mute_strategies()
+
+    async def _setup_user_mute_strategies(self):
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
 
+    async def _setup_turn_start_strategies(self):
         if self._turn_start_strategies.user:
             for s in self._turn_start_strategies.user:
                 await s.setup(self.task_manager)
@@ -393,9 +392,10 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.cancel_task(self._user_turn_end_timeout_task)
             self._user_turn_end_timeout_task = None
 
-        for s in self._params.user_mute_strategies:
-            await s.cleanup()
+        await self._cleanup_turn_start_strategies()
+        await self._cleanup_user_mute_strategies()
 
+    async def _cleanup_turn_start_strategies(self):
         if self._turn_start_strategies.user:
             for s in self._turn_start_strategies.user:
                 await s.cleanup()
@@ -403,6 +403,10 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._turn_start_strategies.bot:
             for s in self._turn_start_strategies.bot:
                 await s.cleanup()
+
+    async def _cleanup_user_mute_strategies(self):
+        for s in self._params.user_mute_strategies:
+            await s.cleanup()
 
     async def _maybe_mute_frame(self, frame: Frame):
         should_mute_frame = self._user_is_muted and isinstance(
@@ -478,6 +482,10 @@ class LLMUserAggregator(LLMContextAggregator):
             "    )"
         )
 
+        await self._cleanup_turn_start_strategies()
+        self._turn_start_strategies = ExternalTurnStartStrategies()
+        await self._setup_turn_start_strategies()
+
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._vad_user_speaking = True
 
@@ -507,11 +515,17 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
-    async def _on_user_turn_started(self, strategy: BaseUserTurnStartStrategy):
-        await self._trigger_user_turn_start(strategy)
+    async def _on_user_turn_started(
+        self,
+        strategy: BaseUserTurnStartStrategy,
+        params: UserTurnStartedParams,
+    ):
+        await self._trigger_user_turn_start(strategy, params)
 
-    async def _on_bot_turn_started(self, strategy: BaseBotTurnStartStrategy):
-        await self._trigger_bot_turn_start(strategy)
+    async def _on_bot_turn_started(
+        self, strategy: BaseBotTurnStartStrategy, params: BotTurnStartedParams
+    ):
+        await self._trigger_bot_turn_start(strategy, params)
 
     async def _on_push_frame(
         self,
@@ -529,10 +543,14 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         await self.broadcast_frame(frame_cls, **kwargs)
 
-    async def _trigger_user_turn_start(self, strategy: Optional[BaseUserTurnStartStrategy]):
+    async def _trigger_user_turn_start(
+        self, strategy: Optional[BaseUserTurnStartStrategy], params: UserTurnStartedParams
+    ):
         # Prevent two consecutive user turn starts.
         if self._user_turn:
             return
+
+        logger.debug(f"User started speaking (user turn start strategy: {strategy})")
 
         self._user_turn = True
         self._user_turn_end_timeout_event.set()
@@ -542,18 +560,21 @@ class LLMUserAggregator(LLMContextAggregator):
             for s in self._turn_start_strategies.user:
                 await s.reset()
 
-        if self._params.enable_user_speaking_frames:
-            logger.debug(f"User started speaking (user turn start strategy: {strategy})")
+        if params.enable_user_speaking_frames:
             # TODO(aleix): These frames should really come from the top of the pipeline.
             await self.broadcast_frame(UserStartedSpeakingFrame)
             await self.broadcast_frame(InterruptionFrame)
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
-    async def _trigger_bot_turn_start(self, strategy: Optional[BaseBotTurnStartStrategy]):
+    async def _trigger_bot_turn_start(
+        self, strategy: Optional[BaseBotTurnStartStrategy], params: BotTurnStartedParams
+    ):
         # Prevent two consecutive bot turn starts.
         if not self._user_turn:
             return
+
+        logger.debug(f"User stopped speaking (bot turn start strategy: {strategy})")
 
         self._user_turn = False
         self._user_turn_end_timeout_event.set()
@@ -563,8 +584,7 @@ class LLMUserAggregator(LLMContextAggregator):
             for s in self._turn_start_strategies.bot:
                 await s.reset()
 
-        if self._params.enable_user_speaking_frames:
-            logger.debug(f"User stopped speaking (bot turn start strategy: {strategy})")
+        if params.enable_user_speaking_frames:
             # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
@@ -584,7 +604,9 @@ class LLMUserAggregator(LLMContextAggregator):
             except asyncio.TimeoutError:
                 if self._user_turn and not self._vad_user_speaking:
                     await self._call_event_handler("on_user_turn_end_timeout")
-                    await self._trigger_bot_turn_start(None)
+                    await self._trigger_bot_turn_start(
+                        None, BotTurnStartedParams(enable_user_speaking_frames=True)
+                    )
 
 
 class LLMAssistantAggregator(LLMContextAggregator):

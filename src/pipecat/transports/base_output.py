@@ -498,7 +498,7 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
-            if not self._transport.interruptions_allowed:
+            if not self._transport._allow_interruptions:
                 return
 
             # Cancel tasks.
