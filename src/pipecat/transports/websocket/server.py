@@ -394,18 +394,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
         try:
             payload = await self._params.serializer.serialize(frame)
-            if not payload or not self._websocket:
-                return
-
-            # Backwards compatible: serializers historically return a single str/bytes.
-            # Some protocols require sending a provisional message[s] before sending media,
-            # e.g. to enable audio buffering on Asterisk websocket channel a TEXT message "START_MEDIA_BUFFERING" is required
-            # before sending BINARY audio, so we also accept a sequence of payloads.
-            if isinstance(payload, tuple):
-                for part in payload:
-                    if part:
-                        await self._websocket.send(part)
-            else:
+            if payload and self._websocket:
                 await self._websocket.send(payload)
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
