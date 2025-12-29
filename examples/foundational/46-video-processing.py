@@ -28,7 +28,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
-from pipecat.turns.bot.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
+from pipecat.turns.bot import TurnAnalyzerBotTurnStartStrategy
 from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 load_dotenv(override=True)

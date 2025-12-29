@@ -30,11 +30,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.bot.transcription_bot_turn_start_strategy import (
-    TranscriptionBotTurnStartStrategy,
-)
-from pipecat.turns.mute.first_speech_user_mute_strategy import FirstSpeechUserMuteStrategy
-from pipecat.turns.mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
+from pipecat.turns.bot import TranscriptionBotTurnStartStrategy
+from pipecat.turns.mute import FirstSpeechUserMuteStrategy, FunctionCallUserMuteStrategy
 from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 USER_TURN_END_TIMEOUT = 0.2

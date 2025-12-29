@@ -15,10 +15,10 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InterruptionFrame,
 )
-from pipecat.turns.mute.always_user_mute_strategy import AlwaysUserMuteStrategy
-from pipecat.turns.mute.first_speech_user_mute_strategy import FirstSpeechUserMuteStrategy
-from pipecat.turns.mute.function_call_user_mute_strategy import FunctionCallUserMuteStrategy
-from pipecat.turns.mute.mute_until_first_bot_complete_user_mute_strategy import (
+from pipecat.turns.mute import (
+    AlwaysUserMuteStrategy,
+    FirstSpeechUserMuteStrategy,
+    FunctionCallUserMuteStrategy,
     MuteUntilFirstBotCompleteUserMuteStrategy,
 )
 

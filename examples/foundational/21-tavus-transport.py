@@ -28,7 +28,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.tavus.transport import TavusParams, TavusTransport
-from pipecat.turns.bot.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
+from pipecat.turns.bot import TurnAnalyzerBotTurnStartStrategy
 from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 load_dotenv(override=True)
