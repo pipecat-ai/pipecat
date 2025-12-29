@@ -115,6 +115,9 @@ class RNNoiseFilter(BaseAudioFilter):
         if self._sample_rate != 48000 and self._resampler_in:
             in_audio = await self._resampler_in.resample(audio, self._sample_rate, 48000)
 
+        if len(in_audio) == 0:
+            return audio
+
         # Convert bytes to numpy array (int16)
         audio_samples = np.frombuffer(in_audio, dtype=np.int16)
 
