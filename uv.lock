@@ -4175,7 +4175,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'ultravox'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'websocket'" },
     { name = "pipecat-ai-krisp", marker = "extra == 'krisp'", specifier = "~=0.4.0" },
-    { name = "pipecat-ai-small-webrtc-prebuilt", marker = "extra == 'runner'", specifier = ">=1.0.0" },
+    { name = "pipecat-ai-small-webrtc-prebuilt", marker = "extra == 'runner'", specifier = ">=2.0.4" },
     { name = "protobuf", specifier = "~=5.29.3" },
     { name = "pvkoala", marker = "extra == 'koala'", specifier = "~=2.0.3" },
     { name = "pyaudio", marker = "extra == 'local'", specifier = "~=0.2.14" },
@@ -4243,12 +4243,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/1d/37/0f1d11d1dc33234a3
 
 [[package]]
 name = "pipecat-ai-small-webrtc-prebuilt"
-version = "1.0.0"
+version = "2.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi", extra = ["all"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/c8/19e9edb707581431c74e57da386656b9f9072c7a968f5fa49005e0b53cd6/pipecat_ai_small_webrtc_prebuilt-1.0.0.tar.gz", hash = "sha256:7e3d1cba420842d469ee9ecae321a086732392acb2625d5587a54d28a16ca0ea", size = 563883, upload-time = "2025-07-25T17:57:53.266Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/88/57b26547ec45623718f1d5beb9e004dba55b7ab548a3b48748466e3e1769/pipecat_ai_small_webrtc_prebuilt-2.0.4.tar.gz", hash = "sha256:3c3447679007ea937c760223bb66579f2605cf94628a68c9da1d66787a96caad", size = 584994, upload-time = "2025-12-30T19:14:52.655Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/6e/332b78d1c7888ff426bd528b150aad0da05024f4f91e56502c359726c07b/pipecat_ai_small_webrtc_prebuilt-2.0.4-py3-none-any.whl", hash = "sha256:054b3cee843fe69191859dbb0693560d9ca08f7d57a9ff0457d0bc741f36f4df", size = 585606, upload-time = "2025-12-30T19:14:50.595Z" },
+]
 
 [[package]]
 name = "platformdirs"
