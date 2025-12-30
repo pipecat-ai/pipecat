@@ -564,7 +564,7 @@ class LLMUserAggregator(LLMContextAggregator):
             # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
-        if params.enable_interruptions:
+        if params.enable_interruptions and self._allow_interruptions:
             # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(InterruptionFrame)
 
