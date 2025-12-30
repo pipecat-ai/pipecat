@@ -7,7 +7,7 @@
 """User turn start strategy based on transcriptions."""
 
 from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
-from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
 class TranscriptionUserTurnStartStrategy(BaseUserTurnStartStrategy):

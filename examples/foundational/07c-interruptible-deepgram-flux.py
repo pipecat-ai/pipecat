@@ -27,7 +27,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.turn_start_strategies import ExternalTurnStartStrategies
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -73,7 +73,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     context_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(turn_start_strategies=ExternalTurnStartStrategies()),
+        user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
     )
 
     pipeline = Pipeline(

@@ -14,7 +14,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user import (
+from pipecat.turns.user_start import (
     ExternalUserTurnStartStrategy,
     MinWordsUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,

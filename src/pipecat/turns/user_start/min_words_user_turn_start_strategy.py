@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     TranscriptionFrame,
 )
-from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
 class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):

@@ -27,8 +27,8 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
-from pipecat.turns.bot import TurnAnalyzerBotTurnStartStrategy
-from pipecat.turns.turn_start_strategies import TurnStartStrategies
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -65,8 +65,8 @@ async def main():
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            turn_start_strategies=TurnStartStrategies(
-                bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
             ),
         ),
     )
