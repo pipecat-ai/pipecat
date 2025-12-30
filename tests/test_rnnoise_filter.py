@@ -104,23 +104,23 @@ class TestRNNoiseFilter(unittest.IsolatedAsyncioTestCase):
 
     async def test_rnnoise_filter_handles_empty_resampler_output(self):
         """Test that RNNoise filter handles empty bytes from resampler gracefully.
-        
+
         This reproduces the issue where mute/silence input (like "bx000") causes
         the resampler to return empty bytes. The filter should handle this gracefully
         without raising a memory error.
         """
         filter = RNNoiseFilter()
-        
+
         # Initialize with a sample rate that requires resampling (not 48kHz)
         await filter.start(sample_rate=16000)
-        
+
         # Enable filtering
         await filter.process_frame(FilterEnableFrame(enable=True))
-        
+
         # Create mute/silence audio chunk (like "bx000" - all zeros)
         # This simulates a mute sound that causes resampler to return empty bytes
         mute_audio = b"\x00\x00" * 160  # 160 samples of silence at 16kHz (10ms)
-        
+
         # Mock the resampler to return empty bytes when given mute input
         # This simulates the behavior where resampler returns b"" for mute sounds
         async def mock_resample(audio, in_rate, out_rate):
@@ -131,13 +131,15 @@ class TestRNNoiseFilter(unittest.IsolatedAsyncioTestCase):
                 return b""  # Return empty bytes - this triggers the bug
             # Otherwise, do normal resampling
             return audio
-        
+
         filter._resampler_in.resample = AsyncMock(side_effect=mock_resample)
-                
+
         result = await filter.filter(mute_audio)
-        
+
         # When resampler returns empty bytes, filter should return empty bytes
         # (or handle it gracefully without crashing)
-        self.assertEqual(result, b"", "Filter should return empty bytes when resampler returns empty bytes")
-        
+        self.assertEqual(
+            result, b"", "Filter should return empty bytes when resampler returns empty bytes"
+        )
+
         await filter.stop()
