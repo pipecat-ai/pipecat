@@ -33,7 +33,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -58,7 +58,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -89,7 +89,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -136,7 +136,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -170,7 +170,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -212,7 +212,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -242,7 +242,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -278,7 +278,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -316,7 +316,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -350,7 +350,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -395,7 +395,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -415,7 +415,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -440,7 +440,7 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -484,7 +484,7 @@ class TestExternalBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy, enable_user_speaking_frames):
+        async def on_bot_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 

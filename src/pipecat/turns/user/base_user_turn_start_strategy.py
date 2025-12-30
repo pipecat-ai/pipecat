@@ -32,6 +32,7 @@ class UserTurnStartedParams:
 
     """
 
+    enable_interruptions: bool
     enable_user_speaking_frames: bool
 
 
@@ -49,18 +50,27 @@ class BaseUserTurnStartStrategy(BaseObject):
       - `on_user_turn_started`: Signals that a user turn has started.
     """
 
-    def __init__(self, *, enable_user_speaking_frames: bool = True, **kwargs):
+    def __init__(
+        self,
+        *,
+        enable_interruptions: bool = True,
+        enable_user_speaking_frames: bool = True,
+        **kwargs,
+    ):
         """Initialize the base user turn start strategy.
 
         Args:
-            enable_user_speaking_frames: If True, the aggregator will emit frames
-                indicating when the user starts speaking, as well as interruption
-                frames. This is enabled by default, but you may want to disable it
-                if another component (e.g., an STT service) is already generating
-                these frames.
+            enable_interruptions: If True, the user aggregator will emit an
+                interruption frame when the user turn starts.
+            enable_user_speaking_frames: If True, the user aggregator will emit
+                frames indicating when the user starts speaking, as well as
+                interruption frames. This is enabled by default, but you may want
+                to disable it if another component (e.g., an STT service) is
+                already generating these frames.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
+        self._enable_interruptions = enable_interruptions
         self._enable_user_speaking_frames = enable_user_speaking_frames
         self._task_manager: Optional[BaseTaskManager] = None
         self._register_event_handler("on_push_frame", sync=True)
@@ -123,5 +133,8 @@ class BaseUserTurnStartStrategy(BaseObject):
         """Trigger the `on_user_turn_started` event."""
         await self._call_event_handler(
             "on_user_turn_started",
-            UserTurnStartedParams(enable_user_speaking_frames=self._enable_user_speaking_frames),
+            UserTurnStartedParams(
+                enable_interruptions=self._enable_interruptions,
+                enable_user_speaking_frames=self._enable_user_speaking_frames,
+            ),
         )

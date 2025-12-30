@@ -35,14 +35,15 @@ class TurnAnalyzerBotTurnStartStrategy(BaseBotTurnStartStrategy):
 
     """
 
-    def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, timeout: float = 0.5):
+    def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, timeout: float = 0.5, **kwargs):
         """Initialize the bot turn start strategy.
 
         Args:
             turn_analyzer: The turn detection analyzer instance to detect end of user turn.
             timeout: Short delay used internally to handle frame timing and event triggering.
+            **kwargs: Additional keyword arguments.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._turn_analyzer = turn_analyzer
         self._timeout = timeout
         self._text = ""

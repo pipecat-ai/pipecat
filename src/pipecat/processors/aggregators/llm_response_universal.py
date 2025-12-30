@@ -561,8 +561,11 @@ class LLMUserAggregator(LLMContextAggregator):
                 await s.reset()
 
         if params.enable_user_speaking_frames:
-            # TODO(aleix): These frames should really come from the top of the pipeline.
+            # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStartedSpeakingFrame)
+
+        if params.enable_interruptions:
+            # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(InterruptionFrame)
 
         await self._call_event_handler("on_user_turn_started", strategy)
