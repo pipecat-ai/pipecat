@@ -5,6 +5,7 @@
 #
 
 import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 
@@ -99,4 +100,55 @@ class TestRNNoiseFilter(unittest.IsolatedAsyncioTestCase):
         # Should return processed audio for at least one complete frame
         self.assertGreater(len(result2), 0)
 
+        await filter.stop()
+
+    async def test_rnnoise_filter_handles_empty_resampler_output(self):
+        """Test that RNNoise filter handles empty bytes from resampler gracefully.
+        
+        This reproduces the issue where mute/silence input (like "bx000") causes
+        the resampler to return empty bytes. The filter should handle this gracefully
+        without raising a memory error.
+        
+        Currently this test FAILS because the code raises MemoryError when empty bytes
+        are passed to denoise_chunk. After fixing the code to check for empty bytes
+        before calling denoise_chunk, this test should PASS.
+        """
+        filter = RNNoiseFilter()
+        
+        # Initialize with a sample rate that requires resampling (not 48kHz)
+        await filter.start(sample_rate=16000)
+        
+        # Enable filtering
+        await filter.process_frame(FilterEnableFrame(enable=True))
+        
+        # Create mute/silence audio chunk (like "bx000" - all zeros)
+        # This simulates a mute sound that causes resampler to return empty bytes
+        mute_audio = b"\x00\x00" * 160  # 160 samples of silence at 16kHz (10ms)
+        
+        # Mock the resampler to return empty bytes when given mute input
+        # This simulates the behavior where resampler returns b"" for mute sounds
+        async def mock_resample(audio, in_rate, out_rate):
+            # If input is all zeros (mute), return empty bytes
+            # This simulates the real-world scenario where resampler returns b"" for silence
+            audio_data = np.frombuffer(audio, dtype=np.int16)
+            if len(audio_data) == 0 or np.all(audio_data == 0):
+                return b""  # Return empty bytes - this triggers the bug
+            # Otherwise, do normal resampling
+            return audio
+        
+        filter._resampler_in.resample = AsyncMock(side_effect=mock_resample)
+        
+        # Don't mock denoise_chunk - let it use the real pyrnnoise library
+        # Currently this will raise MemoryError when empty bytes are passed
+        # After the fix, this should return empty bytes gracefully
+        
+        # The filter should handle empty bytes gracefully without raising an error
+        # Currently this will FAIL because the code raises MemoryError
+        # After fixing, this should PASS
+        result = await filter.filter(mute_audio)
+        
+        # When resampler returns empty bytes, filter should return empty bytes
+        # (or handle it gracefully without crashing)
+        self.assertEqual(result, b"", "Filter should return empty bytes when resampler returns empty bytes")
+        
         await filter.stop()
