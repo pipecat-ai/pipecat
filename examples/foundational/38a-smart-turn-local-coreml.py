@@ -10,7 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_coreml_smart_turn import LocalCoreMLSmartTurnAnalyzer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -19,7 +18,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -28,6 +30,8 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.bot import TurnAnalyzerBotTurnStartStrategy
+from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 load_dotenv(override=True)
 
@@ -56,25 +60,16 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
-            smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
-        ),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
-            smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
-        ),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
-            smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
-        ),
     ),
 }
 
@@ -99,7 +94,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            turn_start_strategies=TurnStartStrategies(
+                bot=[
+                    TurnAnalyzerBotTurnStartStrategy(
+                        turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
+                            smart_turn_model_path=smart_turn_model_path
+                        )
+                    )
+                ]
+            ),
+        ),
+    )
 
     pipeline = Pipeline(
         [

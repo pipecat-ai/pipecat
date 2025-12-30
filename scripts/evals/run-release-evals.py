@@ -79,6 +79,12 @@ EVAL_FLIGHT_STATUS = EvalConfig(
     eval="The user says something about the status of flight AA100, such as whether it's on time or delayed.",
 )
 
+EVAL_ORDER = EvalConfig(
+    prompt="I'd like to order a chocolate iced doughnut and a regular brewed coffee.",
+    eval="The user acknowledges the order of a chocolate iced doughnut and regular brewed coffee.",
+    eval_speaks_first=True,
+)
+
 
 TESTS_07 = [
     # 07 series
@@ -215,6 +221,16 @@ TESTS_49 = [
     ("49d-thinking-functions-google.py", EVAL_FLIGHT_STATUS),
 ]
 
+
+TESTS_50 = [
+    ("50-ultravox-realtime.py", EVAL_ORDER),
+]
+
+
+TESTS_51 = [
+    ("51-grok-realtime.py", EVAL_WEATHER),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -228,6 +244,8 @@ TESTS = [
     *TESTS_43,
     *TESTS_44,
     *TESTS_49,
+    *TESTS_50,
+    *TESTS_51,
 ]
 
 

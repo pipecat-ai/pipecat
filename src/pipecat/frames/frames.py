@@ -30,7 +30,7 @@ from typing import (
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry as NewKeypadEntry
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
@@ -38,7 +38,7 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
-    from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
+    from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -487,16 +487,41 @@ class TranslationFrame(TextFrame):
 class OpenAILLMContextAssistantTimestampFrame(DataFrame):
     """Timestamp information for assistant messages in LLM context.
 
+    .. deprecated:: 0.0.99
+        `OpenAILLMContextAssistantTimestampFrame` is deprecated and will be removed in a future version.
+        Use `LLMContextAssistantTimestampFrame` with the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         timestamp: Timestamp when the assistant message was created.
     """
 
     timestamp: str
 
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
 
-# A more universal (LLM-agnostic) name for
-# OpenAILLMContextAssistantTimestampFrame, matching LLMContext
-LLMContextAssistantTimestampFrame = OpenAILLMContextAssistantTimestampFrame
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "OpenAILLMContextAssistantTimestampFrame is deprecated and will be removed in a future version. "
+                "Use LLMContextAssistantTimestampFrame with the universal LLMContext and LLMContextAggregatorPair instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
+@dataclass
+class LLMContextAssistantTimestampFrame(DataFrame):
+    """Timestamp information for assistant messages in LLM context.
+
+    Parameters:
+        timestamp: Timestamp when the assistant message was created.
+    """
+
+    timestamp: str
 
 
 @dataclass
@@ -926,10 +951,18 @@ class StartFrame(SystemFrame):
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         allow_interruptions: Whether to allow user interruptions.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.
+
         enable_metrics: Whether to enable performance metrics collection.
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
         interruption_strategies: List of interruption handling strategies.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
     """
 
@@ -1072,15 +1105,17 @@ class StartInterruptionFrame(InterruptionFrame):
 
 @dataclass
 class UserStartedSpeakingFrame(SystemFrame):
-    """Frame indicating user has started speaking.
+    """Frame indicating that the user turn has started.
 
-    Emitted by VAD to indicate that a user has started speaking. This can be
-    used for interruptions or other times when detecting that someone is
-    speaking is more important than knowing what they're saying (as you will
-    get with a TranscriptionFrame).
+    Emitted when the user turn starts, which usually means that some
+    transcriptions are already available.
 
     Parameters:
         emulated: Whether this event was emulated rather than detected by VAD.
+
+            .. deprecated:: 0.0.99
+                This field is deprecated and will be removed in a future version.
+
     """
 
     emulated: bool = False
@@ -1088,12 +1123,17 @@ class UserStartedSpeakingFrame(SystemFrame):
 
 @dataclass
 class UserStoppedSpeakingFrame(SystemFrame):
-    """Frame indicating user has stopped speaking.
+    """Frame indicating that the user turn has ended.
 
-    Emitted by the VAD to indicate that a user stopped speaking.
+    Emitted when the user turn ends. This usually coincides with the start of
+    the bot turn.
 
     Parameters:
         emulated: Whether this event was emulated rather than detected by VAD.
+
+            .. deprecated:: 0.0.99
+                This field is deprecated and will be removed in a future version.
+
     """
 
     emulated: bool = False
@@ -1115,6 +1155,9 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
 
     Emitted by internal processors upstream to emulate VAD behavior when a
     user starts speaking.
+
+    .. deprecated:: 0.0.99
+        This frame is deprecated and will be removed in a future version.
     """
 
     pass
@@ -1126,6 +1169,9 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
     Emitted by internal processors upstream to emulate VAD behavior when a
     user stops speaking.
+
+    .. deprecated:: 0.0.99
+        This frame is deprecated and will be removed in a future version.
     """
 
     pass
@@ -1523,7 +1569,7 @@ class SpeechControlParamsFrame(SystemFrame):
     """
 
     vad_params: Optional[VADParams] = None
-    turn_params: Optional[SmartTurnParams] = None
+    turn_params: Optional[BaseTurnParams] = None
 
 
 #

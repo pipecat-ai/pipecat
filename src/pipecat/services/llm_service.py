@@ -8,13 +8,13 @@
 
 import asyncio
 import inspect
+import warnings
 from dataclasses import dataclass
 from typing import (
     Any,
     Awaitable,
     Callable,
     Dict,
-    List,
     Mapping,
     Optional,
     Protocol,
@@ -47,7 +47,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
-    LLMContextMessage,
     LLMSpecificMessage,
 )
 from pipecat.processors.aggregators.llm_response import (
@@ -243,7 +242,21 @@ class LLMService(AIService):
 
         Returns:
             A context aggregator instance.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "create_context_aggregator() is deprecated and will be removed in a future version. "
+                "Use the universal LLMContext and LLMContextAggregatorPair directly instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         pass
 
     async def start(self, frame: StartFrame):
@@ -336,8 +349,6 @@ class LLMService(AIService):
         signature = inspect.signature(handler)
         handler_deprecated = len(signature.parameters) > 1
         if handler_deprecated:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -356,8 +367,6 @@ class LLMService(AIService):
 
         # Start callbacks are now deprecated.
         if start_callback:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -399,7 +408,7 @@ class LLMService(AIService):
             function_name: The name of the function handler to remove.
         """
         del self._functions[function_name]
-        if self._start_callbacks[function_name]:
+        if function_name in self._start_callbacks:
             del self._start_callbacks[function_name]
 
     def unregister_direct_function(self, handler: Any):
@@ -500,8 +509,6 @@ class LLMService(AIService):
             timeout: Optional timeout for the requested image to be added to the LLM context.
 
         """
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(

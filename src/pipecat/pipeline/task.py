@@ -105,13 +105,21 @@ class PipelineParams(BaseModel):
 
     Parameters:
         allow_interruptions: Whether to allow pipeline interruptions.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         enable_heartbeats: Whether to enable heartbeat monitoring.
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
-        interruption_strategies: Strategies for bot interruption behavior.
+        interruption_strategies: [deprecated] Strategies for bot interruption behavior.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
 
             .. deprecated:: 0.0.58
@@ -278,6 +286,7 @@ class PipelineTask(BasePipelineTask):
                 additional_span_attributes=self._additional_span_attributes,
             )
             observers.append(self._turn_trace_observer)
+
         self._finished = False
         self._cancelled = False
 

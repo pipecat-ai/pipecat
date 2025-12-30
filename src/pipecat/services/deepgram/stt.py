@@ -6,7 +6,6 @@
 
 """Deepgram speech-to-text service implementation."""
 
-import asyncio
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -14,13 +13,14 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
@@ -273,9 +273,12 @@ class DeepgramSTTService(STTService):
     async def _on_speech_started(self, *args, **kwargs):
         await self.start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
+        await self.broadcast_frame(UserStartedSpeakingFrame)
+        await self.push_interruption_task_frame_and_wait()
 
     async def _on_utterance_end(self, *args, **kwargs):
         await self._call_event_handler("on_utterance_end", *args, **kwargs)
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     @traced_stt
     async def _handle_transcription(
@@ -329,10 +332,10 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame) and not self.vad_enabled:
+        if isinstance(frame, VADUserStartedSpeakingFrame) and not self.vad_enabled:
             # Start metrics if Deepgram VAD is disabled & pipeline VAD has detected speech
             await self.start_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             await self._connection.finalize()
             logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")

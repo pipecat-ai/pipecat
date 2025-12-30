@@ -17,6 +17,13 @@ class MinWordsInterruptionStrategy(BaseInterruptionStrategy):
     This is an interruption strategy based on a minimum number of words said
     by the user. That is, the strategy will be true if the user has said at
     least that amount of words.
+
+    .. deprecated:: 0.0.99
+
+        This class is deprecated, use
+        `pipecat.turns.user.MinWordsUserTurnStartStrategy` with `PipelineTask`'s
+        new `turn_start_strategies` parameter instead.
+
     """
 
     def __init__(self, *, min_words: int):
@@ -28,6 +35,17 @@ class MinWordsInterruptionStrategy(BaseInterruptionStrategy):
         super().__init__()
         self._min_words = min_words
         self._text = ""
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'pipecat.audio.interruptions' is deprecated. "
+                "Use `pipecat.turns.user.MinWordsUserTurnStartStrategy` with `PipelineTask`'s "
+                "new `turn_start_strategies` parameter instead.",
+                DeprecationWarning,
+            )
 
     async def append_text(self, text: str):
         """Append text for word count analysis.

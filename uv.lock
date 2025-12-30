@@ -316,6 +316,23 @@ wheels = [
 ]
 
 [[package]]
+name = "audiolab"
+version = "0.4.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "av" },
+    { name = "click" },
+    { name = "humanize" },
+    { name = "jinja2" },
+    { name = "smart-open" },
+    { name = "soundfile" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1c/62/343e39ff6560517ffb02c21796d155df4a019eea235ab7f86e46f8b10a73/audiolab-0.4.7.tar.gz", hash = "sha256:9a4618fd39601d5dd366f5dca3a0d23e6eacf5ee0d824ece2bc74ab15c8342b3", size = 31885, upload-time = "2025-12-19T07:40:13.219Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/ac/7dc51c1a0b15ba9162d9d506a7a9f2589f0258b2810dad0a193cc781b7d6/audiolab-0.4.7-py3-none-any.whl", hash = "sha256:52ea93f0c0950727f6ab79c90d95910ee6b3a608bbe1bcd33ce51530b3de064e", size = 50938, upload-time = "2025-12-19T07:40:12.098Z" },
+]
+
+[[package]]
 name = "audioop-lts"
 version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -595,11 +612,11 @@ wheels = [
 
 [[package]]
 name = "certifi"
-version = "2025.8.3"
+version = "2025.11.12"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/dc/67/960ebe6bf230a96cda2e0abcf73af550ec4f090005363542f0765df162e0/certifi-2025.8.3.tar.gz", hash = "sha256:e564105f78ded564e3ae7c923924435e1daa7463faeab5bb932bc53ffae63407", size = 162386, upload-time = "2025-08-03T03:07:47.08Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/8c/58f469717fa48465e4a50c014a0400602d3c437d7c0c468e17ada824da3a/certifi-2025.11.12.tar.gz", hash = "sha256:d8ab5478f2ecd78af242878415affce761ca6bc54a22a27e026d7c25357c3316", size = 160538, upload-time = "2025-11-12T02:54:51.517Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/48/1549795ba7742c948d2ad169c1c8cdbae65bc450d6cd753d124b17c8cd32/certifi-2025.8.3-py3-none-any.whl", hash = "sha256:f6c12493cfb1b06ba2ff328595af9350c65d6644968e5d3a2ffd78699af217a5", size = 161216, upload-time = "2025-08-03T03:07:45.777Z" },
+    { url = "https://files.pythonhosted.org/packages/70/7d/9bc192684cea499815ff478dfcdc13835ddf401365057044fb721ec6bddb/certifi-2025.11.12-py3-none-any.whl", hash = "sha256:97de8790030bbd5c2d96b7ec782fc2f7820ef8dba6db909ccf95449f2d062d4b", size = 159438, upload-time = "2025-11-12T02:54:49.735Z" },
 ]
 
 [[package]]
@@ -2048,6 +2065,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cc/3f/2c29224acb2e2df4d2046e4c73ee2662023c58ff5b113c4c1adac0886c43/humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc", size = 360702, upload-time = "2021-09-17T21:40:43.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/0f/310fb31e39e2d734ccaa2c0fb981ee41f7bd5056ce9bc29b2248bd569169/humanfriendly-10.0-py2.py3-none-any.whl", hash = "sha256:1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477", size = 86794, upload-time = "2021-09-17T21:40:39.897Z" },
+]
+
+[[package]]
+name = "humanize"
+version = "4.14.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/43/50033d25ad96a7f3845f40999b4778f753c3901a11808a584fed7c00d9f5/humanize-4.14.0.tar.gz", hash = "sha256:2fa092705ea640d605c435b1ca82b2866a1b601cdf96f076d70b79a855eba90d", size = 82939, upload-time = "2025-10-15T13:04:51.214Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/5b/9512c5fb6c8218332b530f13500c6ff5f3ce3342f35e0dd7be9ac3856fd3/humanize-4.14.0-py3-none-any.whl", hash = "sha256:d57701248d040ad456092820e6fde56c930f17749956ac47f4f655c0c547bfff", size = 132092, upload-time = "2025-10-15T13:04:49.404Z" },
 ]
 
 [[package]]
@@ -4018,7 +4044,7 @@ soundfile = [
     { name = "soundfile" },
 ]
 speechmatics = [
-    { name = "speechmatics-rt" },
+    { name = "speechmatics-voice", extra = ["smart"] },
 ]
 strands = [
     { name = "strands-agents" },
@@ -4157,7 +4183,7 @@ requires-dist = [
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
     { name = "pyjwt", marker = "extra == 'livekit'", specifier = ">=2.10.1" },
     { name = "pyloudnorm", specifier = "~=0.1.1" },
-    { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.2.0" },
+    { name = "pyrnnoise", marker = "extra == 'rnnoise'", specifier = "~=0.4.1" },
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "resampy", specifier = "~=0.4.3" },
@@ -4166,7 +4192,7 @@ requires-dist = [
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=1.0.3" },
     { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.1" },
     { name = "soxr", specifier = "~=0.5.0" },
-    { name = "speechmatics-rt", marker = "extra == 'speechmatics'", specifier = ">=0.5.0" },
+    { name = "speechmatics-voice", extras = ["smart"], marker = "extra == 'speechmatics'", specifier = ">=0.2.4" },
     { name = "strands-agents", marker = "extra == 'strands'", specifier = ">=1.9.1,<2" },
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
     { name = "timm", marker = "extra == 'moondream'", specifier = "~=1.0.13" },
@@ -4191,7 +4217,7 @@ dev = [
     { name = "pyright", specifier = ">=1.1.404,<1.2" },
     { name = "pytest", specifier = "~=8.4.1" },
     { name = "pytest-aiohttp", specifier = "==1.1.0" },
-    { name = "pytest-asyncio", specifier = "~=1.1.0" },
+    { name = "pytest-asyncio", specifier = "~=1.3.0" },
     { name = "python-dotenv", specifier = ">=1.0.1,<2.0.0" },
     { name = "ruff", specifier = ">=0.12.11,<1" },
     { name = "setuptools", specifier = "~=78.1.1" },
@@ -4780,18 +4806,19 @@ wheels = [
 
 [[package]]
 name = "pyrnnoise"
-version = "0.2.7"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "audiolab" },
+    { name = "click" },
+    { name = "matplotlib" },
     { name = "numpy" },
-    { name = "soundfile" },
-    { name = "soxr" },
     { name = "tqdm" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/5a/d7433a898cc3c8cf9621f74d8671b052511811d9db263cf79cb224e463dc/pyrnnoise-0.2.7-py3-none-macosx_14_0_universal2.whl", hash = "sha256:fec5305080d2edfdc74b0f8beb8243a59e9a4a55a54db0ef8564510568a9eefe", size = 13366079, upload-time = "2024-10-02T12:26:46.199Z" },
-    { url = "https://files.pythonhosted.org/packages/b5/a0/d624dfcbdb94a57047d17c923a2bfc7dfa170458b6a38f97868d89d6d284/pyrnnoise-0.2.7-py3-none-manylinux1_x86_64.whl", hash = "sha256:ce54addc6c4ff3c8a4c48e9e4d14640ca175c39b06a63b44da3f3a34d3ba8895", size = 13261826, upload-time = "2024-10-02T12:26:50.98Z" },
-    { url = "https://files.pythonhosted.org/packages/ff/26/eed8b1dfd122c1523e4cafd0ff19bf4b59a79fe6a791a486a3fa3712e070/pyrnnoise-0.2.7-py3-none-win_amd64.whl", hash = "sha256:8451f98c715e2ce834a405162f7b14c30d730c4dd95ed3c5faecbb92257f8dd2", size = 13255252, upload-time = "2024-10-02T12:28:43.187Z" },
+    { url = "https://files.pythonhosted.org/packages/59/49/7017ffa14230096e0271bd49dfd9ab60a32bfebe7e71399c2a0e38c6f859/pyrnnoise-0.4.1-py3-none-macosx_15_0_universal2.whl", hash = "sha256:c1fe407729190d0f84f3e3c9d9322ebbd33b27f3f5d9f7217379b71a4dd043e7", size = 13381833, upload-time = "2025-11-25T15:54:06.532Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/24/fb8b7bafb3dd9cbb46e134fa25c9597683c61b42c0133453fefeebeb0066/pyrnnoise-0.4.1-py3-none-manylinux1_x86_64.whl", hash = "sha256:ddd39b45221b65fb235f882a0ce127513a1012d41c5b3ba9dc4e9e991b22c205", size = 13273307, upload-time = "2025-11-25T15:54:04.076Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/8e/eef9b2022fa5b9a111ba31d2f25ccd6e45da3daf16d20352e1fb18fd81dd/pyrnnoise-0.4.1-py3-none-win_amd64.whl", hash = "sha256:440e32359256eb7947e29fb080e800e984ba521fbe89a8b0b2f5dc196965e441", size = 13267076, upload-time = "2025-11-25T15:54:37.547Z" },
 ]
 
 [[package]]
@@ -4828,15 +4855,16 @@ wheels = [
 
 [[package]]
 name = "pytest-asyncio"
-version = "1.1.1"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backports-asyncio-runner", marker = "python_full_version < '3.11'" },
     { name = "pytest" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/1e/2aa43805d4a320a9489d2b99f7877b69f9094c79aa0732159a1415dd6cd4/pytest_asyncio-1.1.1.tar.gz", hash = "sha256:b72d215c38e2c91dbb32f275e0b5be69602d7869910e109360e375129960a649", size = 46590, upload-time = "2025-09-12T06:36:20.834Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/28/de/aba79e9ccdb51b5d0d65c67dd857bd78b00c64723df16b9fc800d8b94ce6/pytest_asyncio-1.1.1-py3-none-any.whl", hash = "sha256:726339d30fcfde24691f589445b9b67d058b311ac632b1d704e97f20f1d878da", size = 14719, upload-time = "2025-09-12T06:36:19.726Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
 ]
 
 [[package]]
@@ -5740,6 +5768,18 @@ wheels = [
 ]
 
 [[package]]
+name = "smart-open"
+version = "7.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/9a/0a7acb748b86e2922982366d780ca4b16c33f7246fa5860d26005c97e4f3/smart_open-7.5.0.tar.gz", hash = "sha256:f394b143851d8091011832ac8113ea4aba6b92e6c35f6e677ddaaccb169d7cb9", size = 53920, upload-time = "2025-11-08T21:38:40.698Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ad/95/bc978be7ea0babf2fb48a414b6afaad414c6a9e8b1eafc5b8a53c030381a/smart_open-7.5.0-py3-none-any.whl", hash = "sha256:87e695c5148bbb988f15cec00971602765874163be85acb1c9fb8abc012e6599", size = 63940, upload-time = "2025-11-08T21:38:39.024Z" },
+]
+
+[[package]]
 name = "smithy-aws-core"
 version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5877,14 +5917,35 @@ wheels = [
 
 [[package]]
 name = "speechmatics-rt"
-version = "0.5.0"
+version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/57/26/10359e1f16c2aa6a198eb11a9056f4a86a8bb8d4e610bbbe4a118b227b59/speechmatics_rt-0.5.0.tar.gz", hash = "sha256:ca974a186a012f946fd997deeaf3bf1c4f203f6d6e05a866172d27709183afc8", size = 26832, upload-time = "2025-10-15T15:54:25.695Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/a3/bb4d063a4405744951066c45ffbf7cd714a6fc00a20ef0cc83fe2494ed79/speechmatics_rt-0.5.3.tar.gz", hash = "sha256:c98d21041e5a0c90a66e463c3d5b98879c17eac0bbebb4100fd9d0f2b330bb19", size = 27333, upload-time = "2025-12-16T19:20:50.199Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/2e/9931ebe9360e9d385c68826b33137c2c9a4cfa361cd929d1ac6e72ebfe53/speechmatics_rt-0.5.0-py3-none-any.whl", hash = "sha256:58151488f891fa00cf7054f0cfab1b1eb94b55c3441be587f7941c726caef991", size = 32850, upload-time = "2025-10-15T15:54:24.5Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/5a/35dd924f9bfeb1604e01806ad0e16a9c596f3c44d13e66794f10d10f828b/speechmatics_rt-0.5.3-py3-none-any.whl", hash = "sha256:12f97f19bb989852b8ff3c6d1e28f4f0ea6fd9356e19da75d0e9877545931ce6", size = 33365, upload-time = "2025-12-16T19:20:49.031Z" },
+]
+
+[[package]]
+name = "speechmatics-voice"
+version = "0.2.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "speechmatics-rt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b2/f9/9d81e4abe9ae1c8745372eaf43523213b0333e9721699fb0f3d3bff6c17e/speechmatics_voice-0.2.4.tar.gz", hash = "sha256:e3b5c7a8c24fa7d555b80a72ab181797665c74944400468ca5fb7e54b5f9eae6", size = 60852, upload-time = "2025-12-17T23:22:13.437Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/a6/401dba9be6be914e57b7814360ba0bece55f24140bb7d5c3dc5f07bcd77f/speechmatics_voice-0.2.4-py3-none-any.whl", hash = "sha256:71d0f5272c2db1221422ab19b6c898ea7b38f9fb7f523904f54a4d8c3e4cef12", size = 57056, upload-time = "2025-12-17T23:22:11.837Z" },
+]
+
+[package.optional-dependencies]
+smart = [
+    { name = "certifi" },
+    { name = "onnxruntime" },
+    { name = "transformers" },
 ]
 
 [[package]]
@@ -6468,7 +6529,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "4.56.2"
+version = "4.57.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -6482,9 +6543,9 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e5/82/0bcfddd134cdf53440becb5e738257cc3cf34cf229d63b57bfd288e6579f/transformers-4.56.2.tar.gz", hash = "sha256:5e7c623e2d7494105c726dd10f6f90c2c99a55ebe86eef7233765abd0cb1c529", size = 9844296, upload-time = "2025-09-19T15:16:26.778Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/70/d42a739e8dfde3d92bb2fff5819cbf331fe9657323221e79415cd5eb65ee/transformers-4.57.3.tar.gz", hash = "sha256:df4945029aaddd7c09eec5cad851f30662f8bd1746721b34cc031d70c65afebc", size = 10139680, upload-time = "2025-11-25T15:51:30.139Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/70/26/2591b48412bde75e33bfd292034103ffe41743cacd03120e3242516cd143/transformers-4.56.2-py3-none-any.whl", hash = "sha256:79c03d0e85b26cb573c109ff9eafa96f3c8d4febfd8a0774e8bba32702dd6dde", size = 11608055, upload-time = "2025-09-19T15:16:23.736Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/6b/2f416568b3c4c91c96e5a365d164f8a4a4a88030aa8ab4644181fdadce97/transformers-4.57.3-py3-none-any.whl", hash = "sha256:c77d353a4851b1880191603d36acb313411d3577f6e2897814f333841f7003f4", size = 11993463, upload-time = "2025-11-25T15:51:26.493Z" },
 ]
 
 [[package]]
