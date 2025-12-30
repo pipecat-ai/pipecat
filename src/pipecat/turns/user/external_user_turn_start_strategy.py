@@ -25,7 +25,7 @@ class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
         Args:
             **kwargs: Additional keyword arguments.
         """
-        super().__init__(enable_user_speaking_frames=False, **kwargs)
+        super().__init__(enable_interruptions=False, enable_user_speaking_frames=False, **kwargs)
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect user turn start.

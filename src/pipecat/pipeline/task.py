@@ -46,6 +46,7 @@ from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
@@ -704,7 +705,7 @@ class PipelineTask(BasePipelineTask):
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             interruption_strategies=self._params.interruption_strategies,
         )
-        start_frame.metadata = self._params.start_metadata
+        start_frame.metadata = self._create_start_metadata()
         await self._pipeline.queue_frame(start_frame)
 
         # Wait for the pipeline to be started before pushing any other frame.
@@ -860,6 +861,7 @@ class PipelineTask(BasePipelineTask):
         return True
 
     async def _load_observer_files(self):
+        """Dynamically load observers from files listed in PIPECAT_OBSERVER_FILES."""
         observer_files = os.environ.get("PIPECAT_OBSERVER_FILES", "").split(":")
         for f in observer_files:
             try:
@@ -885,3 +887,26 @@ class PipelineTask(BasePipelineTask):
         tasks = [t.get_name() for t in self._task_manager.current_tasks()]
         if tasks:
             logger.warning(f"Dangling tasks detected: {tasks}")
+
+    def _create_start_metadata(self) -> Dict[str, Any]:
+        """Build and return start metadata including user-provided values."""
+        start_metadata = {}
+
+        # NOTE(aleix): Remove when OpenAILLMContext/LLMUserContextAggregator is removed.
+        if self._find_deprecated_openaillmcontext(self._pipeline):
+            start_metadata["deprecated_openaillmcontext"] = True
+
+        # Update with user provided metadata.
+        start_metadata.update(self._params.start_metadata)
+
+        return start_metadata
+
+    def _find_deprecated_openaillmcontext(self, processor: FrameProcessor) -> bool:
+        """Check whether there is a deprecated LLMUserContextAggregator in the pipeline."""
+        if isinstance(processor, LLMUserContextAggregator):
+            return True
+
+        for p in processor.processors:
+            if self._find_deprecated_openaillmcontext(p):
+                return True
+        return False
