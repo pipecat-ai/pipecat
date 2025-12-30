@@ -1654,6 +1654,18 @@ class InterruptionTaskFrame(TaskFrame):
 
 
 @dataclass
+class QueueTaskFrame(TaskFrame):
+    """Frame to request the pipeline task to push the included frames.
+
+    This is useful when you want the push frames from upstream down to the
+    pipeline. Pushing this frame upstream guarantees upstream frame ordering.
+
+    """
+
+    frames: Sequence[Frame]
+
+
+@dataclass
 class BotInterruptionFrame(InterruptionTaskFrame):
     """Frame indicating the bot should be interrupted.
 
