@@ -601,8 +601,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._started = 0
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
-        self._pending_function_calls = []
-        self._function_calls_message_added = False
 
         self._thought_aggregation_enabled = False
         self._thought_llm: str = ""
@@ -719,8 +717,20 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
         logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
-        self._pending_function_calls = frame.function_calls
-        self._function_calls_message_added = False
+        tool_calls = []
+        for fc in frame.function_calls:
+            tool_calls.append(
+                {
+                    "id": fc.tool_call_id,
+                    "function": {
+                        "name": fc.function_name,
+                        "arguments": json.dumps(fc.arguments),
+                    },
+                    "type": "function",
+                }
+            )
+        self._context.add_message({"role": "assistant", "tool_calls": tool_calls})
+
         for function_call in frame.function_calls:
             self._function_calls_in_progress[function_call.tool_call_id] = None
 
@@ -728,22 +738,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         logger.debug(
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
-
-        if not self._function_calls_message_added and self._pending_function_calls:
-            tool_calls = []
-            for fc in self._pending_function_calls:
-                tool_calls.append(
-                    {
-                        "id": fc.tool_call_id,
-                        "function": {
-                            "name": fc.function_name,
-                            "arguments": json.dumps(fc.arguments),
-                        },
-                        "type": "function",
-                    }
-                )
-            self._context.add_message({"role": "assistant", "tool_calls": tool_calls})
-            self._function_calls_message_added = True
 
         self._context.add_message(
             {
