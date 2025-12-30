@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     FrameProcessorResumeUrgentFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
+    QueueTaskFrame,
     StartFrame,
     SystemFrame,
     UninterruptibleFrame,
@@ -611,6 +612,22 @@ class FrameProcessor(BaseObject):
             await self.__process_frame(frame, direction, callback)
         else:
             await self.__input_queue.put((frame, direction, callback))
+
+    async def queue_task_frame(self, frame: Frame):
+        """Queue a single frame to be pushed from the pipeline task down to the pipeline.
+
+        Args:
+            frame: A single frame to push downstream from the top of the pipeline.
+        """
+        await self.queue_task_frames([frame])
+
+    async def queue_task_frames(self, frames: Sequence[Frame]):
+        """Queue multiple frames to be pushed from the pipeline task down to the pipeline.
+
+        Args:
+            frames: A sequence of frames to push downstream from the top of the pipeline.
+        """
+        await self.push_frame(QueueTaskFrame(frames=frames), FrameDirection.UPSTREAM)
 
     async def pause_processing_frames(self):
         """Pause processing of queued frames."""
