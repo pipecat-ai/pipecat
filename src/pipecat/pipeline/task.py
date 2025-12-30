@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     InterruptionTaskFrame,
     MetricsFrame,
+    QueueTaskFrame,
     StartFrame,
     StopFrame,
     StopTaskFrame,
@@ -756,6 +757,9 @@ class PipelineTask(BasePipelineTask):
             # pipeline-ending frame to finish traversing the pipeline.
             logger.debug(f"{self}: received interruption task frame {frame}")
             await self._pipeline.queue_frame(InterruptionFrame())
+        elif isinstance(frame, QueueTaskFrame):
+            logger.debug(f"{self}: received queue task frame {frame}")
+            await self.queue_frames(frame.frames)
         elif isinstance(frame, ErrorFrame):
             await self._call_event_handler("on_pipeline_error", frame)
             if frame.fatal:
