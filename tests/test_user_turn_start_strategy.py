@@ -10,14 +10,16 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     InterimTranscriptionFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user.min_words_user_turn_start_strategy import MinWordsUserTurnStartStrategy
-from pipecat.turns.user.transcription_user_turn_start_strategy import (
+from pipecat.turns.user import (
+    ExternalUserTurnStartStrategy,
+    MinWordsUserTurnStartStrategy,
     TranscriptionUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
 )
-from pipecat.turns.user.vad_user_turn_start_strategy import VADUserTurnStartStrategy
 
 
 class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
@@ -27,7 +29,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -59,7 +61,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -81,7 +83,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -102,7 +104,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -115,7 +117,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -132,7 +134,7 @@ class TestVADUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -150,15 +152,30 @@ class TestTranscriptionUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         should_start = None
 
         @strategy.event_handler("on_user_turn_started")
-        async def on_user_turn_started(strategy):
+        async def on_user_turn_started(strategy, params):
             nonlocal should_start
             should_start = True
 
-        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp="now"))
-        self.assertFalse(should_start)
-
-        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
         self.assertFalse(should_start)
 
         await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="", timestamp="now"))
+        self.assertTrue(should_start)
+
+
+class TestExternalUserTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
+    async def test_external_strategy(self):
+        strategy = ExternalUserTurnStartStrategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStartedSpeakingFrame())
         self.assertTrue(should_start)

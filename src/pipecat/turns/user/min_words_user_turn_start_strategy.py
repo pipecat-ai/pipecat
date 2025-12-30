@@ -27,7 +27,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
     """
 
-    def __init__(self, *, min_words: int, use_interim: bool = True):
+    def __init__(self, *, min_words: int, use_interim: bool = True, **kwargs):
         """Initialize the minimum words bot turn start strategy.
 
         Args:
@@ -35,8 +35,9 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
                 start of a user turn.
             use_interim: Whether to consider interim transcription frames for
                 earlier detection.
+            **kwargs: Additional keyword arguments.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._min_words = min_words
         self._use_interim = use_interim
         self._bot_speaking = False

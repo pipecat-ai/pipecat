@@ -251,3 +251,8 @@ showcontent = true
 directory = "security"
 name = "Security"
 showcontent = true
+
+[[tool.towncrier.type]]
+directory = "other"
+name = "Other"
+showcontent = true

@@ -6,7 +6,7 @@
 
 """User turn start strategy based on transcriptions."""
 
-from pipecat.frames.frames import BotStartedSpeakingFrame, Frame, TranscriptionFrame
+from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TranscriptionFrame
 from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
@@ -20,15 +20,10 @@ class TranscriptionUserTurnStartStrategy(BaseUserTurnStartStrategy):
 
     """
 
-    def __init__(self):
+    def __init__(self, *, use_interim: bool = True, **kwargs):
         """Initialize transcription-based user turn start strategy."""
-        super().__init__()
-        self._bot_speaking = False
-
-    async def reset(self):
-        """Reset the strategy to its initial state."""
-        await super().reset()
-        self._bot_speaking = False
+        super().__init__(**kwargs)
+        self._use_interim = use_interim
 
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to detect the start of a user turn.
@@ -38,14 +33,7 @@ class TranscriptionUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         await super().process_frame(frame)
 
-        if isinstance(frame, BotStartedSpeakingFrame):
-            await self._handle_bot_started_speaking(frame)
+        if isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
+            await self.trigger_user_turn_started()
         elif isinstance(frame, TranscriptionFrame):
-            await self._handle_transcription(frame)
-
-    async def _handle_bot_started_speaking(self, _: BotStartedSpeakingFrame):
-        self._bot_speaking = True
-
-    async def _handle_transcription(self, _: TranscriptionFrame):
-        if self._bot_speaking:
             await self.trigger_user_turn_started()

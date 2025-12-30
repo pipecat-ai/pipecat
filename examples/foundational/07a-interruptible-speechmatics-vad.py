@@ -15,7 +15,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
@@ -26,6 +29,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.turn_start_strategies import ExternalTurnStartStrategies
 
 load_dotenv(override=True)
 
@@ -127,7 +131,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
 
         context = LLMContext(messages)
-        context_aggregator = LLMContextAggregatorPair(context)
+        context_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                turn_start_strategies=ExternalTurnStartStrategies()
+            ),
+        )
 
         pipeline = Pipeline(
             [

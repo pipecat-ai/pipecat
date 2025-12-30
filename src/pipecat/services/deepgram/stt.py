@@ -17,6 +17,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -271,9 +273,12 @@ class DeepgramSTTService(STTService):
     async def _on_speech_started(self, *args, **kwargs):
         await self.start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
+        await self.broadcast_frame(UserStartedSpeakingFrame)
+        await self.push_interruption_task_frame_and_wait()
 
     async def _on_utterance_end(self, *args, **kwargs):
         await self._call_event_handler("on_utterance_end", *args, **kwargs)
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     @traced_stt
     async def _handle_transcription(
