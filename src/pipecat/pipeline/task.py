@@ -107,7 +107,7 @@ class PipelineParams(BaseModel):
         allow_interruptions: Whether to allow pipeline interruptions.
 
             .. deprecated:: 0.0.99
-                Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.
+                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
 
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
