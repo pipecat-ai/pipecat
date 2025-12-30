@@ -7,7 +7,7 @@
 """User turn start strategy triggered by externally emitted frames."""
 
 from pipecat.frames.frames import Frame, UserStartedSpeakingFrame
-from pipecat.turns.user.base_user_turn_start_strategy import BaseUserTurnStartStrategy
+from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 
 
 class ExternalUserTurnStartStrategy(BaseUserTurnStartStrategy):
