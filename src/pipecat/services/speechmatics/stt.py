@@ -27,8 +27,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
@@ -597,16 +597,20 @@ class SpeechmaticsSTTService(STTService):
 
         The service will:
         - Send a BotInterruptionFrame upstream to stop bot speech
-        - Send a UserStartedSpeakingFrame downstream to notify other components
+        - Send a VADUserStartedSpeakingFrame downstream to notify other components
         - Start metrics collection for measuring response times
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} StartOfTurn received")
-        await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.push_interruption_task_frame_and_wait()
         # await self.start_processing_metrics()
+
+        # Emit VAD events if enabled
+        if self._enable_vad:
+            await self.push_interruption_task_frame_and_wait()
+            logger.debug(f"{self} sending VADUserStartedSpeakingFrame")
+            await self.broadcast_frame(VADUserStartedSpeakingFrame)
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
         """Handle EndOfTurn events.
@@ -618,14 +622,18 @@ class SpeechmaticsSTTService(STTService):
 
         The service will:
         - Stop processing metrics collection
-        - Send a UserStoppedSpeakingFrame to signal turn completion
+        - Send a VADUserStoppedSpeakingFrame to signal turn completion
 
         Args:
             message: the message payload.
         """
         logger.debug(f"{self} EndOfTurn received")
         # await self.stop_processing_metrics()
-        await self.broadcast_frame(UserStoppedSpeakingFrame)
+
+        # Emit VAD events if enabled
+        if self._enable_vad:
+            logger.debug(f"{self} sending VADUserStoppedSpeakingFrame")
+            await self.broadcast_frame(VADUserStoppedSpeakingFrame)
 
     async def _handle_speakers_result(self, message: dict[str, Any]) -> None:
         """Handle SpeakersResult events.
@@ -660,10 +668,10 @@ class SpeechmaticsSTTService(STTService):
             self._bot_speaking = False
 
         # Force finalization
-        if isinstance(frame, UserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._enable_vad:
                 logger.warning(
-                    f"{self} UserStoppedSpeakingFrame received but internal VAD is being used"
+                    f"{self} VADUserStoppedSpeakingFrame received but internal VAD is being used"
                 )
             elif not self._enable_vad and self._client is not None:
                 self._client.finalize()
