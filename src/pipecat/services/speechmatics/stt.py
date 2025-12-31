@@ -609,6 +609,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Emit VAD events if enabled
         if self._enable_vad:
+            logger.debug(f"{self} sending VADUserStartedSpeakingFrame")
             await self.broadcast_frame(VADUserStartedSpeakingFrame)
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
@@ -631,6 +632,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Emit VAD events if enabled
         if self._enable_vad:
+            logger.debug(f"{self} sending VADUserStoppedSpeakingFrame")
             await self.broadcast_frame(VADUserStoppedSpeakingFrame)
 
     async def _handle_speakers_result(self, message: dict[str, Any]) -> None:
