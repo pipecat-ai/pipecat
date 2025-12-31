@@ -134,7 +134,7 @@ class BaseInputTransport(FrameProcessor):
                 warnings.simplefilter("always")
                 warnings.warn(
                     "Parameter 'turn_analyzer' is deprecated, use `LLMUserAggregator`'s new "
-                    "`turn_start_strategies` parameter instead.",
+                    "`user_turn_strategies` parameter instead.",
                     DeprecationWarning,
                 )
 
@@ -178,7 +178,7 @@ class BaseInputTransport(FrameProcessor):
 
         .. deprecated:: 0.0.99
             This method is deprecated and will be removed in a future version.
-            Use `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+            Use `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
 
         Returns:
             The turn analyzer instance if configured, None otherwise.
@@ -189,7 +189,7 @@ class BaseInputTransport(FrameProcessor):
             warnings.simplefilter("always")
             warnings.warn(
                 "Method 'turn_analyzer' is deprecated. Use `LLMUserAggregator`'s new "
-                " `turn_start_strategies` parameter instead.",
+                "`user_turn_strategies` parameter instead.",
                 DeprecationWarning,
             )
 

@@ -137,7 +137,7 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert context.messages[0]["content"] == "Hi there!"
 
-    async def test_default_turn_start_strategies(self):
+    async def test_default_user_turn_strategies(self):
         context = LLMContext()
         user_aggregator = LLMUserAggregator(context)
 
