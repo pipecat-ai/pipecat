@@ -608,7 +608,7 @@ class AzureTTSService(WordTTSService):
                         await self.stop_ttfb_metrics()
                         # Start word timestamps only once when we receive first audio
                         if not self._word_timestamps_started:
-                            self.start_word_timestamps()
+                            await self.start_word_timestamps()
                             self._word_timestamps_started = True
 
                         frame = TTSAudioRawFrame(
