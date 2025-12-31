@@ -313,6 +313,10 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             **kwargs,
         )
 
+        # WebSocket streaming services need to manage their own processing metrics
+        # because audio arrives asynchronously via _receive_messages(), not from run_tts()
+        self._async_processing_metrics = True
+
         params = params or ElevenLabsTTSService.InputParams()
 
         self._api_key = api_key
@@ -567,6 +571,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         """Handle interruption by closing the current context."""
         await super()._handle_interruption(frame, direction)
 
+        # Stop processing metrics when interrupted
+        await self.stop_processing_metrics()
+
         # Close the current context when interrupted without closing the websocket
         if self._context_id and self._websocket:
             logger.trace(f"Closing context {self._context_id} due to interruption")
@@ -595,10 +602,11 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             received_ctx_id = msg.get("contextId")
 
             # Handle final messages first, regardless of context availability
-            # At the moment, this message is received AFTER the close_context message is
-            # sent, so it doesn't serve any functional purpose. For now, we'll just log it.
+            # isFinal indicates audio generation for this context is complete
             if msg.get("isFinal") is True:
                 logger.trace(f"Received final message for context {received_ctx_id}")
+                # Stop processing metrics when audio generation is complete
+                await self.stop_processing_metrics()
                 continue
 
             # Check if this message belongs to the current context.
@@ -703,6 +711,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             try:
                 if not self._started:
                     await self.start_ttfb_metrics()
+                    await self.start_processing_metrics()
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
