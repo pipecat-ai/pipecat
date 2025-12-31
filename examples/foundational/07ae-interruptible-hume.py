@@ -20,6 +20,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
 )
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
@@ -31,8 +32,8 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.bot.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
-from pipecat.turns.turn_start_strategies import TurnStartStrategies
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -80,7 +81,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
+        ),
+    )
 
     rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
@@ -103,9 +111,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
             audio_out_sample_rate=HUME_SAMPLE_RATE,
-            turn_start_strategies=TurnStartStrategies(
-                bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[

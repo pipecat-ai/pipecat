@@ -11,6 +11,7 @@ import time
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     CancelFrame,
@@ -38,7 +39,10 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantResponseAggregator,
 )
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
@@ -49,6 +53,8 @@ from pipecat.services.llm_service import LLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.sync.base_notifier import BaseNotifier
 from pipecat.utils.sync.event_notifier import EventNotifier
 from pipecat.utils.time import time_now_iso8601
@@ -735,7 +741,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
-    context_aggregator = LLMContextAggregatorPair(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
+        ),
+    )
 
     llm = TurnDetectionLLM(conversation_llm, context)
 

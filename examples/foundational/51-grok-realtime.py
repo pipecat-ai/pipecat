@@ -25,7 +25,6 @@ Usage:
     python 50-grok-realtime.py --transport daily
 """
 
-import asyncio
 import os
 from datetime import datetime
 
@@ -37,7 +36,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
 # Note: Grok has built-in server-side VAD, so we don't need local VAD
 # from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
 )
@@ -53,7 +52,6 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.grok.realtime.events import (
     SessionProperties,
-    TurnDetection,
     WebSearchTool,
     XSearchTool,
 )
@@ -173,11 +171,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Configure Grok session properties
     session_properties = SessionProperties(
-        # Voice options: Ara (warm, friendly), Rex (confident), Sal (smooth),
-        # Eve (energetic), Leo (authoritative)
+        # Voice options: Ara, Rex, Sal, Eve, Leo
         voice="Ara",
-        # Enable server-side VAD for automatic turn detection
-        turn_detection=TurnDetection(type="server_vad"),
         # System instructions
         instructions="""You are a helpful and friendly AI assistant powered by Grok.
 

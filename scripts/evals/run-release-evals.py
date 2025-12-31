@@ -226,6 +226,11 @@ TESTS_50 = [
     ("50-ultravox-realtime.py", EVAL_ORDER),
 ]
 
+
+TESTS_51 = [
+    ("51-grok-realtime.py", EVAL_WEATHER),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -240,6 +245,7 @@ TESTS = [
     *TESTS_44,
     *TESTS_49,
     *TESTS_50,
+    *TESTS_51,
 ]
 
 

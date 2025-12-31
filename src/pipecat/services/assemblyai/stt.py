@@ -25,8 +25,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import WebsocketSTTService
@@ -160,9 +160,9 @@ class AssemblyAISTTService(WebsocketSTTService):
             direction: Direction of frame processing.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             await self.start_ttfb_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if (
                 self._vad_force_turn_endpoint
                 and self._websocket

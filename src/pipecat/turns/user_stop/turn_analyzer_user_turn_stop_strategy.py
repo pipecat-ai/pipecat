@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Bot turn start strategy based on turn detection analyzers."""
+"""User turn stop strategy based on turn detection analyzers."""
 
 import asyncio
 from typing import Optional
@@ -22,30 +22,32 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
-from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
+from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
-class TurnAnalyzerBotTurnStartStrategy(BaseBotTurnStartStrategy):
-    """Bot turn start strategy using a turn detection model to detect end of user turn.
+class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
+    """User turn stop strategy using a turn detection model to detect end of user turn.
 
     This strategy uses the turn detection models to determine when the user has
     finished speaking, combining audio, VAD, and transcription frames. Once the
-    turn is considered complete, the bot turn is triggered.
+    turn is considered complete, the user end of turn is triggered.
 
     """
 
-    def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, timeout: float = 0.5):
-        """Initialize the bot turn start strategy.
+    def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, timeout: float = 0.5, **kwargs):
+        """Initialize the user turn stop strategy.
 
         Args:
             turn_analyzer: The turn detection analyzer instance to detect end of user turn.
             timeout: Short delay used internally to handle frame timing and event triggering.
+            **kwargs: Additional keyword arguments.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._turn_analyzer = turn_analyzer
         self._timeout = timeout
         self._text = ""
+        self._turn_complete = False
         self._vad_user_speaking = False
         self._event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
@@ -54,8 +56,9 @@ class TurnAnalyzerBotTurnStartStrategy(BaseBotTurnStartStrategy):
         """Reset the strategy to its initial state."""
         await super().reset()
         self._text = ""
+        self._turn_complete = False
         self._vad_user_speaking = False
-        self._event.set()
+        self._event.clear()
 
     async def setup(self, task_manager: BaseTaskManager):
         """Initialize the strategy with the given task manager.
@@ -102,36 +105,44 @@ class TurnAnalyzerBotTurnStartStrategy(BaseBotTurnStartStrategy):
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""
         state = self._turn_analyzer.append_audio(frame.audio, self._vad_user_speaking)
-        await self._handle_end_of_turn(state)
+
+        # If at this point the model says the turn is complete it will be due to
+        # a timeout, so we mark turn as complete and we trigger the user end of
+        # turn.
+        if state == EndOfTurnState.COMPLETE:
+            self._turn_complete = True
+            await self._maybe_trigger_user_turn_stopped()
 
     async def _handle_vad_user_started_speaking(self, _: VADUserStartedSpeakingFrame):
         """Handle when the VAD indicates the user is speaking."""
+        self._turn_complete = False
         self._vad_user_speaking = True
-        self._event.set()
 
     async def _handle_vad_user_stopped_speaking(self, _: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
-        self._event.set()
 
         state, prediction = await self._turn_analyzer.analyze_end_of_turn()
         await self._handle_prediction_result(prediction)
-        await self._handle_end_of_turn(state)
+
+        # The user stopped speaking and the turn is complete, we now need to
+        # wait for transcriptions.
+        self._turn_complete = state == EndOfTurnState.COMPLETE
+
+        # Reset transcription timeout.
+        self._event.set()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         """Handle user transcription."""
         # We don't really care about the content.
         self._text = frame.text
+        # Reset transcription timeout.
         self._event.set()
 
     async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
         """Handle user interim transcription."""
+        # Reset transcription timeout.
         self._event.set()
-
-    async def _handle_end_of_turn(self, state: EndOfTurnState):
-        """Handle completion of end-of-turn analysis."""
-        if state == EndOfTurnState.COMPLETE:
-            self._event.set()
 
     async def _handle_prediction_result(self, result: Optional[MetricsData]):
         """Handle a prediction result event from the turn analyzer."""
@@ -139,11 +150,11 @@ class TurnAnalyzerBotTurnStartStrategy(BaseBotTurnStartStrategy):
             await self.push_frame(MetricsFrame(data=[result]))
 
     async def _task_handler(self):
-        """Asynchronously monitor events and trigger bot turn when appropriate.
+        """Asynchronously monitor events and trigger user end of turn when appropriate.
 
         If we have not received a transcription in the specified amount of time
         (and we initially received one) and the turn analyzer said the turn is
-        done, then the bot is ready to speak.
+        done, then the user is done speaking.
 
         """
         while True:
@@ -151,5 +162,8 @@ class TurnAnalyzerBotTurnStartStrategy(BaseBotTurnStartStrategy):
                 await asyncio.wait_for(self._event.wait(), timeout=self._timeout)
                 self._event.clear()
             except asyncio.TimeoutError:
-                if self._text:
-                    await self.trigger_bot_turn_started()
+                await self._maybe_trigger_user_turn_stopped()
+
+    async def _maybe_trigger_user_turn_stopped(self):
+        if self._text and self._turn_complete:
+            await self.trigger_user_turn_stopped()

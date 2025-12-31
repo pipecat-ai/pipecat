@@ -46,8 +46,8 @@ from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.turns.turn_start_strategies import TurnStartStrategies
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
@@ -106,6 +106,10 @@ class PipelineParams(BaseModel):
 
     Parameters:
         allow_interruptions: Whether to allow pipeline interruptions.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         enable_heartbeats: Whether to enable heartbeat monitoring.
@@ -115,9 +119,8 @@ class PipelineParams(BaseModel):
         interruption_strategies: [deprecated] Strategies for bot interruption behavior.
 
             .. deprecated:: 0.0.99
-                Use the `turn_start_strategies` instead.
+                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
 
-        turn_start_strategies: User and bot turn start strategies.
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
 
             .. deprecated:: 0.0.58
@@ -138,7 +141,6 @@ class PipelineParams(BaseModel):
     enable_usage_metrics: bool = False
     heartbeats_period_secs: float = HEARTBEAT_SECS
     interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
-    turn_start_strategies: Optional[TurnStartStrategies] = None
     observers: List[BaseObserver] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
@@ -285,10 +287,6 @@ class PipelineTask(BasePipelineTask):
                 additional_span_attributes=self._additional_span_attributes,
             )
             observers.append(self._turn_trace_observer)
-
-        # Initialize default user and bot turn start strategies.
-        if not self._params.turn_start_strategies:
-            self._params.turn_start_strategies = TurnStartStrategies()
 
         self._finished = False
         self._cancelled = False
@@ -706,9 +704,8 @@ class PipelineTask(BasePipelineTask):
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             interruption_strategies=self._params.interruption_strategies,
-            turn_start_strategies=self._params.turn_start_strategies,
         )
-        start_frame.metadata = self._params.start_metadata
+        start_frame.metadata = self._create_start_metadata()
         await self._pipeline.queue_frame(start_frame)
 
         # Wait for the pipeline to be started before pushing any other frame.
@@ -864,6 +861,7 @@ class PipelineTask(BasePipelineTask):
         return True
 
     async def _load_observer_files(self):
+        """Dynamically load observers from files listed in PIPECAT_OBSERVER_FILES."""
         observer_files = os.environ.get("PIPECAT_OBSERVER_FILES", "").split(":")
         for f in observer_files:
             try:
@@ -889,3 +887,26 @@ class PipelineTask(BasePipelineTask):
         tasks = [t.get_name() for t in self._task_manager.current_tasks()]
         if tasks:
             logger.warning(f"Dangling tasks detected: {tasks}")
+
+    def _create_start_metadata(self) -> Dict[str, Any]:
+        """Build and return start metadata including user-provided values."""
+        start_metadata = {}
+
+        # NOTE(aleix): Remove when OpenAILLMContext/LLMUserContextAggregator is removed.
+        if self._find_deprecated_openaillmcontext(self._pipeline):
+            start_metadata["deprecated_openaillmcontext"] = True
+
+        # Update with user provided metadata.
+        start_metadata.update(self._params.start_metadata)
+
+        return start_metadata
+
+    def _find_deprecated_openaillmcontext(self, processor: FrameProcessor) -> bool:
+        """Check whether there is a deprecated LLMUserContextAggregator in the pipeline."""
+        if isinstance(processor, LLMUserContextAggregator):
+            return True
+
+        for p in processor.processors:
+            if self._find_deprecated_openaillmcontext(p):
+                return True
+        return False

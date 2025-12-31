@@ -498,17 +498,19 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
-            if not self._transport.interruptions_allowed:
+            if not self._transport._allow_interruptions:
                 return
 
             # Cancel tasks.
             await self._cancel_audio_task()
             await self._cancel_clock_task()
             await self._cancel_video_task()
+
             # Create tasks.
             self._create_video_task()
             self._create_clock_task()
             self._create_audio_task()
+
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
 

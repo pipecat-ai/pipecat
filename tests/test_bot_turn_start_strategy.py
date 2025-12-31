@@ -10,29 +10,29 @@ import unittest
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.bot.transcription_bot_turn_start_strategy import (
-    TranscriptionBotTurnStartStrategy,
-)
+from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, TranscriptionUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
 
 
-class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
+class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
         self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
     async def test_ste(self):
-        strategy = TranscriptionBotTurnStartStrategy()
+        strategy = TranscriptionUserTurnStopStrategy()
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -52,12 +52,12 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_site(self):
-        strategy = TranscriptionBotTurnStartStrategy()
+        strategy = TranscriptionUserTurnStopStrategy()
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -83,12 +83,12 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_st1iest2e(self):
-        strategy = TranscriptionBotTurnStartStrategy()
+        strategy = TranscriptionUserTurnStopStrategy()
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -129,13 +129,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_siet(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -163,13 +163,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_sieit(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -205,13 +205,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_set(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -235,13 +235,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_seit(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -271,13 +271,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_st1et2(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -309,13 +309,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_set1t2(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -343,13 +343,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_siet1it2(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -388,13 +388,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_t(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -408,13 +408,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_it(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -433,13 +433,13 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_sie_delay_it(self):
-        strategy = TranscriptionBotTurnStartStrategy(timeout=AGGREGATION_TIMEOUT)
+        strategy = TranscriptionUserTurnStopStrategy(timeout=AGGREGATION_TIMEOUT)
         await strategy.setup(self.task_manager)
 
         should_start = None
 
-        @strategy.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(strategy):
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
             nonlocal should_start
             should_start = True
 
@@ -473,4 +473,36 @@ class TestTranscriptionBotTurnStartStrategy(unittest.IsolatedAsyncioTestCase):
         # Transcription comes after user stopped speaking, we need to wait for
         # at least the aggregation timeout.
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+
+
+class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
+    async def test_external_strategy(self):
+        strategy = ExternalUserTurnStopStrategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStoppedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStartedSpeakingFrame())
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(UserStoppedSpeakingFrame())
         self.assertTrue(should_start)

@@ -38,9 +38,8 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
-    from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
+    from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
-    from pipecat.turns.turn_start_strategies import TurnStartStrategies
 
 
 class DeprecatedKeypadEntry:
@@ -514,9 +513,15 @@ class OpenAILLMContextAssistantTimestampFrame(DataFrame):
             )
 
 
-# A more universal (LLM-agnostic) name for
-# OpenAILLMContextAssistantTimestampFrame, matching LLMContext
-LLMContextAssistantTimestampFrame = OpenAILLMContextAssistantTimestampFrame
+@dataclass
+class LLMContextAssistantTimestampFrame(DataFrame):
+    """Timestamp information for assistant messages in LLM context.
+
+    Parameters:
+        timestamp: Timestamp when the assistant message was created.
+    """
+
+    timestamp: str
 
 
 @dataclass
@@ -946,10 +951,18 @@ class StartFrame(SystemFrame):
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         allow_interruptions: Whether to allow user interruptions.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.
+
         enable_metrics: Whether to enable performance metrics collection.
         enable_tracing: Whether to enable OpenTelemetry tracing.
         enable_usage_metrics: Whether to enable usage metrics collection.
         interruption_strategies: List of interruption handling strategies.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
     """
 
@@ -960,7 +973,6 @@ class StartFrame(SystemFrame):
     enable_tracing: bool = False
     enable_usage_metrics: bool = False
     interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
-    turn_start_strategies: Optional["TurnStartStrategies"] = None
     report_only_initial_ttfb: bool = False
 
 
