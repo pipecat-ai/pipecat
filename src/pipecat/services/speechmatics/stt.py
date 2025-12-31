@@ -604,11 +604,11 @@ class SpeechmaticsSTTService(STTService):
             message: the message payload.
         """
         logger.debug(f"{self} StartOfTurn received")
-        await self.push_interruption_task_frame_and_wait()
         # await self.start_processing_metrics()
 
         # Emit VAD events if enabled
         if self._enable_vad:
+            await self.push_interruption_task_frame_and_wait()
             logger.debug(f"{self} sending VADUserStartedSpeakingFrame")
             await self.broadcast_frame(VADUserStartedSpeakingFrame)
 
