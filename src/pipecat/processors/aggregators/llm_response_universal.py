@@ -483,7 +483,7 @@ class LLMUserAggregator(LLMContextAggregator):
         )
 
         await self._cleanup_user_turn_strategies()
-        self._turn_strategies = ExternalUserTurnStrategies()
+        self._user_turn_strategies = ExternalUserTurnStrategies()
         await self._setup_user_turn_strategies()
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
