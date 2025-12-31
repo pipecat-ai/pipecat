@@ -108,7 +108,7 @@ class PipelineParams(BaseModel):
         allow_interruptions: Whether to allow pipeline interruptions.
 
             .. deprecated:: 0.0.99
-                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+                Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
 
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
@@ -119,7 +119,7 @@ class PipelineParams(BaseModel):
         interruption_strategies: [deprecated] Strategies for bot interruption behavior.
 
             .. deprecated:: 0.0.99
-                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+                Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
 
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
 

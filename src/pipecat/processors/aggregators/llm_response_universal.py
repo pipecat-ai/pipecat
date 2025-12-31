@@ -463,9 +463,9 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         logger.warning(
-            f"{self}: `turn_analyzer` in base input transport is deprecated and "
-            "might result in unexpected behavior. Use `LLMUserAggregator`'s new `turn_start_strategies` "
-            "parameter with `TurnAnalyzerUserTurnStopStrategy` instead:\n"
+            f"{self}: `turn_analyzer` in base input transport is deprecated. "
+            "Use `LLMUserAggregator`'s new `user_turn_strategies` parameter with "
+            "`TurnAnalyzerUserTurnStopStrategy` instead:\n"
             "\n"
             "    context_aggregator = LLMContextAggregatorPair(\n"
             "        context,\n"
