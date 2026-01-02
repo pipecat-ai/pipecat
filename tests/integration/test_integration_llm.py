@@ -22,9 +22,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.tests.utils import run_test
-
-from mock_llm_service import MockLLMService
+from pipecat.tests import MockLLMService, run_test
 
 
 @pytest.mark.asyncio

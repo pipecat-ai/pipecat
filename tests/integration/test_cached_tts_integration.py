@@ -19,7 +19,7 @@ import os
 
 import pytest
 import pytest_asyncio
-from mock_llm_service import MockLLMService
+from pipecat.tests import MockLLMService, run_test
 
 from pipecat.frames.frames import (
     EndFrame,

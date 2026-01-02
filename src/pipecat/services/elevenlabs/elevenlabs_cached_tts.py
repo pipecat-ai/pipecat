@@ -204,8 +204,7 @@ class ElevenLabsCachedTTSService(ElevenLabsTTSService):
                 msg["voice_settings"] = self._voice_settings
             if self._pronunciation_dictionary_locators:
                 msg["pronunciation_dictionary_locators"] = [
-                    locator.model_dump()
-                    for locator in self._pronunciation_dictionary_locators
+                    locator.model_dump() for locator in self._pronunciation_dictionary_locators
                 ]
             await self._websocket.send(json.dumps(msg))
             logger.trace(f"Initialized WebSocket context {self._context_id}")
@@ -238,8 +237,7 @@ class ElevenLabsCachedTTSService(ElevenLabsTTSService):
         # Add word timestamps with cumulative time offset for proper sequencing
         if cached_data.word_timestamps:
             offset_timestamps = [
-                (word, time + self._cumulative_time)
-                for word, time in cached_data.word_timestamps
+                (word, time + self._cumulative_time) for word, time in cached_data.word_timestamps
             ]
             await self.add_word_timestamps(offset_timestamps)
 

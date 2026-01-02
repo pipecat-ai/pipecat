@@ -25,8 +25,7 @@ from pipecat.tests.utils import QueuedFrameProcessor
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
-from mock_llm_service import MockLLMService
-from mock_tts_service import PredictableMockTTSService
+from pipecat.tests import MockLLMService, PredictableMockTTSService, run_test
 
 
 async def aggregate_llm_output_text(llm_text: str) -> list[str]:
