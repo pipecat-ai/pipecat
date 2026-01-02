@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Base turn start strategy for determining when the bot should start speaking."""
+"""Base user turn stop strategy for determining when the user stopped speaking."""
 
 from dataclasses import dataclass
 from typing import Optional, Type
@@ -16,41 +16,41 @@ from pipecat.utils.base_object import BaseObject
 
 
 @dataclass
-class BotTurnStartedParams:
-    """Parameters emitted when a bot turn starts.
+class UserTurnStoppedParams:
+    """Parameters emitted when a user turn stops.
 
-    These parameters are passed to the `on_bot_turn_started` event and provide
-    contextual information about how the bot turn should be handled by the user
-    aggregator.
+    These parameters are passed to the `on_user_turn_stopped` event and provide
+    contextual information about how the end of user turn should be handled by
+    the user aggregator.
 
     Attributes:
         enable_user_speaking_frames: Whether the user aggregator should emit
-            frames indicating user speaking state (e.g., user stopped speaking)
-            during the bot's turn. This is typically enabled by default, but may
-            be disabled when another component (such as an STT service) is already
-            responsible for generating user speaking frames.
+            frames indicating user speaking state (e.g., user stopped speaking).
+            This is typically enabled by default, but may be disabled when another
+            component (such as an STT service) is already responsible for
+            generating user speaking frames.
 
     """
 
     enable_user_speaking_frames: bool
 
 
-class BaseBotTurnStartStrategy(BaseObject):
-    """Base class for strategies that determine when the bot should start speaking.
+class BaseUserTurnStopStrategy(BaseObject):
+    """Base class for strategies that determine when the user stops speaking.
 
-    Subclasses should implement logic to detect when the bot should start
+    Subclasses should implement logic to detect when the user stops
     speaking. This could be based on analyzing incoming frames (such as
     transcriptions), conversation state, or other heuristics.
 
-    Events triggered by bot turn start strategies:
+    Events triggered by strategies:
 
       - `on_push_frame`: Indicates the strategy wants to push a frame.
-      - `on_bot_turn_started`: Signals that the bot should start speaking.
+      - `on_user_turn_stopped`: Signals that the user stopped speaking.
 
     """
 
     def __init__(self, *, enable_user_speaking_frames: bool = True, **kwargs):
-        """Initialize the base bot turn start strategy.
+        """Initialize the base user turn stop strategy.
 
         Args:
             enable_user_speaking_frames: If True, the aggregator will emit frames
@@ -64,13 +64,13 @@ class BaseBotTurnStartStrategy(BaseObject):
         self._task_manager: Optional[BaseTaskManager] = None
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
-        self._register_event_handler("on_bot_turn_started", sync=True)
+        self._register_event_handler("on_user_turn_stopped", sync=True)
 
     @property
     def task_manager(self) -> BaseTaskManager:
         """Returns the configured task manager."""
         if not self._task_manager:
-            raise RuntimeError(f"{self} bot turn start strategy was not properly setup")
+            raise RuntimeError(f"{self} user turn stop strategy was not properly setup")
         return self._task_manager
 
     async def setup(self, task_manager: BaseTaskManager):
@@ -90,10 +90,10 @@ class BaseBotTurnStartStrategy(BaseObject):
         pass
 
     async def process_frame(self, frame: Frame):
-        """Process an incoming frame to decide whether the bot should speak.
+        """Process an incoming frame to decide whether the user stopped speaking.
 
         Subclasses should override this to implement logic that decides whether
-        the bot turn has started.
+        the user has stopped speaking.
 
         Args:
             frame: The frame to be analyzed.
@@ -118,9 +118,9 @@ class BaseBotTurnStartStrategy(BaseObject):
         """
         await self._call_event_handler("on_broadcast_frame", frame_cls, **kwargs)
 
-    async def trigger_bot_turn_started(self):
-        """Trigger the `on_bot_turn_started` event."""
+    async def trigger_user_turn_stopped(self):
+        """Trigger the `on_user_turn_stopped` event."""
         await self._call_event_handler(
-            "on_bot_turn_started",
-            BotTurnStartedParams(enable_user_speaking_frames=self._enable_user_speaking_frames),
+            "on_user_turn_stopped",
+            UserTurnStoppedParams(enable_user_speaking_frames=self._enable_user_speaking_frames),
         )

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Transcription time-based bot turn start strategy."""
+"""User turn stop strategy triggered by externally emitted frames."""
 
 import asyncio
 from typing import Optional
@@ -13,33 +13,34 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
-    VADUserStoppedSpeakingFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
-from pipecat.turns.bot.base_bot_turn_start_strategy import BaseBotTurnStartStrategy
+from pipecat.turns.user_stop.base_user_turn_stop_strategy import BaseUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
-class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
-    """Bot turn start strategy based on transcriptions.
+class ExternalUserTurnStopStrategy(BaseUserTurnStopStrategy):
+    """User turn stop strategy controlled by an external processor.
 
-    This strategy assumes the bot should start speaking once a transcription
-    has been received and the user is not actively speaking. It handles
-    multiple or delayed transcription frames gracefully.
+    This strategy does not determine when a user turn ends on its own, it relies
+    on a different processor in the pipeline which is responsible for emitting
+    `UserStoppedSpeakingFrame` frames.
+
     """
 
     def __init__(self, *, timeout: float = 0.5, **kwargs):
-        """Initialize the transcription-based bot turn start strategy.
+        """Initialize the external user turn stop strategy.
 
         Args:
             timeout: A short delay used internally to handle consecutive or
                 slightly delayed transcriptions.
             **kwargs: Additional keyword arguments.
         """
-        super().__init__(**kwargs)
+        super().__init__(enable_user_speaking_frames=False, **kwargs)
         self._timeout = timeout
         self._text = ""
-        self._vad_user_speaking = False
+        self._user_speaking = False
         self._seen_interim_results = False
         self._event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
@@ -48,7 +49,7 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
         """Reset the strategy to its initial state."""
         await super().reset()
         self._text = ""
-        self._vad_user_speaking = False
+        self._user_speaking = False
         self._seen_interim_results = False
         self._event.clear()
 
@@ -71,30 +72,30 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
     async def process_frame(self, frame: Frame):
         """Process an incoming frame to update strategy state.
 
-        Updates internal transcription text and VAD state. The bot turn will be
-        triggered when appropriate based on the collected frames.
+        Updates internal transcription text and VAD state. The user end turn
+        will be triggered when appropriate based on the collected frames.
 
         Args:
             frame: The frame to be analyzed.
 
         """
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._handle_vad_user_started_speaking(frame)
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            await self._handle_vad_user_stopped_speaking(frame)
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, InterimTranscriptionFrame):
             await self._handle_interim_transcription(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
 
-    async def _handle_vad_user_started_speaking(self, _: VADUserStartedSpeakingFrame):
-        """Handle when the VAD indicates the user is speaking."""
-        self._vad_user_speaking = True
+    async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
+        """Handle when the external service indicates the user is speaking."""
+        self._user_speaking = True
 
-    async def _handle_vad_user_stopped_speaking(self, _: VADUserStoppedSpeakingFrame):
-        """Handle when the VAD indicates the user has stopped speaking."""
-        self._vad_user_speaking = False
-        await self._maybe_trigger_bot_turn_started()
+    async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
+        """Handle when the external service indicates the user has stopped speaking."""
+        self._user_speaking = False
+        await self._maybe_trigger_user_turn_stopped()
 
     async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
         self._seen_interim_results = True
@@ -108,10 +109,10 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
         self._event.set()
 
     async def _task_handler(self):
-        """Asynchronously monitor transcriptions and trigger bot turn when ready.
+        """Asynchronously monitor transcriptions and trigger user end turn when ready.
 
         If transcription text exists and the user is not currently speaking,
-        triggers the bot turn. Handles multiple or delayed transcriptions
+        triggers the user end turn. Handles multiple or delayed transcriptions
         gracefully.
 
         """
@@ -120,8 +121,8 @@ class TranscriptionBotTurnStartStrategy(BaseBotTurnStartStrategy):
                 await asyncio.wait_for(self._event.wait(), timeout=self._timeout)
                 self._event.clear()
             except asyncio.TimeoutError:
-                await self._maybe_trigger_bot_turn_started()
+                await self._maybe_trigger_user_turn_stopped()
 
-    async def _maybe_trigger_bot_turn_started(self):
-        if not self._vad_user_speaking and not self._seen_interim_results and self._text:
-            await self.trigger_bot_turn_started()
+    async def _maybe_trigger_user_turn_stopped(self):
+        if not self._user_speaking and not self._seen_interim_results and self._text:
+            await self.trigger_user_turn_stopped()

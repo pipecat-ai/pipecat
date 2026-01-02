@@ -961,7 +961,7 @@ class StartFrame(SystemFrame):
         interruption_strategies: List of interruption handling strategies.
 
             .. deprecated:: 0.0.99
-                Use  `LLMUserAggregator`'s new `turn_start_strategies` parameter instead.
+                Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
 
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
     """

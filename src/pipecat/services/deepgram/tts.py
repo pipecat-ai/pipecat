@@ -51,6 +51,8 @@ class DeepgramTTSService(WebsocketTTSService):
     message for conversational AI use cases.
     """
 
+    SUPPORTED_ENCODINGS = ("linear16", "mulaw", "alaw")
+
     def __init__(
         self,
         *,
@@ -68,9 +70,17 @@ class DeepgramTTSService(WebsocketTTSService):
             voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
             base_url: WebSocket base URL for Deepgram API. Defaults to "wss://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
-            encoding: Audio encoding format. Defaults to "linear16".
+            encoding: Audio encoding format. Defaults to "linear16". Must be one of SUPPORTED_ENCODINGS.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService class.
+
+        Raises:
+            ValueError: If encoding is not in SUPPORTED_ENCODINGS.
         """
+        if encoding.lower() not in self.SUPPORTED_ENCODINGS:
+            raise ValueError(
+                f"Unsupported encoding '{encoding}'. Must be one of {', '.join(self.SUPPORTED_ENCODINGS)} for WebSocket TTS."
+            )
+
         super().__init__(
             sample_rate=sample_rate,
             pause_frame_processing=True,
