@@ -74,6 +74,7 @@ class OpenAILLMService(BaseOpenAILLMService):
         *,
         model: str = "gpt-4.1",
         params: Optional[BaseOpenAILLMService.InputParams] = None,
+        include_reasoning_details: bool = False,
         **kwargs,
     ):
         """Initialize OpenAI LLM service.
@@ -83,7 +84,12 @@ class OpenAILLMService(BaseOpenAILLMService):
             params: Input parameters for model configuration.
             **kwargs: Additional arguments passed to the parent BaseOpenAILLMService.
         """
-        super().__init__(model=model, params=params, **kwargs)
+        super().__init__(
+            model=model,
+            params=params,
+            include_reasoning_details=include_reasoning_details,
+            **kwargs,
+        )
 
     def create_context_aggregator(
         self,
@@ -161,21 +167,18 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         Args:
             frame: Frame containing function call progress information.
         """
-        self._context.add_message(
-            {
-                "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id": frame.tool_call_id,
-                        "function": {
-                            "name": frame.function_name,
-                            "arguments": json.dumps(frame.arguments),
-                        },
-                        "type": "function",
-                    }
-                ],
-            }
-        )
+        details = self._context.get_reasoning_details(frame.tool_call_id)
+        tool_call = {
+            "id": frame.tool_call_id,
+            "function": {
+                "name": frame.function_name,
+                "arguments": json.dumps(frame.arguments),
+            },
+            "type": "function",
+        }
+        if details:
+            tool_call["reasoning_details"] = details
+        self._context.add_message({"role": "assistant", "tool_calls": [tool_call]})
         self._context.add_message(
             {
                 "role": "tool",
@@ -200,6 +203,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             await self._update_function_call_result(
                 frame.function_name, frame.tool_call_id, "COMPLETED"
             )
+        self._context.clear_reasoning_details(frame.tool_call_id)
 
     async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
         """Handle a cancelled function call.
@@ -212,6 +216,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         await self._update_function_call_result(
             frame.function_name, frame.tool_call_id, "CANCELLED"
         )
+        self._context.clear_reasoning_details(frame.tool_call_id)
 
     async def _update_function_call_result(
         self, function_name: str, tool_call_id: str, result: Any
@@ -242,3 +247,4 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             image=frame.image,
             text=frame.request.context,
         )
+        self._context.clear_reasoning_details(frame.request.tool_call_id)

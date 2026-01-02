@@ -45,6 +45,7 @@ class OpenRouterLLMService(OpenAILLMService):
             api_key=api_key,
             base_url=base_url,
             model=model,
+            include_reasoning_details=True,
             **kwargs,
         )
 
