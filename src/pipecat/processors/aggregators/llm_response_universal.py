@@ -783,6 +783,20 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
         logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
+        tool_calls = []
+        for fc in frame.function_calls:
+            tool_calls.append(
+                {
+                    "id": fc.tool_call_id,
+                    "function": {
+                        "name": fc.function_name,
+                        "arguments": json.dumps(fc.arguments),
+                    },
+                    "type": "function",
+                }
+            )
+        self._context.add_message({"role": "assistant", "tool_calls": tool_calls})
+
         for function_call in frame.function_calls:
             self._function_calls_in_progress[function_call.tool_call_id] = None
 
@@ -791,22 +805,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
 
-        # Update context with the in-progress function call
-        self._context.add_message(
-            {
-                "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id": frame.tool_call_id,
-                        "function": {
-                            "name": frame.function_name,
-                            "arguments": json.dumps(frame.arguments),
-                        },
-                        "type": "function",
-                    }
-                ],
-            }
-        )
         self._context.add_message(
             {
                 "role": "tool",
