@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 if is_tracing_available():
     from opentelemetry import trace
+    from opentelemetry.context import Context
     from opentelemetry.trace import Span, SpanContext
 
 
@@ -217,12 +218,25 @@ class TurnTraceObserver(BaseObserver):
 
         self._conversation_id = conversation_id
 
-        # Create a new span for this conversation
-        self._conversation_span = self._tracer.start_span("conversation")
+        # Create a new span for this conversation.
+        # Use an empty Context() to ensure this is always a ROOT span (no parent).
+        # This is critical because if there's an active span in the current context
+        # (e.g., from an HTTP request handler), the conversation span would become
+        # a child of that span, and the langfuse.trace.public attribute wouldn't
+        # be on the actual root span.
+        self._conversation_span = self._tracer.start_span("conversation", context=Context())
 
         # Set span attributes
         self._conversation_span.set_attribute("conversation.id", conversation_id)
         self._conversation_span.set_attribute("conversation.type", "voice")
+
+        # Make trace public so it can be shared via URL without authentication.
+        # This is also set on child service spans (LLM, TTS, STT) in service_decorators.py
+        # because BatchSpanProcessor exports spans when they END, so child spans may arrive
+        # at Langfuse before the parent conversation span. Whichever span arrives first
+        # creates the trace, so all spans need this attribute.
+        self._conversation_span.set_attribute("langfuse.trace.public", True)
+
         # Set custom otel attributes if provided
         for k, v in (self._additional_span_attributes or {}).items():
             self._conversation_span.set_attribute(k, v)
@@ -360,3 +374,42 @@ class TurnTraceObserver(BaseObserver):
             return None
 
         return self._trace_context_map.get(turn_number)
+
+    def get_trace_id(self) -> Optional[str]:
+        """Get the trace ID for the current conversation.
+
+        Returns:
+            The trace ID as a 32-character lowercase hex string, or None if unavailable.
+        """
+        if not is_tracing_available() or not self._conversation_span:
+            return None
+
+        try:
+            span_context = self._conversation_span.get_span_context()
+            # Format as 32-character lowercase hex string (Langfuse format)
+            return format(span_context.trace_id, "032x")
+        except Exception as e:
+            logger.warning(f"Failed to get trace ID: {e}")
+            return None
+
+    def get_trace_url(self) -> Optional[str]:
+        """Get the Langfuse URL for the current conversation trace.
+
+        This URL can be used to view the trace in the Langfuse UI.
+        The trace is public and can be shared without authentication.
+
+        Returns:
+            The Langfuse URL for the trace, or None if unavailable.
+        """
+        trace_id = self.get_trace_id()
+        if trace_id is None:
+            return None
+
+        try:
+            from langfuse import get_client
+
+            langfuse = get_client()
+            return langfuse.get_trace_url(trace_id=trace_id)
+        except Exception as e:
+            logger.warning(f"Failed to get trace URL: {e}")
+            return None

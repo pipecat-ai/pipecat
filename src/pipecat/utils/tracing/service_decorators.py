@@ -192,6 +192,9 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(span_name, context=parent_context) as span:
                 try:
+                    # Enable sharing public traces
+                    span.set_attribute("langfuse.trace.public", True)
+
                     add_tts_span_attributes(
                         span=span,
                         service_name=service_class_name,
@@ -304,6 +307,9 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     span_name, context=parent_context
                 ) as current_span:
                     try:
+                        # Enable sharing public traces
+                        current_span.set_attribute("langfuse.trace.public", True)
+
                         # Get TTFB metric if available
                         ttfb: Optional[float] = getattr(
                             getattr(self, "_metrics", None), "ttfb", None
@@ -407,6 +413,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     span_name, context=parent_context
                 ) as current_span:
                     try:
+                        # Enable sharing public traces
+                        current_span.set_attribute("langfuse.trace.public", True)
+
                         # Store original method and output aggregator
                         original_push_frame = self.push_frame
                         # Accumulator for plain text tokens streamed by the LLM
@@ -654,6 +663,9 @@ def traced_gemini_live(operation: str) -> Callable:
                     span_name, context=parent_context
                 ) as current_span:
                     try:
+                        # Enable sharing public traces
+                        current_span.set_attribute("langfuse.trace.public", True)
+
                         # Base service attributes
                         model_name = getattr(
                             self, "model_name", getattr(self, "_model_name", "unknown")
@@ -962,6 +974,9 @@ def traced_openai_realtime(operation: str) -> Callable:
                     span_name, context=parent_context
                 ) as current_span:
                     try:
+                        # Enable sharing public traces
+                        current_span.set_attribute("langfuse.trace.public", True)
+
                         # Base service attributes
                         model_name = getattr(
                             self, "model_name", getattr(self, "_model_name", "unknown")
