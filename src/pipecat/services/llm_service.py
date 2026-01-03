@@ -595,10 +595,14 @@ class LLMService(AIService):
             cancel_on_interruption=item.cancel_on_interruption,
         )
 
+        callback_executed = False
+
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
         async def function_call_result_callback(
             result: Any, *, properties: Optional[FunctionCallResultProperties] = None
         ):
+            nonlocal callback_executed
+            callback_executed = True
             await self.broadcast_frame(
                 FunctionCallResultFrame,
                 function_name=runner_item.function_name,
@@ -609,40 +613,48 @@ class LLMService(AIService):
                 properties=properties,
             )
 
-        if isinstance(item.handler, DirectFunctionWrapper):
-            # Handler is a DirectFunctionWrapper
-            await item.handler.invoke(
-                args=runner_item.arguments,
-                params=FunctionCallParams(
-                    function_name=runner_item.function_name,
-                    tool_call_id=runner_item.tool_call_id,
-                    arguments=runner_item.arguments,
-                    llm=self,
-                    context=runner_item.context,
-                    result_callback=function_call_result_callback,
-                ),
-            )
-        else:
-            # Handler is a FunctionCallHandler
-            if item.handler_deprecated:
-                await item.handler(
-                    runner_item.function_name,
-                    runner_item.tool_call_id,
-                    runner_item.arguments,
-                    self,
-                    runner_item.context,
-                    function_call_result_callback,
+        try:
+            if isinstance(item.handler, DirectFunctionWrapper):
+                # Handler is a DirectFunctionWrapper
+                await item.handler.invoke(
+                    args=runner_item.arguments,
+                    params=FunctionCallParams(
+                        function_name=runner_item.function_name,
+                        tool_call_id=runner_item.tool_call_id,
+                        arguments=runner_item.arguments,
+                        llm=self,
+                        context=runner_item.context,
+                        result_callback=function_call_result_callback,
+                    ),
                 )
             else:
-                params = FunctionCallParams(
-                    function_name=runner_item.function_name,
-                    tool_call_id=runner_item.tool_call_id,
-                    arguments=runner_item.arguments,
-                    llm=self,
-                    context=runner_item.context,
-                    result_callback=function_call_result_callback,
-                )
-                await item.handler(params)
+                # Handler is a FunctionCallHandler
+                if item.handler_deprecated:
+                    await item.handler(
+                        runner_item.function_name,
+                        runner_item.tool_call_id,
+                        runner_item.arguments,
+                        self,
+                        runner_item.context,
+                        function_call_result_callback,
+                    )
+                else:
+                    params = FunctionCallParams(
+                        function_name=runner_item.function_name,
+                        tool_call_id=runner_item.tool_call_id,
+                        arguments=runner_item.arguments,
+                        llm=self,
+                        context=runner_item.context,
+                        result_callback=function_call_result_callback,
+                    )
+                    await item.handler(params)
+        except Exception as e:
+            error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
+            logger.error(f"{self} {error_message}")
+            await self.push_error(error_msg=error_message, exception=e, fatal=False)
+        finally:
+            if not callback_executed:
+                await function_call_result_callback(None)
 
     async def _cancel_function_call(self, function_name: Optional[str]):
         cancelled_tasks = set()
