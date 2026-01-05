@@ -78,15 +78,14 @@ class HathoraTTSService(TTSService):
         """
         super().__init__(
             **kwargs,
+            voice_id=voice_id,
         )
         self._model = model
-        self._voice = voice
         self._speed = speed
         self._model_config = model_config
         self._base_url = base_url
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
 
-    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Run text-to-speech synthesis on the provided text.
 
