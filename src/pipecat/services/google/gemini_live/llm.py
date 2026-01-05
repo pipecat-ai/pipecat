@@ -975,7 +975,22 @@ class GeminiLiveLLMService(LLMService):
                 logger.warning(
                     "Tools provided both at init time and in context; using context-provided value."
                 )
-            if system_instruction or tools:
+            # if system_instruction or tools:
+            #     await self._reconnect()
+
+            should_reconnect = False
+            
+            if system_instruction and system_instruction != self._system_instruction_from_init:
+                should_reconnect = True
+            
+            if tools:
+                # Check if tools have changed by comparing the underlying ToolsSchema from context
+                # against the ToolsSchema provided at initialization.
+                context_tools = self._context.tools if self._context else None
+                if context_tools != self._tools_from_init:
+                    should_reconnect = True
+
+            if should_reconnect:
                 await self._reconnect()
 
             # Initialize our bookkeeping of already-completed tool calls in
