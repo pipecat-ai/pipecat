@@ -417,6 +417,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 Only used when commit_strategy is VAD. None uses ElevenLabs default.
             include_timestamps: Whether to include word-level timestamps in transcripts.
             enable_logging: Whether to enable logging on ElevenLabs' side.
+            include_language_detection: Whether to include language detection in transcripts.
         """
 
         language_code: Optional[str] = None
@@ -642,7 +643,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 params.append(f"enable_logging={str(self._params.enable_logging).lower()}")
 
             if self._params.include_language_detection:
-                params.append(f"include_language_detection={str(self._params.include_language_detection).lower()}")
+                params.append(
+                    f"include_language_detection={str(self._params.include_language_detection).lower()}"
+                )
 
             # Add VAD parameters if using VAD commit strategy and values are specified
             if self._params.commit_strategy == CommitStrategy.VAD:
