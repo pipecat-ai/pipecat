@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
+from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
@@ -287,13 +288,19 @@ class PipelineTask(BasePipelineTask):
             observers = self._params.observers
         observers = observers or []
         self._turn_tracking_observer: Optional[TurnTrackingObserver] = None
+        self._user_bot_latency_observer: Optional[UserBotLatencyObserver] = None
         self._turn_trace_observer: Optional[TurnTraceObserver] = None
         if self._enable_turn_tracking:
             self._turn_tracking_observer = TurnTrackingObserver()
             observers.append(self._turn_tracking_observer)
         if self._enable_tracing and self._turn_tracking_observer:
+            # Create latency observer for tracing
+            self._user_bot_latency_observer = UserBotLatencyObserver()
+            observers.append(self._user_bot_latency_observer)
+            # Create turn trace observer with latency tracking
             self._turn_trace_observer = TurnTraceObserver(
                 self._turn_tracking_observer,
+                latency_tracker=self._user_bot_latency_observer,
                 conversation_id=self._conversation_id,
                 additional_span_attributes=self._additional_span_attributes,
             )

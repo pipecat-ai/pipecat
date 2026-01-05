@@ -15,6 +15,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.user_bot_latency_log_observer import UserBotLatencyLogObserver
+from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -96,6 +97,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         ]
     )
 
+    # Create latency tracking observers
+    latency_tracker = UserBotLatencyObserver()
+    latency_log_observer = UserBotLatencyLogObserver(latency_tracker)
+
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
@@ -103,7 +108,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        observers=[UserBotLatencyLogObserver()],
+        observers=[latency_tracker, latency_log_observer],
     )
 
     turn_observer = task.turn_tracking_observer
