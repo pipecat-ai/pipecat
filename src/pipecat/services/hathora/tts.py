@@ -12,6 +12,7 @@ import wave
 from typing import AsyncGenerator, Optional, Tuple
 
 import aiohttp
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -50,15 +51,28 @@ class HathoraTTSService(TTSService):
     [Documentation](https://models.hathora.dev)
     """
 
+    class InputParams(BaseModel):
+        """Optional input parameters for Hathora TTS configuration.
+
+        Parameters:
+            speed: Speech speed multiplier (if supported by model).
+            model_config: Some models support additional config, refer to
+                [docs](https://models.hathora.dev) for each model to see
+                what is supported.
+            base_url: Base API URL for the Hathora TTS service.
+        """
+
+        speed: Optional[float] = None
+        model_config: Optional[list[ConfigOption]] = None
+        base_url: str = "https://api.models.hathora.dev/inference/v1/tts",
+
     def __init__(
         self,
         *,
         model: str,
         voice_id: Optional[str] = None,
-        speed: Optional[float] = None,
-        model_config: Optional[list[ConfigOption]] = None,
-        base_url: str = "https://api.models.hathora.dev/inference/v1/tts",
         api_key: Optional[str] = None,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initialize the Hathora TTS service.
@@ -66,26 +80,22 @@ class HathoraTTSService(TTSService):
         Args:
             model: Model to use; find available models
                 [here](https://models.hathora.dev).
-            voice: Voice to use for synthesis (if supported by model).
-            speed: Speech speed multiplier (if supported by model).
-            model_config: Some models support additional config, refer to
-                [docs](https://models.hathora.dev) for each model to see
-                what is supported.
-            base_url: Base API URL for the Hathora TTS service.
+            voice_id: Voice to use for synthesis (if supported by model).
             api_key: API key for authentication with the Hathora service;
                 provision one [here](https://models.hathora.dev/tokens).
+            params: Configuration parameters.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(
             **kwargs,
-            voice_id=voice_id,
         )
         self._model = model
-        self._speed = speed
-        self._model_config = model_config
-        self._base_url = base_url
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
+        self._params = params or HathoraTTSService.InputParams()
 
+        self.set_voice(voice_id)
+
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Run text-to-speech synthesis on the provided text.
 
@@ -99,17 +109,17 @@ class HathoraTTSService(TTSService):
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
-            url = f"{self._base_url}"
+            url = f"{self._params.base_url}"
 
             payload = {"model": self._model, "text": text}
 
-            if self._voice is not None:
-                payload["voice"] = self._voice
-            if self._speed is not None:
-                payload["speed"] = self._speed
-            if self._model_config is not None:
+            if self._voice_id is not None:
+                payload["voice"] = self._voice_id
+            if self._params.speed is not None:
+                payload["speed"] = self._params.speed
+            if self._params.model_config is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value} for option in self._model_config
+                    {"name": option.name, "value": option.value} for option in self._params.model_config
                 ]
 
             yield TTSStartedFrame()

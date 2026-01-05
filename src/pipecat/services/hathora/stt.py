@@ -11,6 +11,7 @@ import os
 from typing import AsyncGenerator, Optional
 
 import aiohttp
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -31,14 +32,27 @@ class HathoraSTTService(SegmentedSTTService):
     [Documentation](https://models.hathora.dev)
     """
 
+    class InputParams(BaseModel):
+        """Optional input parameters for Hathora STT configuration.
+
+        Parameters:
+            language: Language code (if supported by model).
+            model_config: Some models support additional config, refer to
+                [docs](https://models.hathora.dev) for each model to see
+                what is supported.
+            base_url: Base API URL for the Hathora STT service.
+        """
+
+        language: Optional[str] = None
+        model_config: Optional[list[ConfigOption]] = None
+        base_url: str = "https://api.models.hathora.dev/inference/v1/stt",
+
     def __init__(
         self,
         *,
         model: str,
-        language: Optional[str] = None,
-        model_config: Optional[list[ConfigOption]] = None,
-        base_url: str = "https://api.models.hathora.dev/inference/v1/stt",
         api_key: Optional[str] = None,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initialize the Hathora STT service.
@@ -46,23 +60,17 @@ class HathoraSTTService(SegmentedSTTService):
         Args:
             model: Model to use; find available models
                 [here](https://models.hathora.dev).
-            language: Language code (if supported by model).
-            model_config: Some models support additional config, refer to
-                [docs](https://models.hathora.dev) for each model to see
-                what is supported.
-            base_url: Base API URL for the Hathora STT service.
             api_key: API key for authentication with the Hathora service;
                 provision one [here](https://models.hathora.dev/tokens).
+            params: Configuration parameters.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(
             **kwargs,
         )
         self._model = model
-        self._language = language
-        self._model_config = model_config
-        self._base_url = base_url
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
+        self._params = params or HathoraSTTService.InputParams()
 
     @traced_stt
     async def _handle_transcription(
@@ -84,17 +92,17 @@ class HathoraSTTService(SegmentedSTTService):
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
-            url = f"{self._base_url}"
+            url = f"{self._params.base_url}"
 
             payload = {
                 "model": self._model,
             }
 
-            if self._language is not None:
-                payload["language"] = self._language
-            if self._model_config is not None:
+            if self._params.language is not None:
+                payload["language"] = self._params.language
+            if self._params.model_config is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value} for option in self._model_config
+                    {"name": option.name, "value": option.value} for option in self._params.model_config
                 ]
 
             base64_audio = base64.b64encode(audio).decode("utf-8")
