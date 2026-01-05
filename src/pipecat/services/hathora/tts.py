@@ -56,14 +56,14 @@ class HathoraTTSService(TTSService):
 
         Parameters:
             speed: Speech speed multiplier (if supported by model).
-            model_config: Some models support additional config, refer to
+            config: Some models support additional config, refer to
                 [docs](https://models.hathora.dev) for each model to see
                 what is supported.
             base_url: Base API URL for the Hathora TTS service.
         """
 
         speed: Optional[float] = None
-        model_config: Optional[list[ConfigOption]] = None
+        config: Optional[list[ConfigOption]] = None
         base_url: str = "https://api.models.hathora.dev/inference/v1/tts",
 
     def __init__(
@@ -97,7 +97,7 @@ class HathoraTTSService(TTSService):
 
         self._settings = {
             "speed": params.speed,
-            "model_config": params.model_config,
+            "config": params.config,
         }
 
         self.set_model_name(model)
@@ -125,7 +125,7 @@ class HathoraTTSService(TTSService):
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
-            url = f"{self.base_url}"
+            url = f"{self._base_url}"
 
             payload = {"model": self._model, "text": text}
 
@@ -133,9 +133,9 @@ class HathoraTTSService(TTSService):
                 payload["voice"] = self._voice_id
             if self._settings["speed"] is not None:
                 payload["speed"] = self._settings["speed"]
-            if self._settings["model_config"] is not None:
+            if self._settings["config"] is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value} for option in self._settings["model_config"]
+                    {"name": option.name, "value": option.value} for option in self._settings["config"]
                 ]
 
             yield TTSStartedFrame()
