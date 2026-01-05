@@ -11,6 +11,7 @@ Speech SDK for real-time audio transcription.
 """
 
 import asyncio
+import random
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -32,6 +33,8 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from azure.cognitiveservices.speech import (
+        CancellationReason,
+        PropertyId,
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
@@ -41,6 +44,7 @@ try:
         PushAudioInputStream,
     )
     from azure.cognitiveservices.speech.dialog import AudioConfig
+    from azure.cognitiveservices.speech.languageconfig import AutoDetectSourceLanguageConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Azure, you need to `pip install pipecat-ai[azure]`.")
@@ -55,6 +59,19 @@ class AzureSTTService(STTService):
     provides real-time transcription results with timing information.
     """
 
+    DEFAULT_AUTO_DETECT_LANGUAGES = [
+        "en-US",
+        "es-ES",
+        "fr-FR",
+        "de-DE",
+        "zh-CN",
+        "ja-JP",
+        "it-IT",
+        "ru-RU",
+        "hi-IN",
+        "ar-SA",
+    ]
+
     def __init__(
         self,
         *,
@@ -63,6 +80,7 @@ class AzureSTTService(STTService):
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
         endpoint_id: Optional[str] = None,
+        auto_detect_languages: Optional[list[str] | bool] = None,
         **kwargs,
     ):
         """Initialize the Azure STT service.
@@ -71,8 +89,14 @@ class AzureSTTService(STTService):
             api_key: Azure Cognitive Services subscription key.
             region: Azure region for the Speech service (e.g., 'eastus').
             language: Language for speech recognition. Defaults to English (US).
+                Ignored if auto_detect_languages is provided.
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             endpoint_id: Custom model endpoint id.
+            auto_detect_languages: Enable automatic language detection.
+                - If True: Uses the default list of 15 common languages
+                - If list[str]: Uses the provided list of language codes (extends default list)
+                - If None/False: Disables auto-detection and uses the single 'language' parameter
+                Example: ["sv-SE", "no-NO", "da-DK"] to add Swedish, Norwegian, and Danish
             **kwargs: Additional arguments passed to parent STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -80,8 +104,32 @@ class AzureSTTService(STTService):
         self._speech_config = SpeechConfig(
             subscription=api_key,
             region=region,
-            speech_recognition_language=language_to_azure_language(language),
         )
+
+        if auto_detect_languages is True:
+            languages_to_detect = self.DEFAULT_AUTO_DETECT_LANGUAGES.copy()
+        elif isinstance(auto_detect_languages, list):
+            languages_to_detect = self.DEFAULT_AUTO_DETECT_LANGUAGES.copy()
+
+            for lang in auto_detect_languages:
+                if lang not in languages_to_detect:
+                    languages_to_detect.append(lang)
+
+            while len(languages_to_detect) > 10:
+                languages_to_detect.pop(random.randrange(len(languages_to_detect)))
+        else:
+            languages_to_detect = None
+
+        self._auto_detect_languages = languages_to_detect
+        if languages_to_detect:
+            self._auto_detect_config = AutoDetectSourceLanguageConfig(languages=languages_to_detect)
+
+            self._speech_config.set_property(
+                property_id=PropertyId.SpeechServiceConnection_LanguageIdMode, value="Continuous"
+            )
+        else:
+            self._auto_detect_config = None
+            self._speech_config.speech_recognition_language = language_to_azure_language(language)
 
         if endpoint_id:
             self._speech_config.endpoint_id = endpoint_id
@@ -90,8 +138,11 @@ class AzureSTTService(STTService):
         self._speech_recognizer = None
         self._settings = {
             "region": region,
-            "language": language_to_azure_language(language),
+            "language": language_to_azure_language(language)
+            if not languages_to_detect
+            else "auto-detect",
             "sample_rate": sample_rate,
+            "auto_detect_languages": languages_to_detect,
         }
 
     def can_generate_metrics(self) -> bool:
@@ -143,11 +194,20 @@ class AzureSTTService(STTService):
 
             audio_config = AudioConfig(stream=self._audio_stream)
 
-            self._speech_recognizer = SpeechRecognizer(
-                speech_config=self._speech_config, audio_config=audio_config
-            )
+            if self._auto_detect_config:
+                self._speech_recognizer = SpeechRecognizer(
+                    speech_config=self._speech_config,
+                    audio_config=audio_config,
+                    auto_detect_source_language_config=self._auto_detect_config,
+                )
+            else:
+                self._speech_recognizer = SpeechRecognizer(
+                    speech_config=self._speech_config, audio_config=audio_config
+                )
             self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
             self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+            self._speech_recognizer.canceled.connect(self._on_handle_canceled)
+
             self._speech_recognizer.start_continuous_recognition_async()
         except Exception as e:
             await self.push_error(
@@ -220,3 +280,10 @@ class AzureSTTService(STTService):
                 result=event,
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_canceled(self, event):
+        if event.result.reason == ResultReason.Canceled:
+            cancellation_details = event.result.cancellation_details
+            logger.error(f"Azure Handler Canceled: Reason={cancellation_details.reason}")
+            if cancellation_details.reason == CancellationReason.Error:
+                logger.error(f"Azure Handler Error details: {cancellation_details.error_details}")
