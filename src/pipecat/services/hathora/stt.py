@@ -70,7 +70,16 @@ class HathoraSTTService(SegmentedSTTService):
         )
         self._model = model
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
-        self._params = params or HathoraSTTService.InputParams()
+        self._base_url = params.base_url
+
+        params = params or HathoraSTTService.InputParams()
+
+        self._settings = {
+            "language": params.language,
+            "model_config": params.model_config,
+        }
+
+        self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -100,17 +109,17 @@ class HathoraSTTService(SegmentedSTTService):
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
-            url = f"{self._params.base_url}"
+            url = f"{self._base_url}"
 
             payload = {
                 "model": self._model,
             }
 
-            if self._params.language is not None:
-                payload["language"] = self._params.language
-            if self._params.model_config is not None:
+            if self._settings["language"] is not None:
+                payload["language"] = self._settings["language"]
+            if self._settings["model_config"] is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value} for option in self._params.model_config
+                    {"name": option.name, "value": option.value} for option in self._settings["model_config"]
                 ]
 
             base64_audio = base64.b64encode(audio).decode("utf-8")
@@ -129,7 +138,7 @@ class HathoraSTTService(SegmentedSTTService):
                 if text:  # Only yield non-empty text
                     # Hathora's API currently doesn't return language info
                     # so we default to the requested language or "en"
-                    response_language = self._language or "en"
+                    response_language = self._settings["language"] or "en"
                     await self._handle_transcription(text, True, response_language)
                     yield TranscriptionFrame(
                         text,
