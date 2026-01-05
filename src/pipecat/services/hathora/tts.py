@@ -95,6 +95,14 @@ class HathoraTTSService(TTSService):
 
         self.set_voice(voice_id)
 
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True
+        """
+        return True
+
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Run text-to-speech synthesis on the provided text.
