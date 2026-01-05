@@ -72,6 +72,14 @@ class HathoraSTTService(SegmentedSTTService):
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
         self._params = params or HathoraSTTService.InputParams()
 
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True
+        """
+        return True
+
     @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
