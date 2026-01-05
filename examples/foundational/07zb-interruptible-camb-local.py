@@ -20,9 +20,10 @@ Usage:
     export CAMB_API_KEY=your_camb_api_key
     export OPENAI_API_KEY=your_openai_api_key
     export DEEPGRAM_API_KEY=your_deepgram_api_key
-    python 07zb-interruptible-camb-local.py
+    python 07zb-interruptible-camb-local.py [--voice-id VOICE_ID]
 """
 
+import argparse
 import asyncio
 import os
 import sys
@@ -52,7 +53,7 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def main():
+async def main(voice_id: int):
     # Local audio transport - uses your microphone and speakers
     transport = LocalAudioTransport(
         LocalAudioTransportParams(
@@ -71,7 +72,7 @@ async def main():
         tts = CambTTSService(
             api_key=os.getenv("CAMB_API_KEY"),
             aiohttp_session=session,
-            voice_id=2681,  # Attic voice
+            voice_id=voice_id,
             model="mars-8-flash",
             params=CambTTSService.InputParams(
                 speed=1.0,
@@ -109,9 +110,11 @@ they will be spoken aloud. Avoid special characters, emojis, or bullet points.""
         )
 
         # Create pipeline task
+        # Use 24kHz sample rate to match Camb.ai TTS output
         task = PipelineTask(
             pipeline,
             params=PipelineParams(
+                audio_out_sample_rate=24000,
                 enable_metrics=True,
                 enable_usage_metrics=True,
             ),
@@ -141,4 +144,12 @@ they will be spoken aloud. Avoid special characters, emojis, or bullet points.""
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="Camb.ai TTS example with local audio")
+    parser.add_argument(
+        "--voice-id",
+        type=int,
+        default=2681,
+        help="Camb.ai voice ID to use (default: 2681 - Attic voice)",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(args.voice_id))
