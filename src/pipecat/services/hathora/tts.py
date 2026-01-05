@@ -29,7 +29,7 @@ from .utils import ConfigOption
 def _decode_audio_payload(
     audio_bytes: bytes,
     *,
-    fallback_sample_rate: int,
+    fallback_sample_rate: int = 24000,
     fallback_channels: int = 1,
 ) -> Tuple[bytes, int, int]:
     """Convert a WAV/PCM payload into raw PCM samples for TTSAudioRawFrame."""
@@ -125,7 +125,7 @@ class HathoraTTSService(TTSService):
 
             pcm_audio, sample_rate, num_channels = _decode_audio_payload(
                 audio_data,
-                fallback_sample_rate=self.sample_rate or self._init_sample_rate or 24000,
+                fallback_sample_rate=self.sample_rate,
             )
 
             frame = TTSAudioRawFrame(
