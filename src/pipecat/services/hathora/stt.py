@@ -37,14 +37,14 @@ class HathoraSTTService(SegmentedSTTService):
 
         Parameters:
             language: Language code (if supported by model).
-            model_config: Some models support additional config, refer to
+            config: Some models support additional config, refer to
                 [docs](https://models.hathora.dev) for each model to see
                 what is supported.
             base_url: Base API URL for the Hathora STT service.
         """
 
         language: Optional[str] = None
-        model_config: Optional[list[ConfigOption]] = None
+        config: Optional[list[ConfigOption]] = None
         base_url: str = "https://api.models.hathora.dev/inference/v1/stt",
 
     def __init__(
@@ -76,7 +76,7 @@ class HathoraSTTService(SegmentedSTTService):
 
         self._settings = {
             "language": params.language,
-            "model_config": params.model_config,
+            "config": params.config,
         }
 
         self.set_model_name(model)
@@ -117,9 +117,9 @@ class HathoraSTTService(SegmentedSTTService):
 
             if self._settings["language"] is not None:
                 payload["language"] = self._settings["language"]
-            if self._settings["model_config"] is not None:
+            if self._settings["config"] is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value} for option in self._settings["model_config"]
+                    {"name": option.name, "value": option.value} for option in self._settings["config"]
                 ]
 
             base64_audio = base64.b64encode(audio).decode("utf-8")
