@@ -71,7 +71,6 @@ class HathoraSTTService(SegmentedSTTService):
         """Handle a transcription result with tracing."""
         pass
 
-    @traced_stt
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Run speech-to-text on the provided audio data.
 
