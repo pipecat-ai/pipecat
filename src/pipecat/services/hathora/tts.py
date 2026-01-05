@@ -91,8 +91,16 @@ class HathoraTTSService(TTSService):
         )
         self._model = model
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
-        self._params = params or HathoraTTSService.InputParams()
+        self._base_url = params.base_url
 
+        params = params or HathoraTTSService.InputParams()
+
+        self._settings = {
+            "speed": params.speed,
+            "model_config": params.model_config,
+        }
+
+        self.set_model_name(model)
         self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
@@ -117,17 +125,17 @@ class HathoraTTSService(TTSService):
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
-            url = f"{self._params.base_url}"
+            url = f"{self.base_url}"
 
             payload = {"model": self._model, "text": text}
 
             if self._voice_id is not None:
                 payload["voice"] = self._voice_id
-            if self._params.speed is not None:
-                payload["speed"] = self._params.speed
-            if self._params.model_config is not None:
+            if self._settings["speed"] is not None:
+                payload["speed"] = self._settings["speed"]
+            if self._settings["model_config"] is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value} for option in self._params.model_config
+                    {"name": option.name, "value": option.value} for option in self._settings["model_config"]
                 ]
 
             yield TTSStartedFrame()
