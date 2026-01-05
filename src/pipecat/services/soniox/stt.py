@@ -257,7 +257,6 @@ class SonioxSTTService(WebsocketSTTService):
 
         if isinstance(frame, UserStartedSpeakingFrame):
             await self.start_ttfb_metrics()
-            await self.start_processing_metrics()
             self._ttfb_reported = False
 
         if isinstance(frame, UserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
