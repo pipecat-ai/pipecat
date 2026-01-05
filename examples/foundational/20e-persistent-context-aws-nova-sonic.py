@@ -105,15 +105,18 @@ async def load_conversation(params: FunctionCallParams):
         try:
             with open(filename, "r") as file:
                 messages = json.load(file)
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
-                    }
-                )
+                # HACK: if using the older Nova Sonic (pre-2) model, you need a special way of
+                # triggering the first assistant response. The call to trigger_assistant_response(),
+                # commented out below, is part of this.
+                # messages.append(
+                #     {
+                #         "role": "user",
+                #         "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
+                #     }
+                # )
                 params.context.set_messages(messages)
                 await params.llm.reset_conversation()
-                await params.llm.trigger_assistant_response()
+                # await params.llm.trigger_assistant_response()
         except Exception as e:
             await params.result_callback({"success": False, "error": str(e)})
 
@@ -199,14 +202,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     # Specify initial system instruction.
-    # HACK: note that, for now, we need to inject a special bit of text into this instruction to
-    # allow the first assistant response to be programmatically triggered (which happens in the
-    # on_client_connected handler, below)
     system_instruction = (
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "
         "two or three sentences for chatty scenarios. "
-        f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
+        # HACK: if using the older Nova Sonic (pre-2) model, note that you need to inject a special
+        # bit of text into this instruction to allow the first assistant response to be
+        # programmatically triggered (which happens in the on_client_connected handler)
+        # f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
     )
 
     llm = AWSNovaSonicLLMService(
@@ -228,6 +231,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(
         messages=[
             {"role": "system", "content": f"{system_instruction}"},
+            {"role": "user", "content": "Hello!"},
         ],
         tools=tools,
     )
@@ -257,10 +261,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
-        # HACK: for now, we need this special way of triggering the first assistant response in AWS
-        # Nova Sonic. Note that this trigger requires a special corresponding bit of text in the
-        # system instruction. In the future, simply queueing the context frame should be sufficient.
-        await llm.trigger_assistant_response()
+        # HACK: if using the older Nova Sonic (pre-2) model, you need this special way of
+        # triggering the first assistant response. Note that this trigger requires a special
+        # corresponding bit of text in the system instruction.
+        # await llm.trigger_assistant_response()
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
