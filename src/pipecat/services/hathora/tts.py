@@ -54,7 +54,7 @@ class HathoraTTSService(TTSService):
         self,
         *,
         model: str,
-        voice: Optional[str] = None,
+        voice_id: Optional[str] = None,
         speed: Optional[float] = None,
         model_config: Optional[list[ConfigOption]] = None,
         base_url: str = "https://api.models.hathora.dev/inference/v1/tts",
