@@ -188,6 +188,7 @@ TESTS_19 = [
     ("19a-azure-realtime-beta.py", EVAL_WEATHER),
     ("19b-openai-realtime-text.py", EVAL_WEATHER),
     ("19b-openai-realtime-beta-text.py", EVAL_WEATHER),
+    ("19c-openai-realtime-live-video.py", EVAL_VISION_CAMERA),
 ]
 
 TESTS_21 = [
