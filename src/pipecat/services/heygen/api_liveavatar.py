@@ -93,7 +93,8 @@ class LiveAvatarSessionData(BaseModel):
     Parameters:
         session_id (str): Unique identifier for the streaming session.
         livekit_url (str): LiveKit server URL for the session.
-        livekit_client_token (str): Access token for LiveKit.
+        livekit_client_token (str): Access token for LiveKit user.
+        livekit_agent_token (str): Access token for LiveKit Agent (Pipecat).
         max_session_duration (int): Maximum session duration in seconds.
         ws_url (str): WebSocket URL for the session.
     """
@@ -101,6 +102,7 @@ class LiveAvatarSessionData(BaseModel):
     session_id: str
     livekit_url: str
     livekit_client_token: str
+    livekit_agent_token: str
     max_session_duration: int
     ws_url: str
 
@@ -303,10 +305,7 @@ class LiveAvatarApi(BaseAvatarApi):
             session_id=session_response.data.session_id,
             access_token=session_response.data.livekit_client_token,
             livekit_url=session_response.data.livekit_url,
-            # TODO: HeyGen will create a new token for Pipecat
-            # Right now they are creating a single token, which is supposed to be used by the user
-            # Due to this, HeyGenTransport it is not going to work yet.
-            livekit_agent_token=session_response.data.livekit_client_token,
+            livekit_agent_token=session_response.data.livekit_agent_token,
             ws_url=session_response.data.ws_url,
             raw_response=session_response,
         )
