@@ -7,12 +7,14 @@
 """OpenAI Realtime LLM service implementation with WebSocket support."""
 
 import base64
+import io
 import json
 import time
 from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
+from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_realtime_adapter import (
@@ -25,6 +27,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputImageRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -106,6 +109,8 @@ class OpenAIRealtimeLLMService(LLMService):
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
+        start_image_paused: bool = False,
+        image_detail: str = "auto",
         send_transcription_frames: Optional[bool] = None,
         **kwargs,
     ):
@@ -122,6 +127,10 @@ class OpenAIRealtimeLLMService(LLMService):
                 These are session-level settings that can be updated during the session
                 (except for voice and model). If None, uses default SessionProperties.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
+            start_image_paused: Whether to start with image input paused. Defaults to False.
+            image_detail: Detail level for image processing. Can be "auto", "low", or "high".
+                "auto" lets the model decide, "low" is faster and uses fewer tokens,
+                "high" provides more detail. Defaults to "auto".
             send_transcription_frames: Whether to emit transcription frames.
 
                 .. deprecated:: 0.0.92
@@ -156,6 +165,9 @@ class OpenAIRealtimeLLMService(LLMService):
             session_properties or events.SessionProperties()
         )
         self._audio_input_paused = start_audio_paused
+        self._image_input_paused = start_image_paused
+        self._image_detail = image_detail
+        self._last_image_sent_time = 0
         self._websocket = None
         self._receive_task = None
         self._context: LLMContext = None
@@ -192,6 +204,25 @@ class OpenAIRealtimeLLMService(LLMService):
             paused: True to pause audio input, False to resume.
         """
         self._audio_input_paused = paused
+
+    def set_image_input_paused(self, paused: bool):
+        """Set whether image input is paused.
+
+        Args:
+            paused: True to pause image input, False to resume.
+        """
+        self._image_input_paused = paused
+
+    def set_image_detail(self, detail: str):
+        """Set the detail level for image processing.
+
+        Args:
+            detail: Detail level - "auto", "low", or "high".
+        """
+        if detail not in ["auto", "low", "high"]:
+            logger.warning(f"Invalid image detail '{detail}', must be 'auto', 'low', or 'high'")
+            return
+        self._image_detail = detail
 
     def _is_modality_enabled(self, modality: str) -> bool:
         """Check if a specific modality is enabled, "text" or "audio"."""
@@ -379,6 +410,9 @@ class OpenAIRealtimeLLMService(LLMService):
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
+        elif isinstance(frame, InputImageRawFrame):
+            if not self._image_input_paused:
+                await self._send_user_image(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
         elif isinstance(frame, UserStartedSpeakingFrame):
@@ -846,6 +880,49 @@ class OpenAIRealtimeLLMService(LLMService):
     async def _send_user_audio(self, frame):
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
+
+    async def _send_user_image(self, frame: InputImageRawFrame):
+        """Send user image frame to OpenAI Realtime API.
+
+        Args:
+            frame: The input image frame to send.
+        """
+        if self._image_input_paused or self._disconnecting or not self._websocket:
+            return
+
+        now = time.time()
+        if now - self._last_image_sent_time < 1:
+            return  # Ignore if less than 1 second has passed
+
+        self._last_image_sent_time = now  # Update last sent time
+        logger.debug(f"Sending image frame to OpenAI Realtime: {frame}")
+
+        # Convert image to JPEG format and encode as base64
+        buffer = io.BytesIO()
+        Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
+        image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        # Create data URI for the image
+        image_url = f"data:image/jpeg;base64,{image_data}"
+
+        # Create a conversation item with the image
+        item = events.ConversationItem(
+            type="message",
+            role="user",
+            content=[
+                events.ItemContent(
+                    type="input_image",
+                    image_url=image_url,
+                    detail=self._image_detail,
+                )
+            ],
+        )
+
+        # Send the conversation item
+        try:
+            await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+        except Exception as e:
+            await self.push_error(error_msg=f"Send error: {e}")
 
     async def _send_tool_result(self, tool_call_id: str, result: str):
         item = events.ConversationItem(
