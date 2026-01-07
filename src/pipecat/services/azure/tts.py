@@ -144,14 +144,6 @@ class AzureBaseTTSService:
         self._voice_id = voice
         self._speech_synthesizer = None
 
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as Azure TTS service supports metrics generation.
-        """
-        return True
-
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to Azure language format.
 
@@ -285,6 +277,14 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._started = False
         self._first_chunk = True
         self._cumulative_audio_offset: float = 0.0  # Cumulative audio duration in seconds
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Azure TTS service supports metrics generation.
+        """
+        return True
 
     async def start(self, frame: StartFrame):
         """Start the Azure TTS service and initialize speech synthesizer.
@@ -575,6 +575,14 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
 
         self._speech_config = None
         self._speech_synthesizer = None
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Azure TTS service supports metrics generation.
+        """
+        return True
 
     async def start(self, frame: StartFrame):
         """Start the Azure HTTP TTS service and initialize speech synthesizer.
