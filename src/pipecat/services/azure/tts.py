@@ -411,7 +411,12 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         Args:
             evt: Cancellation event.
         """
-        logger.error(f"Speech synthesis canceled: {evt.result.cancellation_details.reason}")
+        reason = evt.result.cancellation_details.reason
+        # User cancellation (from interruption) is expected, not an error
+        if reason == CancellationReason.CancelledByUser:
+            logger.debug(f"{self}: Speech synthesis canceled by user (interruption)")
+        else:
+            logger.error(f"{self}: Speech synthesis canceled: {reason}")
         self._audio_queue.put_nowait(None)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -440,6 +445,17 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         """
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
+
+        # Stop Azure synthesis to prevent more word boundaries from being added
+        if self._speech_synthesizer:
+            try:
+                # stop_speaking_async() returns a ResultFuture
+                # We need to call .get() in a thread to wait for completion
+                result_future = self._speech_synthesizer.stop_speaking_async()
+                await asyncio.to_thread(result_future.get)
+            except Exception as e:
+                logger.error(f"{self} error stopping synthesis: {e}")
+
         # Reset cumulative audio offset on interruption
         self._cumulative_audio_offset = 0.0
         # Clear the audio queue
