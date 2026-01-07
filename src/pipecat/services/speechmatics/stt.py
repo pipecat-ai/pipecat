@@ -29,7 +29,6 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -615,7 +614,7 @@ class SpeechmaticsSTTService(STTService):
 
         The service will:
         - Send a BotInterruptionFrame upstream to stop bot speech
-        - Send a VADUserStartedSpeakingFrame downstream to notify other components
+        - Send a UserStartedSpeakingFrame downstream to notify other components
         - Start metrics collection for measuring response times
 
         Args:
@@ -636,7 +635,7 @@ class SpeechmaticsSTTService(STTService):
 
         The service will:
         - Stop processing metrics collection
-        - Send a VADUserStoppedSpeakingFrame to signal turn completion
+        - Send a UserStoppedSpeakingFrame to signal turn completion
 
         Args:
             message: the message payload.
