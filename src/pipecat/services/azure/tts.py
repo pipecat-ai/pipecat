@@ -13,6 +13,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     InterruptionFrame,
@@ -25,7 +27,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.tts_service import TTSService, WordTTSService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -279,6 +280,8 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._speech_config = None
         self._speech_synthesizer = None
         self._audio_queue = asyncio.Queue()
+        self._word_boundary_queue = asyncio.Queue()
+        self._word_processor_task = None
         self._started = False
         self._cumulative_audio_offset: float = 0.0  # Cumulative audio duration in seconds
 
@@ -316,8 +319,31 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._speech_synthesizer.synthesizing.connect(self._handle_synthesizing)
         self._speech_synthesizer.synthesis_completed.connect(self._handle_completed)
         self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
-        # Add word boundary event handler for word-level timestamps
         self._speech_synthesizer.synthesis_word_boundary.connect(self._handle_word_boundary)
+
+        # Start word processor task
+        if not self._word_processor_task:
+            self._word_processor_task = self.create_task(self._word_processor_task_handler())
+
+    async def stop(self, frame: EndFrame):
+        """Stop the Azure TTS service.
+
+        Args:
+            frame: End frame signaling service stop.
+        """
+        await super().stop(frame)
+        await self.cancel_task(self._word_processor_task)
+        self._word_processor_task = None
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the Azure TTS service.
+
+        Args:
+            frame: Cancel frame signaling service cancellation.
+        """
+        await super().cancel(frame)
+        await self.cancel_task(self._word_processor_task)
+        self._word_processor_task = None
 
     def _handle_word_boundary(self, evt):
         """Handle word boundary events from Azure SDK.
@@ -335,16 +361,28 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         # Add cumulative offset to get absolute timestamp across sentences
         absolute_seconds = self._cumulative_audio_offset + sentence_relative_seconds
 
-        # Queue the word timestamp for processing
-        # Use put_nowait since this is a synchronous callback
+        # Queue word timestamp for async processing
+        # Use thread-safe queue since this is called from Azure SDK thread
         if word:
             logger.trace(f"{self}: Word boundary - '{word}' at {absolute_seconds:.2f}s")
             try:
-                # Convert to nanoseconds and put directly in queue (sync operation)
-                timestamp_ns = seconds_to_nanoseconds(absolute_seconds)
-                self._words_queue.put_nowait((word, timestamp_ns))
+                # Put in temporary queue - will be processed by async task
+                # Store as (word, timestamp_in_seconds) tuple
+                self._word_boundary_queue.put_nowait((word, absolute_seconds))
             except Exception as e:
-                logger.error(f"{self} error adding word timestamp: {e}")
+                logger.error(f"{self} error queuing word timestamp: {e}")
+
+    async def _word_processor_task_handler(self):
+        """Process word timestamps from the queue and call add_word_timestamps."""
+        while True:
+            try:
+                word, timestamp_seconds = await self._word_boundary_queue.get()
+                await self.add_word_timestamps([(word, timestamp_seconds)])
+                self._word_boundary_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"{self} error processing word timestamp: {e}")
 
     def _handle_synthesizing(self, evt):
         """Handle audio chunks as they arrive.
@@ -411,6 +449,13 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                 self._audio_queue.task_done()
             except asyncio.QueueEmpty:
                 break
+        # Clear the word boundary queue
+        while not self._word_boundary_queue.empty():
+            try:
+                self._word_boundary_queue.get_nowait()
+                self._word_boundary_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -443,8 +488,6 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
                     self._started = True
-                    self._first_chunk = True
-                    self._cumulative_audio_offset = 0.0
 
                 ssml = self._construct_ssml(text)
                 self._speech_synthesizer.speak_ssml_async(ssml)
@@ -457,11 +500,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                         break
 
                     await self.stop_ttfb_metrics()
-
-                    # Start word timestamps when first chunk arrives
-                    if self._first_chunk:
-                        await self.start_word_timestamps()
-                        self._first_chunk = False
+                    await self.start_word_timestamps()
 
                     frame = TTSAudioRawFrame(
                         audio=chunk,
