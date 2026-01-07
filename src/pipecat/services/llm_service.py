@@ -596,9 +596,14 @@ class LLMService(AIService):
         )
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
+        callback_invoked = False
+
         async def function_call_result_callback(
             result: Any, *, properties: Optional[FunctionCallResultProperties] = None
         ):
+            nonlocal callback_invoked
+            callback_invoked = True
+
             await self.broadcast_frame(
                 FunctionCallResultFrame,
                 function_name=runner_item.function_name,
@@ -643,6 +648,9 @@ class LLMService(AIService):
                     result_callback=function_call_result_callback,
                 )
                 await item.handler(params)
+
+        if not callback_invoked:
+            await function_call_result_callback(None)
 
     async def _cancel_function_call(self, function_name: Optional[str]):
         cancelled_tasks = set()
