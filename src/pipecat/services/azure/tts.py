@@ -365,12 +365,9 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         # Use thread-safe queue since this is called from Azure SDK thread
         if word:
             logger.trace(f"{self}: Word boundary - '{word}' at {absolute_seconds:.2f}s")
-            try:
-                # Put in temporary queue - will be processed by async task
-                # Store as (word, timestamp_in_seconds) tuple
-                self._word_boundary_queue.put_nowait((word, absolute_seconds))
-            except Exception as e:
-                logger.error(f"{self} error queuing word timestamp: {e}")
+            # Put in temporary queue - will be processed by async task
+            # Store as (word, timestamp_in_seconds) tuple
+            self._word_boundary_queue.put_nowait((word, absolute_seconds))
 
     async def _word_processor_task_handler(self):
         """Process word timestamps from the queue and call add_word_timestamps."""
@@ -382,7 +379,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"{self} error processing word timestamp: {e}")
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     def _handle_synthesizing(self, evt):
         """Handle audio chunks as they arrive.
@@ -416,7 +413,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         if reason == CancellationReason.CancelledByUser:
             logger.debug(f"{self}: Speech synthesis canceled by user (interruption)")
         else:
-            logger.error(f"{self}: Speech synthesis canceled: {reason}")
+            logger.warning(f"{self}: Speech synthesis canceled: {reason}")
         self._audio_queue.put_nowait(None)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -454,7 +451,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                 result_future = self._speech_synthesizer.stop_speaking_async()
                 await asyncio.to_thread(result_future.get)
             except Exception as e:
-                logger.error(f"{self} error stopping synthesis: {e}")
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
         # Reset cumulative audio offset on interruption
         self._cumulative_audio_offset = 0.0
@@ -494,9 +491,6 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
 
         try:
             if self._speech_synthesizer is None:
-                error_msg = "Speech synthesizer not initialized."
-                logger.error(error_msg)
-                yield ErrorFrame(error=error_msg)
                 return
 
             try:
@@ -526,14 +520,14 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                     yield frame
 
             except Exception as e:
-                logger.error(f"{self} error during synthesis: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 self._started = False
                 # Could add reconnection logic here if needed
                 return
 
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class AzureHttpTTSService(TTSService, AzureBaseTTSService):
