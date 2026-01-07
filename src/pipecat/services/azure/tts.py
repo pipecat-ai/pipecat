@@ -441,9 +441,9 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             try:
                 if not self._started:
                     await self.start_ttfb_metrics()
-                    await self.start_word_timestamps()
                     yield TTSStartedFrame()
                     self._started = True
+                    self._first_chunk = True
                     self._cumulative_audio_offset = 0.0
 
                 ssml = self._construct_ssml(text)
@@ -457,6 +457,12 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                         break
 
                     await self.stop_ttfb_metrics()
+
+                    # Start word timestamps when first chunk arrives
+                    if self._first_chunk:
+                        await self.start_word_timestamps()
+                        self._first_chunk = False
+
                     frame = TTSAudioRawFrame(
                         audio=chunk,
                         sample_rate=self.sample_rate,
