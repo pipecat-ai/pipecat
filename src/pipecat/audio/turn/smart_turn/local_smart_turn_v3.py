@@ -42,7 +42,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
         Args:
             smart_turn_model_path: Path to the ONNX model file. If this is not
-                set, the bundled smart-turn-v3.1-cpu model will be used.
+                set, the bundled smart-turn-v3.2-cpu model will be used.
             cpu_count: The number of CPUs to use for inference. Defaults to 1.
             **kwargs: Additional arguments passed to BaseSmartTurn.
         """
@@ -50,7 +50,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
         if not smart_turn_model_path:
             # Load bundled model
-            model_name = "smart-turn-v3.1-cpu.onnx"
+            model_name = "smart-turn-v3.2-cpu.onnx"
             package_path = "pipecat.audio.turn.smart_turn.data"
 
             try:
