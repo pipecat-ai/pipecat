@@ -1346,7 +1346,7 @@ class GeminiLiveLLMService(LLMService):
             return  # Ignore if less than 1 second has passed
 
         self._last_sent_time = now  # Update last sent time
-        logger.debug(f"Sending video frame to Gemini: {frame}")
+        logger.trace(f"Sending video frame to Gemini: {frame}")
 
         buffer = io.BytesIO()
         Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")

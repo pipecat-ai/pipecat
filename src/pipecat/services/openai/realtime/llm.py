@@ -895,7 +895,7 @@ class OpenAIRealtimeLLMService(LLMService):
             return  # Ignore if less than 1 second has passed
 
         self._last_image_sent_time = now  # Update last sent time
-        logger.debug(f"Sending image frame to OpenAI Realtime: {frame}")
+        logger.trace(f"Sending image frame to OpenAI Realtime: {frame}")
 
         # Convert image to JPEG format and encode as base64
         buffer = io.BytesIO()
