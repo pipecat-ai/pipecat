@@ -283,6 +283,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._word_boundary_queue = asyncio.Queue()
         self._word_processor_task = None
         self._started = False
+        self._first_chunk = True
         self._cumulative_audio_offset: float = 0.0  # Cumulative audio duration in seconds
 
     async def start(self, frame: StartFrame):
@@ -425,9 +426,15 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         """
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            self._started = False
+            self._reset_state()
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)])
+
+    def _reset_state(self):
+        """Reset TTS state between turns."""
+        self._started = False
+        self._first_chunk = True
+        self._cumulative_audio_offset = 0.0
 
     async def flush_audio(self):
         """Flush any pending audio data."""
@@ -453,8 +460,8 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
-        # Reset cumulative audio offset on interruption
-        self._cumulative_audio_offset = 0.0
+        # Reset state on interruption
+        self._reset_state()
         # Clear the audio queue
         while not self._audio_queue.empty():
             try:
@@ -498,19 +505,23 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
                     self._started = True
+                    self._first_chunk = True
 
                 ssml = self._construct_ssml(text)
                 self._speech_synthesizer.speak_ssml_async(ssml)
                 await self.start_tts_usage_metrics(text)
 
                 # Stream audio chunks as they arrive
+
                 while True:
                     chunk = await self._audio_queue.get()
                     if chunk is None:  # End of stream
                         break
 
-                    await self.stop_ttfb_metrics()
-                    await self.start_word_timestamps()
+                    if self._first_chunk:
+                        await self.stop_ttfb_metrics()
+                        await self.start_word_timestamps()
+                        self._first_chunk = False
 
                     frame = TTSAudioRawFrame(
                         audio=chunk,
@@ -522,8 +533,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
-                self._started = False
-                # Could add reconnection logic here if needed
+                self._reset_state()
                 return
 
         except Exception as e:
