@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
+from pipecat.audio.interruptions.turn_analyzer_bot_turn_start_strategy import TurnAnalyzerBotTurnStartStrategy
 from pipecat.audio.turn.krisp_viva_turn import KrispTurnParams, KrispVivaTurn
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -65,21 +66,18 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=KrispVivaTurn(params=KrispTurnParams()),
         audio_in_filter=KrispVivaFilter(noise_suppression_level=KRISP_NOISE_SUPPRESSION_LEVEL),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=KrispVivaTurn(params=KrispTurnParams()),
         audio_in_filter=KrispVivaFilter(noise_suppression_level=KRISP_NOISE_SUPPRESSION_LEVEL),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=KrispVivaTurn(params=KrispTurnParams()),
         audio_in_filter=KrispVivaFilter(noise_suppression_level=KRISP_NOISE_SUPPRESSION_LEVEL),
     ),
 }
@@ -106,7 +104,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             turn_start_strategies=TurnStartStrategies(
-                bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+                bot=[TurnAnalyzerBotTurnStartStrategy(turn_analyzer=KrispVivaTurn(params=KrispTurnParams())]
             ),
         ),
     )

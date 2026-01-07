@@ -113,25 +113,18 @@ class KrispVivaTurn(BaseTurnAnalyzer):
 
             # State tracking
             self._speech_triggered = False
-            self._speech_start_time = None
-            self._eot_start_time = None
-            self._last_probability = None  # Store last valid probability for debugging/analysis
-            self._frame_probabilities = []  # Store all probabilities from last append_audio call
+            self._last_probability = None
+            self._frame_probabilities = []
 
             # Create session with provided sample rate or default to 16000 Hz
             # This preloads the model to improve latency when set_sample_rate is called later
             preload_sample_rate = sample_rate if sample_rate else 16000
             try:
                 self._preload_tt_session = self._create_tt_session(preload_sample_rate)
-                self._tt_session = self._preload_tt_session
-                # Calculate samples per frame for the preloaded session
-                if preload_sample_rate:
-                    self._samples_per_frame = int(
-                        (preload_sample_rate * self._params.frame_duration_ms) / 1000
-                    )
             except Exception as e:
                 logger.error(f"Failed to create turn detection session: {e}", exc_info=True)
                 self._preload_tt_session = None
+                raise RuntimeError(f"Failed to create turn detection session: {e}") from e
 
         except Exception:
             # If initialization fails, release the SDK reference
@@ -292,14 +285,12 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 if is_speech:
                     # Track speech start time
                     if not self._speech_triggered:
-                        self._speech_start_time = time.time()
                         logger.trace("Speech detected, turn analysis started")
                     self._speech_triggered = True
-                    self._eot_start_time = None
                 else:
                     # Track when speech stops (potential end-of-turn)
-                    if self._speech_triggered and self._eot_start_time is None:
-                        self._eot_start_time = time.time()
+                    if self._speech_triggered:
+                        state = EndOfTurnState.COMPLETE
 
                 prob = self._tt_session.process(frame.tolist())
 
@@ -312,23 +303,8 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 self._last_probability = prob
                 self._frame_probabilities.append(prob)
 
-                # logger.debug(f"Turn probability: {prob:.3f}")
-
                 # Check if turn is complete based on probability threshold
                 if self._speech_triggered and prob >= self._params.threshold:
-                    current_time = time.time()
-
-                    # Calculate durations
-                    speech_duration = (
-                        current_time - self._speech_start_time if self._speech_start_time else 0
-                    )
-                    eot_latency = current_time - self._eot_start_time if self._eot_start_time else 0
-
-                    # logger.debug(
-                    #     f"Turn complete: prob={prob:.3f}, speech={speech_duration:.1f}s, "
-                    #     f"eot_latency={eot_latency:.3f}s"
-                    # )
-
                     state = EndOfTurnState.COMPLETE
                     self._clear(state)
                     break
@@ -361,8 +337,6 @@ class KrispVivaTurn(BaseTurnAnalyzer):
         """
         # If the state is still incomplete, keep the _speech_triggered as True
         self._speech_triggered = turn_state == EndOfTurnState.INCOMPLETE
-        self._speech_start_time = None
-        self._eot_start_time = None
         # Clear audio buffer on turn completion
         if turn_state == EndOfTurnState.COMPLETE:
             self._audio_buffer.clear()

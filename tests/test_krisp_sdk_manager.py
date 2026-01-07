@@ -24,7 +24,6 @@ class TestKrispVivaSDKManager:
         """Test that SDK manager properly tracks references."""
         # Initial state
         initial_count = KrispVivaSDKManager.get_reference_count()
-        initial_initialized = KrispVivaSDKManager.is_initialized()
 
         # Acquire first reference
         KrispVivaSDKManager.acquire()

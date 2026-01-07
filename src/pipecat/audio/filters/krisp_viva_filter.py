@@ -71,7 +71,19 @@ class KrispVivaFilter(BaseAudioFilter):
 
         try:
             # Set model path, checking environment if not specified
-            self._model_path = model_path or os.getenv("KRISP_VIVA_FILTER_MODEL_PATH")
+            if model_path:
+                self._model_path = model_path
+            else:
+                # Check new environment variable first
+                self._model_path = os.getenv("KRISP_VIVA_FILTER_MODEL_PATH")
+                # Fall back to old environment variable for backward compatibility
+                if not self._model_path:
+                    self._model_path = os.getenv("KRISP_VIVA_MODEL_PATH")
+                    if self._model_path:
+                        logger.warning(
+                            "KRISP_VIVA_MODEL_PATH is deprecated. "
+                            "Please use KRISP_VIVA_FILTER_MODEL_PATH instead."
+                        )
             if not self._model_path:
                 logger.error(
                     "Model path is not provided and KRISP_VIVA_FILTER_MODEL_PATH is not set."
@@ -179,11 +191,11 @@ class KrispVivaFilter(BaseAudioFilter):
             frame: The control frame containing filter commands.
         """
         if isinstance(frame, FilterEnableFrame):
-            if frame.enable == True:
+            if frame.enable:
                 if not self._state == self.State.STARTED:
                     self._state = self.State.STARTING
 
-            elif frame.enable == False:
+            elif not frame.enable:
                 if not self._state == self.State.STOPPED:
                     self._state = self.State.STOPPING
 

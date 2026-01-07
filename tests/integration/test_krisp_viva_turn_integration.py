@@ -17,16 +17,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import numpy as np
 
-# Check if krisp_audio is available - skip tests if not
-# Note: krisp_audio is a private/proprietary module, so these tests are skipped
-# in CI/CD environments where it's not available. Developers with access to
-# krisp_audio can run these tests locally.
-try:
-    import krisp_audio
-
-    KRISP_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):
-    KRISP_AVAILABLE = False
+# Mock package version check before importing pipecat
+# This allows tests to run in development mode without installed package
+_version_patcher = patch("importlib.metadata.version", return_value="0.0.0-dev")
+_version_patcher.start()
 
 try:
     from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState

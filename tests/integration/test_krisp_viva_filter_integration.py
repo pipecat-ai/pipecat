@@ -11,120 +11,91 @@ with Pipecat's pipeline framework, simulating real-world usage scenarios.
 """
 
 import os
+import sys
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-# Check if krisp_audio is available - skip tests if not
-# Note: krisp_audio is a private/proprietary module, so these tests are skipped
-# in CI/CD environments where it's not available. Developers with access to
-# krisp_audio can run these tests locally.
-try:
-    import krisp_audio
+# Mock package version check before importing pipecat
+# This allows tests to run in development mode without installed package
+_version_patcher = patch("importlib.metadata.version", return_value="0.0.0-dev")
+_version_patcher.start()
 
-    KRISP_AVAILABLE = True
-except (ImportError, ModuleNotFoundError):
-    KRISP_AVAILABLE = False
+# Mock krisp_audio module before importing KrispVivaFilter
+# This allows tests to run even when krisp_audio is not installed
+mock_krisp_audio = MagicMock()
+sys.modules["krisp_audio"] = mock_krisp_audio
 
-try:
-    from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
-    from pipecat.frames.frames import (
-        EndFrame,
-        FilterEnableFrame,
-        InputAudioRawFrame,
-        StartFrame,
-    )
-    from pipecat.pipeline.pipeline import Pipeline
-    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-    from pipecat.tests.utils import run_test
-
-    IMPORTS_AVAILABLE = True
-except (ImportError, Exception) as e:
-    # If import fails due to missing krisp_audio, mark as unavailable
-    if "krisp_audio" in str(e) or "Missing module" in str(e):
-        KRISP_AVAILABLE = False
-        IMPORTS_AVAILABLE = False
-        # Set dummy values to prevent NameError, but these won't be used
-        # since the test class will be skipped
-        KrispVivaFilter = None
-        EndFrame = None
-        FilterEnableFrame = None
-        InputAudioRawFrame = None
-        StartFrame = None
-        Pipeline = None
-        FrameDirection = None
-        FrameProcessor = None
-        run_test = None
-    else:
-        raise
+from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
+from pipecat.frames.frames import (
+    EndFrame,
+    FilterEnableFrame,
+    InputAudioRawFrame,
+    StartFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.tests.utils import run_test
 
 
-# Only define MockTransportProcessor if imports are available
-# This prevents TypeError when FrameProcessor is None
-if IMPORTS_AVAILABLE:
+class MockTransportProcessor(FrameProcessor):
+    """Mock transport processor that simulates BaseInputTransport behavior.
 
-    class MockTransportProcessor(FrameProcessor):
-        """Mock transport processor that simulates BaseInputTransport behavior.
+    This processor simulates how an input transport would use the audio filter:
+    - Calls filter.start() on StartFrame
+    - Calls filter.filter() on InputAudioRawFrame
+    - Calls filter.stop() on EndFrame
+    - Processes FilterEnableFrame for runtime control
+    """
 
-        This processor simulates how an input transport would use the audio filter:
-        - Calls filter.start() on StartFrame
-        - Calls filter.filter() on InputAudioRawFrame
-        - Calls filter.stop() on EndFrame
-        - Processes FilterEnableFrame for runtime control
+    def __init__(self, audio_filter: KrispVivaFilter):
+        """Initialize the mock transport processor.
+
+        Args:
+            audio_filter: The audio filter instance to use.
         """
+        super().__init__()
+        self._audio_filter = audio_filter
+        self._sample_rate = 16000
 
-        def __init__(self, audio_filter: KrispVivaFilter):
-            """Initialize the mock transport processor.
+    async def process_frame(self, frame, direction: FrameDirection):
+        """Process frames and apply audio filter as a real transport would."""
+        await super().process_frame(frame, direction)
 
-            Args:
-                audio_filter: The audio filter instance to use.
-            """
-            super().__init__()
-            self._audio_filter = audio_filter
-            self._sample_rate = 16000
+        if isinstance(frame, StartFrame):
+            # Initialize filter with sample rate
+            await self._audio_filter.start(self._sample_rate)
+            await self.push_frame(frame, direction)
 
-        async def process_frame(self, frame, direction: FrameDirection):
-            """Process frames and apply audio filter as a real transport would."""
-            await super().process_frame(frame, direction)
+        elif isinstance(frame, EndFrame):
+            # Stop filter before pushing EndFrame
+            await self._audio_filter.stop()
+            await self.push_frame(frame, direction)
 
-            if isinstance(frame, StartFrame):
-                # Initialize filter with sample rate
-                await self._audio_filter.start(self._sample_rate)
-                await self.push_frame(frame, direction)
+        elif isinstance(frame, FilterEnableFrame):
+            # Process filter control frames
+            await self._audio_filter.process_frame(frame)
+            await self.push_frame(frame, direction)
 
-            elif isinstance(frame, EndFrame):
-                # Stop filter before pushing EndFrame
-                await self._audio_filter.stop()
-                await self.push_frame(frame, direction)
+        elif isinstance(frame, InputAudioRawFrame):
+            # Apply filter to audio data
+            filtered_audio = await self._audio_filter.filter(frame.audio)
 
-            elif isinstance(frame, FilterEnableFrame):
-                # Process filter control frames
-                await self._audio_filter.process_frame(frame)
-                await self.push_frame(frame, direction)
+            # Create new frame with filtered audio
+            filtered_frame = InputAudioRawFrame(
+                audio=filtered_audio,
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
+            await self.push_frame(filtered_frame, direction)
 
-            elif isinstance(frame, InputAudioRawFrame):
-                # Apply filter to audio data
-                filtered_audio = await self._audio_filter.filter(frame.audio)
-
-                # Create new frame with filtered audio
-                filtered_frame = InputAudioRawFrame(
-                    audio=filtered_audio,
-                    sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels,
-                )
-                await self.push_frame(filtered_frame, direction)
-
-            else:
-                # Pass through other frames
-                await self.push_frame(frame, direction)
-else:
-    # Create a dummy class to prevent NameError when test class is skipped
-    MockTransportProcessor = None
+        else:
+            # Pass through other frames
+            await self.push_frame(frame, direction)
 
 
-@unittest.skipIf(not KRISP_AVAILABLE, "krisp_audio module not available (private dependency)")
 class TestKrispVivaFilterIntegration(unittest.IsolatedAsyncioTestCase):
     """Integration tests for KrispVivaFilter in pipeline context."""
 
