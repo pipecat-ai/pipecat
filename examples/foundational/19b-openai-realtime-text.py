@@ -152,7 +152,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     llm = OpenAIRealtimeLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         session_properties=session_properties,
-        start_audio_paused=False,
     )
 
     tts = CartesiaTTSService(
