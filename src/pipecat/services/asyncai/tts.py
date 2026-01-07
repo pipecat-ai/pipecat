@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextTTSService, WebsocketTTSService, TTSService
+from pipecat.services.tts_service import AudioContextTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -73,7 +73,7 @@ def language_to_async_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
-class AsyncAITTSService(AudioContextTTSService, WebsocketTTSService):
+class AsyncAITTSService(AudioContextTTSService):
     """Async TTS service with WebSocket streaming.
 
     Provides text-to-speech using Async's streaming WebSocket API.
@@ -153,7 +153,7 @@ class AsyncAITTSService(AudioContextTTSService, WebsocketTTSService):
         self._receive_task = None
         self._keepalive_task = None
         self._started = False
-    
+
     async def start(self, frame: StartFrame):
         """Start the Async TTS service.
 
@@ -337,7 +337,10 @@ class AsyncAITTSService(AudioContextTTSService, WebsocketTTSService):
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
                     if self._context_id:
-                        keepalive_message = {"transcript": " ", "context_id": self._context_id,}
+                        keepalive_message = {
+                            "transcript": " ", 
+                            "context_id": self._context_id,
+                        }
                         logger.trace("Sending keepalive message")
                     else:
                         # It's possible to have a user interruption which clears the context
@@ -358,7 +361,9 @@ class AsyncAITTSService(AudioContextTTSService, WebsocketTTSService):
         if self._context_id and self._websocket:
             try:
                 await self._websocket.send(
-                    json.dumps({"context_id": self._context_id, "close_context": True, "transcript": ""})
+                    json.dumps(
+                        {"context_id": self._context_id, "close_context": True, "transcript": ""}
+                    )
                 )
             except Exception as e:
                 logger.error(f"Error closing context on interruption: {e}")
@@ -381,7 +386,7 @@ class AsyncAITTSService(AudioContextTTSService, WebsocketTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            try: 
+            try:
                 if not self._started:
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
@@ -401,7 +406,7 @@ class AsyncAITTSService(AudioContextTTSService, WebsocketTTSService):
                     if self._websocket and self._context_id:
                         msg = self._build_msg(text=text, force=True, context_id=self._context_id)
                         await self._get_websocket().send(msg)                    
-                        
+
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
@@ -409,7 +414,8 @@ class AsyncAITTSService(AudioContextTTSService, WebsocketTTSService):
                 return
             yield None
         except Exception as e:
-                logger.error(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")
+
 
 class AsyncAIHttpTTSService(TTSService):
     """HTTP-based Async TTS service.
