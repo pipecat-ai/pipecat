@@ -116,7 +116,7 @@ class TransportParams(BaseModel):
 
             .. deprecated:: 0.0.99
                 The `turn_analyzer` parameter is deprecated, use `LLMUSerAggregator`'s
-                new `turn_start_strategies` parameter instead.
+                new `user_turn_strategies` parameter instead.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

@@ -213,12 +213,14 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
             generation_config: Generation configuration for Sonic-3 models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
+            pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = []
         generation_config: Optional[GenerationConfig] = None
+        pronunciation_dict_id: Optional[str] = None
 
     def __init__(
         self,
@@ -300,6 +302,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "speed": params.speed,
             "emotion": params.emotion,
             "generation_config": params.generation_config,
+            "pronunciation_dict_id": params.pronunciation_dict_id,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -443,6 +446,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
             msg["generation_config"] = self._settings["generation_config"].model_dump(
                 exclude_none=True
             )
+
+        if self._settings["pronunciation_dict_id"]:
+            msg["pronunciation_dict_id"] = self._settings["pronunciation_dict_id"]
 
         return json.dumps(msg)
 
@@ -636,12 +642,14 @@ class CartesiaHttpTTSService(TTSService):
 
             generation_config: Generation configuration for Sonic-3 models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
+            pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = Field(default_factory=list)
         generation_config: Optional[GenerationConfig] = None
+        pronunciation_dict_id: Optional[str] = None
 
     def __init__(
         self,
@@ -690,6 +698,7 @@ class CartesiaHttpTTSService(TTSService):
             "speed": params.speed,
             "emotion": params.emotion,
             "generation_config": params.generation_config,
+            "pronunciation_dict_id": params.pronunciation_dict_id,
         }
         self.set_voice(voice_id)
         self.set_model_name(model)
@@ -787,6 +796,9 @@ class CartesiaHttpTTSService(TTSService):
                 payload["generation_config"] = self._settings["generation_config"].model_dump(
                     exclude_none=True
                 )
+
+            if self._settings["pronunciation_dict_id"]:
+                payload["pronunciation_dict_id"] = self._settings["pronunciation_dict_id"]
 
             yield TTSStartedFrame()
 

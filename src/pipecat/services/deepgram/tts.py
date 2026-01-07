@@ -51,6 +51,8 @@ class DeepgramTTSService(WebsocketTTSService):
     message for conversational AI use cases.
     """
 
+    SUPPORTED_ENCODINGS = ("linear16", "mulaw", "alaw")
+
     def __init__(
         self,
         *,
@@ -68,9 +70,17 @@ class DeepgramTTSService(WebsocketTTSService):
             voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
             base_url: WebSocket base URL for Deepgram API. Defaults to "wss://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
-            encoding: Audio encoding format. Defaults to "linear16".
+            encoding: Audio encoding format. Defaults to "linear16". Must be one of SUPPORTED_ENCODINGS.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService class.
+
+        Raises:
+            ValueError: If encoding is not in SUPPORTED_ENCODINGS.
         """
+        if encoding.lower() not in self.SUPPORTED_ENCODINGS:
+            raise ValueError(
+                f"Unsupported encoding '{encoding}'. Must be one of {', '.join(self.SUPPORTED_ENCODINGS)} for WebSocket TTS."
+            )
+
         super().__init__(
             sample_rate=sample_rate,
             pause_frame_processing=True,
@@ -277,7 +287,9 @@ class DeepgramTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
+        # Append trailing space to prevent TTS from vocalizing trailing periods as "dot"
+        text_with_trailing_space = text + " "
+        logger.debug(f"{self}: Generating TTS [{text_with_trailing_space}]")
 
         try:
             # Reconnect if the websocket is closed
@@ -285,14 +297,14 @@ class DeepgramTTSService(WebsocketTTSService):
                 await self._connect()
 
             await self.start_ttfb_metrics()
-            await self.start_tts_usage_metrics(text)
+            await self.start_tts_usage_metrics(text_with_trailing_space)
 
             yield TTSStartedFrame()
 
             # Send text message to Deepgram
             # Note: We don't send Flush here - that should only be sent when the
             # LLM finishes a complete response via flush_audio()
-            speak_msg = {"type": "Speak", "text": text}
+            speak_msg = {"type": "Speak", "text": text_with_trailing_space}
             await self._get_websocket().send(json.dumps(speak_msg))
 
             # The audio frames will be handled in _receive_messages

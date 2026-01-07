@@ -2199,7 +2199,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compatibility issues with other packages. Now you can use the PlayHT HTTP
   service with other services, like GoogleLLMService.
 
-- Updated `pyproject.toml` to once again pin `numba` to `>=0.61.2` in order to
+- Updated `pyproject.toml` to once again pin `numba` to `==0.61.2` in order to
   resolve package versioning issues.
 
 - Updated the `STTMuteFilter` to include `VADUserStartedSpeakingFrame` and

@@ -43,7 +43,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
-from pipecat.turns.turn_start_strategies import ExternalTurnStartStrategies
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.sync.base_notifier import BaseNotifier
 from pipecat.utils.sync.event_notifier import EventNotifier
 
@@ -629,9 +629,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         self._context = LLMContext(self._messages)
         self._context_aggregator = LLMContextAggregatorPair(
             self._context,
-            user_params=LLMUserAggregatorParams(
-                turn_start_strategies=ExternalTurnStartStrategies()
-            ),
+            user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
         )
 
         # Create notification system for coordinating between components

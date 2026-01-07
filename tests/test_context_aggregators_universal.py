@@ -30,11 +30,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.bot import TranscriptionBotTurnStartStrategy
 from pipecat.turns.mute import FirstSpeechUserMuteStrategy, FunctionCallUserMuteStrategy
-from pipecat.turns.turn_start_strategies import TurnStartStrategies
+from pipecat.turns.user_stop import TranscriptionUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
-USER_TURN_END_TIMEOUT = 0.2
+USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
 
 
@@ -137,7 +137,7 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
         )
         assert context.messages[0]["content"] == "Hi there!"
 
-    async def test_default_turn_start_strategies(self):
+    async def test_default_user_turn_strategies(self):
         context = LLMContext()
         user_aggregator = LLMUserAggregator(context)
 
@@ -163,18 +163,18 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
-    async def test_user_turn_end_timeout_no_transcription(self):
+    async def test_user_turn_stop_timeout_no_transcription(self):
         context = LLMContext()
 
         user_aggregator = LLMUserAggregator(
             context,
-            params=LLMUserAggregatorParams(user_turn_end_timeout=USER_TURN_END_TIMEOUT),
+            params=LLMUserAggregatorParams(user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT),
         )
 
         timeout = False
 
-        @user_aggregator.event_handler("on_user_turn_end_timeout")
-        async def on_user_turn_end_timeout(aggregator):
+        @user_aggregator.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(aggregator):
             nonlocal timeout
             timeout = True
 
@@ -183,7 +183,7 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
             VADUserStoppedSpeakingFrame(),
-            SleepFrame(sleep=USER_TURN_END_TIMEOUT + 0.1),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT + 0.1),
         ]
         await run_test(
             pipeline,
@@ -192,29 +192,29 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(timeout)
 
-    async def test_user_turn_end_timeout_transcription(self):
+    async def test_user_turn_stop_timeout_transcription(self):
         context = LLMContext()
 
         user_aggregator = LLMUserAggregator(
             context,
             params=LLMUserAggregatorParams(
-                turn_start_strategies=TurnStartStrategies(
-                    bot=[TranscriptionBotTurnStartStrategy(timeout=TRANSCRIPTION_TIMEOUT)],
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[TranscriptionUserTurnStopStrategy(timeout=TRANSCRIPTION_TIMEOUT)],
                 ),
-                user_turn_end_timeout=USER_TURN_END_TIMEOUT,
+                user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
             ),
         )
 
         timeout = False
         bot_turn = False
 
-        @user_aggregator.event_handler("on_bot_turn_started")
-        async def on_bot_turn_started(aggregator, strategy):
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy):
             nonlocal bot_turn
             bot_turn = True
 
-        @user_aggregator.event_handler("on_user_turn_end_timeout")
-        async def on_user_turn_end_timeout(aggregator):
+        @user_aggregator.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(aggregator):
             nonlocal timeout
             timeout = True
 
@@ -223,9 +223,9 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
             VADUserStoppedSpeakingFrame(),
-            SleepFrame(sleep=USER_TURN_END_TIMEOUT - 0.1),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT - 0.1),
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
-            SleepFrame(sleep=USER_TURN_END_TIMEOUT - 0.1),
+            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT - 0.1),
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT),
         ]
         await run_test(
