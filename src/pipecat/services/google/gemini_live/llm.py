@@ -1569,6 +1569,27 @@ class GeminiLiveLLMService(LLMService):
         """Handle a transcription result with tracing."""
         pass
 
+    async def _push_user_transcription(self, text: str, result: Optional[LiveServerMessage] = None):
+        """Push a user transcription frame upstream.
+
+        Helper method to ensure consistent handling of user transcriptions
+        from both punctuation-based and timeout-based paths.
+
+        Args:
+            text: The transcription text to push
+            result: Optional LiveServerMessage that triggered this transcription
+        """
+        await self._handle_user_transcription(text, True, self._settings["language"])
+        await self.push_frame(
+            TranscriptionFrame(
+                text=text,
+                user_id="",
+                timestamp=time_now_iso8601(),
+                result=result,
+            ),
+            FrameDirection.UPSTREAM,
+        )
+
     async def _transcription_timeout_handler(self):
         """Handle timeout for user transcription buffer.
 
@@ -1587,18 +1608,7 @@ class GeminiLiveLLMService(LLMService):
                 complete_sentence = self._user_transcription_buffer
                 self._user_transcription_buffer = ""
 
-                await self._handle_user_transcription(
-                    complete_sentence, True, self._settings["language"]
-                )
-                await self.push_frame(
-                    TranscriptionFrame(
-                        text=complete_sentence,
-                        user_id="",
-                        timestamp=time_now_iso8601(),
-                        result=None,
-                    ),
-                    FrameDirection.UPSTREAM,
-                )
+                await self._push_user_transcription(complete_sentence, result=None)
         except asyncio.CancelledError:
             # Task was cancelled because new transcription arrived. This is expected
             # when back to back transcription messages arrive.
@@ -1646,18 +1656,7 @@ class GeminiLiveLLMService(LLMService):
 
             # Send a TranscriptionFrame with the complete sentence
             logger.debug(f"[Transcription:user] [{complete_sentence}]")
-            await self._handle_user_transcription(
-                complete_sentence, True, self._settings["language"]
-            )
-            await self.push_frame(
-                TranscriptionFrame(
-                    text=complete_sentence,
-                    user_id="",
-                    timestamp=time_now_iso8601(),
-                    result=message,
-                ),
-                FrameDirection.UPSTREAM,
-            )
+            await self._push_user_transcription(complete_sentence, result=message)
 
         # If there's still text in the buffer (no end-of-sentence marker found),
         # start a timeout task to flush it later
