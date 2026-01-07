@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -622,8 +623,8 @@ class SpeechmaticsSTTService(STTService):
         """
         logger.debug(f"{self} StartOfTurn received")
         # await self.start_processing_metrics()
+        await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.push_interruption_task_frame_and_wait()
-        await self.broadcast_frame(VADUserStartedSpeakingFrame)
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
         """Handle EndOfTurn events.
