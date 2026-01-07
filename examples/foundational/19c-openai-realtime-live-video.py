@@ -135,10 +135,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         await maybe_capture_participant_screen(transport, client, framerate=1)
 
         await task.queue_frames([LLMRunFrame()])
-        await asyncio.sleep(3)
-        logger.debug("Unpausing audio and video")
-        llm.set_audio_input_paused(False)
-        llm.set_image_input_paused(False)
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
