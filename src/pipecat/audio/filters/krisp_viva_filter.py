@@ -16,7 +16,11 @@ import numpy as np
 from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
-from pipecat.audio.krisp_instance import KrispVivaSDKManager, int_to_krisp_sample_rate
+from pipecat.audio.krisp_instance import (
+    KrispVivaSDKManager,
+    int_to_krisp_frame_duration,
+    int_to_krisp_sample_rate,
+)
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
 try:
@@ -35,24 +39,15 @@ class KrispVivaFilter(BaseAudioFilter):
     valid Krisp model file to operate.
     """
 
-    # TODO: Krisp supports different frame sizes, 10ms, 15ms, 20ms, 30ms, 32ms
-    # We should add a configuration option for this.
-    FRAME_SIZE_MS = 10
-
-    class State:
-        """Filter state enumeration for managing filter lifecycle."""
-
-        STOPPING = "STOPPING"
-        STARTING = "STARTING"
-        STARTED = "STARTED"
-        STOPPED = "STOPPED"
-
-    def __init__(self, model_path: str = None, noise_suppression_level: int = 100) -> None:
+    def __init__(
+        self, model_path: str = None, frame_duration: int = 10, noise_suppression_level: int = 100
+    ) -> None:
         """Initialize the Krisp noise reduction filter.
 
         Args:
             model_path: Path to the Krisp model file (.kef extension).
                 If None, uses KRISP_VIVA_FILTER_MODEL_PATH environment variable.
+            frame_duration: Frame duration in milliseconds.
             noise_suppression_level: Noise suppression level.
 
         Raises:
@@ -100,9 +95,10 @@ class KrispVivaFilter(BaseAudioFilter):
             self._preload_session = None
             self._samples_per_frame = None
             self._noise_suppression_level = noise_suppression_level
+            self._frame_duration_ms = frame_duration
             self._audio_buffer = bytearray()
             self._sdk_acquired = True
-            self._state = self.State.STOPPED
+            self._filtering = True
 
             # Adding the model preload mechanism with default sample rate
             # improves the latency of the session creation in the start() method.
@@ -117,7 +113,6 @@ class KrispVivaFilter(BaseAudioFilter):
         """Release SDK reference when filter is destroyed."""
         if hasattr(self, "_sdk_acquired") and self._sdk_acquired:
             try:
-                # Clean up session first
                 if hasattr(self, "_session") and self._session is not None:
                     self._session = None
 
@@ -129,11 +124,12 @@ class KrispVivaFilter(BaseAudioFilter):
             except Exception as e:
                 logger.error(f"Error in __del__: {e}", exc_info=True)
 
-    def _create_session(self, sample_rate: int):
+    def _create_session(self, sample_rate: int, frame_duration: int):
         """Preload the model with a specific sample rate.
 
         Args:
             sample_rate: Sample rate for preloading
+            frame_duration: Frame duration in milliseconds
 
         Raises:
             Exception: If preloading fails
@@ -144,11 +140,11 @@ class KrispVivaFilter(BaseAudioFilter):
 
             nc_cfg = krisp_audio.NcSessionConfig()
             nc_cfg.inputSampleRate = int_to_krisp_sample_rate(sample_rate)
-            nc_cfg.inputFrameDuration = krisp_audio.FrameDuration.Fd10ms
+            nc_cfg.inputFrameDuration = int_to_krisp_frame_duration(frame_duration)
             nc_cfg.outputSampleRate = nc_cfg.inputSampleRate
             nc_cfg.modelInfo = model_info
 
-            self._samples_per_frame = int((sample_rate * self.FRAME_SIZE_MS) / 1000)
+            self._samples_per_frame = int((sample_rate * frame_duration) / 1000)
             self._current_sample_rate = sample_rate
             session = krisp_audio.NcInt16.create(nc_cfg)
             return session
@@ -159,7 +155,7 @@ class KrispVivaFilter(BaseAudioFilter):
     def _preload_model(self):
         """Preload the model with a specific sample rate."""
         try:
-            self._preload_session = self._create_session(16000)
+            self._preload_session = self._create_session(16000, self._frame_duration_ms)
         except Exception as e:
             logger.error(f"Failed to preload Krisp model: {e}", exc_info=True)
             raise RuntimeError(f"Failed to preload Krisp model: {e}") from e
@@ -171,8 +167,7 @@ class KrispVivaFilter(BaseAudioFilter):
             sample_rate: The sample rate of the input transport in Hz.
         """
         try:
-            self._session = self._create_session(sample_rate)
-            self._state = self.State.STARTED
+            self._session = self._create_session(sample_rate, self._frame_duration_ms)
         except Exception as e:
             logger.error(f"Failed to start Krisp session: {e}", exc_info=True)
             self._session = None
@@ -181,7 +176,6 @@ class KrispVivaFilter(BaseAudioFilter):
     async def stop(self):
         """Clean up the Krisp processor when stopping."""
         self._session = None
-        self._state = self.State.STOPPED
         self._audio_buffer.clear()
 
     async def process_frame(self, frame: FilterControlFrame):
@@ -191,13 +185,7 @@ class KrispVivaFilter(BaseAudioFilter):
             frame: The control frame containing filter commands.
         """
         if isinstance(frame, FilterEnableFrame):
-            if frame.enable:
-                if not self._state == self.State.STARTED:
-                    self._state = self.State.STARTING
-
-            elif not frame.enable:
-                if not self._state == self.State.STOPPED:
-                    self._state = self.State.STOPPING
+            self._filtering = frame.enable
 
     async def filter(self, audio: bytes) -> bytes:
         """Apply Krisp noise reduction to audio data.
@@ -208,27 +196,7 @@ class KrispVivaFilter(BaseAudioFilter):
         Returns:
             Noise-reduced audio data as bytes.
         """
-        # Handle state transitions and return unprocessed audio when not actively filtering
-        if self._state == self.State.STOPPED:
-            return audio
-
-        if self._state == self.State.STOPPING:
-
-            async def stop():
-                if self._state == self.State.STOPPING:
-                    self._state = self.State.STOPPED
-                    self._session = None
-                    self._audio_buffer.clear()
-                    self._session = self._create_session(self._current_sample_rate)
-
-            asyncio.create_task(stop())
-            return audio
-        elif self._state == self.State.STARTING:
-            if self._session is None:
-                logger.debug("Session is not initialized but state is starting")
-                return audio
-            self._state = self.State.STARTED
-        elif self._state == self.State.STOPPED:
+        if not self._filtering:
             return audio
 
         try:

@@ -1,49 +1,33 @@
 #!/usr/bin/env python3
-"""Test script for Krisp VIVA filter with real audio files.
+"""Standalone script to test Krisp VIVA filter with real audio files.
 
 This script processes audio files through Krisp VIVA filter (noise reduction) and saves the output,
 allowing you to compare the original and filtered audio.
 
 Usage:
-    python test_krisp_viva_audiofile.py input.wav output.wav
-    python test_krisp_viva_audiofile.py input.wav output.wav --level 80
+    python test_krisp_viva_filter_audiofile.py input.wav output.wav
+    python test_krisp_viva_filter_audiofile.py input.wav output.wav --level 80
 
 Requirements:
     pip install soundfile numpy pipecat-ai[krisp]
     Set KRISP_VIVA_FILTER_MODEL_PATH environment variable to point to your .kef model file
-
-Note: This is a standalone script, not a pytest test. It will be skipped during pytest collection.
 """
 
 import argparse
 import asyncio
-import importlib
 import os
 import sys
 import time
 from pathlib import Path
 
-# This is a standalone script, not a pytest test file
-# It's named with test_ prefix for convenience but should not be collected by pytest
-# Handle missing dependencies gracefully during pytest collection
 try:
     import numpy as np
     import soundfile as sf
     from audio_file_utils import calculate_audio_stats, read_audio_file, write_audio_file
 except ImportError as e:
-    # Check if we're being imported by pytest
-    # During pytest collection, skip this module gracefully
-    if "pytest" in sys.modules or "_pytest" in sys.modules:
-        import pytest
-
-        pytest.skip(
-            f"Dependencies not available: {e}. "
-            "This is a standalone script (not a pytest test) and requires soundfile.",
-            allow_module_level=True,
-        )
-    else:
-        # If running as standalone script, raise the error immediately
-        raise
+    print(f"Error: Missing required dependencies: {e}")
+    print("Install with: pip install soundfile numpy")
+    sys.exit(1)
 
 # Add src directory to Python path for development environment
 script_dir = Path(__file__).parent
@@ -52,14 +36,20 @@ src_dir = project_root / "src"
 if src_dir.exists() and str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
+# Import Krisp VIVA filter
+try:
+    from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
+    from pipecat.audio.krisp_instance import KRISP_SAMPLE_RATES
+except ImportError as e:
+    print(f"Error: Could not import Krisp VIVA filter: {e}")
+    print("Make sure pipecat-ai is installed: pip install pipecat-ai[krisp]")
+    sys.exit(1)
 
-def load_filter():
-    """Load the Krisp VIVA filter module."""
-    module_name = "pipecat.audio.filters.krisp_viva_filter"
-    filter_class = "KrispVivaFilter"
+
+def validate_model_path():
+    """Validate that the Krisp VIVA model path is set and exists."""
     env_var = "KRISP_VIVA_FILTER_MODEL_PATH"
 
-    # Check model path
     model_path = os.getenv(env_var)
     if not model_path:
         print(f"Error: {env_var} environment variable not set")
@@ -67,21 +57,11 @@ def load_filter():
         print(f"Or in PowerShell: $env:{env_var}='C:\\path\\to\\model.kef'")
         sys.exit(1)
 
-    # Check if model file exists
     if not os.path.isfile(model_path):
         print(f"Error: Model file not found: {model_path}")
         sys.exit(1)
 
-    # Import the module
-    try:
-        module = importlib.import_module(module_name)
-    except ImportError as e:
-        print(f"Error: Could not import {module_name}: {e}")
-        print(f"Make sure pipecat-ai is installed: pip install pipecat-ai[krisp]")
-        sys.exit(1)
-
-    filter_class_obj = getattr(module, filter_class)
-    return filter_class_obj, model_path
+    return model_path
 
 
 async def process_audio_file(
@@ -103,12 +83,10 @@ async def process_audio_file(
     # Read and convert audio file
     audio_data, sample_rate = read_audio_file(input_path, verbose=True)
 
-    # Load filter to get supported sample rates
-    FilterClass, model_path = load_filter()
+    # Validate model path
+    model_path = validate_model_path()
 
-    # Check if sample rate is supported using the shared KRISP_SAMPLE_RATES
-    from pipecat.audio.krisp_instance import KRISP_SAMPLE_RATES
-
+    # Check if sample rate is supported
     supported_rates = list(KRISP_SAMPLE_RATES.keys())
     if sample_rate not in supported_rates:
         print(f"Warning: Sample rate {sample_rate} not in supported rates {supported_rates}")
@@ -123,7 +101,7 @@ async def process_audio_file(
     # Create filter instance and measure preload time
     print("\nInitializing filter (preloading model)...")
     preload_start_time = time.time()
-    filter_obj = FilterClass(
+    filter_obj = KrispVivaFilter(
         model_path=model_path,
         noise_suppression_level=noise_suppression_level,
     )

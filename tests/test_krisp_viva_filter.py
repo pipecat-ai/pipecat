@@ -6,6 +6,7 @@
 
 import asyncio
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -17,20 +18,35 @@ import numpy as np
 _version_patcher = patch("importlib.metadata.version", return_value="0.0.0-dev")
 _version_patcher.start()
 
-try:
-    from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
-    from pipecat.frames.frames import FilterEnableFrame
-except (ImportError, Exception) as e:
-    # If import fails due to missing krisp_audio, mark as unavailable
-    if "krisp_audio" in str(e) or "Missing module" in str(e):
-        KRISP_AVAILABLE = False
-        KrispVivaFilter = None
-        FilterEnableFrame = None
-    else:
-        raise
+# Mock krisp_audio module BEFORE any pipecat imports
+# This allows tests to run without krisp_audio installed
+mock_krisp_audio = MagicMock()
+mock_krisp_audio.SamplingRate.Sr8000Hz = 8000
+mock_krisp_audio.SamplingRate.Sr16000Hz = 16000
+mock_krisp_audio.SamplingRate.Sr24000Hz = 24000
+mock_krisp_audio.SamplingRate.Sr32000Hz = 32000
+mock_krisp_audio.SamplingRate.Sr44100Hz = 44100
+mock_krisp_audio.SamplingRate.Sr48000Hz = 48000
+mock_krisp_audio.FrameDuration.Fd10ms = "10ms"
+mock_krisp_audio.FrameDuration.Fd15ms = "15ms"
+mock_krisp_audio.FrameDuration.Fd20ms = "20ms"
+mock_krisp_audio.FrameDuration.Fd30ms = "30ms"
+mock_krisp_audio.FrameDuration.Fd32ms = "32ms"
+
+# Install the mock in sys.modules before importing
+sys.modules["krisp_audio"] = mock_krisp_audio
+
+# Mock pipecat_ai_krisp package
+mock_pipecat_krisp = MagicMock()
+sys.modules["pipecat_ai_krisp"] = mock_pipecat_krisp
+sys.modules["pipecat_ai_krisp.audio"] = MagicMock()
+sys.modules["pipecat_ai_krisp.audio.krisp_processor"] = MagicMock()
+
+# Now we can safely import
+from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
+from pipecat.frames.frames import FilterEnableFrame
 
 
-@unittest.skipIf(not KRISP_AVAILABLE, "krisp_audio module not available (private dependency)")
 class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
     """Test suite for KrispVivaFilter audio filter."""
 
@@ -42,20 +58,14 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         self.temp_model_file.close()
         self.model_path = self.temp_model_file.name
 
-        # Mock krisp_audio module and its components
-        self.mock_krisp_audio = MagicMock()
-        self.mock_krisp_audio.SamplingRate.Sr8000Hz = 8000
-        self.mock_krisp_audio.SamplingRate.Sr16000Hz = 16000
-        self.mock_krisp_audio.SamplingRate.Sr24000Hz = 24000
-        self.mock_krisp_audio.SamplingRate.Sr32000Hz = 32000
-        self.mock_krisp_audio.SamplingRate.Sr44100Hz = 44100
-        self.mock_krisp_audio.SamplingRate.Sr48000Hz = 48000
+        # Use the global mock_krisp_audio that was set up before imports
+        self.mock_krisp_audio = mock_krisp_audio
 
-        self.mock_krisp_audio.FrameDuration.Fd10ms = "10ms"
-        self.mock_krisp_audio.FrameDuration.Fd15ms = "15ms"
-        self.mock_krisp_audio.FrameDuration.Fd20ms = "20ms"
-        self.mock_krisp_audio.FrameDuration.Fd30ms = "30ms"
-        self.mock_krisp_audio.FrameDuration.Fd32ms = "32ms"
+        # Reset all mocks to clear call counts from previous tests
+        self.mock_krisp_audio.reset_mock()
+        self.mock_krisp_audio.ModelInfo.reset_mock()
+        self.mock_krisp_audio.NcSessionConfig.reset_mock()
+        self.mock_krisp_audio.NcInt16.reset_mock()
 
         # Mock ModelInfo
         self.mock_model_info = MagicMock()
@@ -70,11 +80,7 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         self.mock_session.process = MagicMock(side_effect=lambda x, level: x)
         self.mock_krisp_audio.NcInt16.create.return_value = self.mock_session
 
-        # Patch krisp_audio at module level
-        self.krisp_audio_patcher = patch.dict("sys.modules", {"krisp_audio": self.mock_krisp_audio})
-        self.krisp_audio_patcher.start()
-
-        # Patch the SAMPLE_RATES after import
+        # Patch krisp_audio in the module
         self.sample_rates_patch = patch(
             "pipecat.audio.filters.krisp_viva_filter.krisp_audio", self.mock_krisp_audio
         )
@@ -91,7 +97,6 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         """Clean up test fixtures after each test method."""
         # Stop all patchers
-        self.krisp_audio_patcher.stop()
         self.sample_rates_patch.stop()
         self.sdk_manager_patcher.stop()
 
@@ -108,7 +113,7 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
 
         # Verify filter attributes
         self.assertEqual(filter_instance._model_path, self.model_path)
-        self.assertEqual(filter_instance._state, filter_instance.State.STOPPED)
+        self.assertTrue(filter_instance._filtering)  # Filtering starts enabled
         self.assertEqual(filter_instance._noise_suppression_level, 100)
         self.assertIsNotNone(filter_instance._audio_buffer)
 
@@ -225,31 +230,32 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
     async def test_process_frame_enable(self):
         """Test processing FilterEnableFrame to enable filtering."""
         filter_instance = KrispVivaFilter(model_path=self.model_path)
-        # Filter starts in STOPPED state
-        self.assertEqual(filter_instance._state, filter_instance.State.STOPPED)
+        # Disable filtering first
+        filter_instance._filtering = False
 
         enable_frame = FilterEnableFrame(enable=True)
         await filter_instance.process_frame(enable_frame)
 
-        self.assertEqual(filter_instance._state, filter_instance.State.STARTING)
+        self.assertTrue(filter_instance._filtering)
 
     async def test_process_frame_disable(self):
         """Test processing FilterEnableFrame to disable filtering."""
         filter_instance = KrispVivaFilter(model_path=self.model_path)
         await filter_instance.start(16000)
-        # After start, filter should be in STARTED state
-        self.assertEqual(filter_instance._state, filter_instance.State.STARTED)
+        # After start, filtering should be enabled
+        self.assertTrue(filter_instance._filtering)
 
         disable_frame = FilterEnableFrame(enable=False)
         await filter_instance.process_frame(disable_frame)
 
-        self.assertEqual(filter_instance._state, filter_instance.State.STOPPING)
+        self.assertFalse(filter_instance._filtering)
 
     async def test_filter_when_disabled(self):
         """Test that filter returns audio unchanged when filtering is disabled."""
         filter_instance = KrispVivaFilter(model_path=self.model_path)
-        # Filter starts in STOPPED state, so it should return audio unchanged
-        self.assertEqual(filter_instance._state, filter_instance.State.STOPPED)
+        await filter_instance.start(16000)
+        # Disable filtering
+        filter_instance._filtering = False
 
         input_audio = b"\x00\x01\x02\x03\x04\x05"
         output_audio = await filter_instance.filter(input_audio)
@@ -517,10 +523,7 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(results), 4)
 
         # Verify final state is consistent (last operation was disable)
-        # State could be STOPPING or STOPPED depending on async task completion
-        self.assertIn(
-            filter_instance._state, [filter_instance.State.STOPPING, filter_instance.State.STOPPED]
-        )
+        self.assertFalse(filter_instance._filtering)
 
     async def test_concurrent_start_stop(self):
         """Test concurrent start/stop operations."""
@@ -551,12 +554,9 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
             return await filter_instance.filter(input_audio)
 
         async def toggle_filtering():
-            # Toggle based on current state
-            is_running = filter_instance._state in [
-                filter_instance.State.STARTED,
-                filter_instance.State.STARTING,
-            ]
-            enable_frame = FilterEnableFrame(enable=not is_running)
+            # Toggle based on current filtering state
+            is_filtering = filter_instance._filtering
+            enable_frame = FilterEnableFrame(enable=not is_filtering)
             await filter_instance.process_frame(enable_frame)
 
         # Run filtering and toggling concurrently
@@ -651,29 +651,32 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         """Test that filtering state persists across start/stop cycles."""
         filter_instance = KrispVivaFilter(model_path=self.model_path)
 
-        # Filter starts in STOPPED state
-        self.assertEqual(filter_instance._state, filter_instance.State.STOPPED)
+        # Filter starts with filtering enabled
+        self.assertTrue(filter_instance._filtering)
 
         # Start the filter
         await filter_instance.start(16000)
-        self.assertEqual(filter_instance._state, filter_instance.State.STARTED)
+        self.assertTrue(filter_instance._filtering)
+        self.assertIsNotNone(filter_instance._session)
 
         # Disable filtering
         disable_frame = FilterEnableFrame(enable=False)
         await filter_instance.process_frame(disable_frame)
-        self.assertEqual(filter_instance._state, filter_instance.State.STOPPING)
+        self.assertFalse(filter_instance._filtering)
 
         # Stop the filter (cleanup)
         await filter_instance.stop()
+        self.assertIsNone(filter_instance._session)
 
         # Enable filtering again
         enable_frame = FilterEnableFrame(enable=True)
         await filter_instance.process_frame(enable_frame)
-        self.assertEqual(filter_instance._state, filter_instance.State.STARTING)
+        self.assertTrue(filter_instance._filtering)
 
         # Start the filter again
         await filter_instance.start(16000)
-        self.assertEqual(filter_instance._state, filter_instance.State.STARTED)
+        self.assertTrue(filter_instance._filtering)
+        self.assertIsNotNone(filter_instance._session)
 
     async def test_noise_suppression_level_persistence(self):
         """Test that noise suppression level persists across start/stop."""
