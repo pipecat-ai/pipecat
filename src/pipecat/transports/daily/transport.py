@@ -567,8 +567,17 @@ class DailyTransportClient(EventHandler):
         Returns:
             error: An error description or None.
         """
+        # Wait for join to complete with timeout
+        # If already joined, this returns immediately
         if not self._joined:
-            return "Unable to send messages before joining."
+            try:
+                await asyncio.wait_for(self._joined_event.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                return "Join operation timed out, unable to send message."
+
+        # Double-check we're still joined (could have been cleared if left during wait)
+        if not self._joined:
+            return "Transport disconnected while waiting to send message."
 
         participant_id = None
         if isinstance(
@@ -770,6 +779,8 @@ class DailyTransportClient(EventHandler):
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
             self._joining = False
+            # Ensure any waiting callers are notified of failure
+            self._joined_event.set()  # Allows send attempts to fail immediately instead of hanging
 
     async def _join(self):
         """Execute the actual room join operation."""
@@ -1050,8 +1061,16 @@ class DailyTransportClient(EventHandler):
         Returns:
             error: An error description or None.
         """
+        # Wait for join to complete with timeout
         if not self._joined:
-            return "Can't send message if not joined"
+            try:
+                await asyncio.wait_for(self._joined_event.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                return "Join operation timed out, unable to send message."
+
+        # Double-check we're still joined
+        if not self._joined:
+            return "Transport disconnected while waiting to send message."
 
         future = self._get_event_loop().create_future()
         self._client.send_prebuilt_chat_message(
@@ -1960,7 +1979,7 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         error = await self._client.send_message(frame)
         if error:
-            logger.error(f"Unable to send message: {error}")
+            logger.error(f"Unable to send message: {error}", extra={"frame": frame})
 
     async def register_video_destination(self, destination: str):
         """Register a video output destination.
