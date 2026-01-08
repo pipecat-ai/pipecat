@@ -10,6 +10,7 @@ import asyncio
 from typing import Optional
 
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -86,6 +87,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         if isinstance(frame, StartFrame):
             await self._start(frame)
+        elif isinstance(frame, SpeechControlParamsFrame):
+            await self._handle_speech_control_params(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
@@ -101,6 +104,24 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Process the start frame to configure the turn analyzer."""
         self._turn_analyzer.set_sample_rate(frame.audio_in_sample_rate)
         await self.broadcast_frame(SpeechControlParamsFrame, turn_params=self._turn_analyzer.params)
+
+    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
+        """Sync Smart Turn pre-speech buffering with VAD start delay.
+
+        In the new user-turn-strategies pipeline, `VADUserStartedSpeakingFrame`
+        is emitted only once VAD has *confirmed* speech (after `vad_params.start_secs`).
+        Smart Turn should still include the initial audio collected during that
+        confirmation window, so we record it in `SmartTurnParams.vad_start_secs` and
+        add it at inference slicing time (preserving `pre_speech_ms` semantics).
+        """
+        if not frame.vad_params:
+            return
+
+        params = self._turn_analyzer.params
+        if not isinstance(params, SmartTurnParams):
+            return
+
+        params.vad_start_secs = frame.vad_params.start_secs
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""
