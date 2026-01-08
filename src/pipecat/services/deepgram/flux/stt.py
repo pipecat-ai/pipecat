@@ -116,6 +116,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         model: str = "flux-general-en",
         flux_encoding: str = "linear16",
         params: Optional[InputParams] = None,
+        should_interrupt: bool = True,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT service.
@@ -129,6 +130,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 Raw signed little-endian 16-bit PCM encoding.
             params: InputParams instance containing detailed API configuration options.
                 If None, default parameters will be used.
+            should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
             **kwargs: Additional arguments passed to the parent WebsocketSTTService class.
 
         Examples:
@@ -166,6 +168,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         self._url = url
         self._model = model
         self._params = params or DeepgramFluxSTTService.InputParams()
+        self._should_interrupt = should_interrupt
         self._flux_encoding = flux_encoding
         # This is the currently only supported language
         self._language = Language.EN
@@ -592,7 +595,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         logger.debug("User started speaking")
         self._user_is_speaking = True
         await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.push_interruption_task_frame_and_wait()
+        if self._should_interrupt:
+            await self.push_interruption_task_frame_and_wait()
         await self.start_metrics()
         await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
