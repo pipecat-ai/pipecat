@@ -327,8 +327,8 @@ class TelnyxFrameSerializer(FrameSerializer):
                 # Convert from network byte order (big-endian) to host byte order
                 audio_array = np.frombuffer(payload, dtype=">i2")  # Big-endian int16
                 if sys.byteorder == "little":
-                    # Convert to little-endian for host processing
-                    host_audio = audio_array.astype("<i2").tobytes()
+                    # Swap bytes: big-endian -> little-endian for host processing
+                    host_audio = audio_array.byteswap().tobytes()
                 else:
                     host_audio = payload
                 # Resample if rates differ
