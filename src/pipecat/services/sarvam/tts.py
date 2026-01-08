@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2026, Daily
+# Copyright (c) 2024–2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -245,6 +246,7 @@ class SarvamHttpTTSService(TTSService):
             headers = {
                 "api-subscription-key": self._api_key,
                 "Content-Type": "application/json",
+                **sdk_headers(),
             }
 
             url = f"{self._base_url}/text-to-speech"
@@ -576,6 +578,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 self._websocket_url,
                 additional_headers={
                     "api-subscription-key": self._api_key,
+                    **sdk_headers(),
                 },
             )
             logger.debug("Connected to Sarvam TTS Websocket")
