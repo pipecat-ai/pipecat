@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -303,7 +303,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         add_stt_span_attributes(
                             span=current_span,
                             service_name=service_class_name,
-                            model=getattr(self, "model_name", settings.get("model", "unknown")),
+                            model=getattr(self, "model_name") or settings.get("model", "unknown"),
                             transcript=transcript,
                             is_final=is_final,
                             language=str(language) if language else None,

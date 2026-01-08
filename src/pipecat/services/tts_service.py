@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -901,7 +901,7 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             self._bot_speaking = False
 
 
-class AudioContextTTSService(WebsocketService):
+class AudioContextTTSService(WebsocketTTSService):
     """Base class for websocket-based TTS services with audio context management.
 
     This is a base class for websocket-based TTS services that allow correlating
@@ -921,7 +921,7 @@ class AudioContextTTSService(WebsocketService):
 
         Args:
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
-            **kwargs: Additional arguments passed to the parent WebsocketService.
+            **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
         super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)
         self._contexts: Dict[str, asyncio.Queue] = {}
@@ -1077,10 +1077,12 @@ class AudioContextWordTTSService(AudioContextTTSService, WebsocketWordTTSService
     with the word timestamp functionality of WebsocketWordTTSService.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         """Initialize the Audio Context Word TTS service.
 
         Args:
+            reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        super().__init__(**kwargs)
+        AudioContextTTSService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        WebsocketWordTTSService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -27,7 +27,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.transports.heygen.transport import HeyGenParams, HeyGenTransport
+from pipecat.transports.heygen.transport import HeyGenParams, HeyGenTransport, ServiceType
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
@@ -40,7 +40,8 @@ logger.add(sys.stderr, level="DEBUG")
 async def main():
     async with aiohttp.ClientSession() as session:
         transport = HeyGenTransport(
-            api_key=os.getenv("HEYGEN_API_KEY"),
+            api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
+            service_type=ServiceType.LIVE_AVATAR,
             session=session,
             params=HeyGenParams(
                 audio_in_enabled=True,

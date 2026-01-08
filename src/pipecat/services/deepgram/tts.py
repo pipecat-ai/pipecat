@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -287,7 +287,9 @@ class DeepgramTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
+        # Append trailing space to prevent TTS from vocalizing trailing periods as "dot"
+        text_with_trailing_space = text + " "
+        logger.debug(f"{self}: Generating TTS [{text_with_trailing_space}]")
 
         try:
             # Reconnect if the websocket is closed
@@ -295,14 +297,14 @@ class DeepgramTTSService(WebsocketTTSService):
                 await self._connect()
 
             await self.start_ttfb_metrics()
-            await self.start_tts_usage_metrics(text)
+            await self.start_tts_usage_metrics(text_with_trailing_space)
 
             yield TTSStartedFrame()
 
             # Send text message to Deepgram
             # Note: We don't send Flush here - that should only be sent when the
             # LLM finishes a complete response via flush_audio()
-            speak_msg = {"type": "Speak", "text": text}
+            speak_msg = {"type": "Speak", "text": text_with_trailing_space}
             await self._get_websocket().send(json.dumps(speak_msg))
 
             # The audio frames will be handled in _receive_messages

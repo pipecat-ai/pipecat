@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
@@ -46,6 +47,7 @@ try:
         SpeakerFocusConfig,
         SpeakerFocusMode,
         SpeakerIdentifier,
+        SpeechSegmentConfig,
         VoiceAgentClient,
         VoiceAgentConfig,
         VoiceAgentConfigPreset,
@@ -65,13 +67,14 @@ class TurnDetectionMode(str, Enum):
     """Endpoint and turn detection handling mode.
 
     How the STT engine handles the endpointing of speech. If using Pipecat's built-in endpointing,
-    then use `TurnDetectionMode.EXTERNAL` (default).
+    then use `TurnDetectionMode.FIXED` (default).
 
     To use the STT engine's built-in endpointing, then use `TurnDetectionMode.ADAPTIVE` for simple
     voice activity detection or `TurnDetectionMode.SMART_TURN` for more advanced ML-based
     endpointing.
     """
 
+    FIXED = "fixed"
     EXTERNAL = "external"
     ADAPTIVE = "adaptive"
     SMART_TURN = "smart_turn"
@@ -102,9 +105,9 @@ class SpeechmaticsSTTService(STTService):
 
             language: Language code for transcription. Defaults to `Language.EN`.
 
-            turn_detection_mode: Endpoint handling, one of `TurnDetectionMode.EXTERNAL`,
-                `TurnDetectionMode.ADAPTIVE` and `TurnDetectionMode.SMART_TURN`.
-                Defaults to `TurnDetectionMode.EXTERNAL`.
+            turn_detection_mode: Endpoint handling, one of `TurnDetectionMode.FIXED`,
+                `TurnDetectionMode.EXTERNAL`, `TurnDetectionMode.ADAPTIVE` and
+                `TurnDetectionMode.SMART_TURN`. Defaults to `TurnDetectionMode.FIXED`.
 
             speaker_active_format: Formatter for active speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
@@ -177,6 +180,10 @@ class SpeechmaticsSTTService(STTService):
                 speaker activity detection. This setting is used only for the formatted text output
                 of individual segments.
 
+            split_sentences: Emit finalized sentences mid-turn. When enabled, as soon as a sentence
+                is finalized, it will be emitted as a final segment. This is useful for applications
+                that need to process sentences as they are finalized. Defaults to False.
+
             enable_diarization: Enable speaker diarization. When enabled, the STT engine will
                 determine and attribute words to unique speakers. The speaker_sensitivity
                 parameter can be used to adjust the sensitivity of diarization.
@@ -201,7 +208,7 @@ class SpeechmaticsSTTService(STTService):
         language: Language | str = Language.EN
 
         # Endpointing mode
-        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.EXTERNAL
+        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.FIXED
 
         # Output formatting
         speaker_active_format: str | None = None
@@ -230,6 +237,7 @@ class SpeechmaticsSTTService(STTService):
         end_of_utterance_max_delay: float | None = None
         punctuation_overrides: dict | None = None
         include_partials: bool | None = None
+        split_sentences: bool | None = None
 
         # Diarization
         enable_diarization: bool | None = None
@@ -326,7 +334,10 @@ class SpeechmaticsSTTService(STTService):
             )
 
         # Framework options
-        self._enable_vad: bool = self._config.end_of_utterance_mode != EndOfUtteranceMode.EXTERNAL
+        self._enable_vad: bool = self._config.end_of_utterance_mode not in [
+            EndOfUtteranceMode.FIXED,
+            EndOfUtteranceMode.EXTERNAL,
+        ]
         self._speaker_active_format: str = params.speaker_active_format
         self._speaker_passive_format: str = (
             params.speaker_passive_format or params.speaker_active_format
@@ -487,6 +498,7 @@ class SpeechmaticsSTTService(STTService):
             "end_of_utterance_max_delay",
             "punctuation_overrides",
             "include_partials",
+            "split_sentences",
             "enable_diarization",
             "speaker_sensitivity",
             "max_speakers",
@@ -500,6 +512,11 @@ class SpeechmaticsSTTService(STTService):
             for key, value in params.extra_params.items():
                 if hasattr(config, key):
                     setattr(config, key, value)
+
+        # Enable sentences
+        config.speech_segment_config = SpeechSegmentConfig(
+            emit_sentences=params.split_sentences or False
+        )
 
         # Return the complete config
         return config
@@ -604,9 +621,9 @@ class SpeechmaticsSTTService(STTService):
             message: the message payload.
         """
         logger.debug(f"{self} StartOfTurn received")
+        # await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.push_interruption_task_frame_and_wait()
-        # await self.start_processing_metrics()
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
         """Handle EndOfTurn events.
@@ -660,10 +677,10 @@ class SpeechmaticsSTTService(STTService):
             self._bot_speaking = False
 
         # Force finalization
-        if isinstance(frame, UserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             if self._enable_vad:
                 logger.warning(
-                    f"{self} UserStoppedSpeakingFrame received but internal VAD is being used"
+                    f"{self} VADUserStoppedSpeakingFrame received but internal VAD is being used"
                 )
             elif not self._enable_vad and self._client is not None:
                 self._client.finalize()
