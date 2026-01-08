@@ -21,25 +21,47 @@ import re
 from dataclasses import dataclass
 from typing import FrozenSet, List, Optional, Sequence, Tuple
 
-import nltk
 from loguru import logger
-from nltk.tokenize import sent_tokenize
 
-# Ensure punkt_tab tokenizer data is available
-try:
-    nltk.data.find("tokenizers/punkt_tab")
-except LookupError:
+# Lazy-loaded NLTK components
+_nltk_initialized = False
+_sent_tokenize = None
+
+
+def _ensure_nltk_initialized():
+    """Lazily initialize NLTK and download required data.
+
+    This function is called on-demand when sentence tokenization is needed,
+    avoiding import-time downloads that can fail in containerized environments
+    where the filesystem may be read-only.
+    """
+    global _nltk_initialized, _sent_tokenize
+
+    if _nltk_initialized:
+        return
+
+    import nltk
+    from nltk.tokenize import sent_tokenize
+
+    _sent_tokenize = sent_tokenize
+
+    # Ensure punkt_tab tokenizer data is available
     try:
-        nltk.download("punkt_tab", quiet=True)
-    except (OSError, PermissionError) as e:
-        logger.error(
-            f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
-            "This data is required for sentence tokenization features. "
-            "The download failed due to filesystem permissions. "
-            "To resolve: pre-install the data in a location with appropriate read permissions, "
-            "or set the NLTK_DATA environment variable to point to a writable directory. "
-            "See https://www.nltk.org/data.html for more information."
-        )
+        nltk.data.find("tokenizers/punkt_tab")
+    except LookupError:
+        try:
+            nltk.download("punkt_tab", quiet=True)
+        except (OSError, PermissionError) as e:
+            logger.error(
+                f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
+                "This data is required for sentence tokenization features. "
+                "The download failed due to filesystem permissions. "
+                "To resolve: pre-install the data in a location with appropriate read permissions, "
+                "or set the NLTK_DATA environment variable to point to a writable directory. "
+                "See https://www.nltk.org/data.html for more information."
+            )
+
+    _nltk_initialized = True
 
 SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
     {
@@ -124,13 +146,16 @@ def match_endofsentence(text: str) -> int:
     Returns:
         The position of the end of the sentence if found, otherwise 0.
     """
+    # Lazily initialize NLTK on first use
+    _ensure_nltk_initialized()
+
     text = text.rstrip()
 
     if not text:
         return 0
 
     # Use NLTK's sentence tokenizer to find sentence boundaries
-    sentences = sent_tokenize(text)
+    sentences = _sent_tokenize(text)
 
     if not sentences:
         return 0
