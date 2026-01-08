@@ -299,7 +299,7 @@ class SpeechmaticsSTTService(STTService):
                 or defaults to `wss://eu2.rt.speechmatics.com/v2`.
             sample_rate: Optional audio sample rate in Hz.
             params: Optional[InputParams]: Input parameters for the service.
-            should_interrupt: Determine whether the bot should be interrupted when Speechmatics detects that the user is speaking.
+            should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
             **kwargs: Additional arguments passed to STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
