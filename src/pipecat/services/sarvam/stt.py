@@ -127,7 +127,6 @@ class SarvamSTTService(STTService):
         self.set_model_name(model)
         self._api_key = api_key
         self._language_code: Optional[Language] = params.language
-        self._language_string: Optional[str]
         # For saarika models, default to "unknown" if language is not provided
         if params.language:
             self._language_string = language_to_sarvam_language(params.language)
