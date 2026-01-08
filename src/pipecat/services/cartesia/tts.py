@@ -298,7 +298,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "speed": params.speed,
             "emotion": params.emotion,
             "generation_config": params.generation_config,
@@ -392,10 +392,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
         Returns:
             List of (word, start_time) tuples processed for the language.
         """
-        current_language = self._settings.get("language", "en")
+        current_language = self._settings.get("language")
 
-        # Check if this is a CJK language
-        if self._is_cjk_language(current_language):
+        # Check if this is a CJK language (if language is None, treat as non-CJK)
+        if current_language and self._is_cjk_language(current_language):
             # For CJK languages, combine all characters in this message into one word
             # using the first character's start time
             if words and starts:
@@ -434,10 +434,12 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "model_id": self.model_name,
             "voice": voice_config,
             "output_format": self._settings["output_format"],
-            "language": self._settings["language"],
             "add_timestamps": add_timestamps,
             "use_original_timestamps": False if self.model_name == "sonic" else True,
         }
+
+        if self._settings["language"]:
+            msg["language"] = self._settings["language"]
 
         if self._settings["speed"]:
             msg["speed"] = self._settings["speed"]
@@ -694,7 +696,7 @@ class CartesiaHttpTTSService(TTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "speed": params.speed,
             "emotion": params.emotion,
             "generation_config": params.generation_config,
@@ -786,8 +788,10 @@ class CartesiaHttpTTSService(TTSService):
                 "transcript": text,
                 "voice": voice_config,
                 "output_format": self._settings["output_format"],
-                "language": self._settings["language"],
             }
+
+            if self._settings["language"]:
+                payload["language"] = self._settings["language"]
 
             if self._settings["speed"]:
                 payload["speed"] = self._settings["speed"]
