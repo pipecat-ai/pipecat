@@ -4208,7 +4208,7 @@ requires-dist = [
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=1.0.3" },
     { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.1" },
     { name = "soxr", specifier = "~=0.5.0" },
-    { name = "speechmatics-voice", extras = ["smart"], marker = "extra == 'speechmatics'", specifier = ">=0.2.4" },
+    { name = "speechmatics-voice", extras = ["smart"], marker = "extra == 'speechmatics'", specifier = ">=0.2.6" },
     { name = "strands-agents", marker = "extra == 'strands'", specifier = ">=1.9.1,<2" },
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
     { name = "timm", marker = "extra == 'moondream'", specifier = "~=1.0.13" },
@@ -5948,16 +5948,16 @@ wheels = [
 
 [[package]]
 name = "speechmatics-voice"
-version = "0.2.4"
+version = "0.2.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "pydantic" },
     { name = "speechmatics-rt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/f9/9d81e4abe9ae1c8745372eaf43523213b0333e9721699fb0f3d3bff6c17e/speechmatics_voice-0.2.4.tar.gz", hash = "sha256:e3b5c7a8c24fa7d555b80a72ab181797665c74944400468ca5fb7e54b5f9eae6", size = 60852, upload-time = "2025-12-17T23:22:13.437Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/18/7790718c826be18eadaa7cfc0cc9f229d157f5f3aff628b9fc0f180a7878/speechmatics_voice-0.2.6.tar.gz", hash = "sha256:ae384e8f97862fc6adf38937e1d1d63cd16b64bc49aded8ccad273155634a636", size = 60881, upload-time = "2026-01-08T00:54:41.405Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/69/a6/401dba9be6be914e57b7814360ba0bece55f24140bb7d5c3dc5f07bcd77f/speechmatics_voice-0.2.4-py3-none-any.whl", hash = "sha256:71d0f5272c2db1221422ab19b6c898ea7b38f9fb7f523904f54a4d8c3e4cef12", size = 57056, upload-time = "2025-12-17T23:22:11.837Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/cc/ae6dc3d5638a3fc86c4537af1fb394dee3c4a2a5e9dbebf9fb83a8052939/speechmatics_voice-0.2.6-py3-none-any.whl", hash = "sha256:15d61cb02d7fe492f966cc28ddb0ada199fdd12543b9a61cb8757c7bf25b7a94", size = 57103, upload-time = "2026-01-08T00:54:39.92Z" },
 ]
 
 [package.optional-dependencies]

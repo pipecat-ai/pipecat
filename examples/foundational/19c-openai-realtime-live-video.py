@@ -5,7 +5,6 @@
 #
 
 
-import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -131,8 +130,8 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     async def on_client_connected(transport, client):
         logger.info(f"Client connected: {client}")
 
-        await maybe_capture_participant_camera(transport, client, framerate=1)
-        await maybe_capture_participant_screen(transport, client, framerate=1)
+        await maybe_capture_participant_camera(transport, client, framerate=0.5)
+        await maybe_capture_participant_screen(transport, client, framerate=0.5)
 
         await task.queue_frames([LLMRunFrame()])
 
