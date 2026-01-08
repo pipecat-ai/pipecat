@@ -8,9 +8,11 @@
 
 import base64
 import json
+import sys
 from typing import Optional
 
 import aiohttp
+import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
@@ -52,10 +54,25 @@ class TelnyxFrameSerializer(FrameSerializer):
 
         Parameters:
             telnyx_sample_rate: Sample rate used by Telnyx, defaults to 8000 Hz.
+                For PCMU/PCMA codecs, this is typically 8000 Hz.
+                For L16 codec, this can be 8000 or 16000 Hz depending on your
+                Telnyx media streaming configuration.
             sample_rate: Optional override for pipeline input sample rate.
-            inbound_encoding: Audio encoding for data sent to Telnyx (e.g., "PCMU").
-            outbound_encoding: Audio encoding for data received from Telnyx (e.g., "PCMU").
+            inbound_encoding: Audio encoding for data sent to Telnyx.
+                Supported: "PCMU" (G.711 μ-law), "PCMA" (G.711 A-law), "L16" (16-bit linear PCM).
+                Note: L16 uses network byte order (big-endian) per RFC 2586.
+            outbound_encoding: Audio encoding for data received from Telnyx.
+                Supported: "PCMU" (G.711 μ-law), "PCMA" (G.711 A-law), "L16" (16-bit linear PCM).
+                Note: L16 uses network byte order (big-endian) per RFC 2586.
             auto_hang_up: Whether to automatically terminate call on EndFrame.
+
+        Example for 16kHz L16 audio (higher quality, no codec conversion):
+            params = TelnyxFrameSerializer.InputParams(
+                telnyx_sample_rate=16000,
+                sample_rate=16000,
+                inbound_encoding="L16",
+                outbound_encoding="L16",
+            )
         """
 
         telnyx_sample_rate: int = 8000
@@ -143,7 +160,7 @@ class TelnyxFrameSerializer(FrameSerializer):
         elif isinstance(frame, AudioRawFrame):
             data = frame.audio
 
-            # Output: Convert PCM at frame's rate to 8kHz encoded for Telnyx
+            # Output: Convert PCM at frame's rate to Telnyx rate with appropriate encoding
             if self._params.inbound_encoding == "PCMU":
                 serialized_data = await pcm_to_ulaw(
                     data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
@@ -152,6 +169,27 @@ class TelnyxFrameSerializer(FrameSerializer):
                 serialized_data = await pcm_to_alaw(
                     data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
                 )
+            elif self._params.inbound_encoding == "L16":
+                # L16 is 16-bit linear PCM in network byte order (big-endian) per RFC 2586
+                # First resample if rates differ
+                resampled_data = await self._output_resampler.resample(
+                    data, frame.sample_rate, self._telnyx_sample_rate
+                )
+                if resampled_data is None or len(resampled_data) == 0:
+                    return None
+                # Validate audio length is multiple of 2 bytes (16-bit samples)
+                if len(resampled_data) % 2 != 0:
+                    logger.warning(
+                        f"L16 audio length {len(resampled_data)} is not multiple of 2, truncating"
+                    )
+                    resampled_data = resampled_data[: len(resampled_data) - 1]
+                # Convert from host byte order to network byte order (big-endian)
+                audio_array = np.frombuffer(resampled_data, dtype=np.int16)
+                if sys.byteorder == "little":
+                    # Swap bytes: little-endian -> big-endian
+                    serialized_data = audio_array.byteswap().tobytes()
+                else:
+                    serialized_data = resampled_data
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
 
@@ -248,7 +286,7 @@ class TelnyxFrameSerializer(FrameSerializer):
             payload_base64 = message["media"]["payload"]
             payload = base64.b64decode(payload_base64)
 
-            # Input: Convert Telnyx's 8kHz encoded audio to PCM at pipeline input rate
+            # Input: Convert Telnyx's audio to PCM at pipeline input rate
             if self._params.outbound_encoding == "PCMU":
                 deserialized_data = await ulaw_to_pcm(
                     payload,
@@ -262,6 +300,29 @@ class TelnyxFrameSerializer(FrameSerializer):
                     self._telnyx_sample_rate,
                     self._sample_rate,
                     self._input_resampler,
+                )
+            elif self._params.outbound_encoding == "L16":
+                # L16 is 16-bit linear PCM in network byte order (big-endian) per RFC 2586
+                # Validate audio length is multiple of 2 bytes (16-bit samples)
+                if len(payload) % 2 != 0:
+                    logger.warning(
+                        f"Received L16 audio length {len(payload)} is not multiple of 2, truncating"
+                    )
+                    payload = payload[: len(payload) - 1]
+                if len(payload) == 0:
+                    return None
+                # Convert from network byte order (big-endian) to host byte order
+                audio_array = np.frombuffer(payload, dtype=">i2")  # Big-endian int16
+                if sys.byteorder == "little":
+                    # Convert to little-endian for host processing
+                    host_audio = audio_array.astype("<i2").tobytes()
+                else:
+                    host_audio = payload
+                # Resample if rates differ
+                deserialized_data = await self._input_resampler.resample(
+                    host_audio,
+                    self._telnyx_sample_rate,
+                    self._sample_rate,
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.outbound_encoding}")
