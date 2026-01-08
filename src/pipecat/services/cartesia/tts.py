@@ -392,10 +392,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
         Returns:
             List of (word, start_time) tuples processed for the language.
         """
-        current_language = self._settings.get("language", "en")
+        current_language = self._settings.get("language")
 
-        # Check if this is a CJK language
-        if self._is_cjk_language(current_language):
+        # Check if this is a CJK language (if language is None, treat as non-CJK)
+        if current_language and self._is_cjk_language(current_language):
             # For CJK languages, combine all characters in this message into one word
             # using the first character's start time
             if words and starts:
