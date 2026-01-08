@@ -114,6 +114,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
             self._speech_triggered = False
             self._last_probability = None
             self._frame_probabilities = []
+            self._last_state = EndOfTurnState.INCOMPLETE
 
             # Create session with provided sample rate or default to 16000 Hz
             # This preloads the model to improve latency when set_sample_rate is called later
@@ -245,10 +246,12 @@ class KrispVivaTurn(BaseTurnAnalyzer):
         """
         if self._tt_session is None:
             logger.warning("Turn detection session not initialized, returning INCOMPLETE")
+            self._last_state = EndOfTurnState.INCOMPLETE
             return EndOfTurnState.INCOMPLETE
 
         if self._samples_per_frame is None:
             logger.warning("Samples per frame not initialized, returning INCOMPLETE")
+            self._last_state = EndOfTurnState.INCOMPLETE
             return EndOfTurnState.INCOMPLETE
 
         try:
@@ -263,6 +266,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
 
             if num_complete_frames == 0:
                 # Not enough samples for a complete frame yet, return current state
+                self._last_state = EndOfTurnState.INCOMPLETE
                 return EndOfTurnState.INCOMPLETE
 
             complete_samples_count = num_complete_frames * self._samples_per_frame
@@ -286,10 +290,9 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                     if not self._speech_triggered:
                         logger.trace("Speech detected, turn analysis started")
                     self._speech_triggered = True
-                else:
-                    # Track when speech stops (potential end-of-turn)
-                    if self._speech_triggered:
-                        state = EndOfTurnState.COMPLETE
+                # Note: We don't immediately mark as complete on silence detection.
+                # Instead, we wait for the model's probability check below to confirm
+                # end-of-turn based on the threshold.
 
                 prob = self._tt_session.process(frame.tolist())
 
@@ -303,26 +306,33 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 self._frame_probabilities.append(prob)
 
                 # Check if turn is complete based on probability threshold
+                # Only mark as complete if we've detected speech and the model
+                # confirms with sufficient confidence
                 if self._speech_triggered and prob >= self._params.threshold:
                     state = EndOfTurnState.COMPLETE
                     self._clear(state)
                     break
 
+            # Store the last state for analyze_end_of_turn()
+            self._last_state = state
             return state
 
         except Exception as e:
             logger.error(f"Error during Krisp turn detection: {e}", exc_info=True)
-            return EndOfTurnState.INCOMPLETE
+            error_state = EndOfTurnState.INCOMPLETE
+            self._last_state = error_state
+            return error_state
 
     async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
         """Analyze the current audio state to determine if turn has ended.
 
         Returns:
             Tuple containing the end-of-turn state and optional metrics data.
+            Returns the last state determined by append_audio().
         """
         # For real-time processing, the state is determined in append_audio
-        # This method can be used for periodic checks if needed
-        return EndOfTurnState.INCOMPLETE, None
+        # Return the last state that was computed
+        return self._last_state, None
 
     def clear(self):
         """Reset the turn analyzer to its initial state."""
@@ -339,3 +349,5 @@ class KrispVivaTurn(BaseTurnAnalyzer):
         # Clear audio buffer on turn completion
         if turn_state == EndOfTurnState.COMPLETE:
             self._audio_buffer.clear()
+        # Reset last state when clearing
+        self._last_state = EndOfTurnState.INCOMPLETE
