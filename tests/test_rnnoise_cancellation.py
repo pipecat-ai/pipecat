@@ -1,8 +1,12 @@
-import asyncio
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import unittest
 
 import numpy as np
-import pytest
 
 try:
     import pyrnnoise
