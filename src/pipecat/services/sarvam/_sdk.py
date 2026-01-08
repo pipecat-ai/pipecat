@@ -4,8 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from __future__ import annotations
-
 import platform
 from typing import Dict
 
