@@ -19,12 +19,7 @@ class OLLamaLLMService(OpenAILLMService):
     """
 
     def __init__(
-        self,
-        *,
-        model: str = "llama2",
-        base_url: str = "http://localhost:11434/v1",
-        api_key: str = "ollama",
-        **kwargs,
+        self, *, model: str = "llama2", base_url: str = "http://localhost:11434/v1", **kwargs
     ):
         """Initialize OLLama LLM service.
 
@@ -32,10 +27,9 @@ class OLLamaLLMService(OpenAILLMService):
             model: The OLLama model to use. Defaults to "llama2".
             base_url: The base URL for the OLLama API endpoint.
                     Defaults to "http://localhost:11434/v1".
-            api_key: The API key for authenticating with the OLLama service.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(model=model, base_url=base_url, api_key=api_key, **kwargs)
+        super().__init__(model=model, base_url=base_url, api_key="ollama", **kwargs)
 
     def create_client(self, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Ollama.
