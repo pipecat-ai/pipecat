@@ -287,6 +287,7 @@ class SpeechmaticsSTTService(STTService):
         base_url: str | None = None,
         sample_rate: int | None = None,
         params: InputParams | None = None,
+        should_interrupt: bool = True,
         **kwargs,
     ):
         """Initialize the Speechmatics STT service.
@@ -298,6 +299,7 @@ class SpeechmaticsSTTService(STTService):
                 or defaults to `wss://eu2.rt.speechmatics.com/v2`.
             sample_rate: Optional audio sample rate in Hz.
             params: Optional[InputParams]: Input parameters for the service.
+            should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
             **kwargs: Additional arguments passed to STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -316,6 +318,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Default params
         params = params or SpeechmaticsSTTService.InputParams()
+        self._should_interrupt = should_interrupt
 
         # Deprecation check
         self._check_deprecated_args(kwargs, params)
@@ -623,7 +626,8 @@ class SpeechmaticsSTTService(STTService):
         logger.debug(f"{self} StartOfTurn received")
         # await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.push_interruption_task_frame_and_wait()
+        if self._should_interrupt:
+            await self.push_interruption_task_frame_and_wait()
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
         """Handle EndOfTurn events.
