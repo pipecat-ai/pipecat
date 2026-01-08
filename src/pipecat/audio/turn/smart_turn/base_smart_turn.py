@@ -25,7 +25,7 @@ from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
 
 # Default timing parameters
 STOP_SECS = 3
-PRE_SPEECH_MS = 0
+PRE_SPEECH_MS = 500
 MAX_DURATION_SECONDS = 8  # Max allowed segment duration
 
 
@@ -35,11 +35,15 @@ class SmartTurnParams(BaseTurnParams):
     Parameters:
         stop_secs: Maximum silence duration in seconds before ending turn.
         pre_speech_ms: Milliseconds of audio to include before speech starts.
+        vad_start_secs: Seconds VAD waits before confirming speech start (e.g. VAD STARTING window).
+            This is added to `pre_speech_ms` at inference slicing time so Smart Turn can include
+            the initial audio that occurred while VAD was still confirming speech.
         max_duration_secs: Maximum duration in seconds for audio segments.
     """
 
     stop_secs: float = STOP_SECS
     pre_speech_ms: float = PRE_SPEECH_MS
+    vad_start_secs: float = 0.0
     max_duration_secs: float = MAX_DURATION_SECONDS
 
 
@@ -181,7 +185,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             return state, None
 
         # Extract recent audio segment for prediction
-        start_time = self._speech_start_time - (self._params.pre_speech_ms / 1000)
+        effective_pre_speech_ms = self._params.pre_speech_ms + (self._params.vad_start_secs * 1000)
+        start_time = self._speech_start_time - (effective_pre_speech_ms / 1000)
         start_index = 0
         for i, (t, _) in enumerate(audio_buffer):
             if t >= start_time:
