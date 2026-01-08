@@ -7,6 +7,7 @@
 """Telnyx WebSocket frame serializer for Pipecat."""
 
 import base64
+import binascii
 import json
 import sys
 from typing import Optional
@@ -280,11 +281,23 @@ class TelnyxFrameSerializer(FrameSerializer):
         Raises:
             ValueError: If an unsupported encoding is specified.
         """
-        message = json.loads(data)
+        try:
+            message = json.loads(data)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse JSON message: {data[:100]}...")
+            return None
+
+        if not isinstance(message, dict) or "event" not in message:
+            logger.warning("Invalid message format: missing 'event' field")
+            return None
 
         if message["event"] == "media":
             payload_base64 = message["media"]["payload"]
-            payload = base64.b64decode(payload_base64)
+            try:
+                payload = base64.b64decode(payload_base64)
+            except binascii.Error:
+                logger.warning("Failed to decode base64 audio payload")
+                return None
 
             # Input: Convert Telnyx's audio to PCM at pipeline input rate
             if self._params.outbound_encoding == "PCMU":

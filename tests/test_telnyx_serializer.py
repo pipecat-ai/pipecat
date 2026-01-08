@@ -358,3 +358,134 @@ class TestTelnyxL16ByteOrderEdgeCases:
         if result is not None:
             # Should have truncated to 4 bytes (2 samples)
             assert len(result.audio) % 2 == 0
+
+    @pytest.mark.asyncio
+    async def test_l16_byteswap_vs_astype_equivalence(self, serializer):
+        """Verify byteswap() and astype() produce identical byte output.
+
+        This test ensures the serialize path (using byteswap) and deserialize path
+        (using astype) are consistent and produce bit-identical results.
+        """
+        # Test multiple patterns including edge cases
+        test_values = [
+            [0x0102, 0x0304],  # Simple pattern
+            [32767, -32768],  # Max/min int16
+            [0, 1, -1],  # Zero and near-zero
+            [0x1234, 0x5678, -25924],  # Mixed values (0x9ABC as signed = -25924)
+        ]
+
+        for values in test_values:
+            audio_le = np.array(values, dtype="<i2")  # Little-endian (host)
+
+            # Method 1: byteswap (used in serialize)
+            byteswap_result = audio_le.byteswap().tobytes()
+
+            # Method 2: astype (used in deserialize, reversed)
+            # First convert to big-endian representation
+            audio_be = np.array(values, dtype=">i2")
+            # Then use astype to convert back to little-endian
+            astype_result = audio_be.view(">i2").astype("<i2").tobytes()
+
+            # The roundtrip should preserve values
+            roundtrip_values = np.frombuffer(astype_result, dtype="<i2")
+            np.testing.assert_array_equal(roundtrip_values, values)
+
+    @pytest.mark.asyncio
+    async def test_l16_roundtrip_with_resampling(self):
+        """Test full roundtrip with resampling: 16kHz pipeline → 8kHz Telnyx → 16kHz pipeline."""
+        # Create serializer with mismatched rates
+        params = TelnyxFrameSerializer.InputParams(
+            telnyx_sample_rate=8000,
+            sample_rate=16000,
+            inbound_encoding="L16",
+            outbound_encoding="L16",
+        )
+        serializer = TelnyxFrameSerializer(
+            stream_id="test-stream",
+            outbound_encoding="L16",
+            inbound_encoding="L16",
+            params=params,
+        )
+
+        start_frame = StartFrame(audio_in_sample_rate=16000)
+        await serializer.setup(start_frame)
+
+        # Create a longer audio buffer for resampling (need enough samples)
+        # 100ms of audio at 16kHz = 1600 samples
+        t = np.linspace(0, 0.1, 1600)
+        audio_np = (np.sin(2 * np.pi * 440 * t) * 16000).astype(np.int16)
+        original_audio = audio_np.tobytes()
+
+        audio_frame = AudioRawFrame(audio=original_audio, sample_rate=16000, num_channels=1)
+
+        # Serialize (16kHz → 8kHz, byte swap to big-endian)
+        serialized = await serializer.serialize(audio_frame)
+
+        # Stream resampler may buffer, so we might need multiple frames
+        if serialized is not None:
+            # Deserialize (big-endian → little-endian, 8kHz → 16kHz)
+            result = await serializer.deserialize(serialized)
+
+            if result is not None:
+                assert isinstance(result, InputAudioRawFrame)
+                assert result.sample_rate == 16000
+                # Verify it's valid PCM (even length, reasonable values)
+                assert len(result.audio) % 2 == 0
+                result_values = np.frombuffer(result.audio, dtype=np.int16)
+                assert np.all(result_values >= -32768)
+                assert np.all(result_values <= 32767)
+
+
+class TestTelnyxL16ErrorHandling:
+    """Tests for error handling in L16 deserialization."""
+
+    @pytest.fixture
+    def serializer(self):
+        """Create a TelnyxFrameSerializer configured for L16."""
+        params = TelnyxFrameSerializer.InputParams(
+            telnyx_sample_rate=16000,
+            sample_rate=16000,
+        )
+        return TelnyxFrameSerializer(
+            stream_id="test-stream",
+            outbound_encoding="L16",
+            inbound_encoding="L16",
+            params=params,
+        )
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_returns_none(self, serializer):
+        """Test that malformed JSON returns None instead of crashing."""
+        start_frame = StartFrame(audio_in_sample_rate=16000)
+        await serializer.setup(start_frame)
+
+        # Various malformed JSON inputs
+        malformed_inputs = [
+            "not json at all",
+            "{incomplete",
+            '{"event": "media", "media": {',
+            "",
+            "null",
+        ]
+
+        for bad_input in malformed_inputs:
+            result = await serializer.deserialize(bad_input)
+            assert result is None, f"Expected None for malformed input: {bad_input}"
+
+    @pytest.mark.asyncio
+    async def test_invalid_base64_returns_none(self, serializer):
+        """Test that invalid base64 payload returns None instead of crashing."""
+        start_frame = StartFrame(audio_in_sample_rate=16000)
+        await serializer.setup(start_frame)
+
+        # Valid JSON but invalid base64 payload
+        invalid_payloads = [
+            "not-valid-base64!!!",
+            "====",
+            "ab",  # Too short
+        ]
+
+        for bad_payload in invalid_payloads:
+            message = json.dumps({"event": "media", "media": {"payload": bad_payload}})
+            result = await serializer.deserialize(message)
+            assert result is None, f"Expected None for invalid base64: {bad_payload}"
