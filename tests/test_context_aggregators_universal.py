@@ -143,6 +143,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         should_start = None
         should_stop = None
+        stop_message = None
 
         @user_aggregator.event_handler("on_user_turn_started")
         async def on_user_turn_started(aggregator, strategy):
@@ -150,9 +151,10 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             should_start = True
 
         @user_aggregator.event_handler("on_user_turn_stopped")
-        async def on_user_turn_stopped(aggregator, strategy):
-            nonlocal should_stop
+        async def on_user_turn_stopped(aggregator, strategy, message):
+            nonlocal should_stop, stop_message
             should_stop = True
+            stop_message = message
 
         pipeline = Pipeline([user_aggregator])
 
@@ -177,6 +179,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
+        self.assertEqual(stop_message.content, "Hello!")
 
     async def test_user_turn_stop_timeout_no_transcription(self):
         context = LLMContext()
@@ -196,7 +199,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             should_start = True
 
         @user_aggregator.event_handler("on_user_turn_stopped")
-        async def on_user_turn_stopped(aggregator, strategy):
+        async def on_user_turn_stopped(aggregator, strategy, message):
             nonlocal should_stop
             should_stop = True
 
@@ -236,6 +239,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         should_start = None
         should_stop = None
+        stop_message = None
         timeout = None
 
         @user_aggregator.event_handler("on_user_turn_started")
@@ -244,9 +248,10 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             should_start = True
 
         @user_aggregator.event_handler("on_user_turn_stopped")
-        async def on_user_turn_stopped(aggregator, strategy):
-            nonlocal should_stop
+        async def on_user_turn_stopped(aggregator, strategy, message):
+            nonlocal should_stop, stop_message
             should_stop = True
+            stop_message = message
 
         @user_aggregator.event_handler("on_user_turn_stop_timeout")
         async def on_user_turn_stop_timeout(aggregator):
@@ -271,6 +276,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         # The transcription strategy should kick-in before the user turn end timeout.
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
+        self.assertEqual(stop_message.content, "Hello!")
         self.assertFalse(timeout)
 
     async def test_user_mute_strategies(self):

@@ -102,6 +102,23 @@ class LLMAssistantAggregatorParams:
     expect_stripped_words: bool = True
 
 
+@dataclass
+class UserTurnStoppedMessage:
+    """A user turn stopped message containing a user transcript update.
+
+    A message in a conversation transcript containing the user content. This is
+    the aggregated transcript that is then used in the context.
+
+    Parameters:
+        content: The message content/text.
+        user_id: Optional identifier for the user.
+
+    """
+
+    content: str
+    user_id: Optional[str] = None
+
+
 class LLMContextAggregator(FrameProcessor):
     """Base LLM aggregator that uses an LLMContext for conversation storage.
 
@@ -205,8 +222,12 @@ class LLMContextAggregator(FrameProcessor):
         self._aggregation = []
 
     @abstractmethod
-    async def push_aggregation(self):
-        """Push the current aggregation downstream."""
+    async def push_aggregation(self) -> str:
+        """Push the current aggregation downstream.
+
+        Returns:
+            The pushed aggregation.
+        """
         pass
 
     def aggregation_string(self) -> str:
@@ -243,7 +264,7 @@ class LLMUserAggregator(LLMContextAggregator):
             ...
 
         @aggregator.event_handler("on_user_turn_stopped")
-        async def on_user_turn_stopped(aggregator, strategy: BaseUserTurnStopStrategy):
+        async def on_user_turn_stopped(aggregator, strategy: BaseUserTurnStopStrategy, message: UserTurnStoppedMessage):
             ...
 
         @aggregator.event_handler("on_user_turn_stop_timeout")
@@ -348,15 +369,17 @@ class LLMUserAggregator(LLMContextAggregator):
 
         await self._user_turn_controller.process_frame(frame)
 
-    async def push_aggregation(self):
+    async def push_aggregation(self) -> str:
         """Push the current aggregation."""
         if len(self._aggregation) == 0:
-            return
+            return ""
 
         aggregation = self.aggregation_string()
         await self.reset()
         self._context.add_message({"role": self.role, "content": aggregation})
         await self.push_context_frame()
+
+        return aggregation
 
     async def _start(self, frame: StartFrame):
         await self._user_turn_controller.setup(self.task_manager)
@@ -493,9 +516,10 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         # Always push context frame.
-        await self.push_aggregation()
+        aggregation = await self.push_aggregation()
 
-        await self._call_event_handler("on_user_turn_stopped", strategy)
+        message = UserTurnStoppedMessage(content=aggregation)
+        await self._call_event_handler("on_user_turn_stopped", strategy, message)
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
@@ -633,10 +657,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         else:
             await self.push_frame(frame, direction)
 
-    async def push_aggregation(self):
+    async def push_aggregation(self) -> str:
         """Push the current assistant aggregation with timestamp."""
         if not self._aggregation:
-            return
+            return ""
 
         aggregation = self.aggregation_string()
         await self.reset()
@@ -650,6 +674,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Push timestamp frame with current time
         timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
         await self.push_frame(timestamp_frame)
+
+        return aggregation
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
