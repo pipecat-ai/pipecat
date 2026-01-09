@@ -633,7 +633,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
-        self._thought_aggregation_enabled = False
+        self._thought_append_to_context = False
         self._thought_llm: str = ""
         self._thought_aggregation: List[TextPartForConcatenation] = []
         self._thought_start_time: str = ""
@@ -658,7 +658,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
-        self._thought_aggregation_enabled = False
+        self._thought_append_to_context = False
         self._thought_llm = ""
         self._thought_aggregation = []
 
@@ -915,12 +915,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return
 
         await self._reset_thought_aggregation()
-        self._thought_aggregation_enabled = frame.append_to_context
+        self._thought_append_to_context = frame.append_to_context
         self._thought_llm = frame.llm
         self._thought_start_time = time_now_iso8601()
 
     async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
-        if not self._started or not self._thought_aggregation_enabled:
+        if not self._started:
             return
 
         # Make sure we really have text (spaces count, too!)
@@ -934,23 +934,24 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
     async def _handle_thought_end(self, frame: LLMThoughtEndFrame):
-        if not self._started or not self._thought_aggregation_enabled:
+        if not self._started:
             return
 
         thought = concatenate_aggregated_text(self._thought_aggregation)
-        llm = self._thought_llm
         await self._reset_thought_aggregation()
 
-        self._context.add_message(
-            LLMSpecificMessage(
-                llm=llm,
-                message={
-                    "type": "thought",
-                    "text": thought,
-                    "signature": frame.signature,
-                },
+        if self._thought_append_to_context:
+            llm = self._thought_llm
+            self._context.add_message(
+                LLMSpecificMessage(
+                    llm=llm,
+                    message={
+                        "type": "thought",
+                        "text": thought,
+                        "signature": frame.signature,
+                    },
+                )
             )
-        )
 
         message = AssistantThoughtMessage(content=thought, timestamp=self._thought_start_time)
         await self._call_event_handler("on_assistant_thought", message)
