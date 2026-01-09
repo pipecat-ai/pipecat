@@ -13,8 +13,5 @@ from pipecat import version as pipecat_version
 def sdk_headers() -> Dict[str, str]:
     """SDK identification headers for upstream providers."""
     return {
-        "X-SDK-Source": "Pipecat",
-        "X-SDK-Version": pipecat_version(),
-        "SDK-Language": "Python",
-        "sdk-language-version": platform.python_version(),
+        "User-Agent": f"Pipecat/{pipecat_version()} Python/{platform.python_version()}",
     }
