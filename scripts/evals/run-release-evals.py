@@ -239,6 +239,10 @@ TESTS_51 = [
     ("51-grok-realtime.py", EVAL_WEATHER),
 ]
 
+TESTS_53 = [
+    ("53-concurrent-llm-evaluation.py", EVAL_SIMPLE_MATH),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -254,6 +258,7 @@ TESTS = [
     *TESTS_49,
     *TESTS_50,
     *TESTS_51,
+    *TESTS_53,
 ]
 
 
