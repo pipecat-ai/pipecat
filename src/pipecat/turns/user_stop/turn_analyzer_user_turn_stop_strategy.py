@@ -72,6 +72,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def cleanup(self):
         """Cleanup the strategy."""
         await super().cleanup()
+        await self._turn_analyzer.cleanup()
         if self._task:
             await self.task_manager.cancel_task(self._task)
             self._task = None

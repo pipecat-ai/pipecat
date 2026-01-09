@@ -120,3 +120,7 @@ class BaseTurnAnalyzer(ABC):
     def clear(self):
         """Reset the turn analyzer to its initial state."""
         pass
+
+    async def cleanup(self):
+        """Cleanup the turn analyzer."""
+        pass

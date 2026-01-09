@@ -133,7 +133,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 self._sdk_acquired = False
             raise
 
-    def __del__(self):
+    async def cleanup(self):
         """Release SDK reference when analyzer is destroyed."""
         if self._sdk_acquired:
             try:
@@ -192,8 +192,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
         # Create session when sample rate is set
         try:
             self._tt_session = self._create_tt_session(self._sample_rate)
-            # Clear buffer when sample rate changes
-            self._audio_buffer.clear()
+            self.clear()
         except Exception as e:
             logger.error(f"Failed to create turn detection session: {e}", exc_info=True)
             self._tt_session = None
@@ -310,7 +309,7 @@ class KrispVivaTurn(BaseTurnAnalyzer):
                 # confirms with sufficient confidence
                 if self._speech_triggered and prob >= self._params.threshold:
                     state = EndOfTurnState.COMPLETE
-                    self._clear(state)
+                    self.clear()
                     break
 
             # Store the last state for analyze_end_of_turn()
@@ -336,18 +335,6 @@ class KrispVivaTurn(BaseTurnAnalyzer):
 
     def clear(self):
         """Reset the turn analyzer to its initial state."""
-        self._clear(EndOfTurnState.COMPLETE)
-
-    def _clear(self, turn_state: EndOfTurnState):
-        """Clear internal state based on turn completion status.
-
-        Args:
-            turn_state: The end-of-turn state to use for clearing.
-        """
-        # If the state is still incomplete, keep the _speech_triggered as True
-        self._speech_triggered = turn_state == EndOfTurnState.INCOMPLETE
-        # Clear audio buffer on turn completion
-        if turn_state == EndOfTurnState.COMPLETE:
-            self._audio_buffer.clear()
-        # Reset last state when clearing
+        self._speech_triggered = False
+        self._audio_buffer.clear()
         self._last_state = EndOfTurnState.INCOMPLETE
