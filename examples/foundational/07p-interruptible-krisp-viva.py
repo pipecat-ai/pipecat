@@ -4,6 +4,23 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Interruptible bot with Krisp VIVA noise filtering and turn detection.
+
+This example demonstrates a conversational bot with:
+- Krisp VIVA noise reduction on incoming audio
+- Krisp VIVA Turn detection for natural interruptions
+- Voice activity detection (VAD)
+
+Required environment variables:
+- KRISP_VIVA_FILTER_MODEL_PATH: Path to the Krisp noise filter model file (.kef)
+- KRISP_VIVA_TURN_MODEL_PATH: Path to the Krisp turn detection model file (.kef)
+- DEEPGRAM_API_KEY: Deepgram API key for STT/TTS
+- OPENAI_API_KEY: OpenAI API key for LLM
+
+Optional environment variables:
+- KRISP_NOISE_SUPPRESSION_LEVEL: Noise suppression level 0-100 (default: 100)
+  Higher values = more aggressive noise reduction
+"""
 
 import os
 
@@ -11,7 +28,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+from pipecat.audio.turn.krisp_viva_turn import KrispTurnParams, KrispVivaTurn
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
@@ -82,7 +99,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=KrispVivaTurn())]
             ),
         ),
     )
