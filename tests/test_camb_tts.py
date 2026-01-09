@@ -336,17 +336,14 @@ async def test_input_params():
     # Test defaults
     params = CambTTSService.InputParams()
     assert params.language == Language.EN
-    assert params.speed == 1.0
     assert params.user_instructions is None
 
     # Test custom values
     params = CambTTSService.InputParams(
         language=Language.ES,
-        speed=1.5,
         user_instructions="Speak slowly and clearly",
     )
     assert params.language == Language.ES
-    assert params.speed == 1.5
     assert params.user_instructions == "Speak slowly and clearly"
 
 

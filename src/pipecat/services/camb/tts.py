@@ -14,7 +14,7 @@ Features:
     - 140+ languages supported
     - Real-time HTTP streaming
     - 24kHz audio output
-    - Voice customization (speed, instructions)
+    - Voice customization (instructions for mars-instruct)
 """
 
 import asyncio
@@ -129,8 +129,7 @@ class CambTTSService(TTSService):
     """Camb.ai MARS HTTP-based text-to-speech service.
 
     Converts text to speech using Camb.ai's MARS TTS models with support for
-    multiple languages. Provides control over voice characteristics like speed
-    and custom instructions (for mars-instruct model).
+    multiple languages. Provides custom instructions support for the mars-instruct model.
 
     Example::
 
@@ -140,8 +139,7 @@ class CambTTSService(TTSService):
             model="mars-flash",
             aiohttp_session=session,
             params=CambTTSService.InputParams(
-                language=Language.EN,
-                speed=1.0
+                language=Language.EN
             )
         )
 
@@ -163,13 +161,11 @@ class CambTTSService(TTSService):
 
         Parameters:
             language: Language for synthesis (BCP-47 format). Defaults to English.
-            speed: Speech speed multiplier (0.5 to 2.0). Defaults to 1.0.
             user_instructions: Custom instructions for mars-instruct model only.
                 Ignored for other models. Max 1000 characters.
         """
 
         language: Optional[Language] = Language.EN
-        speed: Optional[float] = Field(default=1.0, ge=0.5, le=2.0)
         user_instructions: Optional[str] = Field(
             default=None,
             max_length=1000,
@@ -223,7 +219,6 @@ class CambTTSService(TTSService):
                 if params.language
                 else DEFAULT_LANGUAGE
             ),
-            "speed": params.speed or 1.0,
             "user_instructions": params.user_instructions,
         }
 
@@ -312,7 +307,6 @@ class CambTTSService(TTSService):
             "language": self._settings["language"],
             "speech_model": self._model_name,
             "output_configuration": {"format": "pcm_s16le"},
-            "voice_settings": {"speed": self._settings["speed"]},
         }
 
         # Add user instructions if using mars-instruct model
