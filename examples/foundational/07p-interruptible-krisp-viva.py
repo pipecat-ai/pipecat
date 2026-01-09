@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.filters.krisp_viva_filter import KrispVivaFilter
-from pipecat.audio.turn.krisp_viva_turn import KrispVivaTurn, KrispTurnParams
+from pipecat.audio.turn.krisp_viva_turn import KrispTurnParams, KrispVivaTurn
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
@@ -99,7 +99,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=KrispVivaTurn(params=KrispTurnParams()))]
+                stop=[
+                    TurnAnalyzerUserTurnStopStrategy(
+                        turn_analyzer=KrispVivaTurn(params=KrispTurnParams())
+                    )
+                ]
             ),
         ),
     )
