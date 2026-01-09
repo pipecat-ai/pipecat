@@ -108,20 +108,12 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
         """Sync Smart Turn pre-speech buffering with VAD start delay.
 
-        In the new user-turn-strategies pipeline, `VADUserStartedSpeakingFrame`
-        is emitted only once VAD has *confirmed* speech (after `vad_params.start_secs`).
-        Smart Turn should still include the initial audio collected during that
-        confirmation window, so we record it in `SmartTurnParams.vad_start_secs` and
-        add it at inference slicing time (preserving `pre_speech_ms` semantics).
+        `VADUserStartedSpeakingFrame` is emitted only once VAD has confirmed speech
+        (after `vad_params.start_secs`). Smart Turn should still include the initial
+        audio collected during that confirmation window, so we let the analyzer know
+        when this value has changed.
         """
-        if not frame.vad_params:
-            return
-
-        params = self._turn_analyzer.params
-        if not isinstance(params, SmartTurnParams):
-            return
-
-        params.vad_start_secs = frame.vad_params.start_secs
+        self._turn_analyzer.on_vad_start_secs_updated(frame.vad_params.start_secs)
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""

@@ -35,15 +35,11 @@ class SmartTurnParams(BaseTurnParams):
     Parameters:
         stop_secs: Maximum silence duration in seconds before ending turn.
         pre_speech_ms: Milliseconds of audio to include before speech starts.
-        vad_start_secs: Seconds VAD waits before confirming speech start (e.g. VAD STARTING window).
-            This is added to `pre_speech_ms` at inference slicing time so Smart Turn can include
-            the initial audio that occurred while VAD was still confirming speech.
         max_duration_secs: Maximum duration in seconds for audio segments.
     """
 
     stop_secs: float = STOP_SECS
     pre_speech_ms: float = PRE_SPEECH_MS
-    vad_start_secs: float = 0.0
     max_duration_secs: float = MAX_DURATION_SECONDS
 
 
@@ -82,6 +78,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         # Thread executor that will run the model. We only need one thread per
         # analyzer because one analyzer just handles one audio stream.
         self._executor = ThreadPoolExecutor(max_workers=1)
+        self._vad_start_secs: float = 0.0
 
     @property
     def speech_triggered(self) -> bool:
@@ -165,6 +162,9 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         logger.debug(f"End of Turn result: {state}")
         return state, result
 
+    def on_vad_start_secs_updated(self, vad_start_secs: float):
+        self._vad_start_secs = vad_start_secs
+
     def clear(self):
         """Reset the turn analyzer to its initial state."""
         self._clear(EndOfTurnState.COMPLETE)
@@ -185,7 +185,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             return state, None
 
         # Extract recent audio segment for prediction
-        effective_pre_speech_ms = self._params.pre_speech_ms + (self._params.vad_start_secs * 1000)
+        effective_pre_speech_ms = self._params.pre_speech_ms + (self._vad_start_secs * 1000)
         start_time = self._speech_start_time - (effective_pre_speech_ms / 1000)
         start_index = 0
         for i, (t, _) in enumerate(audio_buffer):
