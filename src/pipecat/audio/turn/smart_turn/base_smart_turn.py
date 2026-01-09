@@ -163,6 +163,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         return state, result
 
     def on_vad_start_secs_updated(self, vad_start_secs: float):
+        """Store the new vad_start_secs value."""
         self._vad_start_secs = vad_start_secs
 
     def clear(self):
