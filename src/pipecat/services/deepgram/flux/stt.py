@@ -194,6 +194,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Establishes the WebSocket connection to the Deepgram Flux API and starts
         the background task for receiving transcription results.
         """
+        await super()._connect()
+
         await self._connect_websocket()
 
     async def _disconnect(self):
@@ -202,6 +204,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Gracefully disconnects from the Deepgram Flux API, cancels background tasks,
         and cleans up resources to prevent memory leaks.
         """
+        await super()._disconnect()
+
         try:
             await self._disconnect_websocket()
         except Exception as e:

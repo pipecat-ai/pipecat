@@ -157,6 +157,8 @@ class GradiumTTSService(InterruptibleWordTTSService):
 
     async def _connect(self):
         """Establish websocket connection and start receive task."""
+        await super()._connect()
+
         logger.debug(f"{self}: connecting")
 
         # If the server disconnected, cancel the receive-task so that it can be reset below.
@@ -173,6 +175,8 @@ class GradiumTTSService(InterruptibleWordTTSService):
 
     async def _disconnect(self):
         """Close websocket connection and clean up tasks."""
+        await super()._disconnect()
+
         logger.debug(f"{self}: disconnecting")
         if self._receive_task:
             await self.cancel_task(self._receive_task)

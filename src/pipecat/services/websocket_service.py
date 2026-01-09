@@ -36,7 +36,8 @@ class WebsocketService(ABC):
         """
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
         self._reconnect_on_error = reconnect_on_error
-        self._reconnect_in_progress: bool = False  # Add this flag
+        self._reconnect_in_progress: bool = False
+        self._disconnecting: bool = False
 
     async def _verify_connection(self) -> bool:
         """Verify the websocket connection is active and responsive.
@@ -138,6 +139,11 @@ class WebsocketService(ABC):
                 logger.debug(f"{self} connection closed normally: {e}")
                 break
             except ConnectionClosedError as e:
+                # Don't reconnect if we're intentionally disconnecting
+                if self._disconnecting:
+                    logger.warning(f"{self} connection closed with an error during disconnect: {e}")
+                    break
+
                 # Connection closed with error (e.g., no close frame received/sent)
                 # This often indicates network issues, server problems, or abrupt disconnection
                 message = f"{self} connection closed, but with an error: {e}"
@@ -162,23 +168,25 @@ class WebsocketService(ABC):
                     await report_error(ErrorFrame(message))
                     break
 
-    @abstractmethod
     async def _connect(self):
-        """Connect to the service.
+        """Connect to the service and reset disconnecting flag.
 
-        Implement service-specific connection logic including websocket connection
-        via _connect_websocket() and any additional setup required.
+        Manages the disconnecting flag to enable reconnection. Subclasses should
+        call super()._connect() first, then implement their specific connection
+        logic including websocket connection via _connect_websocket() and any
+        additional setup required.
         """
-        pass
+        self._disconnecting = False
 
-    @abstractmethod
     async def _disconnect(self):
-        """Disconnect from the service.
+        """Disconnect from the service and set disconnecting flag.
 
-        Implement service-specific disconnection logic including websocket
+        Manages the disconnecting flag to prevent reconnection during intentional
+        disconnect. Subclasses should call super()._disconnect() first, then
+        implement their specific disconnection logic including websocket
         disconnection via _disconnect_websocket() and any cleanup required.
         """
-        pass
+        self._disconnecting = True
 
     @abstractmethod
     async def _connect_websocket(self):
