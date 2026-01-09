@@ -61,7 +61,6 @@ class KrispFilter(BaseAudioFilter):
     Provides real-time noise reduction for audio streams using Krisp's
     proprietary noise suppression algorithms. Requires a Krisp model file
     for operation.
-
     .. deprecated:: 0.0.94
         The KrispFilter is deprecated and will be removed in a future version.
         Use KrispVivaFilter instead.
