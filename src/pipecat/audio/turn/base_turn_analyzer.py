@@ -116,8 +116,8 @@ class BaseTurnAnalyzer(ABC):
         """
         pass
 
-    def on_vad_start_secs_updated(self, vad_start_secs: float):
-        """Invoked when the VAD start trigger time is updated.
+    def update_vad_start_secs(self, vad_start_secs: float):
+        """Update the VAD start trigger time.
 
         The turn analyzer may choose to change its buffer size depending
         on this value.
