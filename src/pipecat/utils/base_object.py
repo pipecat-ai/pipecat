@@ -96,7 +96,7 @@ class BaseObject(ABC):
         """
         if self._event_tasks:
             event_names, tasks = zip(*self._event_tasks)
-            logger.debug(f"{self} waiting on event handlers to finish {list(event_names)}...")
+            logger.debug(f"{self}: waiting on event handlers to finish {list(event_names)}...")
             await asyncio.wait(tasks)
 
     def event_handler(self, event_name: str):
@@ -126,7 +126,7 @@ class BaseObject(ABC):
         if event_name in self._event_handlers:
             self._event_handlers[event_name].handlers.append(handler)
         else:
-            logger.warning(f"Event handler {event_name} not registered")
+            logger.warning(f"{self}: event handler {event_name} not registered")
 
     def _register_event_handler(self, event_name: str, sync: bool = False):
         """Register an event handler type.
@@ -140,7 +140,7 @@ class BaseObject(ABC):
                 name=event_name, handlers=[], is_sync=sync
             )
         else:
-            logger.warning(f"Event handler {event_name} already registered")
+            logger.warning(f"{self}: event handler {event_name} already registered")
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
         """Call all registered handlers for the specified event.
@@ -191,7 +191,7 @@ class BaseObject(ABC):
             tb = traceback.extract_tb(e.__traceback__)
             last = tb[-1]
             logger.error(
-                f"Uncaught exception in event handler '{event_name}' ({last.filename}:{last.lineno}): {e}"
+                f"{self}: uncaught exception in event handler '{event_name}' ({last.filename}:{last.lineno}): {e}"
             )
 
     def _event_task_finished(self, task: asyncio.Task):

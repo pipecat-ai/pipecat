@@ -23,7 +23,6 @@ from loguru import logger
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -100,6 +99,59 @@ class LLMAssistantAggregatorParams:
     """
 
     expect_stripped_words: bool = True
+
+
+@dataclass
+class UserTurnStoppedMessage:
+    """A user turn stopped message containing a user transcript update.
+
+    A message in a conversation transcript containing the user content. This is
+    the aggregated transcript that is then used in the context.
+
+    Parameters:
+        content: The message content/text.
+        timestamp: When the user turn started.
+        user_id: Optional identifier for the user.
+
+    """
+
+    content: str
+    timestamp: str
+    user_id: Optional[str] = None
+
+
+@dataclass
+class AssistantTurnStoppedMessage:
+    """An assistant turn stopped message containing an assistant transcript update.
+
+    A message in a conversation transcript containing the assistant
+    content. This is the aggregated transcript that is then used in the context.
+
+    Parameters:
+        content: The message content/text.
+        timestamp: When the assistant turn started.
+
+    """
+
+    content: str
+    timestamp: str
+
+
+@dataclass
+class AssistantThoughtMessage:
+    """An assistant thought message containing an assistant thought update.
+
+    A message in a conversation transcript containing the assistant thought
+    content.
+
+    Parameters:
+        content: The message content/text.
+        timestamp: When the thought started.
+
+    """
+
+    content: str
+    timestamp: str
 
 
 class LLMContextAggregator(FrameProcessor):
@@ -205,8 +257,12 @@ class LLMContextAggregator(FrameProcessor):
         self._aggregation = []
 
     @abstractmethod
-    async def push_aggregation(self):
-        """Push the current aggregation downstream."""
+    async def push_aggregation(self) -> str:
+        """Push the current aggregation downstream.
+
+        Returns:
+            The pushed aggregation.
+        """
         pass
 
     def aggregation_string(self) -> str:
@@ -243,7 +299,7 @@ class LLMUserAggregator(LLMContextAggregator):
             ...
 
         @aggregator.event_handler("on_user_turn_stopped")
-        async def on_user_turn_stopped(aggregator, strategy: BaseUserTurnStopStrategy):
+        async def on_user_turn_stopped(aggregator, strategy: BaseUserTurnStopStrategy, message: UserTurnStoppedMessage):
             ...
 
         @aggregator.event_handler("on_user_turn_stop_timeout")
@@ -276,6 +332,7 @@ class LLMUserAggregator(LLMContextAggregator):
         user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
 
         self._user_is_muted = False
+        self._user_turn_start_timestamp = ""
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -348,15 +405,17 @@ class LLMUserAggregator(LLMContextAggregator):
 
         await self._user_turn_controller.process_frame(frame)
 
-    async def push_aggregation(self):
+    async def push_aggregation(self) -> str:
         """Push the current aggregation."""
         if len(self._aggregation) == 0:
-            return
+            return ""
 
         aggregation = self.aggregation_string()
         await self.reset()
         self._context.add_message({"role": self.role, "content": aggregation})
         await self.push_context_frame()
+
+        return aggregation
 
     async def _start(self, frame: StartFrame):
         await self._user_turn_controller.setup(self.task_manager)
@@ -473,6 +532,8 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         logger.debug(f"{self}: User started speaking (user turn start strategy: {strategy})")
 
+        self._user_turn_start_timestamp = time_now_iso8601()
+
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
@@ -493,9 +554,13 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         # Always push context frame.
-        await self.push_aggregation()
+        aggregation = await self.push_aggregation()
 
-        await self._call_event_handler("on_user_turn_stopped", strategy)
+        message = UserTurnStoppedMessage(
+            content=aggregation, timestamp=self._user_turn_start_timestamp
+        )
+        await self._call_event_handler("on_user_turn_stopped", strategy, message)
+        self._user_turn_start_timestamp = ""
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
@@ -514,6 +579,27 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     The aggregator manages function calls in progress and coordinates between
     text generation and tool execution phases of LLM responses.
+
+    Event handlers available:
+
+    - on_assistant_turn_started: Called when the assistant turn starts
+    - on_assistant_turn_stopped: Called when the assistant turn ends
+    - on_assistant_thought: Called when an assistant thought is available
+
+    Example::
+
+        @aggregator.event_handler("on_assistant_turn_started")
+        async def on_assistant_turn_started(aggregator):
+            ...
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            ...
+
+        @aggregator.event_handler("on_assistant_thought")
+        async def on_assistant_thought(aggregator, message: AssistantThoughtMessage):
+            ...
+
     """
 
     def __init__(
@@ -557,9 +643,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
-        self._thought_aggregation_enabled = False
+        self._assistant_turn_start_timestamp = ""
+
+        self._thought_append_to_context = False
         self._thought_llm: str = ""
         self._thought_aggregation: List[TextPartForConcatenation] = []
+        self._thought_start_time: str = ""
+
+        self._register_event_handler("on_assistant_turn_started")
+        self._register_event_handler("on_assistant_turn_stopped")
+        self._register_event_handler("on_assistant_thought")
 
     @property
     def has_function_calls_in_progress(self) -> bool:
@@ -577,7 +670,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
-        self._thought_aggregation_enabled = False
+        self._thought_append_to_context = False
         self._thought_llm = ""
         self._thought_aggregation = []
 
@@ -627,22 +720,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, AssistantImageRawFrame):
             await self._handle_assistant_image_frame(frame)
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.push_aggregation()
-            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
-    async def push_aggregation(self):
+    async def push_aggregation(self) -> str:
         """Push the current assistant aggregation with timestamp."""
         if not self._aggregation:
-            return
+            return ""
 
         aggregation = self.aggregation_string()
         await self.reset()
 
-        if aggregation:
-            self._context.add_message({"role": "assistant", "content": aggregation})
+        self._context.add_message({"role": "assistant", "content": aggregation})
 
         # Push context frame
         await self.push_context_frame()
@@ -650,6 +739,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Push timestamp frame with current time
         timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
         await self.push_frame(timestamp_frame)
+
+        return aggregation
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -665,7 +756,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
-        await self.push_aggregation()
+        await self._trigger_assistant_turn_stopped()
         self._started = 0
         await self.reset()
 
@@ -788,7 +879,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             text=frame.text,
         )
 
-        await self.push_aggregation()
+        await self._trigger_assistant_turn_stopped()
         await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_assistant_image_frame(self, frame: AssistantImageRawFrame):
@@ -811,10 +902,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
         self._started += 1
+        await self._trigger_assistant_turn_started()
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
         self._started -= 1
-        await self.push_aggregation()
+        await self._trigger_assistant_turn_stopped()
 
     async def _handle_text(self, frame: TextFrame):
         if not self._started or not frame.append_to_context:
@@ -835,11 +927,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return
 
         await self._reset_thought_aggregation()
-        self._thought_aggregation_enabled = frame.append_to_context
+        self._thought_append_to_context = frame.append_to_context
         self._thought_llm = frame.llm
+        self._thought_start_time = time_now_iso8601()
 
     async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
-        if not self._started or not self._thought_aggregation_enabled:
+        if not self._started:
             return
 
         # Make sure we really have text (spaces count, too!)
@@ -853,26 +946,45 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
     async def _handle_thought_end(self, frame: LLMThoughtEndFrame):
-        if not self._started or not self._thought_aggregation_enabled:
+        if not self._started:
             return
 
         thought = concatenate_aggregated_text(self._thought_aggregation)
-        llm = self._thought_llm
         await self._reset_thought_aggregation()
 
-        self._context.add_message(
-            LLMSpecificMessage(
-                llm=llm,
-                message={
-                    "type": "thought",
-                    "text": thought,
-                    "signature": frame.signature,
-                },
+        if self._thought_append_to_context:
+            llm = self._thought_llm
+            self._context.add_message(
+                LLMSpecificMessage(
+                    llm=llm,
+                    message={
+                        "type": "thought",
+                        "text": thought,
+                        "signature": frame.signature,
+                    },
+                )
             )
-        )
+
+        message = AssistantThoughtMessage(content=thought, timestamp=self._thought_start_time)
+        await self._call_event_handler("on_assistant_thought", message)
 
     def _context_updated_task_finished(self, task: asyncio.Task):
         self._context_updated_tasks.discard(task)
+
+    async def _trigger_assistant_turn_started(self):
+        self._assistant_turn_start_timestamp = time_now_iso8601()
+
+        await self._call_event_handler("on_assistant_turn_started")
+
+    async def _trigger_assistant_turn_stopped(self):
+        aggregation = await self.push_aggregation()
+        if aggregation:
+            message = AssistantTurnStoppedMessage(
+                content=aggregation, timestamp=self._assistant_turn_start_timestamp
+            )
+            await self._call_event_handler("on_assistant_turn_stopped", message)
+
+            self._assistant_turn_start_timestamp = ""
 
 
 class LLMContextAggregatorPair:
