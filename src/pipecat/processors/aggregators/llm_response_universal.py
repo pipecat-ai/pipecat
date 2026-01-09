@@ -66,6 +66,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
@@ -220,10 +221,10 @@ class LLMContextAggregator(FrameProcessor):
 class LLMUserAggregator(LLMContextAggregator):
     """User LLM aggregator that aggregates user input during active user turns.
 
-    This aggregator operates within turn boundaries defined by the configured
-    user and bot turn start strategies. User turn start strategies indicate when
-    a user turn begins, while bot turn start strategies signal when the user
-    turn has ended and control transitions to the bot turn.
+    This aggregator uses a turn controller and operates within turn boundaries
+    defined by the controller's configured user turn strategies. User turn start
+    strategies indicate when a user turn begins, while user turn stop strategies
+    signal when the user turn has ended.
 
     The aggregator collects and aggregates speech-to-text transcriptions that
     occur while a user turn is active and pushes the final aggregation when the
@@ -238,11 +239,11 @@ class LLMUserAggregator(LLMContextAggregator):
     Example::
 
         @aggregator.event_handler("on_user_turn_started")
-        async def on_user_turn_started(aggregator, Optional[strategy]):
+        async def on_user_turn_started(aggregator, strategy: BaseUserTurnStartStrategy]):
             ...
 
         @aggregator.event_handler("on_user_turn_stopped")
-        async def on_user_turn_stopped(aggregator, Optional[strategy]):
+        async def on_user_turn_stopped(aggregator, strategy: BaseUserTurnStopStrategy):
             ...
 
         @aggregator.event_handler("on_user_turn_stop_timeout")
@@ -268,19 +269,29 @@ class LLMUserAggregator(LLMContextAggregator):
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
 
-        # Initialize default user turn strategies.
-        self._user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
-
-        self._vad_user_speaking = False
-
-        self._user_turn = False
-        self._user_is_muted = False
-        self._user_turn_stop_timeout_event = asyncio.Event()
-        self._user_turn_stop_timeout_task: Optional[asyncio.Task] = None
-
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
         self._register_event_handler("on_user_turn_stop_timeout")
+
+        user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
+
+        self._user_is_muted = False
+
+        self._user_turn_controller = UserTurnController(
+            user_turn_strategies=user_turn_strategies,
+            user_turn_stop_timeout=self._params.user_turn_stop_timeout,
+        )
+        self._user_turn_controller.add_event_handler("on_push_frame", self._on_push_frame)
+        self._user_turn_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_started", self._on_user_turn_started
+        )
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_stopped", self._on_user_turn_stopped
+        )
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
+        )
 
     async def cleanup(self):
         """Clean up processor resources."""
@@ -312,12 +323,6 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._handle_vad_user_started_speaking(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            await self._handle_vad_user_stopped_speaking(frame)
-            await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
         elif isinstance(frame, LLMRunFrame):
@@ -341,7 +346,7 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             await self.push_frame(frame, direction)
 
-        await self._user_turn_strategies_process_frame(frame)
+        await self._user_turn_controller.process_frame(frame)
 
     async def push_aggregation(self):
         """Push the current aggregation."""
@@ -354,32 +359,10 @@ class LLMUserAggregator(LLMContextAggregator):
         await self.push_context_frame()
 
     async def _start(self, frame: StartFrame):
-        if not self._user_turn_stop_timeout_task:
-            self._user_turn_stop_timeout_task = self.create_task(
-                self._user_turn_stop_timeout_task_handler()
-            )
+        await self._user_turn_controller.setup(self.task_manager)
 
-        await self._setup_user_turn_strategies()
-        await self._setup_user_mute_strategies()
-
-    async def _setup_user_mute_strategies(self):
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
-
-    async def _setup_user_turn_strategies(self):
-        if self._user_turn_strategies.start:
-            for s in self._user_turn_strategies.start:
-                await s.setup(self.task_manager)
-                s.add_event_handler("on_push_frame", self._on_push_frame)
-                s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
-                s.add_event_handler("on_user_turn_started", self._on_user_turn_started)
-
-        if self._user_turn_strategies.stop:
-            for s in self._user_turn_strategies.stop:
-                await s.setup(self.task_manager)
-                s.add_event_handler("on_push_frame", self._on_push_frame)
-                s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
-                s.add_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
 
     async def _stop(self, frame: EndFrame):
         await self._cleanup()
@@ -388,23 +371,8 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._cleanup()
 
     async def _cleanup(self):
-        if self._user_turn_stop_timeout_task:
-            await self.cancel_task(self._user_turn_stop_timeout_task)
-            self._user_turn_stop_timeout_task = None
+        await self._user_turn_controller.cleanup()
 
-        await self._cleanup_user_turn_strategies()
-        await self._cleanup_user_mute_strategies()
-
-    async def _cleanup_user_turn_strategies(self):
-        if self._user_turn_strategies.start:
-            for s in self._user_turn_strategies.start:
-                await s.cleanup()
-
-        if self._user_turn_strategies.stop:
-            for s in self._user_turn_strategies.stop:
-                await s.cleanup()
-
-    async def _cleanup_user_mute_strategies(self):
         for s in self._params.user_mute_strategies:
             await s.cleanup()
 
@@ -435,15 +403,6 @@ class LLMUserAggregator(LLMContextAggregator):
             self._user_is_muted = should_mute_next_time
 
         return should_mute_frame
-
-    async def _user_turn_strategies_process_frame(self, frame: Frame):
-        if self._user_turn_strategies.start:
-            for strategy in self._user_turn_strategies.start:
-                await strategy.process_frame(frame)
-
-        if self._user_turn_strategies.stop:
-            for strategy in self._user_turn_strategies.stop:
-                await strategy.process_frame(frame)
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame()
@@ -482,21 +441,7 @@ class LLMUserAggregator(LLMContextAggregator):
             "    )"
         )
 
-        await self._cleanup_user_turn_strategies()
-        self._user_turn_strategies = ExternalUserTurnStrategies()
-        await self._setup_user_turn_strategies()
-
-    async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        self._vad_user_speaking = True
-
-        # The user started talking, let's reset the user turn timeout.
-        self._user_turn_stop_timeout_event.set()
-
-    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        self._vad_user_speaking = False
-
-        # The user stopped talking, let's reset the user turn timeout.
-        self._user_turn_stop_timeout_event.set()
+        await self._user_turn_controller.update_strategies(ExternalUserTurnStrategies())
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
@@ -505,9 +450,6 @@ class LLMUserAggregator(LLMContextAggregator):
         if not text.strip():
             return
 
-        # We have creceived a transcription, let's reset the user turn timeout.
-        self._user_turn_stop_timeout_event.set()
-
         # Transcriptions never include inter-part spaces (so far).
         self._aggregation.append(
             TextPartForConcatenation(
@@ -515,101 +457,48 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
-    async def _on_user_turn_started(
-        self,
-        strategy: BaseUserTurnStartStrategy,
-        params: UserTurnStartedParams,
-    ):
-        await self._trigger_user_turn_start(strategy, params)
-
-    async def _on_user_turn_stopped(
-        self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
-    ):
-        await self._trigger_user_turn_stop(strategy, params)
-
     async def _on_push_frame(
-        self,
-        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
-        frame: Frame,
-        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
         await self.push_frame(frame, direction)
 
-    async def _on_broadcast_frame(
-        self,
-        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
-        frame_cls: Type[Frame],
-        **kwargs,
-    ):
+    async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
         await self.broadcast_frame(frame_cls, **kwargs)
 
-    async def _trigger_user_turn_start(
-        self, strategy: Optional[BaseUserTurnStartStrategy], params: UserTurnStartedParams
+    async def _on_user_turn_started(
+        self,
+        controller: UserTurnController,
+        strategy: BaseUserTurnStartStrategy,
+        params: UserTurnStartedParams,
     ):
-        # Prevent two consecutive user turn starts.
-        if self._user_turn:
-            return
-
-        logger.debug(f"User started speaking (user turn start strategy: {strategy})")
-
-        self._user_turn = True
-        self._user_turn_stop_timeout_event.set()
-
-        # Reset all user turn start strategies to start fresh.
-        if self._user_turn_strategies.start:
-            for s in self._user_turn_strategies.start:
-                await s.reset()
+        logger.debug(f"{self}: User started speaking (user turn start strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
-            # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
         if params.enable_interruptions and self._allow_interruptions:
-            # TODO(aleix): This frame should really come from the top of the pipeline.
-            await self.broadcast_frame(InterruptionFrame)
+            await self.push_interruption_task_frame_and_wait()
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
-    async def _trigger_user_turn_stop(
-        self, strategy: Optional[BaseUserTurnStopStrategy], params: UserTurnStoppedParams
+    async def _on_user_turn_stopped(
+        self,
+        controller: UserTurnController,
+        strategy: BaseUserTurnStopStrategy,
+        params: UserTurnStoppedParams,
     ):
-        # Prevent two consecutive user turn stops.
-        if not self._user_turn:
-            return
-
-        logger.debug(f"User stopped speaking (user turn stop strategy: {strategy})")
-
-        self._user_turn = False
-        self._user_turn_stop_timeout_event.set()
-
-        # Reset all user turn stop strategies to start fresh.
-        if self._user_turn_strategies.stop:
-            for s in self._user_turn_strategies.stop:
-                await s.reset()
+        logger.debug(f"{self}: User stopped speaking (user turn stop strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
-            # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStoppedSpeakingFrame)
-
-        await self._call_event_handler("on_user_turn_stopped", strategy)
 
         # Always push context frame.
         await self.push_aggregation()
 
-    async def _user_turn_stop_timeout_task_handler(self):
-        while True:
-            try:
-                await asyncio.wait_for(
-                    self._user_turn_stop_timeout_event.wait(),
-                    timeout=self._params.user_turn_stop_timeout,
-                )
-                self._user_turn_stop_timeout_event.clear()
-            except asyncio.TimeoutError:
-                if self._user_turn and not self._vad_user_speaking:
-                    await self._call_event_handler("on_user_turn_stop_timeout")
-                    await self._trigger_user_turn_stop(
-                        None, UserTurnStoppedParams(enable_user_speaking_frames=True)
-                    )
+        await self._call_event_handler("on_user_turn_stopped", strategy)
+
+    async def _on_user_turn_stop_timeout(self, controller):
+        await self._call_event_handler("on_user_turn_stop_timeout")
 
 
 class LLMAssistantAggregator(LLMContextAggregator):

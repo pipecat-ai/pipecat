@@ -38,7 +38,7 @@ USER_TURN_STOP_TIMEOUT = 0.2
 TRANSCRIPTION_TIMEOUT = 0.1
 
 
-class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
+class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_llm_run(self):
         context = LLMContext()
 
@@ -141,6 +141,19 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
         context = LLMContext()
         user_aggregator = LLMUserAggregator(context)
 
+        should_start = None
+        should_stop = None
+
+        @user_aggregator.event_handler("on_user_turn_started")
+        async def on_user_turn_started(aggregator, strategy):
+            nonlocal should_start
+            should_start = True
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy):
+            nonlocal should_stop
+            should_stop = True
+
         pipeline = Pipeline([user_aggregator])
 
         frames_to_send = [
@@ -162,6 +175,8 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
+        self.assertTrue(should_start)
+        self.assertTrue(should_stop)
 
     async def test_user_turn_stop_timeout_no_transcription(self):
         context = LLMContext()
@@ -171,7 +186,19 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
             params=LLMUserAggregatorParams(user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT),
         )
 
-        timeout = False
+        should_start = None
+        should_stop = None
+        timeout = None
+
+        @user_aggregator.event_handler("on_user_turn_started")
+        async def on_user_turn_started(aggregator, strategy):
+            nonlocal should_start
+            should_start = True
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy):
+            nonlocal should_stop
+            should_stop = True
 
         @user_aggregator.event_handler("on_user_turn_stop_timeout")
         async def on_user_turn_stop_timeout(aggregator):
@@ -190,6 +217,8 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
         )
 
+        self.assertTrue(should_start)
+        self.assertTrue(should_stop)
         self.assertTrue(timeout)
 
     async def test_user_turn_stop_timeout_transcription(self):
@@ -205,13 +234,19 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        timeout = False
-        bot_turn = False
+        should_start = None
+        should_stop = None
+        timeout = None
+
+        @user_aggregator.event_handler("on_user_turn_started")
+        async def on_user_turn_started(aggregator, strategy):
+            nonlocal should_start
+            should_start = True
 
         @user_aggregator.event_handler("on_user_turn_stopped")
         async def on_user_turn_stopped(aggregator, strategy):
-            nonlocal bot_turn
-            bot_turn = True
+            nonlocal should_stop
+            should_stop = True
 
         @user_aggregator.event_handler("on_user_turn_stop_timeout")
         async def on_user_turn_stop_timeout(aggregator):
@@ -234,7 +269,8 @@ class TestUserAggregator(unittest.IsolatedAsyncioTestCase):
         )
 
         # The transcription strategy should kick-in before the user turn end timeout.
-        self.assertTrue(bot_turn)
+        self.assertTrue(should_start)
+        self.assertTrue(should_stop)
         self.assertFalse(timeout)
 
     async def test_user_mute_strategies(self):
