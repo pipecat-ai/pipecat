@@ -116,6 +116,18 @@ class BaseTurnAnalyzer(ABC):
         """
         pass
 
+    def on_vad_start_secs_updated(self, vad_start_secs: float):
+        """Invoked when the VAD start trigger time is updated.
+
+        The turn analyzer may choose to change its buffer size depending
+        on this value.
+
+        Args:
+            vad_start_secs (float): The number of seconds of voice activity
+                before triggering the user speaking event.
+        """
+        pass
+
     @abstractmethod
     def clear(self):
         """Reset the turn analyzer to its initial state."""
