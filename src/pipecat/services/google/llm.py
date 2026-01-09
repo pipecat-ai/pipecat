@@ -40,7 +40,7 @@ from pipecat.frames.frames import (
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
-    OutputImageRawFrame,
+    UserFileRawFrame,
     UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
