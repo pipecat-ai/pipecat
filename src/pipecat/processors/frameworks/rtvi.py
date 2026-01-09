@@ -26,6 +26,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
+    get_args,
 )
 
 from loguru import logger
@@ -43,8 +44,10 @@ from pipecat.frames.frames import (
     EndFrame,
     EndTaskFrame,
     ErrorFrame,
+    FileFormat,
     Frame,
     FunctionCallResultFrame,
+    ImageFileFormat,
     InputAudioRawFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
@@ -63,6 +66,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserFileRawFrame,
+    UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -1231,6 +1236,9 @@ class RTVIProcessor(FrameProcessor):
                 case "send-text":
                     data = RTVI.SendTextData.model_validate(message.data)
                     await self._handle_send_text(data)
+                case "send-file":
+                    data = RTVI.SendFileData.model_validate(message.data)
+                    await self._handle_send_file(data)
                 case "append-to-context":
                     logger.warning(
                         f"The append-to-context message is deprecated, use send-text instead."
@@ -1241,6 +1249,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_audio_buffer(message.data)
 
                 case _:
+                    logger.warning(f"Unsupported RTVI message type: {message.type}")
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
 
         except ValidationError as e:
@@ -1399,6 +1408,56 @@ class RTVIProcessor(FrameProcessor):
             run_llm=opts.run_immediately,
         )
         await self.push_frame(text_frame)
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
+            await self.push_frame(output_frame)
+
+    async def _handle_send_file(self, data: RTVI.SendFileData):
+        """Handle a send-file message from the client."""
+        file = data.file
+        if file.format not in get_args(FileFormat):
+            logger.warning(f"Unsupported file format: {file.format}")
+            return
+
+        source = None
+        if file.source.type == "bytes":
+            source = file.source.bytes
+        elif file.source.type == "url":
+            source = file.source.url
+        elif file.source.type == "id":
+            logger.warning("File source type 'id' is not supported yet.")
+            return
+        else:
+            logger.warning(f"Unsupported file source type: {file.source.type}")
+            return
+
+        if file.source.type == "bytes" and file.format in get_args(ImageFileFormat):
+            size = [file.source.width or 0, file.source.height or 0]
+            file_frame = UserImageRawFrame(
+                text=data.content,
+                image=source,
+                size=size,
+                format=f"url/{file.format}",
+                append_to_context=True,
+            )
+        else:
+            file_frame = UserFileRawFrame(
+                text=data.content,
+                file=source,
+                type=file.source.type,
+                format=file.format,
+                custom_options=file.customOpts,
+            )
+        opts = data.options if data.options is not None else RTVI.SendTextOptions()
+        if opts.run_immediately:
+            await self.interrupt_bot()
+        cur_llm_skip_tts = self._llm_skip_tts
+        should_skip_tts = not opts.audio_response
+        toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
+            await self.push_frame(output_frame)
+        await self.push_frame(file_frame)
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=cur_llm_skip_tts)
             await self.push_frame(output_frame)

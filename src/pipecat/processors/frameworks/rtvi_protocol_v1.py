@@ -21,6 +21,8 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     AggregationType,
+    FileFormat,
+    FileSourceType,
 )
 
 # -- Constants --
@@ -215,6 +217,47 @@ class RTVISendTextData(BaseModel):
     """
 
     content: str
+    options: Optional[RTVISendTextOptions] = None
+
+
+class RTVIFileSource(BaseModel):
+    """Base class for RTVI file sources."""
+
+    type: FileSourceType
+
+
+class RTVIFileBytes(RTVIFileSource):
+    """File source as base64-encoded bytes."""
+
+    type: FileSourceType = "bytes"
+    bytes: str  # base64-encoded string
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class RTVIFileUrl(RTVIFileSource):
+    """File source as a URL."""
+
+    type: FileSourceType = "url"
+    url: str
+
+
+class RTVIFile(BaseModel):
+    """File data structure for RTVI file sending."""
+
+    format: FileFormat
+    source: RTVIFileBytes | RTVIFileUrl
+    customOpts: Optional[dict] = None  # ex. 'detail' in openAI or 'citations' in Bedrock
+
+
+class RTVISendFileData(BaseModel):
+    """Data format for sending a file to the LLM.
+
+    Contains the information of the file to send and any options for how the pipeline should process it.
+    """
+
+    content: str  # Text to accompany the file
+    file: RTVIFile
     options: Optional[RTVISendTextOptions] = None
 
 
@@ -538,6 +581,10 @@ _all_definitions = [
     ("LLMFunctionCallMessage", RTVILLMFunctionCallMessage),
     ("SendTextOptions", RTVISendTextOptions),
     ("SendTextData", RTVISendTextData),
+    ("FileBytes", RTVIFileBytes),
+    ("FileUrl", RTVIFileUrl),
+    ("File", RTVIFile),
+    ("SendFileData", RTVISendFileData),
     ("AppendToContextData", RTVIAppendToContextData),
     ("AppendToContext", RTVIAppendToContext),
     ("LLMFunctionCallStartMessageData", RTVILLMFunctionCallStartMessageData),

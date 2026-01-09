@@ -173,6 +173,11 @@ class LLMContext:
             image: Raw image bytes.
             text: Optional text to include with the image.
         """
+        # Format is a data URL: data:<mime type>;base64,<data> already provided
+        if format.startswith("url/"):
+            url = image
+            return LLMContext.create_image_url_message(role=role, url=url, text=text)
+
         # Format is a mime type: image is already encoded
         image_already_encoded = format.startswith("image/")
 
@@ -356,6 +361,30 @@ class LLMContext:
             tool_choice: Tool selection strategy for the LLM.
         """
         self._tool_choice = tool_choice
+
+    async def add_file_frame_message(
+        self,
+        *,
+        format: str,
+        size: tuple[int, int],
+        image: bytes,
+        text: Optional[str] = None,
+        role: str = "user",
+    ):
+        """Add a message containing a file frame.
+
+        Args:
+            format: File format (e.g., 'RGB', 'RGBA', or, if already encoded,
+                the MIME type like 'image/jpeg').
+            size: File dimensions as (width, height) tuple.
+            image: Raw image bytes.
+            text: Optional text to include with the image.
+            role: The role of this message (defaults to "user").
+        """
+        message = await LLMContext.create_image_message(
+            role=role, format=format, size=size, image=image, text=text
+        )
+        self.add_message(message)
 
     async def add_image_frame_message(
         self,
