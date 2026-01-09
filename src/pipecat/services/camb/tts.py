@@ -38,7 +38,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 
 # Default configuration
-DEFAULT_VOICE_ID = 2681  # Attic voice (publicly available)
+DEFAULT_VOICE_ID = 147320
 DEFAULT_LANGUAGE = "en-us"
 DEFAULT_MODEL = "mars-flash"  # Faster inference
 DEFAULT_BASE_URL = "https://client.camb.ai/apis"
@@ -135,7 +135,7 @@ class CambTTSService(TTSService):
 
         tts = CambTTSService(
             api_key="your-api-key",
-            voice_id=2681,
+            voice_id=147320,
             model="mars-flash",
             aiohttp_session=session,
             params=CambTTSService.InputParams(
@@ -146,7 +146,7 @@ class CambTTSService(TTSService):
         # For mars-instruct with custom instructions:
         tts_instruct = CambTTSService(
             api_key="your-api-key",
-            voice_id=2681,
+            voice_id=147320,
             model="mars-instruct",
             aiohttp_session=session,
             params=CambTTSService.InputParams(
@@ -190,7 +190,7 @@ class CambTTSService(TTSService):
         Args:
             api_key: Camb.ai API key for authentication.
             aiohttp_session: Shared aiohttp session for making HTTP requests.
-            voice_id: Voice ID to use (e.g., 2681 for Attic). Defaults to 2681.
+            voice_id: Voice ID to use. Defaults to 147320.
             model: TTS model to use. Options: "mars-flash", "mars-pro", "mars-instruct".
                 Defaults to "mars-flash" (fastest).
             base_url: Camb.ai API base URL. Defaults to production URL.
@@ -338,10 +338,8 @@ class CambTTSService(TTSService):
                 await self.start_tts_usage_metrics(text)
                 yield TTSStartedFrame()
 
-                CHUNK_SIZE = self.chunk_size
-
                 async for frame in self._stream_audio_frames_from_iterator(
-                    response.content.iter_chunked(CHUNK_SIZE), strip_wav_header=False
+                    response.content.iter_chunked(self.chunk_size), strip_wav_header=False
                 ):
                     await self.stop_ttfb_metrics()
                     yield frame

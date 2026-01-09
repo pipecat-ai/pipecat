@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Camb.ai MARS-8 TTS example with local audio (microphone/speakers).
+"""Camb.ai MARS TTS example with local audio (microphone/speakers).
 
 This example demonstrates:
-- Basic TTS synthesis with Camb.ai MARS-8
+- Basic TTS synthesis with Camb.ai MARS
 - Local audio input/output (no WebRTC or Daily needed)
 - Handling interruptions
 
@@ -83,7 +83,7 @@ async def main(voice_id: int):
         messages = [
             {
                 "role": "system",
-                "content": """You are a helpful voice assistant powered by Camb.ai's MARS-8
+                "content": """You are a helpful voice assistant powered by Camb.ai's MARS
 text-to-speech technology. Keep your responses concise and conversational since
 they will be spoken aloud. Avoid special characters, emojis, or bullet points.""",
             },
@@ -117,14 +117,9 @@ they will be spoken aloud. Avoid special characters, emojis, or bullet points.""
             ),
         )
 
-        # Run the pipeline
-        runner = PipelineRunner()
-        logger.info("Starting Camb.ai TTS bot with local audio...")
-        logger.info("Speak into your microphone to interact with the bot.")
-
-        # Start the conversation with a greeting after a short delay
-        async def start_greeting():
-            await asyncio.sleep(1)  # Wait for pipeline to start
+        # Start the conversation when the pipeline is ready
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame):
             messages.append(
                 {
                     "role": "system",
@@ -133,11 +128,11 @@ they will be spoken aloud. Avoid special characters, emojis, or bullet points.""
             )
             await task.queue_frames([LLMRunFrame()])
 
-        # Run greeting and pipeline concurrently
-        await asyncio.gather(
-            runner.run(task),
-            start_greeting(),
-        )
+        # Run the pipeline
+        runner = PipelineRunner()
+        logger.info("Starting Camb.ai TTS bot with local audio...")
+        logger.info("Speak into your microphone to interact with the bot.")
+        await runner.run(task)
 
 
 if __name__ == "__main__":
@@ -145,8 +140,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--voice-id",
         type=int,
-        default=2681,
-        help="Camb.ai voice ID to use (default: 2681 - Attic voice)",
+        default=147320,
+        help="Camb.ai voice ID to use (default: 147320)",
     )
     args = parser.parse_args()
     asyncio.run(main(args.voice_id))

@@ -363,7 +363,7 @@ async def test_language_mapping():
 
 
 @pytest.mark.asyncio
-async def test_mars8_instruct_model(aiohttp_client):
+async def test_mars_instruct_model(aiohttp_client):
     """Test that user_instructions are included for mars-instruct model."""
 
     received_payload = {}
