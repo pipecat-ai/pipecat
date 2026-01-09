@@ -34,7 +34,6 @@ from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
 
@@ -61,7 +60,7 @@ class TranscriptHandler:
             f"TranscriptHandler initialized {'with output_file=' + output_file if output_file else 'with log output only'}"
         )
 
-    async def save_message(self, role: str, content: str):
+    async def save_message(self, role: str, content: str, timestamp: str):
         """Save a single transcript message.
 
         Outputs the message to the log and optionally to a file.
@@ -70,7 +69,6 @@ class TranscriptHandler:
             role: Who generated this transcript
             content: The transcript to save
         """
-        timestamp = time_now_iso8601()
         line = f"[{timestamp}] {role}: {content}"
 
         # Always log the message
@@ -91,7 +89,7 @@ class TranscriptHandler:
             message: The new user message
         """
         logger.debug(f"Received user transcript update")
-        await self.save_message("user", message.content)
+        await self.save_message("user", message.content, message.timestamp)
 
     async def on_assistant_transcript(self, message: AssistantTurnStoppedMessage):
         """Handle new assistant transcript message.
@@ -100,7 +98,7 @@ class TranscriptHandler:
             message: The new assistant message
         """
         logger.debug(f"Received assistant transcript update")
-        await self.save_message("assistant", message.content)
+        await self.save_message("assistant", message.content, message.timestamp)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get

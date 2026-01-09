@@ -110,11 +110,13 @@ class UserTurnStoppedMessage:
 
     Parameters:
         content: The message content/text.
+        timestamp: When the user turn started.
         user_id: Optional identifier for the user.
 
     """
 
     content: str
+    timestamp: str
     user_id: Optional[str] = None
 
 
@@ -127,10 +129,12 @@ class AssistantTurnStoppedMessage:
 
     Parameters:
         content: The message content/text.
+        timestamp: When the assistant turn started.
 
     """
 
     content: str
+    timestamp: str
 
 
 @dataclass
@@ -142,7 +146,7 @@ class AssistantThoughtMessage:
 
     Parameters:
         content: The message content/text.
-        timestamp: When the thought was started.
+        timestamp: When the thought started.
 
     """
 
@@ -328,6 +332,7 @@ class LLMUserAggregator(LLMContextAggregator):
         user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
 
         self._user_is_muted = False
+        self._user_turn_start_timestamp = ""
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies,
@@ -527,6 +532,8 @@ class LLMUserAggregator(LLMContextAggregator):
     ):
         logger.debug(f"{self}: User started speaking (user turn start strategy: {strategy})")
 
+        self._user_turn_start_timestamp = time_now_iso8601()
+
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
@@ -549,8 +556,11 @@ class LLMUserAggregator(LLMContextAggregator):
         # Always push context frame.
         aggregation = await self.push_aggregation()
 
-        message = UserTurnStoppedMessage(content=aggregation)
+        message = UserTurnStoppedMessage(
+            content=aggregation, timestamp=self._user_turn_start_timestamp
+        )
         await self._call_event_handler("on_user_turn_stopped", strategy, message)
+        self._user_turn_start_timestamp = ""
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
@@ -632,6 +642,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._started = 0
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
+
+        self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
         self._thought_llm: str = ""
@@ -960,13 +972,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._context_updated_tasks.discard(task)
 
     async def _trigger_assistant_turn_started(self):
+        self._assistant_turn_start_timestamp = time_now_iso8601()
+
         await self._call_event_handler("on_assistant_turn_started")
 
     async def _trigger_assistant_turn_stopped(self):
         aggregation = await self.push_aggregation()
         if aggregation:
-            message = AssistantTurnStoppedMessage(content=aggregation)
+            message = AssistantTurnStoppedMessage(
+                content=aggregation, timestamp=self._assistant_turn_start_timestamp
+            )
             await self._call_event_handler("on_assistant_turn_stopped", message)
+
+            self._assistant_turn_start_timestamp = ""
 
 
 class LLMContextAggregatorPair:
