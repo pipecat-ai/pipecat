@@ -74,9 +74,6 @@ async def main(voice_id: int):
             aiohttp_session=session,
             voice_id=voice_id,
             model="mars-flash",
-            params=CambTTSService.InputParams(
-                speed=1.0,
-            ),
         )
 
         # OpenAI LLM
