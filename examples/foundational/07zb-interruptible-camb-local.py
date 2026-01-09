@@ -68,12 +68,12 @@ async def main(voice_id: int):
 
     # Create HTTP session for Camb.ai TTS
     async with aiohttp.ClientSession() as session:
-        # Camb.ai TTS with MARS-8-flash model
+        # Camb.ai TTS with MARS-flash model
         tts = CambTTSService(
             api_key=os.getenv("CAMB_API_KEY"),
             aiohttp_session=session,
             voice_id=voice_id,
-            model="mars-8-flash",
+            model="mars-flash",
             params=CambTTSService.InputParams(
                 speed=1.0,
             ),

@@ -46,7 +46,7 @@ async def test_run_camb_tts_success(aiohttp_client):
         assert "text" in body
         assert body["voice_id"] == 2681
         assert body["language"] == "en-us"
-        assert body["speech_model"] == "mars-8-flash"
+        assert body["speech_model"] == "mars-flash"
         assert body["output_configuration"]["format"] == "pcm_s16le"
 
         # Prepare a StreamResponse with chunked PCM data
@@ -78,7 +78,7 @@ async def test_run_camb_tts_success(aiohttp_client):
             aiohttp_session=session,
             base_url=base_url,
             voice_id=2681,
-            model="mars-8-flash",
+            model="mars-flash",
         )
 
         # Manually set sample rate (normally done by StartFrame)
@@ -367,7 +367,7 @@ async def test_language_mapping():
 
 @pytest.mark.asyncio
 async def test_mars8_instruct_model(aiohttp_client):
-    """Test that user_instructions are included for mars-8-instruct model."""
+    """Test that user_instructions are included for mars-instruct model."""
 
     received_payload = {}
 
@@ -392,7 +392,7 @@ async def test_mars8_instruct_model(aiohttp_client):
             api_key="test-api-key",
             aiohttp_session=session,
             base_url=base_url,
-            model="mars-8-instruct",
+            model="mars-instruct",
             params=CambTTSService.InputParams(user_instructions="Speak with excitement"),
         )
 
@@ -413,7 +413,7 @@ async def test_mars8_instruct_model(aiohttp_client):
         )
 
         # Verify user_instructions was included in the request
-        assert received_payload.get("speech_model") == "mars-8-instruct"
+        assert received_payload.get("speech_model") == "mars-instruct"
         assert received_payload.get("user_instructions") == "Speak with excitement"
 
 

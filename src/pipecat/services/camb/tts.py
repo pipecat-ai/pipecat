@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Camb.ai MARS-8 text-to-speech service implementation.
+"""Camb.ai MARS text-to-speech service implementation.
 
-This module provides TTS functionality using Camb.ai's MARS-8 model family,
+This module provides TTS functionality using Camb.ai's MARS model family,
 offering high-quality text-to-speech synthesis with HTTP streaming support.
 
 Features:
-    - MARS-8 models: mars-8, mars-8-flash, mars-8-instruct
+    - MARS models: mars-flash, mars-pro, mars-instruct
     - 140+ languages supported
     - Real-time HTTP streaming
     - 24kHz audio output
@@ -40,7 +40,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 # Default configuration
 DEFAULT_VOICE_ID = 2681  # Attic voice (publicly available)
 DEFAULT_LANGUAGE = "en-us"
-DEFAULT_MODEL = "mars-8-flash"  # Faster inference
+DEFAULT_MODEL = "mars-flash"  # Faster inference
 DEFAULT_BASE_URL = "https://client.camb.ai/apis"
 DEFAULT_SAMPLE_RATE = 24000  # 24kHz
 DEFAULT_TIMEOUT = 60.0  # Seconds (minimum recommended by Camb.ai)
@@ -126,18 +126,18 @@ def language_to_camb_language(language: Language) -> Optional[str]:
 
 
 class CambTTSService(TTSService):
-    """Camb.ai MARS-8 HTTP-based text-to-speech service.
+    """Camb.ai MARS HTTP-based text-to-speech service.
 
-    Converts text to speech using Camb.ai's MARS-8 TTS models with support for
+    Converts text to speech using Camb.ai's MARS TTS models with support for
     multiple languages. Provides control over voice characteristics like speed
-    and custom instructions (for mars-8-instruct model).
+    and custom instructions (for mars-instruct model).
 
     Example::
 
         tts = CambTTSService(
             api_key="your-api-key",
             voice_id=2681,
-            model="mars-8-flash",
+            model="mars-flash",
             aiohttp_session=session,
             params=CambTTSService.InputParams(
                 language=Language.EN,
@@ -145,11 +145,11 @@ class CambTTSService(TTSService):
             )
         )
 
-        # For mars-8-instruct with custom instructions:
+        # For mars-instruct with custom instructions:
         tts_instruct = CambTTSService(
             api_key="your-api-key",
             voice_id=2681,
-            model="mars-8-instruct",
+            model="mars-instruct",
             aiohttp_session=session,
             params=CambTTSService.InputParams(
                 language=Language.EN,
@@ -164,7 +164,7 @@ class CambTTSService(TTSService):
         Parameters:
             language: Language for synthesis (BCP-47 format). Defaults to English.
             speed: Speech speed multiplier (0.5 to 2.0). Defaults to 1.0.
-            user_instructions: Custom instructions for mars-8-instruct model only.
+            user_instructions: Custom instructions for mars-instruct model only.
                 Ignored for other models. Max 1000 characters.
         """
 
@@ -173,7 +173,7 @@ class CambTTSService(TTSService):
         user_instructions: Optional[str] = Field(
             default=None,
             max_length=1000,
-            description="Custom instructions for mars-8-instruct model only. "
+            description="Custom instructions for mars-instruct model only. "
             "Use to control tone, style, or pronunciation. Max 1000 characters.",
         )
 
@@ -195,8 +195,8 @@ class CambTTSService(TTSService):
             api_key: Camb.ai API key for authentication.
             aiohttp_session: Shared aiohttp session for making HTTP requests.
             voice_id: Voice ID to use (e.g., 2681 for Attic). Defaults to 2681.
-            model: TTS model to use. Options: "mars-8", "mars-8-flash", "mars-8-instruct".
-                Defaults to "mars-8-flash" (fastest).
+            model: TTS model to use. Options: "mars-flash", "mars-pro", "mars-instruct".
+                Defaults to "mars-flash" (fastest).
             base_url: Camb.ai API base URL. Defaults to production URL.
             sample_rate: Audio sample rate in Hz. If None, uses Camb.ai default (24000).
             params: Additional voice parameters. If None, uses defaults.
@@ -315,8 +315,8 @@ class CambTTSService(TTSService):
             "voice_settings": {"speed": self._settings["speed"]},
         }
 
-        # Add user instructions if using mars-8-instruct model
-        if self._model_name == "mars-8-instruct" and self._settings.get("user_instructions"):
+        # Add user instructions if using mars-instruct model
+        if self._model_name == "mars-instruct" and self._settings.get("user_instructions"):
             payload["user_instructions"] = self._settings["user_instructions"]
 
         headers = {
