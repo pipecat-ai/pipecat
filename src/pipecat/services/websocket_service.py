@@ -138,9 +138,18 @@ class WebsocketService(ABC):
                 logger.debug(f"{self} connection closed normally: {e}")
                 break
             except ConnectionClosedError as e:
-                # Error closure, don't retry
-                logger.warning(f"{self} connection closed, but with an error: {e}")
-                break
+                # Connection closed with error (e.g., no close frame received/sent)
+                # This often indicates network issues, server problems, or abrupt disconnection
+                message = f"{self} connection closed, but with an error: {e}"
+                logger.warning(message)
+
+                if self._reconnect_on_error:
+                    success = await self._try_reconnect(report_error=report_error)
+                    if not success:
+                        break
+                else:
+                    await report_error(ErrorFrame(message))
+                    break
             except Exception as e:
                 message = f"{self} error receiving messages: {e}"
                 logger.error(message)
