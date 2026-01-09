@@ -58,12 +58,6 @@ class KrispVivaFilter(BaseAudioFilter):
         """
         super().__init__()
 
-        # Acquire SDK reference (will initialize on first call)
-        try:
-            KrispVivaSDKManager.acquire()
-        except Exception as e:
-            raise RuntimeError(f"Failed to initialize Krisp SDK: {e}")
-
         try:
             # Set model path, checking environment if not specified
             if model_path:
@@ -92,47 +86,26 @@ class KrispVivaFilter(BaseAudioFilter):
                 raise FileNotFoundError(f"Model file not found: {self._model_path}")
 
             self._session = None
-            self._preload_session = None
             self._samples_per_frame = None
             self._noise_suppression_level = noise_suppression_level
             self._frame_duration_ms = frame_duration
             self._audio_buffer = bytearray()
-            self._sdk_acquired = True
             self._filtering = True
-
-            # Adding the model preload mechanism with default sample rate
-            # improves the latency of the session creation in the start() method.
-            self._preload_model()
 
         except Exception:
             # If initialization fails, release the SDK reference
             KrispVivaSDKManager.release()
             raise
 
-    def __del__(self):
-        """Release SDK reference when filter is destroyed."""
-        if hasattr(self, "_sdk_acquired") and self._sdk_acquired:
-            try:
-                if hasattr(self, "_session") and self._session is not None:
-                    self._session = None
-
-                if hasattr(self, "_preload_session") and self._preload_session is not None:
-                    self._preload_session = None
-
-                KrispVivaSDKManager.release()
-                self._sdk_acquired = False
-            except Exception as e:
-                logger.error(f"Error in __del__: {e}", exc_info=True)
-
     def _create_session(self, sample_rate: int, frame_duration: int):
-        """Preload the model with a specific sample rate.
+        """Create a Krisp session with a specific sample rate.
 
         Args:
-            sample_rate: Sample rate for preloading
+            sample_rate: Sample rate for the session
             frame_duration: Frame duration in milliseconds
 
         Raises:
-            Exception: If preloading fails
+            Exception: If session creation fails
         """
         try:
             model_info = krisp_audio.ModelInfo()
@@ -152,14 +125,6 @@ class KrispVivaFilter(BaseAudioFilter):
             logger.error(f"Failed to create Krisp session: {e}", exc_info=True)
             raise RuntimeError(f"Failed to create Krisp processing session: {e}") from e
 
-    def _preload_model(self):
-        """Preload the model with a specific sample rate."""
-        try:
-            self._preload_session = self._create_session(16000, self._frame_duration_ms)
-        except Exception as e:
-            logger.error(f"Failed to preload Krisp model: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to preload Krisp model: {e}") from e
-
     async def start(self, sample_rate: int):
         """Initialize the Krisp processor with the transport's sample rate.
 
@@ -167,6 +132,8 @@ class KrispVivaFilter(BaseAudioFilter):
             sample_rate: The sample rate of the input transport in Hz.
         """
         try:
+            # Acquire SDK reference (will initialize on first call)
+            KrispVivaSDKManager.acquire()
             self._session = self._create_session(sample_rate, self._frame_duration_ms)
         except Exception as e:
             logger.error(f"Failed to start Krisp session: {e}", exc_info=True)
@@ -175,8 +142,13 @@ class KrispVivaFilter(BaseAudioFilter):
 
     async def stop(self):
         """Clean up the Krisp processor when stopping."""
-        self._session = None
-        self._audio_buffer.clear()
+        try:
+            self._session = None
+            self._audio_buffer.clear()
+            KrispVivaSDKManager.release()
+        except Exception as e:
+            logger.error(f"Error in stop: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to stop Krisp processor: {e}") from e
 
     async def process_frame(self, frame: FilterControlFrame):
         """Process control frames to enable/disable filtering.

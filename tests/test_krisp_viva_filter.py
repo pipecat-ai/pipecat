@@ -108,8 +108,8 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         """Test filter initialization with explicit model path."""
         filter_instance = KrispVivaFilter(model_path=self.model_path)
 
-        # Verify SDK was acquired
-        self.mock_sdk_manager.acquire.assert_called_once()
+        # Verify SDK was NOT acquired during initialization (happens in start())
+        self.mock_sdk_manager.acquire.assert_not_called()
 
         # Verify filter attributes
         self.assertEqual(filter_instance._model_path, self.model_path)
@@ -122,7 +122,8 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {"KRISP_VIVA_FILTER_MODEL_PATH": self.model_path}):
             filter_instance = KrispVivaFilter()
 
-            self.mock_sdk_manager.acquire.assert_called_once()
+            # Verify SDK was NOT acquired during initialization (happens in start())
+            self.mock_sdk_manager.acquire.assert_not_called()
             self.assertEqual(filter_instance._model_path, self.model_path)
 
     async def test_initialization_without_model_path(self):
@@ -132,7 +133,9 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
                 KrispVivaFilter()
 
             self.assertIn("Model path", str(context.exception))
-            # Verify SDK was released on error
+            # SDK acquire not called during initialization (happens in start())
+            # But release() is called in exception handler even though acquire() wasn't called
+            self.mock_sdk_manager.acquire.assert_not_called()
             self.mock_sdk_manager.release.assert_called_once()
 
     async def test_initialization_with_invalid_extension(self):
@@ -146,6 +149,9 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
                 KrispVivaFilter(model_path=tmp_path)
 
             self.assertIn(".kef extension", str(context.exception))
+            # SDK acquire not called during initialization (happens in start())
+            # But release() is called in exception handler even though acquire() wasn't called
+            self.mock_sdk_manager.acquire.assert_not_called()
             self.mock_sdk_manager.release.assert_called_once()
         finally:
             os.unlink(tmp_path)
@@ -155,6 +161,9 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(FileNotFoundError):
             KrispVivaFilter(model_path="/nonexistent/path/model.kef")
 
+        # SDK acquire not called during initialization (happens in start())
+        # But release() is called in exception handler even though acquire() wasn't called
+        self.mock_sdk_manager.acquire.assert_not_called()
         self.mock_sdk_manager.release.assert_called_once()
 
     async def test_initialization_with_custom_noise_level(self):
@@ -174,14 +183,17 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
 
         await filter_instance.start(16000)
 
+        # Verify SDK was acquired during start()
+        self.mock_sdk_manager.acquire.assert_called_once()
+
         # Verify session was created
         self.assertIsNotNone(filter_instance._session)
         self.assertEqual(filter_instance._current_sample_rate, 16000)
         self.assertEqual(filter_instance._samples_per_frame, 160)  # 16000 * 10ms / 1000
 
         # Verify NcSessionConfig was created and configured
-        # Note: Called twice - once for preload session, once for start()
-        self.assertEqual(self.mock_krisp_audio.NcSessionConfig.call_count, 2)
+        # Note: Called once in start() (no preload session anymore)
+        self.assertEqual(self.mock_krisp_audio.NcSessionConfig.call_count, 1)
         # Verify frame duration was set (hardcoded to 10ms in filter)
         self.assertEqual(self.mock_nc_cfg.inputFrameDuration, "10ms")
         # inputSampleRate and outputSampleRate are now set to the enum value
@@ -396,15 +408,16 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
             # Verify correct processing
             self.assertEqual(len(output_audio), len(input_audio))
 
-    async def test_destructor_cleanup(self):
-        """Test that destructor properly releases SDK reference."""
+    async def test_stop_releases_sdk(self):
+        """Test that stop() properly releases SDK reference."""
         filter_instance = KrispVivaFilter(model_path=self.model_path)
+        await filter_instance.start(16000)
 
-        # Call destructor
-        filter_instance.__del__()
+        # Stop the filter
+        await filter_instance.stop()
 
         # Verify SDK was released
-        self.mock_sdk_manager.release.assert_called()
+        self.mock_sdk_manager.release.assert_called_once()
 
     async def test_int_to_sample_rate_conversion(self):
         """Test sample rate conversion using the shared utility function."""
@@ -437,15 +450,24 @@ class TestKrispVivaFilter(unittest.IsolatedAsyncioTestCase):
         call_args = self.mock_session.process.call_args
         self.assertEqual(call_args[0][1], 75)  # Second argument should be the level
 
-    async def test_preload_session_created(self):
-        """Test that preload session is created during initialization."""
+    async def test_start_acquires_sdk(self):
+        """Test that start() acquires SDK reference and creates session."""
         filter_instance = KrispVivaFilter(model_path=self.model_path)
 
-        # Verify preload session was created
-        self.assertIsNotNone(filter_instance._preload_session)
+        # Verify no session exists before start
+        self.assertIsNone(filter_instance._session)
 
-        # Verify NcSessionConfig was created for preload and frame duration was set
-        self.mock_krisp_audio.NcSessionConfig.assert_called()
+        # Start the filter
+        await filter_instance.start(16000)
+
+        # Verify SDK was acquired
+        self.mock_sdk_manager.acquire.assert_called_once()
+
+        # Verify session was created
+        self.assertIsNotNone(filter_instance._session)
+
+        # Verify NcSessionConfig was created and frame duration was set
+        self.mock_krisp_audio.NcSessionConfig.assert_called_once()
         # Verify frame duration was set to 10ms (hardcoded in filter)
         self.assertEqual(self.mock_nc_cfg.inputFrameDuration, "10ms")
 
