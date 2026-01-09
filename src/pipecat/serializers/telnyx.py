@@ -171,7 +171,9 @@ class TelnyxFrameSerializer(FrameSerializer):
                     data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
                 )
             elif self._params.inbound_encoding == "L16":
-                # L16 is 16-bit linear PCM in network byte order (big-endian) per RFC 2586
+                # L16 audio to Telnyx WebSocket
+                # Note: Despite RFC 2586 specifying big-endian, Telnyx appears to expect
+                # little-endian L16 audio over their WebSocket media streaming API.
                 # First resample if rates differ
                 resampled_data = await self._output_resampler.resample(
                     data, frame.sample_rate, self._telnyx_sample_rate
@@ -184,13 +186,13 @@ class TelnyxFrameSerializer(FrameSerializer):
                         f"L16 audio length {len(resampled_data)} is not multiple of 2, truncating"
                     )
                     resampled_data = resampled_data[: len(resampled_data) - 1]
-                # Convert from host byte order to network byte order (big-endian)
-                audio_array = np.frombuffer(resampled_data, dtype=np.int16)
+                # Telnyx expects little-endian L16 - send directly on little-endian hosts
                 if sys.byteorder == "little":
-                    # Swap bytes: little-endian -> big-endian
-                    serialized_data = audio_array.byteswap().tobytes()
+                    serialized_data = resampled_data  # Already in correct byte order
                 else:
-                    serialized_data = resampled_data
+                    # On big-endian hosts, swap bytes to little-endian
+                    audio_array = np.frombuffer(resampled_data, dtype=np.int16)
+                    serialized_data = audio_array.byteswap().tobytes()
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
 
@@ -315,7 +317,9 @@ class TelnyxFrameSerializer(FrameSerializer):
                     self._input_resampler,
                 )
             elif self._params.outbound_encoding == "L16":
-                # L16 is 16-bit linear PCM in network byte order (big-endian) per RFC 2586
+                # L16 audio from Telnyx WebSocket
+                # Note: Despite RFC 2586 specifying big-endian, Telnyx appears to send
+                # little-endian L16 audio over their WebSocket media streaming API.
                 # Validate audio length is multiple of 2 bytes (16-bit samples)
                 if len(payload) % 2 != 0:
                     logger.warning(
@@ -324,13 +328,13 @@ class TelnyxFrameSerializer(FrameSerializer):
                     payload = payload[: len(payload) - 1]
                 if len(payload) == 0:
                     return None
-                # Convert from network byte order (big-endian) to host byte order
-                audio_array = np.frombuffer(payload, dtype=">i2")  # Big-endian int16
+                # Telnyx sends little-endian L16 - use directly on little-endian hosts
                 if sys.byteorder == "little":
-                    # Swap bytes: big-endian -> little-endian for host processing
-                    host_audio = audio_array.byteswap().tobytes()
+                    host_audio = payload  # Already in host byte order
                 else:
-                    host_audio = payload
+                    # On big-endian hosts, swap bytes
+                    audio_array = np.frombuffer(payload, dtype="<i2")
+                    host_audio = audio_array.byteswap().tobytes()
                 # Resample if rates differ
                 deserialized_data = await self._input_resampler.resample(
                     host_audio,
