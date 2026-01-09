@@ -536,6 +536,10 @@ class TranscriptionMessage:
         content: The message content/text.
         user_id: Optional identifier for the user.
         timestamp: Optional timestamp when the message was created.
+
+    .. deprecated:: 0.0.99
+        `TranscriptionMessage` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.
     """
 
     role: Literal["user", "assistant"]
@@ -543,14 +547,43 @@ class TranscriptionMessage:
     user_id: Optional[str] = None
     timestamp: Optional[str] = None
 
+    def __post_init__(self):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "TranscriptionMessage is deprecated and will be removed in a future version. "
+                "Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
 
 @dataclass
 class ThoughtTranscriptionMessage:
-    """An LLM thought message in a conversation transcript."""
+    """An LLM thought message in a conversation transcript.
+
+    .. deprecated:: 0.0.99
+        `ThoughtTranscriptionMessage` is deprecated and will be removed in a future version.
+        Use `LLMAssistantAggregator`'s new events instead.
+    """
 
     role: Literal["assistant"] = field(default="assistant", init=False)
     content: str
     timestamp: Optional[str] = None
+
+    def __post_init__(self):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "ThoughtTranscriptionMessage is deprecated and will be removed in a future version. "
+                "Use `LLMAssistantAggregator`'s new events instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass
@@ -595,9 +628,27 @@ class TranscriptionUpdateFrame(DataFrame):
 
     Parameters:
         messages: List of new transcript messages that were added.
+
+    .. deprecated:: 0.0.99
+        `TranscriptionUpdateFrame` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.
     """
 
     messages: List[TranscriptionMessage | ThoughtTranscriptionMessage]
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "TranscriptionUpdateFrame is deprecated and will be removed in a future version. "
+                "Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -1160,7 +1211,18 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
         This frame is deprecated and will be removed in a future version.
     """
 
-    pass
+    def __post_init__(self):
+        super().__post_init__()
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "EmulateUserStartedSpeakingFrame is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass
@@ -1174,7 +1236,18 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
         This frame is deprecated and will be removed in a future version.
     """
 
-    pass
+    def __post_init__(self):
+        super().__post_init__()
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "EmulateUserStoppedSpeakingFrame is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass
