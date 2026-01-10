@@ -231,6 +231,8 @@ class PlayHTTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         """Connect to PlayHT WebSocket and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -238,6 +240,8 @@ class PlayHTTTSService(InterruptibleTTSService):
 
     async def _disconnect(self):
         """Disconnect from PlayHT WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
