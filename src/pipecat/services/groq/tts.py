@@ -59,8 +59,8 @@ class GroqTTSService(TTSService):
         api_key: str,
         output_format: str = "wav",
         params: Optional[InputParams] = None,
-        model_name: str = "playai-tts",
-        voice_id: str = "Celeste-PlayAI",
+        model_name: str = "canopylabs/orpheus-v1-english",
+        voice_id: str = "autumn",
         sample_rate: Optional[int] = GROQ_SAMPLE_RATE,
         **kwargs,
     ):
