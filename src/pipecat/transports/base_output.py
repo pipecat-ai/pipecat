@@ -603,6 +603,8 @@ class BaseOutputTransport(FrameProcessor):
             if self._bot_speaking:
                 return
 
+            self._bot_speaking = True
+
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
             )
@@ -614,12 +616,16 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
-            self._bot_speaking = True
-
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
                 return
+
+            self._bot_speaking = False
+
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
 
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
@@ -631,12 +637,6 @@ class BaseOutputTransport(FrameProcessor):
             upstream_frame.transport_destination = self._destination
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
-
-            self._bot_speaking = False
-
-            # Clean audio buffer (there could be tiny left overs if not multiple
-            # to our output chunk size).
-            self._audio_buffer = bytearray()
 
         async def _bot_currently_speaking(self):
             """Handle bot speaking event."""
