@@ -9,8 +9,9 @@
 import asyncio
 import base64
 import json
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional, Dict
 
+import uuid
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
@@ -27,7 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import InterruptibleTTSService, TTSService
+from pipecat.services.tts_service import AudioContextTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -72,7 +73,7 @@ def language_to_async_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
-class AsyncAITTSService(InterruptibleTTSService):
+class AsyncAITTSService(AudioContextTTSService):
     """Async TTS service with WebSocket streaming.
 
     Provides text-to-speech using Async's streaming WebSocket API.
@@ -126,6 +127,10 @@ class AsyncAITTSService(InterruptibleTTSService):
             **kwargs,
         )
 
+        self._contexts: Dict[str, asyncio.Queue] = {}
+        self._audio_context_task = None
+        self._context_id = None
+
         params = params or AsyncAITTSService.InputParams()
 
         self._api_key = api_key
@@ -148,29 +153,6 @@ class AsyncAITTSService(InterruptibleTTSService):
         self._receive_task = None
         self._keepalive_task = None
         self._started = False
-
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate processing metrics.
-
-        Returns:
-            True, as Async service supports metrics generation.
-        """
-        return True
-
-    def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert a Language enum to Async language format.
-
-        Args:
-            language: The language to convert.
-
-        Returns:
-            The Async-specific language code, or None if not supported.
-        """
-        return language_to_async_language(language)
-
-    def _build_msg(self, text: str = "", force: bool = False) -> str:
-        msg = {"transcript": text, "force": force}
-        return json.dumps(msg)
 
     async def start(self, frame: StartFrame):
         """Start the Async TTS service.
@@ -199,6 +181,29 @@ class AsyncAITTSService(InterruptibleTTSService):
         """
         await super().cancel(frame)
         await self._disconnect()
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Async service supports metrics generation.
+        """
+        return True
+
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Async language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Async-specific language code, or None if not supported.
+        """
+        return language_to_async_language(language)
+
+    def _build_msg(self, text: str = "", context_id: str = "", force: bool = False) -> str:
+        msg = {"transcript": text, "context_id": context_id, "force": force}
+        return json.dumps(msg)
 
     async def _connect(self):
         await self._connect_websocket()
@@ -249,11 +254,16 @@ class AsyncAITTSService(InterruptibleTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Async")
+                # Close all contexts and the socket
+                if self._context_id:
+                    await self._websocket.send(json.dumps({"terminate": True}))
                 await self._websocket.close()
+                logger.debug("Disconnected from Async")
         except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            logger.error(f"{self} error closing websocket: {e}")
         finally:
             self._websocket = None
+            self._context_id = None
             self._started = False
             await self._call_event_handler("on_disconnected")
 
@@ -264,10 +274,10 @@ class AsyncAITTSService(InterruptibleTTSService):
 
     async def flush_audio(self):
         """Flush any pending audio."""
-        if not self._websocket:
+        if not self._context_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = self._build_msg(text=" ", force=True)
+        msg = self._build_msg(text=" ", context_id=self._context_id, force=True)
         await self._websocket.send(msg)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -287,34 +297,74 @@ class AsyncAITTSService(InterruptibleTTSService):
             if not msg:
                 continue
 
-            elif msg.get("audio"):
+            received_ctx_id = msg.get("context_id")
+            # Handle final messages first, regardless of context availability
+            # At the moment, this message is received AFTER the close_context message is
+            # sent, so it doesn't serve any functional purpose. For now, we'll just log it.
+            if msg.get("final") is True:
+                logger.trace(f"Received final message for context {received_ctx_id}")
+                continue
+
+            # Check if this message belongs to the current context.
+            if not self.audio_context_available(received_ctx_id):
+                if self._context_id == received_ctx_id:
+                    logger.debug(
+                        f"Received a delayed message, recreating the context: {self._context_id}"
+                    )
+                    await self.create_audio_context(self._context_id)
+                else:
+                    # This can happen if a message is received _after_ we have closed a context
+                    # due to user interruption but _before_ the `isFinal` message for the context
+                    # is received.
+                    logger.debug(f"Ignoring message from unavailable context: {received_ctx_id}")
+                    continue
+
+            if msg.get("audio"):
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(
-                    audio=base64.b64decode(msg["audio"]),
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                )
-                await self.push_frame(frame)
-            elif msg.get("error_code"):
-                await self.push_frame(TTSStoppedFrame())
-                await self.stop_all_metrics()
-                await self.push_error(error_msg=f"Error: {msg['message']}")
-            else:
-                await self.push_error(error_msg=f"Unknown message type: {msg}")
+                audio = base64.b64decode(msg["audio"])
+                frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                await self.append_to_audio_context(received_ctx_id, frame)
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 3
+        KEEPALIVE_SLEEP = 10
         while True:
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    keepalive_message = {"transcript": " "}
-                    logger.trace("Sending keepalive message")
+                    if self._context_id:
+                        keepalive_message = {
+                            "transcript": " ", 
+                            "context_id": self._context_id,
+                        }
+                        logger.trace("Sending keepalive message")
+                    else:
+                        # It's possible to have a user interruption which clears the context
+                        # without generating a new TTS response. In this case, we'll just send
+                        # an empty message to keep the connection alive.
+                        keepalive_message = {"transcript": " "}
+                        logger.trace("Sending keepalive without context")
                     await self._websocket.send(json.dumps(keepalive_message))
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} keepalive error: {e}")
                 break
+
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        """Handle interruption by closing the current context."""
+        await super()._handle_interruption(frame, direction)
+
+        # Close the current context when interrupted without closing the websocket
+        if self._context_id and self._websocket:
+            try:
+                await self._websocket.send(
+                    json.dumps(
+                        {"context_id": self._context_id, "close_context": True, "transcript": ""}
+                    )
+                )
+            except Exception as e:
+                logger.error(f"Error closing context on interruption: {e}")
+            self._context_id = None
+            self._started = False
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -332,25 +382,35 @@ class AsyncAITTSService(InterruptibleTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self._started:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame()
-                self._started = True
-
-            msg = self._build_msg(text=text, force=True)
-
             try:
-                await self._get_websocket().send(msg)
-                await self.start_tts_usage_metrics(text)
+                if not self._started:
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame()
+                    self._started = True
+
+                    if not self._context_id:
+                        self._context_id = str(uuid.uuid4())
+                    if not self.audio_context_available(self._context_id):
+                        await self.create_audio_context(self._context_id)
+
+                    msg = self._build_msg(text=" ", context_id=self._context_id)
+                    await self._get_websocket().send(msg)
+                    msg = self._build_msg(text=text, force=True, context_id=self._context_id)
+                    await self._get_websocket().send(msg)
+                    await self.start_tts_usage_metrics(text)
+                else:
+                    if self._websocket and self._context_id:
+                        msg = self._build_msg(text=text, force=True, context_id=self._context_id)
+                        await self._get_websocket().send(msg)                    
+
             except Exception as e:
-                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
-                await self._disconnect()
-                await self._connect()
+                self._started = False
                 return
             yield None
         except Exception as e:
-            yield ErrorFrame(error=f"Unknown error occurred: {e}")
+            logger.error(f"{self} exception: {e}")
 
 
 class AsyncAIHttpTTSService(TTSService):
@@ -462,9 +522,9 @@ class AsyncAIHttpTTSService(TTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
+        first_byte_seen = False
         try:
             voice_config = {"mode": "id", "id": self._voice_id}
-            await self.start_ttfb_metrics()
             payload = {
                 "model_id": self._model_name,
                 "transcript": text,
@@ -472,7 +532,6 @@ class AsyncAIHttpTTSService(TTSService):
                 "output_format": self._settings["output_format"],
                 "language": self._settings["language"],
             }
-            yield TTSStartedFrame()
             headers = {
                 "version": self._api_version,
                 "x-api-key": self._api_key,
@@ -480,26 +539,36 @@ class AsyncAIHttpTTSService(TTSService):
             }
             url = f"{self._base_url}/text_to_speech/streaming"
 
+            yield TTSStartedFrame()
+            await self.start_ttfb_metrics()
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     await self.push_error(error_msg=f"Async API error: {error_text}")
                     raise Exception(f"Async API returned status {response.status}: {error_text}")
 
-                audio_data = await response.read()
+                # Read streaming bytes; stop TTFB on the *first* received chunk
+                buffer = bytearray()
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    if not chunk:
+                        continue
+                    if not first_byte_seen:
+                        first_byte_seen = True
+                        await self.stop_ttfb_metrics()
+                        await self.start_tts_usage_metrics(text)
 
-            await self.start_tts_usage_metrics(text)
+                    buffer.extend(chunk)
+                audio_data = bytes(buffer)
 
-            frame = TTSAudioRawFrame(
+            yield TTSAudioRawFrame(
                 audio=audio_data,
                 sample_rate=self.sample_rate,
                 num_channels=1,
             )
 
-            yield frame
-
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.stop_ttfb_metrics()
+            if not first_byte_seen:
+                await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
