@@ -490,17 +490,20 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 if not message.parts:
                     continue
 
-                # We're assuming that the thought signature always applies to the last part
-                last_part = message.parts[-1]
+                # Check all parts in the message to find the matching bookmark
+                thought_signature_found = False
+                for part in message.parts:
+                    if self._thought_signature_bookmark_matches_part(bookmark, part):
+                        # Apply the thought signature to the matching part.
+                        part.thought_signature = signature
+                        thought_signatures_applied += 1
 
-                # If the bookmark matches the part...
-                if self._thought_signature_bookmark_matches_part(bookmark, last_part):
-                    # Apply the thought signature
-                    last_part.thought_signature = signature
-                    thought_signatures_applied += 1
+                        # Update the start index and stop searching for a match
+                        message_start_index = i + 1
+                        thought_signature_found = True
+                        break
 
-                    # Update the start index and stop searching for a match
-                    message_start_index = i + 1
+                if thought_signature_found:
                     break
 
         # For debugging, print out how many thought signatures were applied
