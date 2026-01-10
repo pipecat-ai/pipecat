@@ -127,6 +127,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             user_aggregator,  # User responses
             llm,  # LLM
             tts,  # TTS
+            transport.output(),  # Transport bot output
             assistant_aggregator,  # Assistant spoken responses
         ]
     )
