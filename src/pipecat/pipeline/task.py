@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
+from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
@@ -213,7 +214,7 @@ class PipelineTask(BasePipelineTask):
 
     def __init__(
         self,
-        pipeline: FrameProcessor,
+        pipeline: BasePipeline,
         *,
         params: Optional[PipelineParams] = None,
         additional_span_attributes: Optional[dict] = None,
@@ -367,6 +368,17 @@ class PipelineTask(BasePipelineTask):
             The pipeline parameters configuration.
         """
         return self._params
+
+    @property
+    def pipeline(self) -> BasePipeline:
+        """Get the full pipeline managed by this pipeline task.
+
+        This will also include any internal processors added by the pipeline task.
+
+        Returns:
+            The pipeline managed by the pipeline task.
+        """
+        return self._pipeline
 
     @property
     def turn_tracking_observer(self) -> Optional[TurnTrackingObserver]:
