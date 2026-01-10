@@ -59,19 +59,19 @@ class HathoraTTSService(TTSService):
             config: Some models support additional config, refer to
                 [docs](https://models.hathora.dev) for each model to see
                 what is supported.
-            base_url: Base API URL for the Hathora TTS service.
         """
 
         speed: Optional[float] = None
         config: Optional[list[ConfigOption]] = None
-        base_url: str = "https://api.models.hathora.dev/inference/v1/tts",
 
     def __init__(
         self,
         *,
         model: str,
         voice_id: Optional[str] = None,
+        sample_rate: Optional[int] = None,
         api_key: Optional[str] = None,
+        base_url: str = "https://api.models.hathora.dev/inference/v1/tts",
         params: Optional[InputParams] = None,
         **kwargs,
     ):
@@ -81,17 +81,20 @@ class HathoraTTSService(TTSService):
             model: Model to use; find available models
                 [here](https://models.hathora.dev).
             voice_id: Voice to use for synthesis (if supported by model).
+            sample_rate: Output sample rate for generated audio.
             api_key: API key for authentication with the Hathora service;
                 provision one [here](https://models.hathora.dev/tokens).
+            base_url: Base API URL for the Hathora TTS service.
             params: Configuration parameters.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(
+            sample_rate=sample_rate,
             **kwargs,
         )
         self._model = model
         self._api_key = api_key or os.getenv("HATHORA_API_KEY")
-        self._base_url = params.base_url
+        self._base_url = base_url
 
         params = params or HathoraTTSService.InputParams()
 
@@ -155,7 +158,7 @@ class HathoraTTSService(TTSService):
 
             frame = TTSAudioRawFrame(
                 audio=pcm_audio,
-                sample_rate=sample_rate,
+                sample_rate=self.sample_rate,
                 num_channels=num_channels,
             )
 
