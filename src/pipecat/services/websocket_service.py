@@ -121,6 +121,39 @@ class WebsocketService(ABC):
             else:
                 logger.error(f"{self} send failed; unable to reconnect")
 
+    async def _maybe_try_reconnect(
+        self,
+        error: Exception,
+        error_message: str,
+        report_error: Callable[[ErrorFrame], Awaitable[None]],
+    ) -> bool:
+        """Check if reconnection should be attempted and try if appropriate.
+
+        Args:
+            error: The exception that occurred.
+            error_message: Human-readable error message for logging.
+            report_error: Callback function to report connection errors.
+
+        Returns:
+            True if should continue the receive loop, False if should break.
+        """
+        # Don't reconnect if we're intentionally disconnecting
+        if self._disconnecting:
+            logger.warning(f"{self} error during disconnect: {error}")
+            return False
+
+        # Log the error
+        logger.warning(error_message)
+
+        # Try to reconnect if enabled
+        if self._reconnect_on_error:
+            success = await self._try_reconnect(report_error=report_error)
+            return success
+        else:
+            # Reconnection disabled
+            await report_error(ErrorFrame(error_message))
+            return False
+
     async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
         """Handle websocket message receiving with automatic retry logic.
 
@@ -139,33 +172,17 @@ class WebsocketService(ABC):
                 logger.debug(f"{self} connection closed normally: {e}")
                 break
             except ConnectionClosedError as e:
-                # Don't reconnect if we're intentionally disconnecting
-                if self._disconnecting:
-                    logger.warning(f"{self} connection closed with an error during disconnect: {e}")
-                    break
-
                 # Connection closed with error (e.g., no close frame received/sent)
                 # This often indicates network issues, server problems, or abrupt disconnection
                 message = f"{self} connection closed, but with an error: {e}"
-                logger.warning(message)
-
-                if self._reconnect_on_error:
-                    success = await self._try_reconnect(report_error=report_error)
-                    if not success:
-                        break
-                else:
-                    await report_error(ErrorFrame(message))
+                should_continue = await self._maybe_try_reconnect(e, message, report_error)
+                if not should_continue:
                     break
             except Exception as e:
+                # General error during message receiving
                 message = f"{self} error receiving messages: {e}"
-                logger.error(message)
-
-                if self._reconnect_on_error:
-                    success = await self._try_reconnect(report_error=report_error)
-                    if not success:
-                        break
-                else:
-                    await report_error(ErrorFrame(message))
+                should_continue = await self._maybe_try_reconnect(e, message, report_error)
+                if not should_continue:
                     break
 
     async def _connect(self):
