@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -179,6 +180,15 @@ class SonioxSTTService(WebsocketSTTService):
 
         self._receive_task = None
         self._keepalive_task = None
+        self._ttfb_reported = False
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Soniox STT service supports metrics generation.
+        """
+        return True
 
     async def start(self, frame: StartFrame):
         """Start the Soniox STT websocket connection.
@@ -246,6 +256,10 @@ class SonioxSTTService(WebsocketSTTService):
             direction: The direction of frame processing.
         """
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self.start_ttfb_metrics()
+            self._ttfb_reported = False
 
         if isinstance(frame, UserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
             # Send finalize message to Soniox so we get the final tokens asap.
@@ -395,6 +409,10 @@ class SonioxSTTService(WebsocketSTTService):
                     else:
                         # Got at least one token, so we can reset the auto finalize delay.
                         self._last_tokens_received = time.time()
+                        # Report TTFB on first token received
+                        if not self._ttfb_reported:
+                            await self.stop_ttfb_metrics()
+                            self._ttfb_reported = True
 
                 # We will only send the final tokens after we get the "endpoint" event.
                 non_final_transcription = []
