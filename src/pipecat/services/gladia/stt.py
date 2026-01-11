@@ -29,6 +29,8 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
     TranslationFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
@@ -278,6 +280,9 @@ class GladiaSTTService(STTService):
         self._connection_task = None
         self._should_reconnect = True
 
+        # VAD state tracking
+        self._is_speaking = False
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate performance metrics.
 
@@ -523,6 +528,30 @@ class GladiaSTTService(STTService):
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
+    async def _on_speech_started(self):
+        """Handle speech start event from Gladia.
+
+        Triggers interruption and emits UserStartedSpeakingFrame when VAD is enabled.
+        """
+        if not self._params.enable_vad or self._is_speaking:
+            return
+        logger.debug(f"{self} User started speaking")
+        self._is_speaking = True
+        # Push interruption first to stop the bot, then notify about user speaking
+        await self.push_interruption_task_frame_and_wait()
+        await self.push_frame(UserStartedSpeakingFrame())
+
+    async def _on_speech_ended(self):
+        """Handle speech end event from Gladia.
+
+        Emits UserStoppedSpeakingFrame when VAD is enabled.
+        """
+        if not self._params.enable_vad or not self._is_speaking:
+            return
+        self._is_speaking = False
+        await self.push_frame(UserStoppedSpeakingFrame())
+        logger.debug(f"{self} User stopped speaking")
+
     async def _send_audio(self, audio: bytes):
         """Send audio chunk with proper message format."""
         if self._websocket and self._websocket.state is State.OPEN:
@@ -617,6 +646,10 @@ class GladiaSTTService(STTService):
                                 translation, "", time_now_iso8601(), translated_language
                             )
                         )
+                elif content["type"] == "speech_start":
+                    await self._on_speech_started()
+                elif content["type"] == "speech_end":
+                    await self._on_speech_ended()
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection
             pass
