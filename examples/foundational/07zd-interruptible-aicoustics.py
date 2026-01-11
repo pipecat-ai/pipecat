@@ -12,7 +12,7 @@ import wave
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.filters.aic_filter import AICFilter
+from pipecat.audio.filters.aic_filter_v2 import AICFilter
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline

@@ -4,11 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""ai-coustics AIC SDK audio filter for Pipecat.
+"""ai-coustics AIC SDK audio filter for Pipecat (aic-sdk < 2.0.0).
 
 This module provides an audio filter implementation using ai-coustics' AIC SDK to
 enhance audio streams in real time. It mirrors the structure of other filters like
 the Koala filter and integrates with Pipecat's input transport pipeline.
+
+.. note::
+    This module is compatible with aic-sdk versions < 2.0.0.
+    For aic-sdk >= 2.0.0, use :mod:`pipecat.audio.filters.aic_filter_v2` instead.
 """
 
 from typing import List, Optional
@@ -17,15 +21,14 @@ import numpy as np
 from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
+from pipecat.audio.utils import check_aic_sdk_version
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
-try:
-    # AIC SDK (https://ai-coustics.github.io/aic-sdk-py/api/)
-    from aic import AICModelType, AICParameter, Model
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use the AIC filter, you need to `pip install pipecat-ai[aic]`.")
-    raise Exception(f"Missing module: {e}")
+# Check aic-sdk is installed and version is compatible (< 2.0.0)
+check_aic_sdk_version("v1")
+
+# AIC SDK (https://ai-coustics.github.io/aic-sdk-py/api/)
+from aic import AICModelType, AICParameter, Model
 
 
 class AICFilter(BaseAudioFilter):

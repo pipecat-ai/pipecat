@@ -1,22 +1,26 @@
-"""AIC-integrated VAD analyzer that lazily binds to the AIC SDK backend.
+"""AIC-integrated VAD analyzer that lazily binds to the AIC SDK backend (aic-sdk < 2.0.0).
 
 This analyzer queries the backend's is_speech_detected() and maps it to a float
 confidence (1.0/0.0). It uses 10 ms windows based on the sample rate and applies
 optional AIC VAD parameters (lookback_buffer_size, sensitivity) when available.
+
+.. note::
+    This module is compatible with aic-sdk versions < 2.0.0.
+    For aic-sdk >= 2.0.0, use :mod:`pipecat.audio.vad.aic_vad_v2` instead.
 """
 
 from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from pipecat.audio.utils import check_aic_sdk_version
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 
-try:
-    from aic import AICVadParameter
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use the AIC filter, you need to `pip install pipecat-ai[aic]`.")
-    raise Exception(f"Missing module: {e}")
+# Check aic-sdk is installed and version is compatible (< 2.0.0)
+check_aic_sdk_version("v1")
+
+from aic import AICVadParameter
+
 
 
 class AICVADAnalyzer(VADAnalyzer):
