@@ -84,6 +84,11 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
+try:
+    from smithy_aws_event_stream.events import InvalidEventBytesError
+except ImportError:
+    InvalidEventBytesError = None
+
 
 class AWSNovaSonicUnhandledFunctionException(Exception):
     """Exception raised when the LLM attempts to call an unregistered function."""
@@ -873,7 +878,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(result_content_end)
 
     async def _send_client_event(self, event_json: str):
-        if not self._stream:  # should never happen
+        if not self._stream or self._disconnecting:
             return
 
         event = InvokeModelWithBidirectionalStreamInputChunk(
@@ -929,14 +934,23 @@ class AWSNovaSonicLLMService(LLMService):
                         elif "completionEnd" in event_json:
                             # Handle the LLM completion ending
                             await self._handle_completion_end_event(event_json)
+        except asyncio.CancelledError:
+            logger.debug("Receive task cancelled")
+            raise
         except Exception as e:
             if self._disconnecting:
                 # Errors are kind of expected while disconnecting, so just
                 # ignore them and do nothing
                 return
+            is_invalid_bytes = (
+                InvalidEventBytesError and isinstance(e, InvalidEventBytesError)
+            ) or "Invalid event bytes" in str(e)
+            is_timeout = isinstance(e, asyncio.TimeoutError) or "timeout" in str(e)
+            if (is_invalid_bytes or is_timeout) and self._wants_connection:
+                logger.warning(f"Attempting automatic recovery from error: {e}")
+                self.create_task(self.reset_conversation())
+                return
             await self.push_error(error_msg=f"Error processing responses: {e}", exception=e)
-            if self._wants_connection:
-                await self.reset_conversation()
 
     async def _handle_completion_start_event(self, event_json):
         pass
