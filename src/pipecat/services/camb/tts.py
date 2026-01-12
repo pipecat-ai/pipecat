@@ -7,20 +7,20 @@
 """Camb.ai MARS text-to-speech service implementation.
 
 This module provides TTS functionality using Camb.ai's MARS model family,
-offering high-quality text-to-speech synthesis with HTTP streaming support.
+offering high-quality text-to-speech synthesis with streaming support.
 
 Features:
     - MARS models: mars-flash, mars-pro, mars-instruct
     - 140+ languages supported
-    - Real-time HTTP streaming
+    - Real-time streaming via official SDK
     - 24kHz audio output
     - Voice customization (instructions for mars-instruct)
 """
 
-import asyncio
 from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
 
-import aiohttp
+from camb.client import AsyncCambAI
+from camb import StreamTtsOutputConfiguration
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -41,7 +41,6 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 DEFAULT_VOICE_ID = 147320
 DEFAULT_LANGUAGE = "en-us"
 DEFAULT_MODEL = "mars-flash"  # Faster inference
-DEFAULT_BASE_URL = "https://client.camb.ai/apis"
 DEFAULT_SAMPLE_RATE = 24000  # 24kHz
 DEFAULT_TIMEOUT = 60.0  # Seconds (minimum recommended by Camb.ai)
 MIN_TEXT_LENGTH = 3
@@ -126,21 +125,29 @@ def language_to_camb_language(language: Language) -> Optional[str]:
 
 
 class CambTTSService(TTSService):
-    """Camb.ai MARS HTTP-based text-to-speech service.
+    """Camb.ai MARS text-to-speech service using the official SDK.
 
     Converts text to speech using Camb.ai's MARS TTS models with support for
     multiple languages. Provides custom instructions support for the mars-instruct model.
 
     Example::
 
+        # Using API key (creates internal client)
         tts = CambTTSService(
             api_key="your-api-key",
             voice_id=147320,
             model="mars-flash",
-            aiohttp_session=session,
             params=CambTTSService.InputParams(
                 language=Language.EN
             )
+        )
+
+        # Using existing SDK client
+        client = AsyncCambAI(api_key="your-api-key")
+        tts = CambTTSService(
+            client=client,
+            voice_id=147320,
+            model="mars-flash",
         )
 
         # For mars-instruct with custom instructions:
@@ -148,7 +155,6 @@ class CambTTSService(TTSService):
             api_key="your-api-key",
             voice_id=147320,
             model="mars-instruct",
-            aiohttp_session=session,
             params=CambTTSService.InputParams(
                 language=Language.EN,
                 user_instructions="Speak with excitement and energy"
@@ -176,11 +182,10 @@ class CambTTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: str,
-        aiohttp_session: aiohttp.ClientSession,
+        api_key: Optional[str] = None,
+        client: Optional[AsyncCambAI] = None,
         voice_id: int = DEFAULT_VOICE_ID,
         model: str = DEFAULT_MODEL,
-        base_url: str = DEFAULT_BASE_URL,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         **kwargs,
@@ -188,29 +193,29 @@ class CambTTSService(TTSService):
         """Initialize the Camb.ai TTS service.
 
         Args:
-            api_key: Camb.ai API key for authentication.
-            aiohttp_session: Shared aiohttp session for making HTTP requests.
+            api_key: Camb.ai API key for authentication. Required if client is not provided.
+            client: Existing AsyncCambAI client instance. If provided, api_key is ignored.
             voice_id: Voice ID to use. Defaults to 147320.
             model: TTS model to use. Options: "mars-flash", "mars-pro", "mars-instruct".
                 Defaults to "mars-flash" (fastest).
-            base_url: Camb.ai API base URL. Defaults to production URL.
             sample_rate: Audio sample rate in Hz. If None, uses Camb.ai default (24000).
             params: Additional voice parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        if client is None and api_key is None:
+            raise ValueError("Either 'api_key' or 'client' must be provided")
+
         params = params or CambTTSService.InputParams()
 
-        self._api_key = api_key
-        self._session = aiohttp_session
-
-        # Remove trailing slash from base URL
-        if base_url.endswith("/"):
-            logger.warning("Base URL ends with a slash, removing it.")
-            base_url = base_url[:-1]
-
-        self._base_url = base_url
+        # Use provided client or create one
+        if client is not None:
+            self._client = client
+            self._owns_client = False
+        else:
+            self._client = AsyncCambAI(api_key=api_key, timeout=DEFAULT_TIMEOUT)
+            self._owns_client = True
 
         # Build settings
         self._settings = {
@@ -300,63 +305,37 @@ class CambTTSService(TTSService):
             )
             text = text[:MAX_TEXT_LENGTH]
 
-        # Build request payload
-        payload = {
-            "text": text,
-            "voice_id": self._voice_id_int,
-            "language": self._settings["language"],
-            "speech_model": self._model_name,
-            "output_configuration": {"format": "pcm_s16le"},
-        }
-
-        # Add user instructions if using mars-instruct model
-        if self._model_name == "mars-instruct" and self._settings.get("user_instructions"):
-            payload["user_instructions"] = self._settings["user_instructions"]
-
-        headers = {
-            "x-api-key": self._api_key,
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-
         try:
             await self.start_ttfb_metrics()
 
-            async with self._session.post(
-                f"{self._base_url}/tts-stream",
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT),
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    error_msg = self._format_error_message(response.status, error_text)
-                    logger.error(f"{self}: {error_msg}")
-                    yield ErrorFrame(error=error_msg)
-                    return
+            # Build SDK parameters
+            tts_kwargs: Dict[str, Any] = {
+                "text": text,
+                "voice_id": self._voice_id_int,
+                "language": self._settings["language"],
+                "speech_model": self._model_name,
+                "output_configuration": StreamTtsOutputConfiguration(format="pcm_s16le"),
+            }
 
-                await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
+            # Add user instructions if using mars-instruct model
+            if self._model_name == "mars-instruct" and self._settings.get("user_instructions"):
+                tts_kwargs["user_instructions"] = self._settings["user_instructions"]
 
-                async for chunk in response.content.iter_chunked(self.chunk_size):
-                    if chunk:
-                        await self.stop_ttfb_metrics()
-                        yield TTSAudioRawFrame(
-                            audio=chunk,
-                            sample_rate=self.sample_rate,
-                            num_channels=1,
-                        )
+            await self.start_tts_usage_metrics(text)
+            yield TTSStartedFrame()
 
-        except aiohttp.ClientError as e:
-            error_msg = f"Network error communicating with Camb.ai: {e}"
-            logger.error(f"{self}: {error_msg}")
-            yield ErrorFrame(error=error_msg)
-        except asyncio.TimeoutError:
-            error_msg = f"Timeout waiting for Camb.ai TTS response (>{DEFAULT_TIMEOUT}s)"
-            logger.error(f"{self}: {error_msg}")
-            yield ErrorFrame(error=error_msg)
+            # Stream audio chunks from SDK
+            async for chunk in self._client.text_to_speech.tts(**tts_kwargs):
+                if chunk:
+                    await self.stop_ttfb_metrics()
+                    yield TTSAudioRawFrame(
+                        audio=chunk,
+                        sample_rate=self.sample_rate,
+                        num_channels=1,
+                    )
+
         except Exception as e:
-            error_msg = f"Unexpected error in Camb.ai TTS: {e}"
+            error_msg = f"Camb.ai TTS error: {e}"
             logger.error(f"{self}: {error_msg}")
             yield ErrorFrame(error=error_msg)
         finally:
@@ -364,74 +343,37 @@ class CambTTSService(TTSService):
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
 
-    def _format_error_message(self, status: int, error_text: str) -> str:
-        """Format error message based on HTTP status code.
-
-        Args:
-            status: HTTP status code.
-            error_text: Error response body.
-
-        Returns:
-            Formatted, user-friendly error message.
-        """
-        if status == 401:
-            return (
-                "Invalid Camb.ai API key. "
-                "Set CAMB_API_KEY environment variable with your API key from https://camb.ai"
-            )
-        elif status == 403:
-            return (
-                f"Voice ID {self._voice_id_int} is not accessible with your API key. "
-                "Use list_voices() to see available voices."
-            )
-        elif status == 404:
-            return (
-                f"Invalid voice ID: {self._voice_id_int}. "
-                "Use list_voices() to see available voices."
-            )
-        elif status == 429:
-            return "Camb.ai rate limit exceeded. Please wait before making more requests."
-        elif status >= 500:
-            return f"Camb.ai server error (status {status}): {error_text}"
-        else:
-            return f"Camb.ai API error (status {status}): {error_text}"
-
     @staticmethod
     async def list_voices(
-        api_key: str,
-        aiohttp_session: aiohttp.ClientSession,
-        base_url: str = DEFAULT_BASE_URL,
+        api_key: Optional[str] = None,
+        client: Optional[AsyncCambAI] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch available voices from Camb.ai API.
 
         Args:
-            api_key: Camb.ai API key for authentication.
-            aiohttp_session: aiohttp ClientSession for making HTTP requests.
-            base_url: Camb.ai API base URL.
+            api_key: Camb.ai API key for authentication. Required if client is not provided.
+            client: Existing AsyncCambAI client instance. If provided, api_key is ignored.
 
         Returns:
             List of voice dictionaries with id, name, gender, and language fields.
 
         Raises:
+            ValueError: If neither api_key nor client is provided.
             Exception: If the API request fails.
 
         Example::
 
-            async with aiohttp.ClientSession() as session:
-                voices = await CambTTSService.list_voices(
-                    api_key="your-api-key",
-                    aiohttp_session=session,
-                )
-                for voice in voices:
-                    print(f"{voice['id']}: {voice['name']}")
-        """
-        if base_url.endswith("/"):
-            base_url = base_url[:-1]
+            # Using API key
+            voices = await CambTTSService.list_voices(api_key="your-api-key")
+            for voice in voices:
+                print(f"{voice['id']}: {voice['name']}")
 
-        headers = {
-            "x-api-key": api_key,
-            "Accept": "application/json",
-        }
+            # Using existing client
+            client = AsyncCambAI(api_key="your-api-key")
+            voices = await CambTTSService.list_voices(client=client)
+        """
+        if client is None and api_key is None:
+            raise ValueError("Either 'api_key' or 'client' must be provided")
 
         gender_map = {
             0: "Not Specified",
@@ -440,23 +382,22 @@ class CambTTSService(TTSService):
             9: "Not Applicable",
         }
 
-        async with aiohttp_session.get(
-            f"{base_url}/list-voices",
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=30.0),
-        ) as response:
-            if response.status != 200:
-                error_text = await response.text()
-                raise Exception(f"Failed to list voices (status {response.status}): {error_text}")
+        # Use provided client or create a temporary one
+        if client is not None:
+            sdk_client = client
+        else:
+            sdk_client = AsyncCambAI(api_key=api_key)
 
-            data = await response.json()
-            return [
-                {
-                    "id": v["id"],
-                    "name": v.get("voice_name", "Unknown"),
-                    "gender": gender_map.get(v.get("gender"), "Unknown"),
-                    "age": v.get("age"),
-                    "language": v.get("language"),
-                }
-                for v in data
-            ]
+        voices = await sdk_client.voice_cloning.list_voices()
+        return [
+            {
+                "id": v.id if hasattr(v, "id") else v.get("id"),
+                "name": v.voice_name if hasattr(v, "voice_name") else v.get("voice_name", "Unknown"),
+                "gender": gender_map.get(
+                    v.gender if hasattr(v, "gender") else v.get("gender"), "Unknown"
+                ),
+                "age": v.age if hasattr(v, "age") else v.get("age"),
+                "language": v.language if hasattr(v, "language") else v.get("language"),
+            }
+            for v in voices
+        ]

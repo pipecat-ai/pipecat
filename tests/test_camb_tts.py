@@ -6,14 +6,12 @@
 
 """Tests for CambTTSService.
 
-These tests use mock servers to simulate the Camb.ai API responses.
+These tests mock the Camb.ai SDK client to test the service behavior.
 """
 
-import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import aiohttp
 import pytest
-from aiohttp import web
 
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -29,54 +27,30 @@ from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 
 
+async def mock_tts_stream(*args, **kwargs):
+    """Mock TTS stream that yields audio chunks."""
+    yield b"\x00\x01" * 4800  # Small chunk of PCM audio
+
+
+async def mock_tts_stream_error(*args, **kwargs):
+    """Mock TTS stream that raises an error."""
+    raise Exception("API error: Invalid API key")
+    yield  # Make this a generator
+
+
 @pytest.mark.asyncio
-async def test_run_camb_tts_success(aiohttp_client):
+async def test_run_camb_tts_success():
     """Test successful TTS generation with chunked PCM audio.
 
     Verifies the frame sequence: TTSStartedFrame -> TTSAudioRawFrame* -> TTSStoppedFrame
     """
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        mock_client.text_to_speech.tts = mock_tts_stream
+        MockAsyncCambAI.return_value = mock_client
 
-    async def handler(request):
-        # Verify request headers
-        assert request.headers.get("x-api-key") == "test-api-key"
-        assert request.headers.get("Content-Type") == "application/json"
-
-        # Parse and verify request body
-        body = await request.json()
-        assert "text" in body
-        assert body["voice_id"] == 2681
-        assert body["language"] == "en-us"
-        assert body["speech_model"] == "mars-flash"
-        assert body["output_configuration"]["format"] == "pcm_s16le"
-
-        # Prepare a StreamResponse with chunked PCM data
-        resp = web.StreamResponse(
-            status=200,
-            reason="OK",
-            headers={"Content-Type": "audio/raw"},
-        )
-        await resp.prepare(request)
-
-        # Write out chunked PCM byte data (16-bit samples)
-        # Use smaller chunks for more predictable frame count
-        data = b"\x00\x01" * 4800  # Small chunk of audio
-        await resp.write(data)
-        await resp.write_eof()
-
-        return resp
-
-    # Create an aiohttp test server
-    app = web.Application()
-    app.router.add_post("/tts-stream", handler)
-    client = await aiohttp_client(app)
-
-    base_url = str(client.make_url("")).rstrip("/")
-
-    async with aiohttp.ClientSession() as session:
         tts_service = CambTTSService(
             api_key="test-api-key",
-            aiohttp_session=session,
-            base_url=base_url,
             voice_id=2681,
             model="mars-flash",
         )
@@ -106,32 +80,24 @@ async def test_run_camb_tts_success(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_run_camb_tts_error_401(aiohttp_client):
-    """Test handling of invalid API key (401 Unauthorized)."""
+async def test_run_camb_tts_error():
+    """Test handling of TTS API errors."""
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        mock_client.text_to_speech.tts = mock_tts_stream_error
+        MockAsyncCambAI.return_value = mock_client
 
-    async def handler(request):
-        return web.Response(
-            status=401,
-            text="Unauthorized: Invalid API key",
-        )
-
-    app = web.Application()
-    app.router.add_post("/tts-stream", handler)
-    client = await aiohttp_client(app)
-    base_url = str(client.make_url("")).rstrip("/")
-
-    async with aiohttp.ClientSession() as session:
         tts_service = CambTTSService(
             api_key="invalid-key",
-            aiohttp_session=session,
-            base_url=base_url,
+            voice_id=147320,
         )
 
         frames_to_send = [
             TTSSpeakFrame(text="This should fail."),
         ]
 
-        expected_down_frames = [AggregatedTextFrame, TTSStoppedFrame, TTSTextFrame]
+        # TTSStartedFrame is emitted before we attempt to iterate the stream
+        expected_down_frames = [AggregatedTextFrame, TTSStartedFrame, TTSStoppedFrame, TTSTextFrame]
         expected_up_frames = [ErrorFrame]
 
         frames_received = await run_test(
@@ -142,143 +108,38 @@ async def test_run_camb_tts_error_401(aiohttp_client):
         )
         up_frames = frames_received[1]
 
-        assert isinstance(up_frames[0], ErrorFrame), "Must receive an ErrorFrame for 401"
-        assert "Invalid Camb.ai API key" in up_frames[0].error, (
-            "ErrorFrame should mention invalid API key"
-        )
+        assert isinstance(up_frames[0], ErrorFrame), "Must receive an ErrorFrame"
+        assert "error" in up_frames[0].error.lower(), "ErrorFrame should contain error message"
 
 
 @pytest.mark.asyncio
-async def test_run_camb_tts_error_404(aiohttp_client):
-    """Test handling of invalid voice ID (404 Not Found)."""
-
-    async def handler(request):
-        return web.Response(
-            status=404,
-            text="Voice not found",
-        )
-
-    app = web.Application()
-    app.router.add_post("/tts-stream", handler)
-    client = await aiohttp_client(app)
-    base_url = str(client.make_url("")).rstrip("/")
-
-    async with aiohttp.ClientSession() as session:
-        tts_service = CambTTSService(
-            api_key="test-api-key",
-            aiohttp_session=session,
-            base_url=base_url,
-            voice_id=99999,  # Invalid voice ID
-        )
-
-        frames_to_send = [
-            TTSSpeakFrame(text="This should fail."),
-        ]
-
-        expected_down_frames = [AggregatedTextFrame, TTSStoppedFrame, TTSTextFrame]
-        expected_up_frames = [ErrorFrame]
-
-        frames_received = await run_test(
-            tts_service,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
-            expected_up_frames=expected_up_frames,
-        )
-        up_frames = frames_received[1]
-
-        assert isinstance(up_frames[0], ErrorFrame), "Must receive an ErrorFrame for 404"
-        assert "Invalid voice ID" in up_frames[0].error, (
-            "ErrorFrame should mention invalid voice ID"
-        )
-
-
-@pytest.mark.asyncio
-async def test_run_camb_tts_error_429(aiohttp_client):
-    """Test handling of rate limit (429 Too Many Requests)."""
-
-    async def handler(request):
-        return web.Response(
-            status=429,
-            text="Rate limit exceeded",
-        )
-
-    app = web.Application()
-    app.router.add_post("/tts-stream", handler)
-    client = await aiohttp_client(app)
-    base_url = str(client.make_url("")).rstrip("/")
-
-    async with aiohttp.ClientSession() as session:
-        tts_service = CambTTSService(
-            api_key="test-api-key",
-            aiohttp_session=session,
-            base_url=base_url,
-        )
-
-        frames_to_send = [
-            TTSSpeakFrame(text="This should fail due to rate limit."),
-        ]
-
-        expected_down_frames = [AggregatedTextFrame, TTSStoppedFrame, TTSTextFrame]
-        expected_up_frames = [ErrorFrame]
-
-        frames_received = await run_test(
-            tts_service,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
-            expected_up_frames=expected_up_frames,
-        )
-        up_frames = frames_received[1]
-
-        assert isinstance(up_frames[0], ErrorFrame), "Must receive an ErrorFrame for 429"
-        assert "rate limit" in up_frames[0].error.lower(), (
-            "ErrorFrame should mention rate limit"
-        )
-
-
-@pytest.mark.asyncio
-async def test_list_voices(aiohttp_client):
+async def test_list_voices():
     """Test voice listing endpoint."""
 
-    async def handler(request):
-        # Verify API key header
-        assert request.headers.get("x-api-key") == "test-api-key"
+    async def mock_list_voices(*args, **kwargs):
+        # Return mock Voice objects
+        mock_voice1 = MagicMock()
+        mock_voice1.id = 2681
+        mock_voice1.voice_name = "Attic"
+        mock_voice1.gender = 1
+        mock_voice1.age = 25
+        mock_voice1.language = None
 
-        # Return mock voice data (matching actual API response structure)
-        voices = [
-            {
-                "id": 2681,
-                "voice_name": "Attic",
-                "gender": 1,
-                "age": 25,
-                "language": None,
-                "transcript": None,
-                "description": None,
-                "is_published": None,
-            },
-            {
-                "id": 2682,
-                "voice_name": "Cellar",
-                "gender": 2,
-                "age": 30,
-                "language": 1,
-                "transcript": None,
-                "description": None,
-                "is_published": False,
-            },
-        ]
-        return web.json_response(voices)
+        mock_voice2 = MagicMock()
+        mock_voice2.id = 2682
+        mock_voice2.voice_name = "Cellar"
+        mock_voice2.gender = 2
+        mock_voice2.age = 30
+        mock_voice2.language = 1
 
-    app = web.Application()
-    app.router.add_get("/list-voices", handler)
-    client = await aiohttp_client(app)
-    base_url = str(client.make_url("")).rstrip("/")
+        return [mock_voice1, mock_voice2]
 
-    async with aiohttp.ClientSession() as session:
-        voices = await CambTTSService.list_voices(
-            api_key="test-api-key",
-            aiohttp_session=session,
-            base_url=base_url,
-        )
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        mock_client.voice_cloning.list_voices = mock_list_voices
+        MockAsyncCambAI.return_value = mock_client
+
+        voices = await CambTTSService.list_voices(api_key="test-api-key")
 
         # Should return all voices
         assert len(voices) == 2, "Should return all voices"
@@ -291,23 +152,17 @@ async def test_list_voices(aiohttp_client):
 
 
 @pytest.mark.asyncio
-async def test_text_length_validation_too_short(aiohttp_client):
+async def test_text_length_validation_too_short():
     """Test that text shorter than 3 characters is handled gracefully."""
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        # TTS should not be called for short text
+        mock_client.text_to_speech.tts = AsyncMock(side_effect=AssertionError("TTS should not be called"))
+        MockAsyncCambAI.return_value = mock_client
 
-    async def handler(request):
-        # This should not be called for short text
-        pytest.fail("Handler should not be called for text < 3 chars")
-
-    app = web.Application()
-    app.router.add_post("/tts-stream", handler)
-    client = await aiohttp_client(app)
-    base_url = str(client.make_url("")).rstrip("/")
-
-    async with aiohttp.ClientSession() as session:
         tts_service = CambTTSService(
             api_key="test-api-key",
-            aiohttp_session=session,
-            base_url=base_url,
+            voice_id=147320,
         )
 
         frames_to_send = [
@@ -363,32 +218,22 @@ async def test_language_mapping():
 
 
 @pytest.mark.asyncio
-async def test_mars_instruct_model(aiohttp_client):
+async def test_mars_instruct_model():
     """Test that user_instructions are included for mars-instruct model."""
+    received_kwargs = {}
 
-    received_payload = {}
+    async def mock_tts_with_capture(*args, **kwargs):
+        nonlocal received_kwargs
+        received_kwargs = kwargs
+        yield b"\x00" * 1000
 
-    async def handler(request):
-        nonlocal received_payload
-        received_payload = await request.json()
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        mock_client.text_to_speech.tts = mock_tts_with_capture
+        MockAsyncCambAI.return_value = mock_client
 
-        # Return minimal successful response
-        resp = web.StreamResponse(status=200, headers={"Content-Type": "audio/raw"})
-        await resp.prepare(request)
-        await resp.write(b"\x00" * 1000)
-        await resp.write_eof()
-        return resp
-
-    app = web.Application()
-    app.router.add_post("/tts-stream", handler)
-    client = await aiohttp_client(app)
-    base_url = str(client.make_url("")).rstrip("/")
-
-    async with aiohttp.ClientSession() as session:
         tts_service = CambTTSService(
             api_key="test-api-key",
-            aiohttp_session=session,
-            base_url=base_url,
             model="mars-instruct",
             params=CambTTSService.InputParams(user_instructions="Speak with excitement"),
         )
@@ -410,19 +255,44 @@ async def test_mars_instruct_model(aiohttp_client):
         )
 
         # Verify user_instructions was included in the request
-        assert received_payload.get("speech_model") == "mars-instruct"
-        assert received_payload.get("user_instructions") == "Speak with excitement"
+        assert received_kwargs.get("speech_model") == "mars-instruct"
+        assert received_kwargs.get("user_instructions") == "Speak with excitement"
 
 
 @pytest.mark.asyncio
-async def test_base_url_trailing_slash():
-    """Test that trailing slash in base URL is handled correctly."""
-    async with aiohttp.ClientSession() as session:
+async def test_client_initialization_with_api_key():
+    """Test that client is created when api_key is provided."""
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        MockAsyncCambAI.return_value = mock_client
+
         tts = CambTTSService(
             api_key="test-key",
-            aiohttp_session=session,
-            base_url="https://api.example.com/",  # With trailing slash
+            voice_id=147320,
         )
 
-        # Should have removed the trailing slash
-        assert tts._base_url == "https://api.example.com"
+        # Should have created a client
+        MockAsyncCambAI.assert_called_once()
+        assert tts._owns_client is True
+
+
+@pytest.mark.asyncio
+async def test_client_initialization_with_existing_client():
+    """Test that existing client is used when provided."""
+    mock_client = MagicMock()
+
+    tts = CambTTSService(
+        client=mock_client,
+        voice_id=147320,
+    )
+
+    # Should use the provided client
+    assert tts._client is mock_client
+    assert tts._owns_client is False
+
+
+@pytest.mark.asyncio
+async def test_client_initialization_requires_api_key_or_client():
+    """Test that ValueError is raised when neither api_key nor client is provided."""
+    with pytest.raises(ValueError, match="Either 'api_key' or 'client' must be provided"):
+        CambTTSService(voice_id=147320)

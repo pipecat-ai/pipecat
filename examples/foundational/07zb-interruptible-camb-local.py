@@ -28,7 +28,6 @@ import asyncio
 import os
 import sys
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -66,73 +65,70 @@ async def main(voice_id: int):
     # Deepgram STT for speech recognition
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    # Create HTTP session for Camb.ai TTS
-    async with aiohttp.ClientSession() as session:
-        # Camb.ai TTS with MARS-flash model
-        tts = CambTTSService(
-            api_key=os.getenv("CAMB_API_KEY"),
-            aiohttp_session=session,
-            voice_id=voice_id,
-            model="mars-flash",
-        )
+    # Camb.ai TTS with MARS-flash model (uses official SDK)
+    tts = CambTTSService(
+        api_key=os.getenv("CAMB_API_KEY"),
+        voice_id=voice_id,
+        model="mars-flash",
+    )
 
-        # OpenAI LLM
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    # OpenAI LLM
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-        # System prompt
-        messages = [
-            {
-                "role": "system",
-                "content": """You are a helpful voice assistant powered by Camb.ai's MARS
+    # System prompt
+    messages = [
+        {
+            "role": "system",
+            "content": """You are a helpful voice assistant powered by Camb.ai's MARS
 text-to-speech technology. Keep your responses concise and conversational since
 they will be spoken aloud. Avoid special characters, emojis, or bullet points.""",
-            },
+        },
+    ]
+
+    # Context management
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(context)
+
+    # Build the pipeline
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Microphone input
+            stt,  # Speech-to-text
+            context_aggregator.user(),  # User context
+            llm,  # Language model
+            tts,  # Camb.ai TTS
+            transport.output(),  # Speaker output
+            context_aggregator.assistant(),  # Assistant context
         ]
+    )
 
-        # Context management
-        context = LLMContext(messages)
-        context_aggregator = LLMContextAggregatorPair(context)
+    # Create pipeline task
+    # Use 24kHz sample rate to match Camb.ai TTS output
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            audio_out_sample_rate=24000,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
-        # Build the pipeline
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Microphone input
-                stt,  # Speech-to-text
-                context_aggregator.user(),  # User context
-                llm,  # Language model
-                tts,  # Camb.ai TTS
-                transport.output(),  # Speaker output
-                context_aggregator.assistant(),  # Assistant context
-            ]
+    # Start the conversation when the pipeline is ready
+    @task.event_handler("on_pipeline_started")
+    async def on_pipeline_started(task, frame):
+        messages.append(
+            {
+                "role": "system",
+                "content": "Please introduce yourself briefly and ask how you can help.",
+            }
         )
+        await task.queue_frames([LLMRunFrame()])
 
-        # Create pipeline task
-        # Use 24kHz sample rate to match Camb.ai TTS output
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                audio_out_sample_rate=24000,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-        )
-
-        # Start the conversation when the pipeline is ready
-        @task.event_handler("on_pipeline_started")
-        async def on_pipeline_started(task, frame):
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "Please introduce yourself briefly and ask how you can help.",
-                }
-            )
-            await task.queue_frames([LLMRunFrame()])
-
-        # Run the pipeline
-        runner = PipelineRunner()
-        logger.info("Starting Camb.ai TTS bot with local audio...")
-        logger.info("Speak into your microphone to interact with the bot.")
-        await runner.run(task)
+    # Run the pipeline
+    runner = PipelineRunner()
+    logger.info("Starting Camb.ai TTS bot with local audio...")
+    logger.info("Speak into your microphone to interact with the bot.")
+    await runner.run(task)
 
 
 if __name__ == "__main__":
