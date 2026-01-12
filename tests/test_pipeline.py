@@ -549,4 +549,3 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         # Event fires for each StartFrame (with warning logged for duplicate)
         assert start_count == 2
-
