@@ -1447,6 +1447,7 @@ class RTVIProcessor(FrameProcessor):
                 type=file.source.type,
                 format=file.format,
                 custom_options=file.customOpts,
+                append_to_context=True,
             )
         opts = data.options if data.options is not None else RTVI.SendTextOptions()
         if opts.run_immediately:
