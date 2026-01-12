@@ -208,6 +208,66 @@ class ConversationGate(NotifierGate):
         super().__init__(voicemail_notifier, task_name="conversation_gate")
 
 
+class ClassifierUpstreamGate(FrameProcessor):
+    """Gate that blocks upstream frames to classifier branch when conversation is detected.
+
+    This gate sits at the bottom of the classifier branch and blocks frames flowing
+    upstream after conversation is detected. This prevents system frames like
+    FunctionCallsStartedFrame from reaching the classifier LLM after classification
+    is complete. Downstream frames always pass through. Only essential cleanup frames
+    (EndFrame, StopFrame) are allowed upstream when closed.
+    """
+
+    def __init__(self, conversation_notifier: BaseNotifier):
+        """Initialize the classifier conversation gate.
+
+        Args:
+            conversation_notifier: Notifier that signals when conversation has been
+                detected and upstream frames should be blocked.
+        """
+        super().__init__()
+        self._conversation_notifier = conversation_notifier
+        self._gate_open = True
+        self._conversation_task: Optional[asyncio.Task] = None
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the processor with required components.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._conversation_task = self.create_task(self._wait_for_conversation())
+
+    async def cleanup(self):
+        """Clean up the processor resources."""
+        await super().cleanup()
+        if self._conversation_task:
+            await self.cancel_task(self._conversation_task)
+            self._conversation_task = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and block upstream frames when conversation is detected.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        # Always allow downstream frames through
+        if direction == FrameDirection.DOWNSTREAM:
+            await self.push_frame(frame, direction)
+        # Gate upstream frames when conversation is detected
+        elif self._gate_open:
+            await self.push_frame(frame, direction)
+
+    async def _wait_for_conversation(self):
+        """Wait for conversation detection and close the gate."""
+        await self._conversation_notifier.wait()
+        self._gate_open = False
+
+
 class ClassificationProcessor(FrameProcessor):
     """Processor that handles LLM classification responses and triggers events.
 
@@ -630,6 +690,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
 
         # Create the processor components
         self._classifier_gate = ClassifierGate(self._gate_notifier, self._conversation_notifier)
+        self._classifier_upstream_gate = ClassifierUpstreamGate(self._conversation_notifier)
         self._conversation_gate = ConversationGate(self._voicemail_notifier)
         self._classification_processor = ClassificationProcessor(
             gate_notifier=self._gate_notifier,
@@ -643,13 +704,14 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         super().__init__(
             # Conversation branch: gate to blocks after voicemail detection
             [self._conversation_gate],
-            # Classification branch: gate -> context -> LLM -> processor -> context
+            # Classification branch: classifier gate -> context -> LLM -> processor -> context -> upstream gate
             [
                 self._classifier_gate,
                 self._context_aggregator.user(),
                 self._classifier_llm,
                 self._classification_processor,
                 self._context_aggregator.assistant(),
+                self._classifier_upstream_gate,
             ],
         )
 

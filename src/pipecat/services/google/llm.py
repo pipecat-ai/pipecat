@@ -873,8 +873,23 @@ class GoogleLLMService(LLMService):
         adapter = self.get_llm_adapter()
         params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
 
+        messages_for_log = adapter.get_messages_for_logging(context)
+        for message in messages_for_log:
+            if isinstance(message, dict) and "parts" in message:
+                for part in message["parts"]:
+                    if "text" in part and isinstance(part["text"], str):
+                        words = part["text"].split()
+                        if len(words) > 120:
+                            part["text"] = " ".join(words[:20] + ["......"] + words[-100:])
+
+        system_instruction_for_log = params["system_instruction"]
+        if isinstance(system_instruction_for_log, str):
+            words = system_instruction_for_log.split()
+            if len(words) > 120:
+                system_instruction_for_log = " ".join(words[:20] + ["......"] + words[-100:])
+
         logger.debug(
-            f"{self}: Generating chat from universal context [{params['system_instruction']}] | {adapter.get_messages_for_logging(context)}"
+            f"{self}: Generating chat from universal context [{system_instruction_for_log}] | {messages_for_log}"
         )
 
         return await self._stream_content(params)
