@@ -338,11 +338,14 @@ class CambTTSService(TTSService):
                 await self.start_tts_usage_metrics(text)
                 yield TTSStartedFrame()
 
-                async for frame in self._stream_audio_frames_from_iterator(
-                    response.content.iter_chunked(self.chunk_size), strip_wav_header=False
-                ):
-                    await self.stop_ttfb_metrics()
-                    yield frame
+                async for chunk in response.content.iter_chunked(self.chunk_size):
+                    if chunk:
+                        await self.stop_ttfb_metrics()
+                        yield TTSAudioRawFrame(
+                            audio=chunk,
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                        )
 
         except aiohttp.ClientError as e:
             error_msg = f"Network error communicating with Camb.ai: {e}"
