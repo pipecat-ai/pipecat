@@ -199,6 +199,34 @@ class LLMContext:
         return LLMContext.create_image_url_message(role=role, url=url, text=text)
 
     @staticmethod
+    async def create_file_message(
+        *,
+        role: str = "user",
+        format: str,
+        file: bytes,
+        text: Optional[str] = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing a file.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            format: File format (the MIME type like 'image/jpeg').
+            file: Raw file bytes.
+            text: Optional text to include with the file.
+        """
+        # Right now: assumes file is already encoded properly as a data URL:
+        #  data:<mime type>;base64,<data>
+        #   TODO: support not already encoded?
+        content = []
+        if text:
+            content.append({"type": "text", "text": text})
+
+        file = {"file_data": file, "filename": "test"}
+        content.append({"type": "file", "file": file})
+
+        return {"role": role, "content": content}
+
+    @staticmethod
     async def create_audio_message(
         *, role: str = "user", audio_frames: list[AudioRawFrame], text: str = "Audio follows"
     ) -> LLMContextMessage:
@@ -366,23 +394,20 @@ class LLMContext:
         self,
         *,
         format: str,
-        size: tuple[int, int],
-        image: bytes,
+        file: bytes,
         text: Optional[str] = None,
         role: str = "user",
     ):
         """Add a message containing a file frame.
 
         Args:
-            format: File format (e.g., 'RGB', 'RGBA', or, if already encoded,
-                the MIME type like 'image/jpeg').
-            size: File dimensions as (width, height) tuple.
-            image: Raw image bytes.
-            text: Optional text to include with the image.
+            format: File format (the MIME type like 'image/jpeg').
+            file: Raw file bytes.
+            text: Optional text to include with the file.
             role: The role of this message (defaults to "user").
         """
-        message = await LLMContext.create_image_message(
-            role=role, format=format, size=size, image=image, text=text
+        message = await LLMContext.create_file_message(
+            role=role, format=format, file=file, text=text
         )
         self.add_message(message)
 

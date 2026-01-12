@@ -1146,9 +1146,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self._context.add_file_frame_message(
             format=frame.format,
             text=frame.text,
-            type=frame.type,
             file=frame.file,
-            options=frame.custom_options,
+            #            options=frame.custom_options,
         )
 
         await self.push_aggregation()
