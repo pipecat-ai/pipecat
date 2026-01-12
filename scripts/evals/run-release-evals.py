@@ -30,8 +30,13 @@ EVAL_SIMPLE_MATH = EvalConfig(
 )
 
 EVAL_WEATHER = EvalConfig(
-    prompt="What's the weather in San Francisco? Temperature should be in fahrenheits.",
+    prompt="What's the weather in San Francisco? Temperature should be in Fahrenheit.",
     eval="The user talks about the weather in San Francisco, including the degrees.",
+)
+
+EVAL_WEATHER_AND_RESTAURANT = EvalConfig(
+    prompt="What's the weather in San Francisco, and what's a good restaurant there? Temperature should be in Fahrenheit.",
+    eval="The user talks about the weather in San Francisco, including the degrees, and provides a restaurant recommendation.",
 )
 
 EVAL_ONLINE_SEARCH = EvalConfig(
@@ -145,10 +150,16 @@ TESTS_12 = [
     ("12d-describe-image-moondream.py", EVAL_VISION_IMAGE()),
 ]
 
+# For a few major services, we also test parallel function calling.
+# (We don't bother doing this with every single service, as it's expensive and
+# most rely on the same OpenAI-compatible implementation.)
 TESTS_14 = [
     ("14-function-calling.py", EVAL_WEATHER),
+    ("14-function-calling.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14a-function-calling-anthropic.py", EVAL_WEATHER),
+    ("14a-function-calling-anthropic.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14e-function-calling-google.py", EVAL_WEATHER),
+    ("14e-function-calling-google.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14f-function-calling-groq.py", EVAL_WEATHER),
     ("14g-function-calling-grok.py", EVAL_WEATHER),
     ("14h-function-calling-azure.py", EVAL_WEATHER),
@@ -160,6 +171,7 @@ TESTS_14 = [
     ("14p-function-calling-gemini-vertex-ai.py", EVAL_WEATHER),
     ("14q-function-calling-qwen.py", EVAL_WEATHER),
     ("14r-function-calling-aws.py", EVAL_WEATHER),
+    ("14r-function-calling-aws.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14v-function-calling-openai.py", EVAL_WEATHER),
     ("14w-function-calling-mistral.py", EVAL_WEATHER),
     ("14x-function-calling-openpipe.py", EVAL_WEATHER),
