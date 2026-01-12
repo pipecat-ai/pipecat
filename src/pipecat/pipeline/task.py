@@ -160,9 +160,7 @@ class PipelineTask(BasePipelineTask):
     - on_frame_reached_upstream: Called when upstream frames reach the source
     - on_frame_reached_downstream: Called when downstream frames reach the sink
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
-    - on_pipeline_started: Called once when the pipeline starts. The pipeline
-          automatically sends a StartFrame when ``run()`` is called, so you should
-          not queue a StartFrame manually.
+    - on_pipeline_started: Called when pipeline starts with StartFrame
     - on_pipeline_stopped: [deprecated] Called when pipeline stops with StopFrame
 
             .. deprecated:: 0.0.86
@@ -293,6 +291,7 @@ class PipelineTask(BasePipelineTask):
         self._finished = False
         self._cancelled = False
         self._started = False
+        self._ended = False
 
         # This task maneger will handle all the asyncio tasks created by this
         # PipelineTask and its frame processors.
@@ -517,11 +516,6 @@ class PipelineTask(BasePipelineTask):
 
         Args:
             frame: The frame to be processed.
-
-        Note:
-            Do not queue a StartFrame manually. The pipeline automatically sends
-            a StartFrame when ``run()`` is called. Queueing a StartFrame will
-            result in a warning being logged.
         """
         await self._push_queue.put(frame)
 
@@ -530,11 +524,6 @@ class PipelineTask(BasePipelineTask):
 
         Args:
             frames: An iterable or async iterable of frames to be processed.
-
-        Note:
-            Do not queue a StartFrame manually. The pipeline automatically sends
-            a StartFrame when ``run()`` is called. Queueing a StartFrame will
-            result in a warning being logged.
         """
         if isinstance(frames, AsyncIterable):
             async for frame in frames:
@@ -790,24 +779,27 @@ class PipelineTask(BasePipelineTask):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
         if isinstance(frame, StartFrame):
-            # Only trigger on_pipeline_started once. The pipeline automatically
-            # sends a StartFrame when run() is called, so if users manually queue
-            # a StartFrame, we ignore it to avoid firing the event multiple times.
-            if not self._started:
-                self._started = True
-                await self._call_event_handler("on_pipeline_started", frame)
-
-                # Start heartbeat tasks now that StartFrame has been processed
-                # by all processors in the pipeline
-                self._maybe_start_heartbeat_tasks()
-            else:
+            if self._started:
                 logger.warning(
                     f"{self}: Duplicate StartFrame detected. The pipeline automatically "
                     "sends a StartFrame - you should not queue one manually."
                 )
+            else:
+                self._started = True
+
+            await self._call_event_handler("on_pipeline_started", frame)
+
+            # Start heartbeat tasks now that StartFrame has been processed
+            # by all processors in the pipeline
+            self._maybe_start_heartbeat_tasks()
 
             self._pipeline_start_event.set()
         elif isinstance(frame, EndFrame):
+            if self._ended:
+                logger.warning(f"{self}: Duplicate EndFrame detected.")
+            else:
+                self._ended = True
+
             await self._call_event_handler("on_pipeline_ended", frame)
             await self._call_event_handler("on_pipeline_finished", frame)
             self._pipeline_end_event.set()

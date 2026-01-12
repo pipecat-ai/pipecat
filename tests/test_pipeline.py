@@ -529,8 +529,8 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         except asyncio.CancelledError:
             assert error_received
 
-    async def test_duplicate_start_frame_fires_event_once(self):
-        """Test that on_pipeline_started only fires once even if user queues a StartFrame."""
+    async def test_duplicate_start_frame_fires_event_with_warning(self):
+        """Test that on_pipeline_started fires for each StartFrame but warns on duplicates."""
         start_count = 0
 
         identity = IdentityFilter()
@@ -547,5 +547,6 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await task.queue_frame(EndFrame())
         await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
 
-        # Event should only fire once despite two StartFrames
-        assert start_count == 1
+        # Event fires for each StartFrame (with warning logged for duplicate)
+        assert start_count == 2
+
