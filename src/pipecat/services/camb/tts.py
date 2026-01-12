@@ -144,8 +144,8 @@ class CambTTSService(TTSService):
 
     Example::
 
-        # Basic usage with defaults (mars-flash)
-        tts = CambTTSService(api_key="your-api-key")
+        # Basic usage with mars-flash (fast)
+        tts = CambTTSService(api_key="your-api-key", model="mars-flash")
 
         # High quality with mars-pro
         tts = CambTTSService(
