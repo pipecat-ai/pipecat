@@ -6,11 +6,8 @@
 
 """Camb.ai TTS example with local audio (microphone/speakers).
 
-This example demonstrates:
-- Camb.ai MARS TTS with streaming audio
-- Local audio input/output (no WebRTC or Daily needed)
-- TTFB metrics tracking
-- End-to-end latency measurement (user speech → AI response)
+This is a standalone local example for quick testing without WebRTC/Daily.
+For production use with Daily/Twilio/WebRTC, see 07zb-interruptible-camb.py
 
 Requirements:
 - CAMB_API_KEY environment variable
@@ -108,7 +105,7 @@ DEFAULT_VOICE_ID = 147320
 
 
 async def main(voice_id: int):
-    sample_rate = 48000
+    sample_rate = 22050  # mars-flash uses 22.05kHz
 
     # Local audio transport - uses your microphone and speakers
     # Increase audio_out_10ms_chunks for larger buffer (default is 4 = 40ms)
@@ -124,7 +121,7 @@ async def main(voice_id: int):
     # Deepgram STT for speech recognition
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    # Camb.ai TTS (48kHz output)
+    # Camb.ai TTS
     tts = CambTTSService(
         api_key=os.getenv("CAMB_API_KEY"),
         voice_id=voice_id,

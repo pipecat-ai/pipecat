@@ -10,11 +10,10 @@ This module provides TTS functionality using Camb.ai's MARS model family,
 offering high-quality text-to-speech synthesis with streaming support.
 
 Features:
-    - MARS models: mars-flash, mars-pro, mars-instruct
+    - MARS models: mars-flash (fast), mars-pro (high quality)
     - 140+ languages supported
     - Real-time streaming via official SDK
-    - 48kHz audio output
-    - Voice customization (instructions for mars-instruct)
+    - Model-specific sample rates: mars-pro (48kHz), mars-flash (22.05kHz)
 """
 
 from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
@@ -41,10 +40,16 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 DEFAULT_VOICE_ID = 147320
 DEFAULT_LANGUAGE = "en-us"
 DEFAULT_MODEL = "mars-flash"  # Faster inference
-DEFAULT_SAMPLE_RATE = 48000  # 48kHz
 DEFAULT_TIMEOUT = 60.0  # Seconds (minimum recommended by Camb.ai)
 MIN_TEXT_LENGTH = 3
 MAX_TEXT_LENGTH = 3000
+
+# Model-specific sample rates
+MODEL_SAMPLE_RATES: Dict[str, int] = {
+    "mars-flash": 22050,     # 22.05kHz
+    "mars-pro": 48000,       # 48kHz
+    "mars-instruct": 22050,  # 22.05kHz
+}
 
 # Gender mapping for voice listing
 GENDER_MAP = {0: "Not Specified", 1: "Male", 2: "Female", 9: "Not Applicable"}
@@ -131,29 +136,22 @@ class CambTTSService(TTSService):
     """Camb.ai MARS text-to-speech service using the official SDK.
 
     Converts text to speech using Camb.ai's MARS TTS models with support for
-    multiple languages. Provides custom instructions support for the mars-instruct model.
+    multiple languages.
 
-    All models output 48kHz audio.
+    Models:
+        - mars-flash: Fast inference, 22.05kHz output (default)
+        - mars-pro: High quality, 48kHz output
 
     Example::
 
-        # Basic usage with defaults
+        # Basic usage with defaults (mars-flash)
         tts = CambTTSService(api_key="your-api-key")
 
-        # With custom voice and model
+        # High quality with mars-pro
         tts = CambTTSService(
             api_key="your-api-key",
             voice_id=12345,
             model="mars-pro",
-        )
-
-        # mars-instruct with custom instructions
-        tts = CambTTSService(
-            api_key="your-api-key",
-            model="mars-instruct",
-            params=CambTTSService.InputParams(
-                user_instructions="Speak with excitement and energy"
-            ),
         )
     """
 
@@ -190,10 +188,10 @@ class CambTTSService(TTSService):
         Args:
             api_key: Camb.ai API key for authentication.
             voice_id: Voice ID to use. Defaults to DEFAULT_VOICE_ID.
-            model: TTS model to use. Options: "mars-flash", "mars-pro", "mars-instruct".
-                Defaults to DEFAULT_MODEL (mars-flash, fastest).
+            model: TTS model to use. Options: "mars-flash" (fast), "mars-pro" (high quality).
+                Defaults to DEFAULT_MODEL (mars-flash).
             timeout: Request timeout in seconds. Defaults to DEFAULT_TIMEOUT (60s).
-            sample_rate: Audio sample rate in Hz. If None, uses DEFAULT_SAMPLE_RATE (48kHz).
+            sample_rate: Audio sample rate in Hz. If None, uses model-specific default.
             params: Additional voice parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
@@ -243,9 +241,9 @@ class CambTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        # Use 48kHz sample rate if not explicitly specified
+        # Use model-specific sample rate if not explicitly specified
         if not self._init_sample_rate:
-            self._sample_rate = DEFAULT_SAMPLE_RATE
+            self._sample_rate = MODEL_SAMPLE_RATES.get(self._model_name, 22050)
         self._settings["sample_rate"] = self._sample_rate
 
     async def _update_settings(self, settings: Mapping[str, Any]):
@@ -310,15 +308,33 @@ class CambTTSService(TTSService):
             await self.start_tts_usage_metrics(text)
             yield TTSStartedFrame()
 
+            # Buffer for aligning chunks to 2-byte boundaries (16-bit PCM)
+            audio_buffer = b""
+
             # Stream audio chunks from SDK
             async for chunk in self._client.text_to_speech.tts(**tts_kwargs):
                 if chunk:
                     await self.stop_ttfb_metrics()
-                    yield TTSAudioRawFrame(
-                        audio=chunk,
-                        sample_rate=self.sample_rate,
-                        num_channels=1,
-                    )
+                    audio_buffer += chunk
+
+                    # Only yield complete 16-bit samples (2 bytes per sample)
+                    aligned_size = (len(audio_buffer) // 2) * 2
+                    if aligned_size > 0:
+                        yield TTSAudioRawFrame(
+                            audio=audio_buffer[:aligned_size],
+                            sample_rate=self.sample_rate,
+                            num_channels=1,
+                        )
+                        audio_buffer = audio_buffer[aligned_size:]
+
+            # Yield any remaining complete samples
+            if len(audio_buffer) >= 2:
+                aligned_size = (len(audio_buffer) // 2) * 2
+                yield TTSAudioRawFrame(
+                    audio=audio_buffer[:aligned_size],
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                )
 
         except Exception as e:
             error_msg = f"Camb.ai TTS error: {e}"

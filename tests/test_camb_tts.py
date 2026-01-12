@@ -25,8 +25,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.camb.tts import (
     CambTTSService,
-    DEFAULT_SAMPLE_RATE,
     DEFAULT_VOICE_ID,
+    MODEL_SAMPLE_RATES,
     language_to_camb_language,
 )
 from pipecat.tests.utils import run_test
@@ -58,7 +58,8 @@ async def test_run_camb_tts_success():
         tts_service = CambTTSService(api_key="test-api-key")
 
         # Manually set sample rate (normally done by StartFrame)
-        tts_service._sample_rate = DEFAULT_SAMPLE_RATE
+        # mars-flash uses 22.05kHz
+        tts_service._sample_rate = MODEL_SAMPLE_RATES["mars-flash"]
 
         # Test run_tts directly to avoid frame count variability
         text = "Hello world, this is a test."
@@ -75,9 +76,9 @@ async def test_run_camb_tts_success():
         audio_frames = [f for f in frames if isinstance(f, TTSAudioRawFrame)]
         assert len(audio_frames) > 0, "Should have at least one audio frame"
 
-        # Verify sample rate matches 48kHz output
+        # Verify sample rate matches model output (mars-flash = 22.05kHz)
         for a_frame in audio_frames:
-            assert a_frame.sample_rate == DEFAULT_SAMPLE_RATE
+            assert a_frame.sample_rate == MODEL_SAMPLE_RATES["mars-flash"]
             assert a_frame.num_channels == 1, "Should be mono audio"
 
 
@@ -346,7 +347,7 @@ async def test_ttfb_metrics_tracked():
         MockAsyncCambAI.return_value = mock_client
 
         tts_service = CambTTSService(api_key="test-api-key")
-        tts_service._sample_rate = DEFAULT_SAMPLE_RATE
+        tts_service._sample_rate = MODEL_SAMPLE_RATES["mars-flash"]
 
         # Patch the metrics methods to track calls
         original_start_ttfb = tts_service.start_ttfb_metrics
