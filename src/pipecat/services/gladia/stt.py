@@ -404,6 +404,8 @@ class GladiaSTTService(WebsocketSTTService):
 
         Initializes the session if needed and establishes websocket connection.
         """
+        await super()._connect()
+
         # Initialize session if needed
         if not self._session_url:
             settings = self._prepare_settings()
@@ -425,6 +427,8 @@ class GladiaSTTService(WebsocketSTTService):
 
         Cleans up tasks and closes websocket connection.
         """
+        await super()._disconnect()
+
         self._connection_active = False
 
         if self._keepalive_task:
