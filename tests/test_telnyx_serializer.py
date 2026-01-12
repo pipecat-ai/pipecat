@@ -101,6 +101,7 @@ class TestTelnyxL16Codec(unittest.IsolatedAsyncioTestCase):
         result = await self.serializer.deserialize(message)
         self.assertIsNone(result)
 
+
 class TestTelnyxSerializerBackwardCompatibility(unittest.IsolatedAsyncioTestCase):
     """Test that existing PCMU/PCMA functionality still works."""
 
