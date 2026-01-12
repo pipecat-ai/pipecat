@@ -477,7 +477,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         # Apply thought signatures to the corresponding assistant messages.
         # Thought signatures are already in message order.
         thought_signatures_applied = 0
-        message_start_index = 0  # Track where to start searching for the next matching message.
+        message_start_index = (
+            0  # Track where to start searching for the next matching message part.
+        )
         for thought_signature_dict in thought_signature_dicts:
             signature = thought_signature_dict.get("signature")
             bookmark = thought_signature_dict.get("bookmark")
@@ -494,12 +496,15 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 thought_signature_found = False
                 for part in message.parts:
                     if self._thought_signature_bookmark_matches_part(bookmark, part):
-                        # Apply the thought signature to the matching part.
+                        # Apply the thought signature to the matching part
                         part.thought_signature = signature
                         thought_signatures_applied += 1
 
                         # Update the start index and stop searching for a match
-                        message_start_index = i + 1
+                        # (Note that we don't set message_start_index = i + 1
+                        # here, to support multiple thought signatures in the
+                        # same message; this is a theoretical concern for now)
+                        message_start_index = i
                         thought_signature_found = True
                         break
 
