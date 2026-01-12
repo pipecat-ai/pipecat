@@ -56,11 +56,14 @@ class FastAPIWebsocketParams(TransportParams):
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for encoding/decoding messages.
         session_timeout: Session timeout in seconds, None for no timeout.
+        audio_packet_bytes: Optional fixed-size packetization for raw PCM audio payloads.
+            Useful when the remote WebSocket media endpoint requires strict audio framing.
     """
 
     add_wav_header: bool = False
     serializer: Optional[FrameSerializer] = None
     session_timeout: Optional[int] = None
+    audio_packet_bytes: Optional[int] = None
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -360,6 +363,14 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
+        # Buffer for optional protocol-level audio packetization.
+        # Some serializers may emit arbitrarily sized raw PCM payloads, while
+        # certain downstream transports or media endpoints require audio to be
+        # sent in fixed-size frames. When `params.audio_packet_bytes` is set,
+        # this buffer accumulates outgoing audio until a full packet can be
+        # emitted, preserving any remainder for subsequent sends.
+        self._audio_send_buffer = bytearray()
+
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
@@ -417,6 +428,10 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InterruptionFrame):
+            # Drop any partially buffered audio to avoid replaying stale PCM
+            if self._params.audio_packet_bytes:
+                self._audio_send_buffer.clear()
+
             await self._write_frame(frame)
             self._next_send_time = 0
 
@@ -480,6 +495,21 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload:
+                # Optional protocol-level audio packetization:
+                # If a downstream WebSocket media endpoint requires fixed-size PCM frames,
+                # configure params.audio_packet_bytes (e.g. 640 for 20ms @ 16kHz PCM16 mono).
+                packet_bytes = self._params.audio_packet_bytes
+
+                if packet_bytes and isinstance(payload, (bytes, bytearray)):
+                    self._audio_send_buffer.extend(bytes(payload))
+
+                    # Send only full frames; keep remainder for the next call.
+                    while len(self._audio_send_buffer) >= packet_bytes:
+                        chunk = bytes(self._audio_send_buffer[:packet_bytes])
+                        del self._audio_send_buffer[:packet_bytes]
+                        await self._client.send(chunk)
+                    return
+
                 await self._client.send(payload)
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
