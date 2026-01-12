@@ -56,14 +56,14 @@ class FastAPIWebsocketParams(TransportParams):
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for encoding/decoding messages.
         session_timeout: Session timeout in seconds, None for no timeout.
-        audio_packet_bytes: Optional fixed-size packetization for raw PCM audio payloads.
+        fixed_audio_packet_size: Optional fixed-size packetization for raw PCM audio payloads.
             Useful when the remote WebSocket media endpoint requires strict audio framing.
     """
 
     add_wav_header: bool = False
     serializer: Optional[FrameSerializer] = None
     session_timeout: Optional[int] = None
-    audio_packet_bytes: Optional[int] = None
+    fixed_audio_packet_size: Optional[int] = None
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -366,7 +366,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         # Buffer for optional protocol-level audio packetization.
         # Some serializers may emit arbitrarily sized raw PCM payloads, while
         # certain downstream transports or media endpoints require audio to be
-        # sent in fixed-size frames. When `params.audio_packet_bytes` is set,
+        # sent in fixed-size frames. When `params.fixed_audio_packet_size` is set,
         # this buffer accumulates outgoing audio until a full packet can be
         # emitted, preserving any remainder for subsequent sends.
         self._audio_send_buffer = bytearray()
@@ -429,7 +429,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
         if isinstance(frame, InterruptionFrame):
             # Drop any partially buffered audio to avoid replaying stale PCM
-            if self._params.audio_packet_bytes:
+            if self._params.fixed_audio_packet_size:
                 self._audio_send_buffer.clear()
 
             await self._write_frame(frame)
@@ -497,8 +497,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             if payload:
                 # Optional protocol-level audio packetization:
                 # If a downstream WebSocket media endpoint requires fixed-size PCM frames,
-                # configure params.audio_packet_bytes (e.g. 640 for 20ms @ 16kHz PCM16 mono).
-                packet_bytes = self._params.audio_packet_bytes
+                # configure params.fixed_audio_packet_size (e.g. 640 for 20ms @ 16kHz PCM16 mono).
+                packet_bytes = self._params.fixed_audio_packet_size
 
                 if packet_bytes and isinstance(payload, (bytes, bytearray)):
                     self._audio_send_buffer.extend(bytes(payload))
