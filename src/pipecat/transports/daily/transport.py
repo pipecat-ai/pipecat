@@ -72,6 +72,10 @@ except ModuleNotFoundError as e:
 
 VAD_RESET_PERIOD_MS = 2000
 
+# Timeout constants for Daily operations
+DAILY_JOIN_TIMEOUT_SECS = 30.0
+DAILY_LEAVE_TIMEOUT_SECS = 30.0
+
 
 @dataclass
 class DailyOutputTransportMessageFrame(OutputTransportMessageFrame):
@@ -828,7 +832,12 @@ class DailyTransportClient(EventHandler):
             },
         )
 
-        return await future
+        try:
+            return await asyncio.wait_for(future, timeout=DAILY_JOIN_TIMEOUT_SECS)
+        except asyncio.TimeoutError:
+            error_msg = f"Timeout joining {self._room_url} after {DAILY_JOIN_TIMEOUT_SECS}s"
+            logger.error(error_msg)
+            return (None, error_msg)
 
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
@@ -867,7 +876,13 @@ class DailyTransportClient(EventHandler):
 
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
-        return await future
+        
+        try:
+            return await asyncio.wait_for(future, timeout=DAILY_LEAVE_TIMEOUT_SECS)
+        except asyncio.TimeoutError:
+            error_msg = f"Timeout leaving {self._room_url} after {DAILY_LEAVE_TIMEOUT_SECS}s"
+            logger.error(error_msg)
+            return error_msg
 
     def _cleanup(self):
         """Cleanup the Daily client instance."""
