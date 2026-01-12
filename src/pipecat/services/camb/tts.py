@@ -46,6 +46,9 @@ DEFAULT_TIMEOUT = 60.0  # Seconds (minimum recommended by Camb.ai)
 MIN_TEXT_LENGTH = 3
 MAX_TEXT_LENGTH = 3000
 
+# Gender mapping for voice listing
+GENDER_MAP = {0: "Not Specified", 1: "Male", 2: "Female", 9: "Not Applicable"}
+
 
 def language_to_camb_language(language: Language) -> Optional[str]:
     """Convert a Pipecat Language enum to Camb.ai language code.
@@ -132,31 +135,21 @@ class CambTTSService(TTSService):
 
     Example::
 
-        # Using API key (creates internal client)
+        # Basic usage with defaults
+        tts = CambTTSService(api_key="your-api-key")
+
+        # With custom voice and model
         tts = CambTTSService(
             api_key="your-api-key",
-            voice_id=147320,
-            model="mars-flash",
-            params=CambTTSService.InputParams(
-                language=Language.EN
-            )
-        )
-
-        # Using existing SDK client
-        client = AsyncCambAI(api_key="your-api-key")
-        tts = CambTTSService(
-            client=client,
-            voice_id=147320,
-            model="mars-flash",
+            voice_id=12345,
+            model="mars-pro",
         )
 
         # For mars-instruct with custom instructions:
-        tts_instruct = CambTTSService(
+        tts = CambTTSService(
             api_key="your-api-key",
-            voice_id=147320,
             model="mars-instruct",
             params=CambTTSService.InputParams(
-                language=Language.EN,
                 user_instructions="Speak with excitement and energy"
             )
         )
@@ -182,10 +175,10 @@ class CambTTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        client: Optional[AsyncCambAI] = None,
+        api_key: str,
         voice_id: int = DEFAULT_VOICE_ID,
         model: str = DEFAULT_MODEL,
+        timeout: float = DEFAULT_TIMEOUT,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         **kwargs,
@@ -193,29 +186,20 @@ class CambTTSService(TTSService):
         """Initialize the Camb.ai TTS service.
 
         Args:
-            api_key: Camb.ai API key for authentication. Required if client is not provided.
-            client: Existing AsyncCambAI client instance. If provided, api_key is ignored.
-            voice_id: Voice ID to use. Defaults to 147320.
+            api_key: Camb.ai API key for authentication.
+            voice_id: Voice ID to use. Defaults to DEFAULT_VOICE_ID.
             model: TTS model to use. Options: "mars-flash", "mars-pro", "mars-instruct".
-                Defaults to "mars-flash" (fastest).
-            sample_rate: Audio sample rate in Hz. If None, uses Camb.ai default (24000).
+                Defaults to DEFAULT_MODEL (mars-flash, fastest).
+            timeout: Request timeout in seconds. Defaults to DEFAULT_TIMEOUT (60s).
+            sample_rate: Audio sample rate in Hz. If None, uses DEFAULT_SAMPLE_RATE (24kHz).
             params: Additional voice parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        if client is None and api_key is None:
-            raise ValueError("Either 'api_key' or 'client' must be provided")
-
         params = params or CambTTSService.InputParams()
 
-        # Use provided client or create one
-        if client is not None:
-            self._client = client
-            self._owns_client = False
-        else:
-            self._client = AsyncCambAI(api_key=api_key, timeout=DEFAULT_TIMEOUT)
-            self._owns_client = True
+        self._client = AsyncCambAI(api_key=api_key, timeout=timeout)
 
         # Build settings
         self._settings = {
@@ -344,60 +328,43 @@ class CambTTSService(TTSService):
             yield TTSStoppedFrame()
 
     @staticmethod
-    async def list_voices(
-        api_key: Optional[str] = None,
-        client: Optional[AsyncCambAI] = None,
-    ) -> List[Dict[str, Any]]:
+    async def list_voices(api_key: str) -> List[Dict[str, Any]]:
         """Fetch available voices from Camb.ai API.
 
         Args:
-            api_key: Camb.ai API key for authentication. Required if client is not provided.
-            client: Existing AsyncCambAI client instance. If provided, api_key is ignored.
+            api_key: Camb.ai API key for authentication.
 
         Returns:
             List of voice dictionaries with id, name, gender, and language fields.
 
         Raises:
-            ValueError: If neither api_key nor client is provided.
             Exception: If the API request fails.
 
         Example::
 
-            # Using API key
             voices = await CambTTSService.list_voices(api_key="your-api-key")
             for voice in voices:
                 print(f"{voice['id']}: {voice['name']}")
-
-            # Using existing client
-            client = AsyncCambAI(api_key="your-api-key")
-            voices = await CambTTSService.list_voices(client=client)
         """
-        if client is None and api_key is None:
-            raise ValueError("Either 'api_key' or 'client' must be provided")
+        client = AsyncCambAI(api_key=api_key)
+        voice_list = await client.voice_cloning.list_voices()
 
-        gender_map = {
-            0: "Not Specified",
-            1: "Male",
-            2: "Female",
-            9: "Not Applicable",
-        }
+        voices = []
+        for voice in voice_list:
+            voice_id = voice.get("id")
+            # Skip voices without an ID
+            if voice_id is None:
+                continue
 
-        # Use provided client or create a temporary one
-        if client is not None:
-            sdk_client = client
-        else:
-            sdk_client = AsyncCambAI(api_key=api_key)
+            gender_int = voice.get("gender")
+            gender = GENDER_MAP.get(gender_int) if gender_int is not None else None
 
-        voices = await sdk_client.voice_cloning.list_voices()
-        return [
-            {
-                "id": v.id if hasattr(v, "id") else v.get("id"),
-                "name": v.voice_name if hasattr(v, "voice_name") else v.get("voice_name", "Unknown"),
-                "gender": gender_map.get(
-                    v.gender if hasattr(v, "gender") else v.get("gender"), "Unknown"
-                ),
-                "age": v.age if hasattr(v, "age") else v.get("age"),
-                "language": v.language if hasattr(v, "language") else v.get("language"),
-            }
-            for v in voices
-        ]
+            voices.append({
+                "id": voice_id,
+                "name": voice.get("voice_name", ""),
+                "gender": gender,
+                "age": voice.get("age"),
+                "language": voice.get("language"),
+            })
+
+        return voices

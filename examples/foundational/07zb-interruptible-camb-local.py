@@ -34,6 +34,8 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
+from pipecat.metrics.metrics import TTFBMetricsData
+from pipecat.observers.loggers.metrics_log_observer import MetricsLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -104,6 +106,7 @@ they will be spoken aloud. Avoid special characters, emojis, or bullet points.""
 
     # Create pipeline task
     # Use 24kHz sample rate to match Camb.ai TTS output
+    # Add MetricsLogObserver to track TTFB metrics
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
@@ -111,6 +114,7 @@ they will be spoken aloud. Avoid special characters, emojis, or bullet points.""
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[MetricsLogObserver(include_metrics={TTFBMetricsData})],
     )
 
     # Start the conversation when the pipeline is ready

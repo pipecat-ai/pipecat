@@ -9,6 +9,7 @@
 These tests mock the Camb.ai SDK client to test the service behavior.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,7 +23,12 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.camb.tts import CambTTSService, language_to_camb_language
+from pipecat.services.camb.tts import (
+    CambTTSService,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_VOICE_ID,
+    language_to_camb_language,
+)
 from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 
@@ -49,14 +55,10 @@ async def test_run_camb_tts_success():
         mock_client.text_to_speech.tts = mock_tts_stream
         MockAsyncCambAI.return_value = mock_client
 
-        tts_service = CambTTSService(
-            api_key="test-api-key",
-            voice_id=2681,
-            model="mars-flash",
-        )
+        tts_service = CambTTSService(api_key="test-api-key")
 
         # Manually set sample rate (normally done by StartFrame)
-        tts_service._sample_rate = 24000
+        tts_service._sample_rate = DEFAULT_SAMPLE_RATE
 
         # Test run_tts directly to avoid frame count variability
         text = "Hello world, this is a test."
@@ -73,9 +75,9 @@ async def test_run_camb_tts_success():
         audio_frames = [f for f in frames if isinstance(f, TTSAudioRawFrame)]
         assert len(audio_frames) > 0, "Should have at least one audio frame"
 
-        # Verify sample rate matches Camb.ai's output (24kHz)
+        # Verify sample rate matches Camb.ai's output
         for a_frame in audio_frames:
-            assert a_frame.sample_rate == 24000, "Sample rate should be 24000 Hz"
+            assert a_frame.sample_rate == DEFAULT_SAMPLE_RATE
             assert a_frame.num_channels == 1, "Should be mono audio"
 
 
@@ -87,10 +89,7 @@ async def test_run_camb_tts_error():
         mock_client.text_to_speech.tts = mock_tts_stream_error
         MockAsyncCambAI.return_value = mock_client
 
-        tts_service = CambTTSService(
-            api_key="invalid-key",
-            voice_id=147320,
-        )
+        tts_service = CambTTSService(api_key="invalid-key")
 
         frames_to_send = [
             TTSSpeakFrame(text="This should fail."),
@@ -114,25 +113,26 @@ async def test_run_camb_tts_error():
 
 @pytest.mark.asyncio
 async def test_list_voices():
-    """Test voice listing endpoint."""
+    """Test voice listing endpoint with dict responses."""
 
     async def mock_list_voices(*args, **kwargs):
-        # Return mock Voice objects
-        mock_voice1 = MagicMock()
-        mock_voice1.id = 2681
-        mock_voice1.voice_name = "Attic"
-        mock_voice1.gender = 1
-        mock_voice1.age = 25
-        mock_voice1.language = None
-
-        mock_voice2 = MagicMock()
-        mock_voice2.id = 2682
-        mock_voice2.voice_name = "Cellar"
-        mock_voice2.gender = 2
-        mock_voice2.age = 30
-        mock_voice2.language = 1
-
-        return [mock_voice1, mock_voice2]
+        # Return mock voice dicts (as returned by the API)
+        return [
+            {
+                "id": 2681,
+                "voice_name": "Attic",
+                "gender": 1,
+                "age": 25,
+                "language": None,
+            },
+            {
+                "id": 2682,
+                "voice_name": "Cellar",
+                "gender": 2,
+                "age": 30,
+                "language": "en-us",
+            },
+        ]
 
     with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
         mock_client = MagicMock()
@@ -152,6 +152,50 @@ async def test_list_voices():
 
 
 @pytest.mark.asyncio
+async def test_list_voices_skips_none_id():
+    """Test that voices without an ID are skipped."""
+
+    async def mock_list_voices(*args, **kwargs):
+        return [
+            {"id": 123, "voice_name": "Valid", "gender": 1, "age": 25, "language": None},
+            {"id": None, "voice_name": "NoID", "gender": 2, "age": 30, "language": None},
+            {"voice_name": "MissingID", "gender": 1, "age": 35, "language": None},
+        ]
+
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        mock_client.voice_cloning.list_voices = mock_list_voices
+        MockAsyncCambAI.return_value = mock_client
+
+        voices = await CambTTSService.list_voices(api_key="test-api-key")
+
+        # Should only return the voice with a valid ID
+        assert len(voices) == 1
+        assert voices[0]["id"] == 123
+        assert voices[0]["name"] == "Valid"
+
+
+@pytest.mark.asyncio
+async def test_list_voices_handles_none_gender():
+    """Test that None gender is handled correctly."""
+
+    async def mock_list_voices(*args, **kwargs):
+        return [
+            {"id": 123, "voice_name": "NoGender", "gender": None, "age": 25, "language": None},
+        ]
+
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        mock_client.voice_cloning.list_voices = mock_list_voices
+        MockAsyncCambAI.return_value = mock_client
+
+        voices = await CambTTSService.list_voices(api_key="test-api-key")
+
+        assert len(voices) == 1
+        assert voices[0]["gender"] is None
+
+
+@pytest.mark.asyncio
 async def test_text_length_validation_too_short():
     """Test that text shorter than 3 characters is handled gracefully."""
     with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
@@ -160,10 +204,7 @@ async def test_text_length_validation_too_short():
         mock_client.text_to_speech.tts = AsyncMock(side_effect=AssertionError("TTS should not be called"))
         MockAsyncCambAI.return_value = mock_client
 
-        tts_service = CambTTSService(
-            api_key="test-api-key",
-            voice_id=147320,
-        )
+        tts_service = CambTTSService(api_key="test-api-key")
 
         frames_to_send = [
             TTSSpeakFrame(text="Hi"),  # Only 2 characters
@@ -260,39 +301,83 @@ async def test_mars_instruct_model():
 
 
 @pytest.mark.asyncio
-async def test_client_initialization_with_api_key():
-    """Test that client is created when api_key is provided."""
+async def test_client_initialization():
+    """Test that client is created with correct parameters."""
     with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
         mock_client = MagicMock()
         MockAsyncCambAI.return_value = mock_client
 
-        tts = CambTTSService(
-            api_key="test-key",
-            voice_id=147320,
-        )
+        CambTTSService(api_key="test-key", timeout=120.0)
 
-        # Should have created a client
-        MockAsyncCambAI.assert_called_once()
-        assert tts._owns_client is True
+        # Should have created a client with correct params
+        MockAsyncCambAI.assert_called_once_with(api_key="test-key", timeout=120.0)
 
 
 @pytest.mark.asyncio
-async def test_client_initialization_with_existing_client():
-    """Test that existing client is used when provided."""
-    mock_client = MagicMock()
+async def test_default_voice_id_used():
+    """Test that DEFAULT_VOICE_ID is used when not specified."""
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        MockAsyncCambAI.return_value = mock_client
 
-    tts = CambTTSService(
-        client=mock_client,
-        voice_id=147320,
-    )
+        tts = CambTTSService(api_key="test-key")
 
-    # Should use the provided client
-    assert tts._client is mock_client
-    assert tts._owns_client is False
+        assert tts._voice_id_int == DEFAULT_VOICE_ID
 
 
 @pytest.mark.asyncio
-async def test_client_initialization_requires_api_key_or_client():
-    """Test that ValueError is raised when neither api_key nor client is provided."""
-    with pytest.raises(ValueError, match="Either 'api_key' or 'client' must be provided"):
-        CambTTSService(voice_id=147320)
+async def test_ttfb_metrics_tracked():
+    """Test that TTFB metrics are properly tracked during TTS generation."""
+    import time
+
+    ttfb_start_called = False
+    ttfb_stop_called = False
+    start_time = None
+    stop_time = None
+
+    async def mock_tts_with_delay(*args, **kwargs):
+        # Simulate some network delay
+        await asyncio.sleep(0.05)
+        yield b"\x00\x01" * 4800
+
+    with patch("pipecat.services.camb.tts.AsyncCambAI") as MockAsyncCambAI:
+        mock_client = MagicMock()
+        mock_client.text_to_speech.tts = mock_tts_with_delay
+        MockAsyncCambAI.return_value = mock_client
+
+        tts_service = CambTTSService(api_key="test-api-key")
+        tts_service._sample_rate = DEFAULT_SAMPLE_RATE
+
+        # Patch the metrics methods to track calls
+        original_start_ttfb = tts_service.start_ttfb_metrics
+        original_stop_ttfb = tts_service.stop_ttfb_metrics
+
+        async def patched_start_ttfb():
+            nonlocal ttfb_start_called, start_time
+            ttfb_start_called = True
+            start_time = time.time()
+            await original_start_ttfb()
+
+        async def patched_stop_ttfb():
+            nonlocal ttfb_stop_called, stop_time
+            if not ttfb_stop_called:  # Only record first stop
+                ttfb_stop_called = True
+                stop_time = time.time()
+            await original_stop_ttfb()
+
+        tts_service.start_ttfb_metrics = patched_start_ttfb
+        tts_service.stop_ttfb_metrics = patched_stop_ttfb
+
+        # Run TTS
+        frames = []
+        async for frame in tts_service.run_tts("Hello, this is a TTFB test."):
+            frames.append(frame)
+
+        # Verify TTFB tracking was called
+        assert ttfb_start_called, "start_ttfb_metrics should be called"
+        assert ttfb_stop_called, "stop_ttfb_metrics should be called"
+        assert start_time is not None and stop_time is not None
+
+        # TTFB should be >= simulated delay
+        ttfb = stop_time - start_time
+        assert ttfb >= 0.05, f"TTFB ({ttfb:.3f}s) should be >= 0.05s (simulated delay)"
