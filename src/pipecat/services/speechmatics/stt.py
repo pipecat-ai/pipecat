@@ -369,17 +369,14 @@ class SpeechmaticsSTTService(STTService):
         """Called when the new session starts."""
         await super().start(frame)
         await self._connect()
-        self._stt_msg_task = self.create_task(self._process_stt_messages())
 
     async def stop(self, frame: EndFrame):
         """Called when the session ends."""
-        await self.cancel_task(self._stt_msg_task)
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
-        await self.cancel_task(self._stt_msg_task)
         await super().cancel(frame)
         await self._disconnect()
 
@@ -389,6 +386,7 @@ class SpeechmaticsSTTService(STTService):
         - Create STT client
         - Register handlers for messages
         - Connect to the client
+        - Start message processing task
         """
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
@@ -436,12 +434,22 @@ class SpeechmaticsSTTService(STTService):
             self._client = None
             await self.push_error(error_msg=f"Error connecting to STT service: {e}", exception=e)
 
+        # Start message processing task
+        if not self._stt_msg_task:
+            self._stt_msg_task = self.create_task(self._process_stt_messages())
+
     async def _disconnect(self) -> None:
         """Disconnect from the STT service.
 
+        - Cancel message processing task
         - Disconnect the client
         - Emit on_disconnected event handler for clients
         """
+        # Cancel the message processing task
+        if self._stt_msg_task:
+            await self.cancel_task(self._stt_msg_task)
+            self._stt_msg_task = None
+
         # Disconnect the client
         logger.debug(f"{self} disconnecting from Speechmatics STT service")
         try:
