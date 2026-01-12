@@ -13,7 +13,7 @@ Features:
     - MARS models: mars-flash, mars-pro, mars-instruct
     - 140+ languages supported
     - Real-time streaming via official SDK
-    - 24kHz audio output
+    - 48kHz audio output
     - Voice customization (instructions for mars-instruct)
 """
 
@@ -41,7 +41,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 DEFAULT_VOICE_ID = 147320
 DEFAULT_LANGUAGE = "en-us"
 DEFAULT_MODEL = "mars-flash"  # Faster inference
-DEFAULT_SAMPLE_RATE = 24000  # 24kHz
+DEFAULT_SAMPLE_RATE = 48000  # 48kHz
 DEFAULT_TIMEOUT = 60.0  # Seconds (minimum recommended by Camb.ai)
 MIN_TEXT_LENGTH = 3
 MAX_TEXT_LENGTH = 3000
@@ -133,6 +133,8 @@ class CambTTSService(TTSService):
     Converts text to speech using Camb.ai's MARS TTS models with support for
     multiple languages. Provides custom instructions support for the mars-instruct model.
 
+    All models output 48kHz audio.
+
     Example::
 
         # Basic usage with defaults
@@ -145,13 +147,13 @@ class CambTTSService(TTSService):
             model="mars-pro",
         )
 
-        # For mars-instruct with custom instructions:
+        # mars-instruct with custom instructions
         tts = CambTTSService(
             api_key="your-api-key",
             model="mars-instruct",
             params=CambTTSService.InputParams(
                 user_instructions="Speak with excitement and energy"
-            )
+            ),
         )
     """
 
@@ -191,7 +193,7 @@ class CambTTSService(TTSService):
             model: TTS model to use. Options: "mars-flash", "mars-pro", "mars-instruct".
                 Defaults to DEFAULT_MODEL (mars-flash, fastest).
             timeout: Request timeout in seconds. Defaults to DEFAULT_TIMEOUT (60s).
-            sample_rate: Audio sample rate in Hz. If None, uses DEFAULT_SAMPLE_RATE (24kHz).
+            sample_rate: Audio sample rate in Hz. If None, uses DEFAULT_SAMPLE_RATE (48kHz).
             params: Additional voice parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
@@ -241,7 +243,7 @@ class CambTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        # Use Camb.ai's native sample rate if not specified
+        # Use 48kHz sample rate if not explicitly specified
         if not self._init_sample_rate:
             self._sample_rate = DEFAULT_SAMPLE_RATE
         self._settings["sample_rate"] = self._sample_rate

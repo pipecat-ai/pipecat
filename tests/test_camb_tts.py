@@ -75,7 +75,7 @@ async def test_run_camb_tts_success():
         audio_frames = [f for f in frames if isinstance(f, TTSAudioRawFrame)]
         assert len(audio_frames) > 0, "Should have at least one audio frame"
 
-        # Verify sample rate matches Camb.ai's output
+        # Verify sample rate matches 48kHz output
         for a_frame in audio_frames:
             assert a_frame.sample_rate == DEFAULT_SAMPLE_RATE
             assert a_frame.num_channels == 1, "Should be mono audio"
