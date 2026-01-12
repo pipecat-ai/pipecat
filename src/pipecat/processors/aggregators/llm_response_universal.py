@@ -950,7 +950,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return
 
         thought = concatenate_aggregated_text(self._thought_aggregation)
-        await self._reset_thought_aggregation()
 
         if self._thought_append_to_context:
             llm = self._thought_llm
@@ -966,6 +965,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
 
         message = AssistantThoughtMessage(content=thought, timestamp=self._thought_start_time)
+
+        await self._reset_thought_aggregation()
+
         await self._call_event_handler("on_assistant_thought", message)
 
     def _context_updated_task_finished(self, task: asyncio.Task):
