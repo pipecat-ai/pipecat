@@ -255,6 +255,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         # Apply thought signatures to the corresponding messages
         self._apply_thought_signatures_to_messages(thought_signature_dicts, messages)
 
+        # Merge consecutive tool calls and tool responses into single multi-part messages
+        messages = self._merge_consecutive_tool_messages(messages)
+
         # Check if we only have function-related messages (no regular text)
         has_regular_messages = any(
             len(msg.parts) == 1
@@ -432,6 +435,80 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             content=Content(role=role, parts=parts),
             tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
         )
+
+    def _merge_consecutive_tool_messages(self, messages: List[Content]) -> List[Content]:
+        """Merge consecutive tool call messages within tool exchange blocks.
+
+        Gemini (and Gemini 3 in particular, where thought signatures are
+        involved) expects multiple parallel tool calls to be in a single Content
+        with multiple function_call parts.
+
+        This method detects "tool exchange blocks" (sequences of tool calls and
+        responses, including alternating patterns like call1, response1, call2,
+        response2) and merges all tool calls within each block into a single
+        Content, followed by the individual tool responses.
+
+        Args:
+            messages: List of Content messages to process.
+
+        Returns:
+            List of Content messages with tool calls merged within each block.
+        """
+        if not messages:
+            return messages
+
+        def is_tool_call_message(msg: Content) -> bool:
+            """Check if message contains only function_call parts."""
+            return (
+                msg.role == "model"
+                and msg.parts
+                and all(getattr(part, "function_call", None) for part in msg.parts)
+            )
+
+        def is_tool_response_message(msg: Content) -> bool:
+            """Check if message contains only function_response parts."""
+            return (
+                msg.role == "user"
+                and msg.parts
+                and all(getattr(part, "function_response", None) for part in msg.parts)
+            )
+
+        def is_tool_message(msg: Content) -> bool:
+            """Check if message is either a tool call or tool response."""
+            return is_tool_call_message(msg) or is_tool_response_message(msg)
+
+        merged_messages = []
+        i = 0
+
+        while i < len(messages):
+            current = messages[i]
+
+            # Check for a tool exchange block (sequence of tool calls and/or responses)
+            if is_tool_message(current):
+                tool_call_parts = []
+                tool_response_messages = []
+
+                # Collect all consecutive tool messages (calls and responses)
+                j = i
+                while j < len(messages) and is_tool_message(messages[j]):
+                    msg = messages[j]
+                    if is_tool_call_message(msg):
+                        tool_call_parts.extend(msg.parts)
+                    else:  # is_tool_response_message
+                        tool_response_messages.append(msg)
+                    j += 1
+
+                # Output merged tool calls first, then individual tool responses
+                if tool_call_parts:
+                    merged_messages.append(Content(role="model", parts=tool_call_parts))
+                merged_messages.extend(tool_response_messages)
+
+                i = j
+            else:
+                merged_messages.append(current)
+                i += 1
+
+        return merged_messages
 
     def _apply_thought_signatures_to_messages(
         self, thought_signature_dicts: List[dict], messages: List[Content]
