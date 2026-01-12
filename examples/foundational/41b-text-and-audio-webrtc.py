@@ -34,6 +34,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair, OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
@@ -81,6 +82,11 @@ def create_action_llm_append_to_messages(context_aggregator: OpenAIContextAggreg
 # instantiated. The function will be called when the desired transport gets
 # selected.
 transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
