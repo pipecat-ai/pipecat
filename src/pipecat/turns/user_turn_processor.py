@@ -155,7 +155,7 @@ class UserTurnProcessor(FrameProcessor):
         strategy: BaseUserTurnStartStrategy,
         params: UserTurnStartedParams,
     ):
-        logger.debug(f"{self}: User started speaking (user turn start strategy: {strategy})")
+        logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
@@ -171,7 +171,7 @@ class UserTurnProcessor(FrameProcessor):
         strategy: BaseUserTurnStopStrategy,
         params: UserTurnStoppedParams,
     ):
-        logger.debug(f"{self}: User stopped speaking (user turn stop strategy: {strategy})")
+        logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
