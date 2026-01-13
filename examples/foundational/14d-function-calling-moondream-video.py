@@ -64,9 +64,15 @@ async def fetch_user_image(params: FunctionCallParams):
 
     # Request a user image frame. In this case, we don't want the requested
     # image to be added to the context because we will process it with
-    # Moondream.
+    # Moondream. Also associate it to the function call.
     await params.llm.push_frame(
-        UserImageRequestFrame(user_id=user_id, text=question, append_to_context=False),
+        UserImageRequestFrame(
+            user_id=user_id,
+            text=question,
+            append_to_context=False,
+            function_name=params.function_name,
+            tool_call_id=params.tool_call_id,
+        ),
         FrameDirection.UPSTREAM,
     )
 
