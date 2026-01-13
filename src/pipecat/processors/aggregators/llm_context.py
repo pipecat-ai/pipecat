@@ -206,7 +206,7 @@ class LLMContext:
         """
         content = [{"type": "text", "text": text}]
 
-        async def encode_audio():
+        def encode_audio():
             sample_rate = audio_frames[0].sample_rate
             num_channels = audio_frames[0].num_channels
 
