@@ -1565,27 +1565,13 @@ class UserImageRawFrame(InputImageRawFrame):
         user_id: Identifier of the user who provided this image.
         text: An optional text associated to this image.
         append_to_context: Whether the requested image should be appended to the LLM context.
-        request: [DEPRECATED] The original image request frame if this is a response.
+        request: The original image request frame if this is a response.
     """
 
     user_id: str = ""
     text: Optional[str] = None
     append_to_context: Optional[bool] = None
     request: Optional[UserImageRequestFrame] = None
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        if self.request:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "`UserImageRawFrame` field `request` is deprecated.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
 
     def __str__(self):
         pts = format_pts(self.pts)

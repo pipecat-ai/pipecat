@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     CancelFrame,
     ControlFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
@@ -1844,7 +1843,6 @@ class DailyInputTransport(BaseInputTransport):
                 format=video_frame.color_format,
                 text=request_frame.text if request_frame else None,
                 append_to_context=request_frame.append_to_context if request_frame else None,
-                # Deprecated fields below.
                 request=request_frame,
             )
             frame.transport_source = video_source
