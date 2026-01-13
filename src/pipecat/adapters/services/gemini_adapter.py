@@ -256,7 +256,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         self._apply_thought_signatures_to_messages(thought_signature_dicts, messages)
 
         # When thinking is enabled, merge parallel tool calls into single messages
-        messages = self._merge_parallel_tool_calls_for_thinking(messages)
+        messages = self._merge_parallel_tool_calls_for_thinking(thought_signature_dicts, messages)
 
         # Check if we only have function-related messages (no regular text)
         has_regular_messages = any(
@@ -436,7 +436,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
         )
 
-    def _merge_parallel_tool_calls_for_thinking(self, messages: List[Content]) -> List[Content]:
+    def _merge_parallel_tool_calls_for_thinking(
+        self, thought_signature_dicts: List[dict], messages: List[Content]
+    ) -> List[Content]:
         """Merge parallel tool calls into single Content objects when thinking is enabled.
 
         Gemini expects parallel tool calls (multiple function calls made
@@ -460,6 +462,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         messages appear in between.
 
         Args:
+            thought_signature_dicts: A list of thought signature dicts, used
+                to determine if the work of merging is necessary.
             messages: List of Content messages to process.
 
         Returns:
@@ -467,6 +471,16 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             thought_signatures are present, otherwise unchanged.
         """
         if not messages:
+            return messages
+
+        # Fast-exit if no function-call-related thought signatures
+        # This is a shortcut for determining both:
+        # - whether thinking is enabled, and
+        # - whether there are function calls in the messages
+        has_function_call_signatures = any(
+            ts.get("bookmark", {}).get("function_call") for ts in thought_signature_dicts
+        )
+        if not has_function_call_signatures:
             return messages
 
         def is_tool_call_message(msg: Content) -> bool:
