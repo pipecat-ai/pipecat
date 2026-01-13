@@ -708,16 +708,18 @@ class GoogleLLMService(LLMService):
         Gemini 2.5 and 3 series models have this thinking process.
 
         Parameters:
-            thinking_level: Thinking level for Gemini 3 Pro. Can be "low" or "high".
-                If not provided, Gemini 3 Pro defaults to "high".
-                Note: Gemini 2.5 series should use thinking_budget instead.
+            thinking_level: Thinking level for Gemini 3 models.
+                For Gemini 3 Pro, this can be "low" or "high".
+                For Gemini 3 Flash, this can be "minimal", "low", "medium", or "high".
+                If not provided, Gemini 3 models default to "high".
+                Note: Gemini 2.5 series must use thinking_budget instead.
             thinking_budget: Token budget for thinking, for Gemini 2.5 series.
                 -1 for dynamic thinking (model decides), 0 to disable thinking,
                 or a specific token count (e.g., 128-32768 for 2.5 Pro).
                 If not provided, most models today default to dynamic thinking.
                 See https://ai.google.dev/gemini-api/docs/thinking#set-budget
                 for default values and allowed ranges.
-                Note: Gemini 3 Pro should use thinking_level instead.
+                Note: Gemini 3 models must use thinking_level instead.
             include_thoughts: Whether to include thought summaries in the response.
                 Today's models default to not including thoughts (False).
         """
@@ -726,7 +728,9 @@ class GoogleLLMService(LLMService):
 
         # Why `| str` here? To not break compatibility in case Google adds more
         # levels in the future.
-        thinking_level: Optional[Literal["low", "high"] | str] = Field(default=None)
+        thinking_level: Optional[Literal["low", "high", "medium", "minimal"] | str] = Field(
+            default=None
+        )
 
         include_thoughts: Optional[bool] = Field(default=None)
 
