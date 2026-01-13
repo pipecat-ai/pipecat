@@ -112,6 +112,7 @@ TESTS_07 = [
     ("07g-interruptible-openai.py", EVAL_SIMPLE_MATH),
     ("07h-interruptible-openpipe.py", EVAL_SIMPLE_MATH),
     ("07j-interruptible-gladia.py", EVAL_SIMPLE_MATH),
+    ("07j-interruptible-gladia-vad.py", EVAL_SIMPLE_MATH),
     ("07k-interruptible-lmnt.py", EVAL_SIMPLE_MATH),
     ("07l-interruptible-groq.py", EVAL_SIMPLE_MATH),
     ("07m-interruptible-aws.py", EVAL_SIMPLE_MATH),
