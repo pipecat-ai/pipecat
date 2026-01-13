@@ -1464,7 +1464,7 @@ class GeminiLiveLLMService(LLMService):
                 # so bracket each thought in start/end frames
                 await self.push_frame(LLMThoughtStartFrame())
                 await self.push_frame(LLMThoughtTextFrame(text))
-                await self.push_frame(LLMThoughtEndFrame(signature=part.thought_signature))
+                await self.push_frame(LLMThoughtEndFrame())
             else:
                 # Regular text response
                 self._bot_text_buffer += text
