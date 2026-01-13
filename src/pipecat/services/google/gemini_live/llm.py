@@ -1195,7 +1195,11 @@ class GeminiLiveLLMService(LLMService):
                         # Reset failure counter if connection has been stable
                         self._check_and_reset_failure_counter()
 
-                        if message.server_content and message.server_content.model_turn:
+                        if message.server_content and message.server_content.interrupted:
+                            logger.debug("Gemini VAD: interrupted signal received")
+                            await self._handle_interruption()
+                            await self.push_frame(InterruptionFrame())
+                        elif message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
                         elif (
                             message.server_content
