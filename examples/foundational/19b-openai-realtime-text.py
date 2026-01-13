@@ -14,13 +14,12 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -164,8 +163,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
-    transcript = TranscriptProcessor()
-
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
@@ -180,11 +177,9 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         [
             transport.input(),  # Transport user input
             context_aggregator.user(),
-            transcript.user(),  # LLM pushes TranscriptionFrames upstream
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            transcript.assistant(),  # After the transcript output, to time with the audio output
             context_aggregator.assistant(),
         ]
     )
@@ -208,15 +203,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
-
-    # Register event handler for transcript updates
-    @transcript.event_handler("on_transcript_update")
-    async def on_transcript_update(processor, frame):
-        for msg in frame.messages:
-            if isinstance(msg, TranscriptionMessage):
-                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
-                line = f"{timestamp}{msg.role}: {msg.content}"
-                logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
