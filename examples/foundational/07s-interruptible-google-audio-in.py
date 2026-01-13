@@ -249,7 +249,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -257,7 +257,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
-    audio_collector = UserAudioCollector(context, context_aggregator.user())
+    audio_collector = UserAudioCollector(context, user_aggregator)
     pull_transcript_out_of_llm_output = TranscriptExtractor(context)
     fixup_context_messages = TranscriptionContextFixup(context)
 
@@ -265,12 +265,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             audio_collector,
-            context_aggregator.user(),  # User responses
+            user_aggregator,  # User responses
             llm,  # LLM
             pull_transcript_out_of_llm_output,
             tts,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
             fixup_context_messages,
         ]
     )

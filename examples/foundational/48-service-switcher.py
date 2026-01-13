@@ -136,7 +136,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tools = ToolsSchema(standard_tools=[weather_function, get_restaurant_recommendation])
 
     context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -149,11 +149,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             stt_switcher,
-            context_aggregator.user(),  # User responses
+            user_aggregator,  # User responses
             llm_switcher,  # LLM
             tts_switcher,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 

@@ -1052,3 +1052,15 @@ class LLMContextAggregatorPair:
             The assistant context aggregator instance.
         """
         return self._assistant
+
+    def __iter__(self):
+        """Allow tuple unpacking of the aggregator pair.
+
+        This enables both usage patterns::
+            pair = LLMContextAggregatorPair(context)  # Returns the instance
+            user, assistant = LLMContextAggregatorPair(context)  # Unpacks into tuple
+
+        Yields:
+            The user aggregator, then the assistant aggregator.
+        """
+        return iter((self._user, self._assistant))

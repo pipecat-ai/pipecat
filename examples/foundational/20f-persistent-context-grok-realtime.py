@@ -203,15 +203,15 @@ Remember, your responses should be short - just one or two sentences usually."""
     llm.register_function("load_conversation", load_conversation)
 
     context = LLMContext([{"role": "user", "content": "Say hello!"}], tools)
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

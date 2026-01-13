@@ -201,7 +201,7 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -215,11 +215,11 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
         [
             transport.input(),
             stt,
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             tts,  # TTS with pattern aggregator
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

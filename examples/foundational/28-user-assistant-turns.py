@@ -143,7 +143,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -151,9 +151,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
-
-    user_aggregator = context_aggregator.user()
-    assistant_aggregator = context_aggregator.assistant()
 
     # Create transcript processor and handler
     transcript_handler = TranscriptHandler()  # Output to log only

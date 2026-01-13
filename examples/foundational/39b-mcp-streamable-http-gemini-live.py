@@ -109,7 +109,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     await mcp.register_tools_schema(tools, llm)
 
     context = LLMContext([{"role": "user", "content": "Please introduce yourself."}])
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -121,10 +121,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            context_aggregator.user(),  # User spoken responses
+            user_aggregator,  # User spoken responses
             llm,  # LLM
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses and tool context
+            assistant_aggregator,  # Assistant spoken responses and tool context
         ]
     )
 

@@ -188,10 +188,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         tools,
     )
 
-    context_aggregator = LLMContextAggregatorPair(context)
-
-    user_aggregator = context_aggregator.user()
-    assistant_aggregator = context_aggregator.assistant()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
