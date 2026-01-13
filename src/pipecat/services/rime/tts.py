@@ -130,6 +130,7 @@ class RimeTTSService(AudioContextWordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
+            append_trailing_space=True,
             sample_rate=sample_rate,
             **kwargs,
         )
