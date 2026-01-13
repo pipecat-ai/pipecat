@@ -443,6 +443,7 @@ class CompletenessCheck(FrameProcessor):
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
                 self._idle_task = None
+            await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
