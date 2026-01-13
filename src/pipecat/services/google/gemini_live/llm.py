@@ -44,6 +44,9 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     TranscriptionFrame,
@@ -1455,10 +1458,19 @@ class GeminiLiveLLMService(LLMService):
                 await self._set_bot_is_responding(True)
                 await self.push_frame(LLMFullResponseStartFrame())
 
-            self._bot_text_buffer += text
-            self._search_result_buffer += text  # Also accumulate for grounding
-            frame = LLMTextFrame(text=text)
-            await self.push_frame(frame)
+            # Check if this is a thought
+            if part.thought:
+                # Gemini Live emits fully-formed thoughts rather than chunks,
+                # so bracket each thought in start/end frames
+                await self.push_frame(LLMThoughtStartFrame())
+                await self.push_frame(LLMThoughtTextFrame(text))
+                await self.push_frame(LLMThoughtEndFrame(signature=part.thought_signature))
+            else:
+                # Regular text response
+                self._bot_text_buffer += text
+                self._search_result_buffer += text  # Also accumulate for grounding
+                frame = LLMTextFrame(text=text)
+                await self.push_frame(frame)
 
         # Check for grounding metadata in server content
         if msg.server_content and msg.server_content.grounding_metadata:
