@@ -519,9 +519,10 @@ class LLMService(AIService):
             UserImageRequestFrame(
                 user_id=user_id,
                 text=text_content,
-                # Deprecated fields below.
+                append_to_context=True,
                 function_name=function_name,
                 tool_call_id=tool_call_id,
+                # Deprecated fields below.
                 context=text_content,
             ),
             FrameDirection.UPSTREAM,

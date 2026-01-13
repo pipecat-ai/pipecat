@@ -14,7 +14,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame, UserImageRequestFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -55,9 +55,15 @@ async def fetch_user_image(params: FunctionCallParams):
     logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
     # Request a user image frame and indicate that it should be added to the
-    # context.
+    # context. Also associate it to the function call.
     await params.llm.push_frame(
-        UserImageRequestFrame(user_id=user_id, text=question, append_to_context=True),
+        UserImageRequestFrame(
+            user_id=user_id,
+            text=question,
+            append_to_context=True,
+            function_name=params.function_name,
+            tool_call_id=params.tool_call_id,
+        ),
         FrameDirection.UPSTREAM,
     )
 
@@ -100,6 +106,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Google Gemini model for vision analysis
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
     llm.register_function("fetch_user_image", fetch_user_image)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     fetch_image_function = FunctionSchema(
         name="fetch_user_image",

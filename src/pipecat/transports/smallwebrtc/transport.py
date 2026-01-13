@@ -680,7 +680,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                                 format=video_frame.format,
                                 text=request_text,
                                 append_to_context=add_to_context,
-                                # Deprecated fields below.
                                 request=request_frame,
                             )
                             image_frame.transport_source = video_source
