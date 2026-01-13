@@ -255,8 +255,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         # Apply thought signatures to the corresponding messages
         self._apply_thought_signatures_to_messages(thought_signature_dicts, messages)
 
-        # Merge consecutive tool calls and tool responses into single multi-part messages
-        messages = self._merge_consecutive_tool_messages(messages)
+        # When thinking is enabled, merge parallel tool calls into single messages
+        messages = self._merge_parallel_tool_calls_for_thinking(messages)
 
         # Check if we only have function-related messages (no regular text)
         has_regular_messages = any(
@@ -436,23 +436,35 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
         )
 
-    def _merge_consecutive_tool_messages(self, messages: List[Content]) -> List[Content]:
-        """Merge consecutive tool call messages within tool exchange blocks.
+    def _merge_parallel_tool_calls_for_thinking(self, messages: List[Content]) -> List[Content]:
+        """Merge parallel tool calls into single Content objects when thinking is enabled.
 
-        Gemini (and Gemini 3 in particular, where thought signatures are
-        involved) expects multiple parallel tool calls to be in a single Content
-        with multiple function_call parts.
+        Gemini expects parallel tool calls (multiple function calls made
+        simultaneously) to be in a single Content with multiple function_call
+        Parts. This method takes a list of Content messages, where parallel
+        tool calls may be split across multiple messages, and merges them into
+        single messages.
 
-        This method detects "tool exchange blocks" (sequences of tool calls and
-        responses, including alternating patterns like call1, response1, call2,
-        response2) and merges all tool calls within each block into a single
-        Content, followed by the individual tool responses.
+        This only has an effect when thought_signatures are present (i.e., when
+        thinking is enabled). When thinking is disabled, merging doesn't matter.
+        When thinking is enabled, there is a guarantee that the first tool call
+        (and only the first) in any batch of parallel tool calls will have a
+        thought_signature. This allows us to distinguish:
+
+        - Parallel tool calls: share a single thought_signature (on the first call)
+        - Sequential tool calls: each have their own thought_signature
+
+        Algorithm: A tool call message with a thought_signature starts a new
+        parallel group. Any tool call messages after it without a
+        thought_signature get merged into that group, regardless of what
+        messages appear in between.
 
         Args:
             messages: List of Content messages to process.
 
         Returns:
-            List of Content messages with tool calls merged within each block.
+            List of Content messages with parallel tool calls merged when
+            thought_signatures are present, otherwise unchanged.
         """
         if not messages:
             return messages
@@ -465,17 +477,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 and all(getattr(part, "function_call", None) for part in msg.parts)
             )
 
-        def is_tool_response_message(msg: Content) -> bool:
-            """Check if message contains only function_response parts."""
-            return (
-                msg.role == "user"
-                and msg.parts
-                and all(getattr(part, "function_response", None) for part in msg.parts)
-            )
-
-        def is_tool_message(msg: Content) -> bool:
-            """Check if message is either a tool call or tool response."""
-            return is_tool_call_message(msg) or is_tool_response_message(msg)
+        def message_has_thought_signature(msg: Content) -> bool:
+            """Check if any part in the message has a thought_signature."""
+            return any(getattr(part, "thought_signature", None) for part in msg.parts)
 
         merged_messages = []
         i = 0
@@ -483,26 +487,31 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         while i < len(messages):
             current = messages[i]
 
-            # Check for a tool exchange block (sequence of tool calls and/or responses)
-            if is_tool_message(current):
-                tool_call_parts = []
-                tool_response_messages = []
+            # If this is a tool call message with a thought signature, start merging
+            if is_tool_call_message(current) and message_has_thought_signature(current):
+                merged_parts = list(current.parts)
+                other_messages = []
+                j = i + 1
 
-                # Collect all consecutive tool messages (calls and responses)
-                j = i
-                while j < len(messages) and is_tool_message(messages[j]):
-                    msg = messages[j]
-                    if is_tool_call_message(msg):
-                        tool_call_parts.extend(msg.parts)
-                    else:  # is_tool_response_message
-                        tool_response_messages.append(msg)
-                    j += 1
+                # Scan forward, merging tool calls without signatures, collecting others
+                while j < len(messages):
+                    next_msg = messages[j]
+                    if is_tool_call_message(next_msg):
+                        if message_has_thought_signature(next_msg):
+                            # New parallel group starts, stop here
+                            break
+                        else:
+                            # Merge this call into the current group
+                            merged_parts.extend(next_msg.parts)
+                            j += 1
+                    else:
+                        # Collect non-tool-call message, keep scanning
+                        other_messages.append(next_msg)
+                        j += 1
 
-                # Output merged tool calls first, then individual tool responses
-                if tool_call_parts:
-                    merged_messages.append(Content(role="model", parts=tool_call_parts))
-                merged_messages.extend(tool_response_messages)
-
+                # Output merged calls, then collected other messages
+                merged_messages.append(Content(role="model", parts=merged_parts))
+                merged_messages.extend(other_messages)
                 i = j
             else:
                 merged_messages.append(current)
