@@ -255,6 +255,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         # Apply thought signatures to the corresponding messages
         self._apply_thought_signatures_to_messages(thought_signature_dicts, messages)
 
+        # When thinking is enabled, merge parallel tool calls into single messages
+        messages = self._merge_parallel_tool_calls_for_thinking(thought_signature_dicts, messages)
+
         # Check if we only have function-related messages (no regular text)
         has_regular_messages = any(
             len(msg.parts) == 1
@@ -432,6 +435,103 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             content=Content(role=role, parts=parts),
             tool_call_id_to_name_mapping=tool_call_id_to_name_mapping,
         )
+
+    def _merge_parallel_tool_calls_for_thinking(
+        self, thought_signature_dicts: List[dict], messages: List[Content]
+    ) -> List[Content]:
+        """Merge parallel tool calls into single Content objects when thinking is enabled.
+
+        Gemini expects parallel tool calls (multiple function calls made
+        simultaneously) to be in a single Content with multiple function_call
+        Parts. This method takes a list of Content messages, where parallel
+        tool calls may be split across multiple messages, and merges them into
+        single messages.
+
+        This only has an effect when thought_signatures are present (i.e., when
+        thinking is enabled). When thinking is disabled, merging doesn't matter.
+        When thinking is enabled, there is a guarantee that the first tool call
+        (and only the first) in any batch of parallel tool calls will have a
+        thought_signature. This allows us to distinguish:
+
+        - Parallel tool calls: share a single thought_signature (on the first call)
+        - Sequential tool calls: each have their own thought_signature
+
+        Algorithm: A tool call message with a thought_signature starts a new
+        parallel group. Any tool call messages after it without a
+        thought_signature get merged into that group, regardless of what
+        messages appear in between.
+
+        Args:
+            thought_signature_dicts: A list of thought signature dicts, used
+                to determine if the work of merging is necessary.
+            messages: List of Content messages to process.
+
+        Returns:
+            List of Content messages with parallel tool calls merged when
+            thought_signatures are present, otherwise unchanged.
+        """
+        if not messages:
+            return messages
+
+        # Fast-exit if no function-call-related thought signatures
+        # This is a shortcut for determining both:
+        # - whether thinking is enabled, and
+        # - whether there are function calls in the messages
+        has_function_call_signatures = any(
+            ts.get("bookmark", {}).get("function_call") for ts in thought_signature_dicts
+        )
+        if not has_function_call_signatures:
+            return messages
+
+        def is_tool_call_message(msg: Content) -> bool:
+            """Check if message contains only function_call parts."""
+            return (
+                msg.role == "model"
+                and msg.parts
+                and all(getattr(part, "function_call", None) for part in msg.parts)
+            )
+
+        def message_has_thought_signature(msg: Content) -> bool:
+            """Check if any part in the message has a thought_signature."""
+            return any(getattr(part, "thought_signature", None) for part in msg.parts)
+
+        merged_messages = []
+        i = 0
+
+        while i < len(messages):
+            current = messages[i]
+
+            # If this is a tool call message with a thought signature, start merging
+            if is_tool_call_message(current) and message_has_thought_signature(current):
+                merged_parts = list(current.parts)
+                other_messages = []
+                j = i + 1
+
+                # Scan forward, merging tool calls without signatures, collecting others
+                while j < len(messages):
+                    next_msg = messages[j]
+                    if is_tool_call_message(next_msg):
+                        if message_has_thought_signature(next_msg):
+                            # New parallel group starts, stop here
+                            break
+                        else:
+                            # Merge this call into the current group
+                            merged_parts.extend(next_msg.parts)
+                            j += 1
+                    else:
+                        # Collect non-tool-call message, keep scanning
+                        other_messages.append(next_msg)
+                        j += 1
+
+                # Output merged calls, then collected other messages
+                merged_messages.append(Content(role="model", parts=merged_parts))
+                merged_messages.extend(other_messages)
+                i = j
+            else:
+                merged_messages.append(current)
+                i += 1
+
+        return merged_messages
 
     def _apply_thought_signatures_to_messages(
         self, thought_signature_dicts: List[dict], messages: List[Content]
