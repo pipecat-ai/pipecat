@@ -68,13 +68,7 @@ async def get_image(params: FunctionCallParams):
         text_content=question,
     )
 
-    # Wait a short time for the frame to be processed
-    await asyncio.sleep(0.5)
-
-    # Return a result to complete the function call
-    await params.result_callback(
-        f"I've captured an image from your camera and I'm analyzing what you asked about: {question}"
-    )
+    await params.result_callback(None)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get

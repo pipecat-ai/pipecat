@@ -74,6 +74,8 @@ async def get_image(params: FunctionCallParams):
         text_content=question,
     )
 
+    await params.result_callback(None)
+
 
 async def get_saved_conversation_filenames(params: FunctionCallParams):
     # Construct the full pattern including the BASE_FILENAME
@@ -257,7 +259,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = GoogleLLMService(model="gemini-2.0-flash-001", api_key=os.getenv("GOOGLE_API_KEY"))
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
     # you can either register a single function for all function calls, or specific functions
     # llm.register_function(None, fetch_weather_from_api)
