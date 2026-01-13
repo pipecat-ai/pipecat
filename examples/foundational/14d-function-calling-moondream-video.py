@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMRunFrame,
     TextFrame,
+    TTSSpeakFrame,
     UserImageRequestFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -135,6 +136,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     llm.register_function("fetch_user_image", fetch_user_image)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     fetch_image_function = FunctionSchema(
         name="fetch_user_image",
