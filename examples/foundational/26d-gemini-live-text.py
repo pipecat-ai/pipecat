@@ -111,16 +111,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Set up conversation context and management
     # The context_aggregator will automatically collect conversation context
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             tts,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

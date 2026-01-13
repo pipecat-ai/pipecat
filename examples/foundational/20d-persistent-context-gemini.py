@@ -282,7 +282,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_image", get_image)
 
     context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -295,11 +295,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             stt,  # STT
-            context_aggregator.user(),
+            user_aggregator,
             llm,  # LLM
             tts,
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

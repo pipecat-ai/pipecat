@@ -215,10 +215,7 @@ Always be helpful and proactive in offering assistance.""",
         tools,
     )
 
-    context_aggregator = LLMContextAggregatorPair(context)
-
-    user_aggregator = context_aggregator.user()
-    assistant_aggregator = context_aggregator.assistant()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     # Note: In realtime mode, transcription comes from Grok (upstream),

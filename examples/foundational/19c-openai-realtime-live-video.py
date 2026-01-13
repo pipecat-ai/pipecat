@@ -104,15 +104,15 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         [{"role": "user", "content": "Say hello!"}],
     )
 
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            context_aggregator.user(),
+            user_aggregator,
             llm,  # LLM
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

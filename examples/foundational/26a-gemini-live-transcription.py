@@ -91,19 +91,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             #     },
         ],
     )
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     transcript = TranscriptProcessor()
 
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
-            transcript.user(),
+            user_aggregator,
             llm,
             transport.output(),
-            transcript.assistant(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
