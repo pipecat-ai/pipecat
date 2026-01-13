@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2026, Daily
+# Copyright (c) 2024–202, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -448,6 +448,7 @@ class SarvamTTSService(InterruptibleTTSService):
         self._receive_task = None
         self._keepalive_task = None
         self._disconnecting = False
+        self._ttfb_recorded = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -513,6 +514,7 @@ class SarvamTTSService(InterruptibleTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
+            self._ttfb_recorded = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame and flush audio if it's the end of a full response."""
@@ -634,7 +636,9 @@ class SarvamTTSService(InterruptibleTTSService):
                 msg = json.loads(message)
                 if msg.get("type") == "audio":
                     # Check for interruption before processing audio
-                    await self.stop_ttfb_metrics()
+                    if not self._ttfb_recorded:
+                        await self.stop_ttfb_metrics()
+                        self._ttfb_recorded = True
                     audio = base64.b64decode(msg["data"]["audio"])
                     frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
                     await self.push_frame(frame)
@@ -697,6 +701,7 @@ class SarvamTTSService(InterruptibleTTSService):
             try:
                 if not self._started:
                     await self.start_ttfb_metrics()
+                    self._ttfb_recorded = False
                     yield TTSStartedFrame()
                     self._started = True
                 await self._send_text(text)
