@@ -316,11 +316,41 @@ def is_silence(pcm_bytes: bytes) -> bool:
     return max_value <= SPEAKING_THRESHOLD
 
 
+def is_aic_sdk_v2() -> bool:
+    """Detect if aic-sdk v2 is installed by checking the module name.
+
+    In v2, the module was renamed from 'aic' to 'aic_sdk'.
+
+    Returns:
+        True if aic-sdk v2 (aic_sdk module) is installed, False if v1 (aic module).
+
+    Raises:
+        ImportError: If neither aic nor aic_sdk module is installed.
+    """
+    try:
+        import aic_sdk  # noqa: F401
+
+        return True
+    except ModuleNotFoundError:
+        pass
+
+    try:
+        import aic  # noqa: F401
+
+        return False
+    except ModuleNotFoundError:
+        logger.error("In order to use the AIC filter, you need to `pip install pipecat-ai[aic]`.")
+        raise ImportError(
+            "aic-sdk is not installed. Install with 'pip install pipecat-ai[aic]'."
+        )
+
+
 def check_aic_sdk_version(required_version: Literal["v1", "v2"]) -> None:
     """Check if the aic-sdk is installed and compatible with the module.
 
     This function checks both that the aic-sdk is installed and that its version
-    is compatible with the module requirements.
+    is compatible with the module requirements. Version detection is based on
+    the module name: v2 uses 'aic_sdk', v1 uses 'aic'.
 
     Args:
         required_version: Either "v1" (for aic-sdk < 2.0.0) or "v2" (for aic-sdk >= 2.0.0).
@@ -328,43 +358,25 @@ def check_aic_sdk_version(required_version: Literal["v1", "v2"]) -> None:
     Raises:
         ImportError: If aic-sdk is not installed or version is incompatible.
     """
-    try:
-        import aic  # noqa: F401 - check if module is installed
-    except ModuleNotFoundError as e:
-        logger.error(f"Exception: {e}")
-        logger.error("In order to use the AIC filter, you need to `pip install pipecat-ai[aic]`.")
-        raise ImportError(f"Missing module: {e}") from e
+    is_v2 = is_aic_sdk_v2()
 
-    try:
-        from importlib.metadata import version as get_version
+    if required_version == "v1" and is_v2:
+        error_msg = (
+            "aic-sdk v2 (aic_sdk module) detected, but v1 (aic module) is required. "
+            "Please use the v2 classes instead: "
+            "'from pipecat.audio.filters.aic_filter import AICFilterV2' or "
+            "'from pipecat.audio.vad.aic_vad import AICVADAnalyzerV2'."
+        )
+        logger.error(error_msg)
+        raise ImportError(error_msg)
 
-        aic_version = get_version("aic-sdk")
-        major_version = int(aic_version.split(".")[0])
-
-        if required_version == "v1" and major_version >= 2:
-            error_msg = (
-                f"aic-sdk version {aic_version} detected, but aic-sdk < 2.0.0 is required. "
-                "Please use the v2 modules instead: "
-                "'from pipecat.audio.filters.aic_filter_v2 import AICFilter' or "
-                "'from pipecat.audio.vad.aic_vad_v2 import AICVADAnalyzer'."
-            )
-            logger.error(error_msg)
-            raise ImportError(error_msg)
-
-        if required_version == "v2" and major_version < 2:
-            error_msg = (
-                f"aic-sdk version {aic_version} detected, but aic-sdk >= 2.0.0 is required. "
-                "Please update with 'pip install --upgrade aic-sdk>=2.0.0' "
-                "or use the v1 modules: "
-                "'from pipecat.audio.filters.aic_filter import AICFilter' or "
-                "'from pipecat.audio.vad.aic_vad import AICVADAnalyzer'."
-            )
-            logger.error(error_msg)
-            raise ImportError(error_msg)
-
-    except ImportError:
-        # Re-raise if it's our version mismatch error
-        raise
-    except Exception:
-        # If we can't determine version for other reasons, log warning and allow to proceed
-        logger.warning("Could not determine aic-sdk version. Proceeding anyway.")
+    if required_version == "v2" and not is_v2:
+        error_msg = (
+            "aic-sdk v1 (aic module) detected, but v2 (aic_sdk module) is required. "
+            "Please update with 'pip install --upgrade aic-sdk>=2.0.0' "
+            "or use the v1 classes: "
+            "'from pipecat.audio.filters.aic_filter import AICFilter' or "
+            "'from pipecat.audio.vad.aic_vad import AICVADAnalyzer'."
+        )
+        logger.error(error_msg)
+        raise ImportError(error_msg)
