@@ -450,6 +450,7 @@ PIPECAT_SETUP_FILES="setup1.py:setup.py:..."`). Each file must define a
 ### Fixed
 
 - Improved error handling in `ElevenLabsRealtimeSTTService`
+  (PR [#3233](https://github.com/pipecat-ai/pipecat/pull/3233))
 
 - Fixed an issue in `ElevenLabsRealtimeSTTService` causing an infinite loop
   that blocks the process if the websocket disconnects due to an error
@@ -499,6 +500,9 @@ PIPECAT_SETUP_FILES="setup1.py:setup.py:..."`). Each file must define a
   set after awaiting, allowing the event loop to re-enter the method before the
   guard was set.
   (PR [#3400](https://github.com/pipecat-ai/pipecat/pull/3400))
+
+- Fixed parallel function calling when using Gemini thinking.
+  (PR [3420](https://github.com/pipecat-ai/pipecat/pull/3420))
 
 - Fixed an issue in `traced_llm` where `model_name` in OpenTelemetry appears as
   `unknown`.
