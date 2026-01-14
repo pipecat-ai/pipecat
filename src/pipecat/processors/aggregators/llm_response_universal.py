@@ -530,7 +530,7 @@ class LLMUserAggregator(LLMContextAggregator):
         strategy: BaseUserTurnStartStrategy,
         params: UserTurnStartedParams,
     ):
-        logger.debug(f"{self}: User started speaking (user turn start strategy: {strategy})")
+        logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
         self._user_turn_start_timestamp = time_now_iso8601()
 
@@ -548,7 +548,7 @@ class LLMUserAggregator(LLMContextAggregator):
         strategy: BaseUserTurnStopStrategy,
         params: UserTurnStoppedParams,
     ):
-        logger.debug(f"{self}: User stopped speaking (user turn stop strategy: {strategy})")
+        logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
