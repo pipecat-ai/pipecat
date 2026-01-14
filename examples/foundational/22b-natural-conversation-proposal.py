@@ -119,7 +119,7 @@ class CompletenessCheck(FrameProcessor):
 
         if isinstance(frame, TextFrame) and frame.text == "YES":
             logger.debug("Completeness check YES")
-            await self.push_frame(UserStoppedSpeakingFrame())
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
             await self._notifier.notify()
         elif isinstance(frame, TextFrame) and frame.text == "NO":
             logger.debug("Completeness check NO")

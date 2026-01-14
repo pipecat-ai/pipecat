@@ -1187,7 +1187,7 @@ class AWSNovaSonicLLMService(LLMService):
             logger.debug(
                 "Wrapping assistant response trigger transcription with upstream UserStarted/StoppedSpeakingFrames"
             )
-            await self.push_frame(UserStartedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+            await self.broadcast_frame(UserStartedSpeakingFrame)
 
         # Send the transcription upstream for the user context aggregator
         frame = TranscriptionFrame(
@@ -1197,7 +1197,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Finish wrapping the upstream transcription in UserStarted/StoppedSpeakingFrames if needed
         if should_wrap_in_user_started_stopped_speaking_frames:
-            await self.push_frame(UserStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         # Clear out the buffered user text
         self._user_text_buffer = ""
