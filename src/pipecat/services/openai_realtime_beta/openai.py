@@ -387,8 +387,56 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         await self.push_frame(frame, direction)
 
-    async def _handle_messages_append(self, frame):
-        logger.error("!!! NEED TO IMPLEMENT MESSAGES APPEND")
+    async def _handle_messages_append(self, frame: LLMMessagesAppendFrame):
+        """Handle appending messages to the conversation and optionally triggering a response.
+
+        Converts messages from the frame to OpenAI Realtime conversation items and sends
+        them to the API. If `frame.run_llm` is True, triggers a response generation.
+
+        Args:
+            frame: Frame containing messages to append and whether to trigger LLM response.
+        """
+        for message in frame.messages:
+            role = message.get("role")
+            content = message.get("content")
+
+            # Convert content to string if it's a list
+            if isinstance(content, list):
+                # Handle content list format (e.g., [{"type": "text", "text": "..."}])
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                    elif isinstance(part, str):
+                        text_parts.append(part)
+                content = " ".join(text_parts)
+
+            # Determine content type based on role
+            # User messages use "input_text", assistant/system messages use "text"
+            if role == "user":
+                content_type = "input_text"
+            else:
+                content_type = "text"
+
+            # Create conversation item
+            item = events.ConversationItem(
+                type="message",
+                role=role,
+                content=[events.ItemContent(type=content_type, text=content)],
+            )
+
+            # Send the conversation item
+            await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+
+        # Trigger response if requested
+        if frame.run_llm:
+            await self.send_client_event(
+                events.ResponseCreateEvent(
+                    response=events.ResponseProperties(
+                        modalities=self._get_enabled_modalities()
+                    )
+                )
+            )
 
     async def _handle_function_call_result(self, frame):
         item = events.ConversationItem(
