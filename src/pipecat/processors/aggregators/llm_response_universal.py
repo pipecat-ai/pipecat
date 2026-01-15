@@ -1059,6 +1059,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         logger.debug(f"{self} Appending UserFileRawFrame to LLM context (format: {frame.format})")
         await self._context.add_file_frame_message(
+            type=frame.type,
             format=frame.format,
             text=frame.text,
             file=frame.file,

@@ -25,7 +25,6 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    get_args,
 )
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -242,10 +241,7 @@ DocFileFormat = Literal[
 ]
 MediaFileFormat = Literal["mp3", "wav", "ogg", "aac", "mp4", "webm", "ogg", "avi"]
 
-_all_formats = list(
-    set(get_args(ImageFileFormat) + get_args(DocFileFormat) + get_args(MediaFileFormat))
-)
-FileFormat = Literal[tuple(_all_formats)]
+FileFormat = Literal[ImageFileFormat, DocFileFormat, MediaFileFormat]
 
 FileSourceType = Literal["bytes", "url"]  # TODO: Add support for "id"
 
@@ -257,11 +253,13 @@ class FileRawFrame:
     Parameters:
         file: Raw file bytes.
         type: Type of the file ('bytes' or 'url'),
+        name: Optional name of the file.
         format: File format (e.g., 'pdf', 'docx').
     """
 
     file: bytes | str
     type: FileSourceType
+    name: Optional[str]
     format: Optional[FileFormat]
 
 

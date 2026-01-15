@@ -1424,9 +1424,6 @@ class RTVIProcessor(FrameProcessor):
             source = file.source.bytes
         elif file.source.type == "url":
             source = file.source.url
-        elif file.source.type == "id":
-            logger.warning("File source type 'id' is not supported yet.")
-            return
         else:
             logger.warning(f"Unsupported file source type: {file.source.type}")
             return
