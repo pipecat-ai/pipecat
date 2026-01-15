@@ -251,6 +251,10 @@ class UserTurnController(BaseObject):
         self._user_turn = True
         self._user_turn_stop_timeout_event.set()
 
+        # Reset all user turn start strategies to start fresh.
+        for s in self._user_turn_strategies.start or []:
+            await s.reset()
+
         await self._call_event_handler("on_user_turn_started", strategy, params)
 
     async def _trigger_user_turn_stop(
