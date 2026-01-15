@@ -16,10 +16,10 @@ Features:
     - Model-specific sample rates: mars-pro (48kHz), mars-flash (22.05kHz)
 """
 
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
+from typing import Any, AsyncGenerator, Dict, Mapping, Optional
 
-from camb.client import AsyncCambAI
 from camb import StreamTtsOutputConfiguration
+from camb.client import AsyncCambAI
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -35,24 +35,12 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
-
-# Default configuration
-DEFAULT_VOICE_ID = 147320
-DEFAULT_LANGUAGE = "en-us"
-DEFAULT_MODEL = "mars-flash"  # Faster inference
-DEFAULT_TIMEOUT = 60.0  # Seconds (minimum recommended by Camb.ai)
-MIN_TEXT_LENGTH = 3
-MAX_TEXT_LENGTH = 3000
-
 # Model-specific sample rates
 MODEL_SAMPLE_RATES: Dict[str, int] = {
-    "mars-flash": 22050,     # 22.05kHz
-    "mars-pro": 48000,       # 48kHz
+    "mars-flash": 22050,  # 22.05kHz
+    "mars-pro": 48000,  # 48kHz
     "mars-instruct": 22050,  # 22.05kHz
 }
-
-# Gender mapping for voice listing
-GENDER_MAP = {0: "Not Specified", 1: "Male", 2: "Female", 9: "Not Applicable"}
 
 
 def language_to_camb_language(language: Language) -> Optional[str]:
@@ -132,6 +120,19 @@ def language_to_camb_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+def _get_aligned_audio(buffer: bytes) -> tuple[bytes, bytes]:
+    """Split buffer into aligned audio (2-byte samples) and remainder.
+
+    Args:
+        buffer: Raw audio bytes to align.
+
+    Returns:
+        Tuple of (aligned audio bytes, remaining bytes).
+    """
+    aligned_size = (len(buffer) // 2) * 2
+    return buffer[:aligned_size], buffer[aligned_size:]
+
+
 class CambTTSService(TTSService):
     """Camb.ai MARS text-to-speech service using the official SDK.
 
@@ -176,9 +177,9 @@ class CambTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice_id: int = DEFAULT_VOICE_ID,
-        model: str = DEFAULT_MODEL,
-        timeout: float = DEFAULT_TIMEOUT,
+        voice_id: int = 147320,
+        model: str = "mars-flash",
+        timeout: float = 60.0,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         **kwargs,
@@ -187,10 +188,11 @@ class CambTTSService(TTSService):
 
         Args:
             api_key: Camb.ai API key for authentication.
-            voice_id: Voice ID to use. Defaults to DEFAULT_VOICE_ID.
+            voice_id: Voice ID to use. Defaults to 147320.
             model: TTS model to use. Options: "mars-flash" (fast), "mars-pro" (high quality).
-                Defaults to DEFAULT_MODEL (mars-flash).
-            timeout: Request timeout in seconds. Defaults to DEFAULT_TIMEOUT (60s).
+                Defaults to "mars-flash".
+            timeout: Request timeout in seconds. Defaults to 60.0 (minimum recommended
+                by Camb.ai).
             sample_rate: Audio sample rate in Hz. If None, uses model-specific default.
             params: Additional voice parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
@@ -201,19 +203,24 @@ class CambTTSService(TTSService):
 
         self._client = AsyncCambAI(api_key=api_key, timeout=timeout)
 
+        # Warn if sample rate doesn't match model's supported rate
+        if sample_rate and sample_rate != MODEL_SAMPLE_RATES.get(model):
+            logger.warning(
+                f"Camb.ai's {model} model only supports {MODEL_SAMPLE_RATES.get(model)}Hz "
+                f"sample rate. Current rate of {sample_rate}Hz may cause issues."
+            )
+
         # Build settings
         self._settings = {
             "language": (
-                self.language_to_service_language(params.language)
-                if params.language
-                else DEFAULT_LANGUAGE
+                self.language_to_service_language(params.language) if params.language else "en-us"
             ),
             "user_instructions": params.user_instructions,
         }
 
         self.set_model_name(model)
         self.set_voice(str(voice_id))
-        self._voice_id_int = voice_id
+        self._voice_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -262,7 +269,7 @@ class CambTTSService(TTSService):
                     self._settings[key] = value
                 logger.debug(f"Updated Camb.ai TTS setting {key} to: {value}")
             elif key == "voice_id":
-                self._voice_id_int = int(value)
+                self._voice_id = int(value)
                 self.set_voice(str(value))
 
     @traced_tts
@@ -270,7 +277,7 @@ class CambTTSService(TTSService):
         """Generate speech from text using Camb.ai's TTS API.
 
         Args:
-            text: The text to synthesize into speech (3-3000 characters).
+            text: The text to synthesize into speech (max 3000 characters).
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -278,16 +285,9 @@ class CambTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         # Validate text length
-        if len(text) < MIN_TEXT_LENGTH:
-            logger.warning(f"Text too short for Camb.ai TTS (min {MIN_TEXT_LENGTH} chars): {text}")
-            yield TTSStoppedFrame()
-            return
-
-        if len(text) > MAX_TEXT_LENGTH:
-            logger.warning(
-                f"Text too long for Camb.ai TTS (max {MAX_TEXT_LENGTH} chars), truncating"
-            )
-            text = text[:MAX_TEXT_LENGTH]
+        if len(text) > 3000:
+            logger.warning("Text too long for Camb.ai TTS (max 3000 chars), truncating")
+            text = text[:3000]
 
         try:
             await self.start_ttfb_metrics()
@@ -295,9 +295,9 @@ class CambTTSService(TTSService):
             # Build SDK parameters
             tts_kwargs: Dict[str, Any] = {
                 "text": text,
-                "voice_id": self._voice_id_int,
+                "voice_id": self._voice_id,
                 "language": self._settings["language"],
-                "speech_model": self._model_name,
+                "speech_model": self.model_name,
                 "output_configuration": StreamTtsOutputConfiguration(format="pcm_s16le"),
             }
 
@@ -318,71 +318,25 @@ class CambTTSService(TTSService):
                     audio_buffer += chunk
 
                     # Only yield complete 16-bit samples (2 bytes per sample)
-                    aligned_size = (len(audio_buffer) // 2) * 2
-                    if aligned_size > 0:
+                    aligned_audio, audio_buffer = _get_aligned_audio(audio_buffer)
+                    if aligned_audio:
                         yield TTSAudioRawFrame(
-                            audio=audio_buffer[:aligned_size],
+                            audio=aligned_audio,
                             sample_rate=self.sample_rate,
                             num_channels=1,
                         )
-                        audio_buffer = audio_buffer[aligned_size:]
 
             # Yield any remaining complete samples
             if len(audio_buffer) >= 2:
-                aligned_size = (len(audio_buffer) // 2) * 2
-                yield TTSAudioRawFrame(
-                    audio=audio_buffer[:aligned_size],
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                )
+                aligned_audio, _ = _get_aligned_audio(audio_buffer)
+                if aligned_audio:
+                    yield TTSAudioRawFrame(
+                        audio=aligned_audio,
+                        sample_rate=self.sample_rate,
+                        num_channels=1,
+                    )
 
         except Exception as e:
-            error_msg = f"Camb.ai TTS error: {e}"
-            logger.error(f"{self}: {error_msg}")
-            yield ErrorFrame(error=error_msg)
+            yield ErrorFrame(error=f"Camb.ai TTS error: {e}")
         finally:
-            logger.debug(f"{self}: Finished TTS [{text}]")
-            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
-
-    @staticmethod
-    async def list_voices(api_key: str) -> List[Dict[str, Any]]:
-        """Fetch available voices from Camb.ai API.
-
-        Args:
-            api_key: Camb.ai API key for authentication.
-
-        Returns:
-            List of voice dictionaries with id, name, gender, and language fields.
-
-        Raises:
-            Exception: If the API request fails.
-
-        Example::
-
-            voices = await CambTTSService.list_voices(api_key="your-api-key")
-            for voice in voices:
-                print(f"{voice['id']}: {voice['name']}")
-        """
-        client = AsyncCambAI(api_key=api_key)
-        voice_list = await client.voice_cloning.list_voices()
-
-        voices = []
-        for voice in voice_list:
-            voice_id = voice.get("id")
-            # Skip voices without an ID
-            if voice_id is None:
-                continue
-
-            gender_int = voice.get("gender")
-            gender = GENDER_MAP.get(gender_int) if gender_int is not None else None
-
-            voices.append({
-                "id": voice_id,
-                "name": voice.get("voice_name", ""),
-                "gender": gender,
-                "age": voice.get("age"),
-                "language": voice.get("language"),
-            })
-
-        return voices
