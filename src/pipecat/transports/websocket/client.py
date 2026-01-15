@@ -20,6 +20,7 @@ from typing import Awaitable, Callable, Optional
 import websockets
 from loguru import logger
 from pydantic.main import BaseModel
+from websockets import HeadersLike
 from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.frames.frames import (
@@ -50,6 +51,7 @@ class WebsocketClientParams(TransportParams):
     """
 
     add_wav_header: bool = True
+    additional_headers: Optional[dict[str, str]] = None
     serializer: Optional[FrameSerializer] = None
 
 
@@ -130,7 +132,11 @@ class WebsocketClientSession:
             return
 
         try:
-            self._websocket = await websocket_connect(uri=self._uri, open_timeout=10)
+            self._websocket = await websocket_connect(
+                uri=self._uri,
+                open_timeout=10,
+                additional_headers=self._params.additional_headers,
+            )
             self._client_task = self.task_manager.create_task(
                 self._client_task_handler(),
                 f"{self._transport_name}::WebsocketClientSession::_client_task_handler",
