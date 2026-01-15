@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,9 +12,20 @@ management, and frame flow control mechanisms.
 """
 
 import asyncio
+import traceback
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Sequence, Tuple, Type
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 
 from loguru import logger
 
@@ -32,6 +43,7 @@ from pipecat.frames.frames import (
     InterruptionTaskFrame,
     StartFrame,
     SystemFrame,
+    UninterruptibleFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
@@ -178,11 +190,13 @@ class FrameProcessor(BaseObject):
         self._observer: Optional[BaseObserver] = None
 
         # Other properties
-        self._allow_interruptions = False
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
+        # Other properties (deprecated)
+        self._allow_interruptions = False
         self._interruption_strategies: List[BaseInterruptionStrategy] = []
+        self._deprecated_openaillmcontext = False
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -210,6 +224,7 @@ class FrameProcessor(BaseObject):
         # The input task that handles all types of frames. It processes system
         # frames right away and queues non-system frames for later processing.
         self.__should_block_system_frames = False
+        self.__input_queue = FrameProcessorQueue()
         self.__input_event: Optional[asyncio.Event] = None
         self.__input_frame_task: Optional[asyncio.Task] = None
 
@@ -219,8 +234,10 @@ class FrameProcessor(BaseObject):
         # called. To resume processing frames we need to call
         # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
+        self.__process_queue = asyncio.Queue()
         self.__process_event: Optional[asyncio.Event] = None
         self.__process_frame_task: Optional[asyncio.Task] = None
+        self.__process_current_frame: Optional[Frame] = None
 
         # To interrupt a pipeline, we push an `InterruptionTaskFrame` upstream.
         # Then we wait for the corresponding `InterruptionFrame` to travel from
@@ -303,9 +320,23 @@ class FrameProcessor(BaseObject):
     def interruptions_allowed(self):
         """Check if interruptions are allowed for this processor.
 
+        .. deprecated:: 0.0.99
+            Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.
+
         Returns:
             True if interruptions are allowed.
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`FrameProcessor.interruptions_allowed` is deprecated. "
+                "Use  `LLMUserAggregator`'s new `user_mute_strategies` parameter instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         return self._allow_interruptions
 
     @property
@@ -338,6 +369,10 @@ class FrameProcessor(BaseObject):
     @property
     def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
         """Get the interruption strategies for this processor.
+
+        .. deprecated:: 0.0.99
+            This function is deprecated, use the new user and bot turn start
+            strategies insted.
 
         Returns:
             Sequence of interruption strategies.
@@ -677,7 +712,17 @@ class FrameProcessor(BaseObject):
         if not error.processor:
             error.processor = self
         await self._call_event_handler("on_error", error)
-        logger.error(f"{error.processor} error: {error.error}")
+
+        if error.exception:
+            tb = traceback.extract_tb(error.exception.__traceback__)
+            last = tb[-1]
+            error_message = (
+                f"{error.processor} exception ({last.filename}:{last.lineno}): {error.error}"
+            )
+        else:
+            error_message = f"{error.processor} error: {error.error}"
+
+        logger.error(error_message)
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -750,6 +795,9 @@ class FrameProcessor(BaseObject):
         self._interruption_strategies = frame.interruption_strategies
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
 
+        # NOTE(aleix): Remove when OpenAILLMContext/LLMUserContextAggregator is removed.
+        self._deprecated_openaillmcontext = "deprecated_openaillmcontext" in frame.metadata
+
         self.__create_process_task()
 
     async def __cancel(self, frame: CancelFrame):
@@ -794,8 +842,12 @@ class FrameProcessor(BaseObject):
                 # interruption). Instead we just drain the queue because this is
                 # an interruption.
                 self.__reset_process_task()
+            elif isinstance(self.__process_current_frame, UninterruptibleFrame):
+                # We don't want to cancel UninterruptibleFrame, so we simply
+                # cleanup the queue.
+                self.__reset_process_queue()
             else:
-                # Cancel and re-create the process task including the queue.
+                # Cancel and re-create the process task.
                 await self.__cancel_process_task()
                 self.__create_process_task()
         except Exception as e:
@@ -861,7 +913,6 @@ class FrameProcessor(BaseObject):
 
         if not self.__input_frame_task:
             self.__input_event = asyncio.Event()
-            self.__input_queue = FrameProcessorQueue()
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
@@ -879,9 +930,7 @@ class FrameProcessor(BaseObject):
             return
 
         if not self.__process_frame_task:
-            self.__should_block_frames = False
-            self.__process_event = asyncio.Event()
-            self.__process_queue = asyncio.Queue()
+            self.__reset_process_task()
             self.__process_frame_task = self.create_task(self.__process_frame_task_handler())
 
     def __reset_process_task(self):
@@ -891,9 +940,25 @@ class FrameProcessor(BaseObject):
 
         self.__should_block_frames = False
         self.__process_event = asyncio.Event()
+        self.__reset_process_queue()
+
+    def __reset_process_queue(self):
+        """Reset non-system frame processing queue."""
+        # Create a new queue to insert UninterruptibleFrame frames.
+        new_queue = asyncio.Queue()
+
+        # Process current queue and keep UninterruptibleFrame frames.
         while not self.__process_queue.empty():
-            self.__process_queue.get_nowait()
+            item = self.__process_queue.get_nowait()
+            if isinstance(item, UninterruptibleFrame):
+                new_queue.put_nowait(item)
             self.__process_queue.task_done()
+
+        # Put back UninterruptibleFrame frames into our process queue.
+        while not new_queue.empty():
+            item = new_queue.get_nowait()
+            self.__process_queue.put_nowait(item)
+            new_queue.task_done()
 
     async def __cancel_process_task(self):
         """Cancel the non-system frame processing task."""
@@ -948,7 +1013,11 @@ class FrameProcessor(BaseObject):
     async def __process_frame_task_handler(self):
         """Handle non-system frames from the process queue."""
         while True:
+            self.__process_current_frame = None
+
             (frame, direction, callback) = await self.__process_queue.get()
+
+            self.__process_current_frame = frame
 
             if self.__should_block_frames and self.__process_event:
                 logger.trace(f"{self}: frame processing paused")

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -20,8 +20,8 @@ from pipecat.frames.frames import (
     StartFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
@@ -252,20 +252,15 @@ class SegmentedSTTService(STTService):
         """Process frames, handling VAD events and audio segmentation."""
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
 
-    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
-        if frame.emulated:
-            return
+    async def _handle_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         self._user_speaking = True
 
-    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
-        if frame.emulated:
-            return
-
+    async def _handle_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         self._user_speaking = False
 
         content = io.BytesIO()

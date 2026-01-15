@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -26,15 +26,15 @@ class MatchAction(Enum):
 
     Parameters:
         REMOVE: The text along with its delimiters will be removed from the streaming text.
-              Sentence aggregation will continue on as if this text did not exist.
+            Sentence aggregation will continue on as if this text did not exist.
         KEEP: The delimiters will be removed, but the content between them will be kept.
-              Sentence aggregation will continue on with the internal text included.
+            Sentence aggregation will continue on with the internal text included.
         AGGREGATE: The delimiters will be removed and the content between will be treated
-              as a separate aggregation. Any text before the start of the pattern will be
-              returned early, whether or not a complete sentence was found. Then the pattern
-              will be returned. Then the aggregation will continue on sentence matching after
-              the closing delimiter is found. The content between the delimiters is not
-              aggregated by sentence. It is aggregated as one single block of text.
+            as a separate aggregation. Any text before the start of the pattern will be
+            returned early, whether or not a complete sentence was found. Then the pattern
+            will be returned. Then the aggregation will continue on sentence matching after
+            the closing delimiter is found. The content between the delimiters is not
+            aggregated by sentence. It is aggregated as one single block of text.
     """
 
     REMOVE = "remove"
@@ -133,17 +133,15 @@ class PatternPairAggregator(SimpleTextAggregator):
 
         Args:
             type: Identifier for this pattern pair. Should be unique and ideally descriptive.
-                  (e.g., 'code', 'speaker', 'custom'). type can not be 'sentence' or 'word' as
-                  those are reserved for the default behavior.
+                (e.g., 'code', 'speaker', 'custom'). type can not be 'sentence' or 'word' as
+                those are reserved for the default behavior.
             start_pattern: Pattern that marks the beginning of content.
             end_pattern: Pattern that marks the end of content.
-            action: What to do when a complete pattern is matched:
-                    - MatchAction.REMOVE: Remove the matched pattern from the text.
-                    - MatchAction.KEEP: Keep the matched pattern in the text and treat it as
-                                        normal text. This allows you to register handlers for
-                                        the pattern without affecting the aggregation logic.
-                    - MatchAction.AGGREGATE: Return the matched pattern as a separate
-                                             aggregation object.
+            action: What to do when a complete pattern is matched.
+
+                - MatchAction.REMOVE: Remove the matched pattern from the text.
+                - MatchAction.KEEP: Keep the matched pattern in the text and treat it as normal text. This allows you to register handlers for the pattern without affecting the aggregation logic.
+                - MatchAction.AGGREGATE: Return the matched pattern as a separate aggregation object.
 
         Returns:
             Self for method chaining.

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -113,6 +113,10 @@ class TransportParams(BaseModel):
 
         vad_analyzer: Voice Activity Detection analyzer instance.
         turn_analyzer: Turn-taking analyzer instance for conversation management.
+
+            .. deprecated:: 0.0.99
+                The `turn_analyzer` parameter is deprecated, use `LLMUSerAggregator`'s
+                new `user_turn_strategies` parameter instead.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

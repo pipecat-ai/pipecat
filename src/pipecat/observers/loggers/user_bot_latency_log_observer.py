@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,8 +15,8 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
@@ -36,7 +36,7 @@ class UserBotLatencyLogObserver(BaseObserver):
         to calculate response latencies.
         """
         super().__init__()
-        self._processed_frames = set()
+        self._user_bot_latency_processed_frames = set()
         self._user_stopped_time = 0
         self._latencies = []
 
@@ -51,14 +51,14 @@ class UserBotLatencyLogObserver(BaseObserver):
             return
 
         # Skip already processed frames
-        if data.frame.id in self._processed_frames:
+        if data.frame.id in self._user_bot_latency_processed_frames:
             return
 
-        self._processed_frames.add(data.frame.id)
+        self._user_bot_latency_processed_frames.add(data.frame.id)
 
-        if isinstance(data.frame, UserStartedSpeakingFrame):
+        if isinstance(data.frame, VADUserStartedSpeakingFrame):
             self._user_stopped_time = 0
-        elif isinstance(data.frame, UserStoppedSpeakingFrame):
+        elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
             self._user_stopped_time = time.time()
         elif isinstance(data.frame, (EndFrame, CancelFrame)):
             self._log_summary()

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -56,11 +56,14 @@ class FastAPIWebsocketParams(TransportParams):
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for encoding/decoding messages.
         session_timeout: Session timeout in seconds, None for no timeout.
+        fixed_audio_packet_size: Optional fixed-size packetization for raw PCM audio payloads.
+            Useful when the remote WebSocket media endpoint requires strict audio framing.
     """
 
     add_wav_header: bool = False
     serializer: Optional[FrameSerializer] = None
     session_timeout: Optional[int] = None
+    fixed_audio_packet_size: Optional[int] = None
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -77,6 +80,26 @@ class FastAPIWebsocketCallbacks(BaseModel):
     on_session_timeout: Callable[[WebSocket], Awaitable[None]]
 
 
+class _WebSocketMessageIterator:
+    """Async iterator for WebSocket messages that yields both binary and text."""
+
+    def __init__(self, websocket: WebSocket):
+        self._websocket = websocket
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes | str:
+        message = await self._websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            raise StopAsyncIteration
+        if "bytes" in message and message["bytes"] is not None:
+            return message["bytes"]
+        if "text" in message and message["text"] is not None:
+            return message["text"]
+        raise StopAsyncIteration
+
+
 class FastAPIWebsocketClient:
     """WebSocket client wrapper for handling connections and message passing.
 
@@ -84,17 +107,15 @@ class FastAPIWebsocketClient:
     with support for both binary and text message types.
     """
 
-    def __init__(self, websocket: WebSocket, is_binary: bool, callbacks: FastAPIWebsocketCallbacks):
+    def __init__(self, websocket: WebSocket, callbacks: FastAPIWebsocketCallbacks):
         """Initialize the WebSocket client.
 
         Args:
             websocket: The FastAPI WebSocket connection.
-            is_binary: Whether to use binary message format.
             callbacks: Event callback functions.
         """
         self._websocket = websocket
         self._closing = False
-        self._is_binary = is_binary
         self._callbacks = callbacks
         self._leave_counter = 0
 
@@ -110,9 +131,9 @@ class FastAPIWebsocketClient:
         """Get an async iterator for receiving WebSocket messages.
 
         Returns:
-            An async iterator yielding bytes or strings based on message type.
+            An async iterator yielding bytes or strings.
         """
-        return self._websocket.iter_bytes() if self._is_binary else self._websocket.iter_text()
+        return _WebSocketMessageIterator(self._websocket)
 
     async def send(self, data: str | bytes):
         """Send data through the WebSocket connection.
@@ -122,7 +143,7 @@ class FastAPIWebsocketClient:
         """
         try:
             if self._can_send():
-                if self._is_binary:
+                if isinstance(data, bytes):
                     await self._websocket.send_bytes(data)
                 else:
                     await self._websocket.send_text(data)
@@ -342,6 +363,14 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
+        # Buffer for optional protocol-level audio packetization.
+        # Some serializers may emit arbitrarily sized raw PCM payloads, while
+        # certain downstream transports or media endpoints require audio to be
+        # sent in fixed-size frames. When `params.fixed_audio_packet_size` is set,
+        # this buffer accumulates outgoing audio until a full packet can be
+        # emitted, preserving any remainder for subsequent sends.
+        self._audio_send_buffer = bytearray()
+
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
@@ -399,6 +428,10 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InterruptionFrame):
+            # Drop any partially buffered audio to avoid replaying stale PCM
+            if self._params.fixed_audio_packet_size:
+                self._audio_send_buffer.clear()
+
             await self._write_frame(frame)
             self._next_send_time = 0
 
@@ -462,6 +495,21 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload:
+                # Optional protocol-level audio packetization:
+                # If a downstream WebSocket media endpoint requires fixed-size PCM frames,
+                # configure params.fixed_audio_packet_size (e.g. 640 for 20ms @ 16kHz PCM16 mono).
+                packet_bytes = self._params.fixed_audio_packet_size
+
+                if packet_bytes and isinstance(payload, (bytes, bytearray)):
+                    self._audio_send_buffer.extend(bytes(payload))
+
+                    # Send only full frames; keep remainder for the next call.
+                    while len(self._audio_send_buffer) >= packet_bytes:
+                        chunk = bytes(self._audio_send_buffer[:packet_bytes])
+                        del self._audio_send_buffer[:packet_bytes]
+                        await self._client.send(chunk)
+                    return
+
                 await self._client.send(payload)
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
@@ -510,10 +558,7 @@ class FastAPIWebsocketTransport(BaseTransport):
             on_session_timeout=self._on_session_timeout,
         )
 
-        is_binary = False
-        if self._params.serializer:
-            is_binary = self._params.serializer.type == FrameSerializerType.BINARY
-        self._client = FastAPIWebsocketClient(websocket, is_binary, self._callbacks)
+        self._client = FastAPIWebsocketClient(websocket, self._callbacks)
 
         self._input = FastAPIWebsocketInputTransport(
             self, self._client, self._params, name=self._input_name

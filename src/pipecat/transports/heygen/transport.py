@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -16,7 +16,7 @@ The module consists of three main components:
 - HeyGenTransport: Main transport implementation that coordinates input/output transports
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import aiohttp
 from loguru import logger
@@ -36,8 +36,9 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.services.heygen.api import NewSessionRequest
-from pipecat.services.heygen.client import HeyGenCallbacks, HeyGenClient
+from pipecat.services.heygen.api_interactive_avatar import NewSessionRequest
+from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
+from pipecat.services.heygen.client import HeyGenCallbacks, HeyGenClient, ServiceType
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -297,10 +298,8 @@ class HeyGenTransport(BaseTransport):
         params: HeyGenParams = HeyGenParams(),
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
-        session_request: NewSessionRequest = NewSessionRequest(
-            avatar_id="Shawn_Therapist_public",
-            version="v2",
-        ),
+        session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
+        service_type: Optional[ServiceType] = None,
     ):
         """Initialize the HeyGen transport.
 
@@ -313,7 +312,8 @@ class HeyGenTransport(BaseTransport):
             params: HeyGen-specific configuration parameters (default: HeyGenParams())
             input_name: Optional custom name for the input transport
             output_name: Optional custom name for the output transport
-            session_request: Configuration for the HeyGen session (default: uses Shawn_Therapist_public avatar)
+            session_request: Configuration for the HeyGen session
+            service_type: Service type for the avatar session
 
         Note:
             The transport will automatically join the same virtual room as the HeyGen Avatar
@@ -326,6 +326,7 @@ class HeyGenTransport(BaseTransport):
             session=session,
             params=params,
             session_request=session_request,
+            service_type=service_type,
             callbacks=HeyGenCallbacks(
                 on_participant_connected=self._on_participant_connected,
                 on_participant_disconnected=self._on_participant_disconnected,

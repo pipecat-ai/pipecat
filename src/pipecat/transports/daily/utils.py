@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -27,6 +27,8 @@ class DailyRoomSipParams(BaseModel):
         num_endpoints: Number of allowed SIP endpoints.
         codecs: Codecs to support for audio and video. If None, uses Daily defaults.
             Example: {"audio": ["OPUS"], "video": ["H264"]}
+        provider: Optional SIP provider name (defaults to None).
+            Example: "daily"
     """
 
     display_name: str = "sw-sip-dialin"
@@ -34,6 +36,7 @@ class DailyRoomSipParams(BaseModel):
     sip_mode: str = "dial-in"
     num_endpoints: int = 1
     codecs: Optional[Dict[str, List[str]]] = None
+    provider: Optional[str] = None
 
 
 class RecordingsBucketConfig(BaseModel):

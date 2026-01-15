@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -40,7 +40,7 @@ class SimpleTextAggregator(BaseTextAggregator):
         Returns:
             The text that has been accumulated in the buffer.
         """
-        return Aggregation(text=self._text.strip(), type=AggregationType.SENTENCE)
+        return Aggregation(text=self._text.strip(" "), type=AggregationType.SENTENCE)
 
     async def aggregate(self, text: str) -> AsyncIterator[Aggregation]:
         """Aggregate text and yield completed sentences.
@@ -97,7 +97,7 @@ class SimpleTextAggregator(BaseTextAggregator):
                     # NLTK confirmed a sentence - return it
                     result = self._text[:eos_marker]
                     self._text = self._text[eos_marker:]
-                    return Aggregation(text=result, type=AggregationType.SENTENCE)
+                    return Aggregation(text=result.strip(" "), type=AggregationType.SENTENCE)
                 # No sentence found - keep accumulating
                 return None
             # Still whitespace, keep waiting
@@ -123,7 +123,7 @@ class SimpleTextAggregator(BaseTextAggregator):
             # Return whatever we have in the buffer
             result = self._text
             await self.reset()
-            return Aggregation(text=result.strip(), type=AggregationType.SENTENCE)
+            return Aggregation(text=result.strip(" "), type=AggregationType.SENTENCE)
         return None
 
     async def handle_interruption(self):

@@ -1,18 +1,22 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
 import unittest
+from dataclasses import dataclass
 
 from pipecat.frames.frames import (
+    DataFrame,
     EndFrame,
     Frame,
     InterruptionFrame,
     OutputTransportMessageUrgentFrame,
+    SystemFrame,
     TextFrame,
+    UninterruptibleFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.filters.identity_filter import IdentityFilter
@@ -109,4 +113,76 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
             send_end_frame=False,
+        )
+
+    async def test_interruptible_frames(self):
+        @dataclass
+        class TestInterruptibleFrame(DataFrame):
+            text: str
+
+        class DelayTestFrameProcessor(FrameProcessor):
+            """This processor just delays processing frames so we have time to
+            try to interrupt them.
+            """
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if not isinstance(frame, SystemFrame):
+                    # Sleep more than SleepFrame default.
+                    await asyncio.sleep(0.4)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayTestFrameProcessor()])
+
+        frames_to_send = [
+            TestInterruptibleFrame(text="Hello from Pipecat!"),
+            # Make sure we hit the DelayTestFrameProcessor first.
+            SleepFrame(),
+            # Just a random interruption. This should cause the interruption of
+            # TestInterruptibleFrame.
+            InterruptionFrame(),
+        ]
+        expected_down_frames = [InterruptionFrame]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+    async def test_uninterruptible_frames(self):
+        @dataclass
+        class TestUninterruptibleFrame(DataFrame, UninterruptibleFrame):
+            text: str
+
+        class DelayTestFrameProcessor(FrameProcessor):
+            """This processor just delays processing non-InterruptionFrame so we
+            have time to try to interrupt them.
+
+            """
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                if not isinstance(frame, SystemFrame):
+                    # Sleep more than SleepFrame default.
+                    await asyncio.sleep(0.4)
+                await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([DelayTestFrameProcessor()])
+
+        frames_to_send = [
+            TestUninterruptibleFrame(text="Hello from Pipecat!"),
+            # Make sure we hit the DelayTestFrameProcessor first.
+            SleepFrame(),
+            # Just a random interruption. This should not cause the interruption
+            # of TestUninterruptibleFrame.
+            InterruptionFrame(),
+        ]
+        expected_down_frames = [
+            InterruptionFrame,
+            TestUninterruptibleFrame,
+        ]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
         )

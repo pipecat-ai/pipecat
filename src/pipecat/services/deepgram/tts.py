@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -51,6 +51,8 @@ class DeepgramTTSService(WebsocketTTSService):
     message for conversational AI use cases.
     """
 
+    SUPPORTED_ENCODINGS = ("linear16", "mulaw", "alaw")
+
     def __init__(
         self,
         *,
@@ -68,13 +70,22 @@ class DeepgramTTSService(WebsocketTTSService):
             voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
             base_url: WebSocket base URL for Deepgram API. Defaults to "wss://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
-            encoding: Audio encoding format. Defaults to "linear16".
+            encoding: Audio encoding format. Defaults to "linear16". Must be one of SUPPORTED_ENCODINGS.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService class.
+
+        Raises:
+            ValueError: If encoding is not in SUPPORTED_ENCODINGS.
         """
+        if encoding.lower() not in self.SUPPORTED_ENCODINGS:
+            raise ValueError(
+                f"Unsupported encoding '{encoding}'. Must be one of {', '.join(self.SUPPORTED_ENCODINGS)} for WebSocket TTS."
+            )
+
         super().__init__(
             sample_rate=sample_rate,
             pause_frame_processing=True,
             push_stop_frames=True,
+            append_trailing_space=True,
             **kwargs,
         )
 
@@ -137,6 +148,8 @@ class DeepgramTTSService(WebsocketTTSService):
 
     async def _connect(self):
         """Connect to Deepgram WebSocket and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -144,6 +157,8 @@ class DeepgramTTSService(WebsocketTTSService):
 
     async def _disconnect(self):
         """Disconnect from Deepgram WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None

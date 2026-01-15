@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,13 +8,17 @@
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
+from pipecat.frames.frames import LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frameworks.strands_agents import StrandsAgentsProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -23,6 +27,8 @@ from pipecat.services.aws.tts import AWSPollyTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 # Strands agent setup
 try:
@@ -71,9 +77,9 @@ def build_agent(model_id: str, max_tokens: int):
     @tool
     def check_weather(location: str) -> str:
         if location.lower() == "san francisco":
-            return "The weather in San Francisco is sunny and 30 degrees."
+            return "The weather in San Francisco is sunny and 75 degrees."
         elif location.lower() == "sydney":
-            return "The weather in Sydney is cloudy and 20 degrees."
+            return "The weather in Sydney is cloudy and 60 degrees."
         else:
             return "I'm not sure about the weather in that location."
 
@@ -114,17 +120,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Setup context aggregators for message handling
     context = LLMContext()
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
+        ),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,  # Speech-to-text
-            context_aggregator.user(),  # User responses
+            user_aggregator,  # User responses
             llm,  # Strands Agents processor
             tts,  # Text-to-speech
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -61,7 +61,6 @@ class KrispFilter(BaseAudioFilter):
     Provides real-time noise reduction for audio streams using Krisp's
     proprietary noise suppression algorithms. Requires a Krisp model file
     for operation.
-
     .. deprecated:: 0.0.94
         The KrispFilter is deprecated and will be removed in a future version.
         Use KrispVivaFilter instead.
