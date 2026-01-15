@@ -576,22 +576,6 @@ wheels = [
 ]
 
 [[package]]
-name = "camb-sdk"
-version = "1.5.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "typing-extensions" },
-    { name = "websocket-client" },
-    { name = "websockets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/68/44/b4161f5da381f1b0d35a1abc7d69588ff24af6dacc9f13bccfb6f9889c46/camb_sdk-1.5.4.tar.gz", hash = "sha256:e882fb1b32aa45243ead5a558fed4e4e7ff8542af9f1802565a5fb4b7114fb5c", size = 83074, upload-time = "2026-01-12T20:19:34.318Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/c9/f718b6028d6e457391d1a6a8f93ae6073055731d77279ef097734b84bdcb/camb_sdk-1.5.4-py3-none-any.whl", hash = "sha256:b9ad43fddc0d749dd522839a06136df89d109510f57e68102414a8c0078e496a", size = 152143, upload-time = "2026-01-12T20:19:31.769Z" },
-]
-
-[[package]]
 name = "cartesia"
 version = "2.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -3909,9 +3893,6 @@ aws-nova-sonic = [
 azure = [
     { name = "azure-cognitiveservices-speech" },
 ]
-camb = [
-    { name = "camb-sdk" },
-]
 cartesia = [
     { name = "cartesia" },
     { name = "websockets" },
@@ -4131,7 +4112,6 @@ requires-dist = [
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.2.0" },
     { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12' and extra == 'sagemaker'" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = "~=1.42.0" },
-    { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.4" },
     { name = "cartesia", marker = "extra == 'cartesia'", specifier = "~=2.0.3" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
     { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.23.0" },
@@ -4225,7 +4205,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "camb", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "playht", "qwen", "remote-smart-turn", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -6941,15 +6921,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f3/d3/71c2dcf81dc1edcf8af9f4d8d63b1316fb0a2dd90cbfd427e8d9dd584a90/watchfiles-1.1.0-pp311-pypy311_pp73-macosx_11_0_arm64.whl", hash = "sha256:51b81e55d40c4b4aa8658427a3ee7ea847c591ae9e8b81ef94a90b668999353c", size = 398816, upload-time = "2025-06-15T19:06:50.433Z" },
     { url = "https://files.pythonhosted.org/packages/b8/fa/12269467b2fc006f8fce4cd6c3acfa77491dd0777d2a747415f28ccc8c60/watchfiles-1.1.0-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f2bcdc54ea267fe72bfc7d83c041e4eb58d7d8dc6f578dfddb52f037ce62f432", size = 451584, upload-time = "2025-06-15T19:06:51.834Z" },
     { url = "https://files.pythonhosted.org/packages/bd/d3/254cea30f918f489db09d6a8435a7de7047f8cb68584477a515f160541d6/watchfiles-1.1.0-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:923fec6e5461c42bd7e3fd5ec37492c6f3468be0499bc0707b4bbbc16ac21792", size = 454009, upload-time = "2025-06-15T19:06:52.896Z" },
-]
-
-[[package]]
-name = "websocket-client"
-version = "1.9.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/76/26/a951e489a0e3d2c64e5562e0248a15d2e73e0edb4ba0833d685abb1a262e/websocket_client-1.9.0.tar.gz", hash = "sha256:0c59a2e7a35f8a1879a3f15f8a4fd424a549779f8d6c6fbc6cf6d13939c1b9c5", size = 56817, upload-time = "2025-12-11T08:11:04.182Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/1e/4e8dec1a49596497549f59036c8e9b3b18e9f2dfbb540a51e6f3ead9bcc9/websocket_client-1.9.0-py3-none-any.whl", hash = "sha256:a579efc637ce2324bbe38a7a74b0d88bdbc3abe1c95e6f750d0f736be7986dde", size = 55621, upload-time = "2025-12-11T08:11:01.553Z" },
 ]
 
 [[package]]
