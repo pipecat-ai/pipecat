@@ -8,11 +8,15 @@ import asyncio
 import unittest
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
+)
+from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
+    MinWordsUserTurnStartStrategy,
 )
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
@@ -57,6 +61,46 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await controller.process_frame(VADUserStoppedSpeakingFrame())
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
+
+    async def test_user_turn_start_reset(self):
+        controller = UserTurnController(
+            user_turn_strategies=UserTurnStrategies(
+                start=[MinWordsUserTurnStartStrategy(min_words=3)]
+            ),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+
+        await controller.setup(self.task_manager)
+
+        should_start = 0
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal should_start
+            should_start += 1
+
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(TranscriptionFrame(text="One", user_id="cat", timestamp=""))
+        self.assertEqual(should_start, 0)
+
+        await controller.process_frame(
+            TranscriptionFrame(text=" two three!", user_id="cat", timestamp="")
+        )
+        self.assertEqual(should_start, 1)
+
+        # Trigger user stop turn so we can trigger user start turn again.
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+
+        await controller.process_frame(BotStartedSpeakingFrame())
+        await controller.process_frame(
+            TranscriptionFrame(text="Hello", user_id="cat", timestamp="")
+        )
+        self.assertEqual(should_start, 1)
+
+        await controller.process_frame(
+            TranscriptionFrame(text=" there friend!", user_id="cat", timestamp="")
+        )
+        self.assertEqual(should_start, 2)
 
     async def test_user_turn_stop_timeout_no_transcription(self):
         controller = UserTurnController(
