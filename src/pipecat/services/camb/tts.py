@@ -248,18 +248,10 @@ class CambTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
+
         # Use model-specific sample rate if not explicitly specified
         if not self._init_sample_rate:
-            self._sample_rate = MODEL_SAMPLE_RATES.get(self._model_name, 22050)
-        self._settings["sample_rate"] = self._sample_rate
-
-        # Warn if sample rate doesn't match model's supported rate
-        if self._sample_rate != MODEL_SAMPLE_RATES.get(self._model_name):
-            logger.warning(
-                f"Camb.ai's {self._model_name} model requires "
-                f"{MODEL_SAMPLE_RATES.get(self._model_name)}Hz sample rate. "
-                f"Current rate of {self._sample_rate}Hz may cause issues."
-            )
+            self._sample_rate = MODEL_SAMPLE_RATES.get(self.model_name, 22050)
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
