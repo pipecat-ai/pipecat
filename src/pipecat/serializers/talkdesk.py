@@ -55,11 +55,11 @@ class TalkdeskControlFrame(ControlFrame, UninterruptibleFrame):
     delivered to Talkdesk.
 
     Parameters:
-        action: The control action to perform (hangup or escalate).
-        ring_group: Optional ring group for escalation (defaults to "agents").
+        action: The control action to perform (hangup, error, or escalate).
+        ring_group: Optional ring group for escalation.
     """
 
-    action: TalkdeskControlAction = TalkdeskControlAction.HANGUP
+    action: TalkdeskControlAction
     ring_group: Optional[str] = None
 
 
