@@ -16,7 +16,7 @@ Features:
     - Model-specific sample rates: mars-pro (48kHz), mars-flash (22.05kHz)
 """
 
-from typing import Any, AsyncGenerator, Dict, Mapping, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from camb import StreamTtsOutputConfiguration
 from camb.client import AsyncCambAI
@@ -252,25 +252,6 @@ class CambTTSService(TTSService):
         if not self._init_sample_rate:
             self._sample_rate = MODEL_SAMPLE_RATES.get(self._model_name, 22050)
         self._settings["sample_rate"] = self._sample_rate
-
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings dynamically.
-
-        Args:
-            settings: Dictionary of settings to update.
-        """
-        await super()._update_settings(settings)
-
-        for key, value in settings.items():
-            if key in self._settings:
-                if key == "language" and isinstance(value, Language):
-                    self._settings[key] = language_to_camb_language(value)
-                else:
-                    self._settings[key] = value
-                logger.debug(f"Updated Camb.ai TTS setting {key} to: {value}")
-            elif key == "voice_id":
-                self._voice_id = int(value)
-                self.set_voice(str(value))
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
