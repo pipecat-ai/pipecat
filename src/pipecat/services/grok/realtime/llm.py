@@ -659,7 +659,7 @@ class GrokRealtimeLLMService(LLMService):
         """Handle speech stopped event from VAD."""
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _handle_evt_error(self, evt):
         """Handle error event."""

@@ -676,8 +676,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         await self._handle_transcription(transcript, True, self._language)
         await self.stop_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
         await self._call_event_handler("on_end_of_turn", transcript)
 
     async def _handle_eager_end_of_turn(self, transcript: str, data: Dict[str, Any]):
