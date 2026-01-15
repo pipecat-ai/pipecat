@@ -97,15 +97,6 @@ TESTS_07 = [
     ("07-interruptible-cartesia-http.py", EVAL_SIMPLE_MATH),
     ("07a-interruptible-speechmatics.py", EVAL_SIMPLE_MATH),
     ("07a-interruptible-speechmatics-vad.py", EVAL_SIMPLE_MATH),
-    ("07aa-interruptible-soniox.py", EVAL_SIMPLE_MATH),
-    ("07ab-interruptible-inworld.py", EVAL_SIMPLE_MATH),
-    ("07ab-interruptible-inworld-http.py", EVAL_SIMPLE_MATH),
-    ("07ac-interruptible-asyncai.py", EVAL_SIMPLE_MATH),
-    ("07ac-interruptible-asyncai-http.py", EVAL_SIMPLE_MATH),
-    # Need license key to run
-    # ("07ad-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
-    ("07ae-interruptible-hume.py", EVAL_SIMPLE_MATH),
-    ("07af-interruptible-gradium.py", EVAL_SIMPLE_MATH),
     ("07b-interruptible-langchain.py", EVAL_SIMPLE_MATH),
     ("07c-interruptible-deepgram.py", EVAL_SIMPLE_MATH),
     ("07c-interruptible-deepgram-flux.py", EVAL_SIMPLE_MATH),
@@ -137,6 +128,15 @@ TESTS_07 = [
     ("07y-interruptible-minimax.py", EVAL_SIMPLE_MATH),
     ("07z-interruptible-sarvam.py", EVAL_SIMPLE_MATH),
     ("07z-interruptible-sarvam-http.py", EVAL_SIMPLE_MATH),
+    ("07za-interruptible-soniox.py", EVAL_SIMPLE_MATH),
+    ("07zb-interruptible-inworld.py", EVAL_SIMPLE_MATH),
+    ("07zb-interruptible-inworld-http.py", EVAL_SIMPLE_MATH),
+    ("07zc-interruptible-asyncai.py", EVAL_SIMPLE_MATH),
+    ("07zc-interruptible-asyncai-http.py", EVAL_SIMPLE_MATH),
+    # Need license key to run
+    # ("07zd-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
+    ("07ze-interruptible-hume.py", EVAL_SIMPLE_MATH),
+    ("07zf-interruptible-gradium.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
     # Needs a Krisp license.
