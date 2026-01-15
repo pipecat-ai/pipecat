@@ -1197,8 +1197,8 @@ class GeminiLiveLLMService(LLMService):
 
                         if message.server_content and message.server_content.interrupted:
                             logger.debug("Gemini VAD: interrupted signal received")
-                            await self._handle_interruption()
-                            await self.push_frame(InterruptionFrame())
+                            await self.broadcast_frame(UserStartedSpeakingFrame())
+                            await self.push_interruption_task_frame_and_wait()
                         elif message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
                         elif (
