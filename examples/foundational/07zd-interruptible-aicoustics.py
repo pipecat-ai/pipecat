@@ -50,7 +50,7 @@ def _create_aic_filter() -> AICFilterV2:
 
     return AICFilterV2(
         license_key=license_key,
-        model_id="quail-xxs-48khz",
+        model_id="sparrow-xxs-48khz",
         enhancement_level=0.5,
     )
 
