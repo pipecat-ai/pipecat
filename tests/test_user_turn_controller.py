@@ -9,11 +9,13 @@ import unittest
 
 from pipecat.frames.frames import (
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.turns.user_turn_controller import UserTurnController
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 USER_TURN_STOP_TIMEOUT = 0.2
@@ -93,6 +95,56 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(should_stop)
 
         await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+        self.assertTrue(should_stop)
+        self.assertTrue(timeout)
+
+    async def test_external_user_turn_strategies_no_timeout_while_speaking(self):
+        """Test that timeout does not trigger when user is still speaking with external strategies."""
+        controller = UserTurnController(
+            user_turn_strategies=ExternalUserTurnStrategies(),
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
+        )
+
+        await controller.setup(self.task_manager)
+
+        should_start = None
+        should_stop = None
+        timeout = None
+
+        @controller.event_handler("on_user_turn_started")
+        async def on_user_turn_started(controller, strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        @controller.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(controller, strategy, params):
+            nonlocal should_stop
+            should_stop = True
+
+        @controller.event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(controller):
+            nonlocal timeout
+            timeout = True
+
+        # Simulate external service (like Deepgram Flux) broadcasting UserStartedSpeakingFrame
+        await controller.process_frame(UserStartedSpeakingFrame())
+        self.assertTrue(should_start)
+        self.assertFalse(should_stop)
+        self.assertFalse(timeout)
+
+        # User is still speaking, timeout should not trigger
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+        self.assertTrue(should_start)
+        self.assertFalse(should_stop)
+        self.assertFalse(timeout)
+
+        # Now external service broadcasts UserStoppedSpeakingFrame
+        await controller.process_frame(UserStoppedSpeakingFrame())
+
+        # But no transcription, so timeout should trigger
+        await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
+
         self.assertTrue(should_start)
         self.assertTrue(should_stop)
         self.assertTrue(timeout)
