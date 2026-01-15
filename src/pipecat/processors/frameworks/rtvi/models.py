@@ -257,6 +257,7 @@ class File(BaseModel):
     """File data structure for RTVI file sending."""
 
     format: FileFormat
+    name: Optional[str] = None
     source: FileBytes | FileUrl
     customOpts: Optional[dict] = None  # ex. 'detail' in openAI or 'citations' in Bedrock
 
