@@ -102,6 +102,14 @@ autodoc_mock_imports = [
     "openai.types.beta.realtime",
     "langchain_core",
     "langchain_core.messages",
+    # FastAPI - Pydantic v2 compatibility issues during Sphinx autodoc
+    "fastapi",
+    "fastapi.applications",
+    "fastapi.routing",
+    "fastapi.params",
+    "fastapi.middleware",
+    "fastapi.responses",
+    "uvicorn",
 ]
 
 # HTML output settings
