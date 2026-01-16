@@ -41,8 +41,11 @@ dependencies = [
 ]
 
 [project.urls]
+Homepage = "https://pipecat.ai"
+Documentation = "https://docs.pipecat.ai/"
 Source = "https://github.com/pipecat-ai/pipecat"
-Website = "https://pipecat.ai"
+Issues = "https://github.com/pipecat-ai/pipecat/issues"
+Changelog = "https://github.com/pipecat-ai/pipecat/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 aic = [ "aic-sdk~=1.2.0" ]
