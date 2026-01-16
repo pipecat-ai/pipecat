@@ -568,7 +568,9 @@ class DailyTransportClient(EventHandler):
         """
         if not self._joined:
             return "Unable to send messages before joining."
-
+        if not self._client:
+            return "Unable to send messages as Daily CallClient is None"
+        
         participant_id = None
         if isinstance(
             frame, (DailyOutputTransportMessageFrame, DailyOutputTransportMessageUrgentFrame)
