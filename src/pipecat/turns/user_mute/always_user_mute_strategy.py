@@ -7,7 +7,7 @@
 """User mute strategy that always mutes the user while the bot is speaking."""
 
 from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, Frame
-from pipecat.turns.mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.turns.user_mute.base_user_mute_strategy import BaseUserMuteStrategy
 
 
 class AlwaysUserMuteStrategy(BaseUserMuteStrategy):

@@ -14,7 +14,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
 )
-from pipecat.turns.mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.turns.user_mute.base_user_mute_strategy import BaseUserMuteStrategy
 
 
 class FunctionCallUserMuteStrategy(BaseUserMuteStrategy):
