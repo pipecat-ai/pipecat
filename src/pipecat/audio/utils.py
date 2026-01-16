@@ -12,11 +12,9 @@ various audio formats used in Pipecat pipelines.
 """
 
 import audioop
-from typing import Literal
 
 import numpy as np
 import pyloudnorm as pyln
-from loguru import logger
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
