@@ -759,7 +759,11 @@ class DailyTransportClient(EventHandler):
             # Increment leave counter if we successfully joined.
             self._leave_counter += 1
 
-            logger.info(f"Joined {self._room_url}")
+            participant_id = data.get("participants", {}).get("local", {}).get("id")
+            meeting_id = data.get("meetingSession", {}).get("id")
+            logger.info(
+                f"Joined {self._room_url}. Participant ID: {participant_id}, Meeting ID: {meeting_id}"
+            )
 
             await self._callbacks.on_joined(data)
 
