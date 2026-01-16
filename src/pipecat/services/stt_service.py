@@ -152,6 +152,8 @@ class STTService(AIService):
                 self._settings[key] = value
                 if key == "language":
                     await self.set_language(value)
+            elif key == "language":
+                await self.set_language(value)
             elif key == "model":
                 self.set_model_name(value)
             else:
