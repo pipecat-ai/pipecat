@@ -11,6 +11,7 @@ input processing, including VAD, turn analysis, and interruption management.
 """
 
 import asyncio
+import time
 from typing import Optional
 
 from loguru import logger
@@ -77,6 +78,11 @@ class BaseInputTransport(FrameProcessor):
 
         # Track user speaking state for interruption logic
         self._user_speaking = False
+        # Last time a UserSpeakingFrame was pushed.
+        self._user_speaking_frame_time = 0
+        # How often a UserSpeakingFrame should be pushed (value should be
+        # greater than the audio chunks to have any effect).
+        self._user_speaking_frame_period = 0.2
 
         # Task to process incoming audio (VAD) and push audio frames downstream
         # if passthrough is enabled.
@@ -423,7 +429,7 @@ class BaseInputTransport(FrameProcessor):
                     await self._deprecated_run_turn_analyzer(frame, vad_state, previous_vad_state)
 
                 if vad_state == VADState.SPEAKING:
-                    await self.broadcast_frame(UserSpeakingFrame)
+                    await self._user_currently_speaking()
 
                 # Push audio downstream if passthrough is set.
                 if self._params.audio_in_passthrough:
@@ -443,6 +449,13 @@ class BaseInputTransport(FrameProcessor):
                         await self._deprecated_handle_user_interruption(VADState.QUIET)
                     else:
                         await self.push_frame(VADUserStoppedSpeakingFrame())
+
+    async def _user_currently_speaking(self):
+        """Handle user speaking frame."""
+        diff_time = time.time() - self._user_speaking_frame_time
+        if diff_time >= self._user_speaking_frame_period:
+            await self.broadcast_frame(UserSpeakingFrame)
+            self._user_speaking_frame_time = time.time()
 
     #
     # DEPRECATED.
