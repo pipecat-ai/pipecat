@@ -752,6 +752,14 @@ class GrokRealtimeLLMService(LLMService):
 
     async def _send_user_audio(self, frame):
         """Send user audio to Grok."""
+        # Don't send audio if conversation setup is still pending, as it can
+        # lead to errors. For example: audio sent before conversation setup
+        # will be interpreted as having Grok's default sample rate (24000),
+        # and if that differs from the sample rate we eventually set through
+        # the conversation setup, Grok will error out.
+        if self._llm_needs_conversation_setup:
+            return
+
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
