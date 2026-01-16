@@ -34,7 +34,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.mute import (
+from pipecat.turns.user_mute import (
     FunctionCallUserMuteStrategy,
     MuteUntilFirstBotCompleteUserMuteStrategy,
 )

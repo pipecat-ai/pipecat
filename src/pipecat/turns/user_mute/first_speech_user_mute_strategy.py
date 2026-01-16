@@ -7,7 +7,7 @@
 """User mute strategy that mutes the user only during the bot’s first speech."""
 
 from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, Frame
-from pipecat.turns.mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.turns.user_mute.base_user_mute_strategy import BaseUserMuteStrategy
 
 
 class FirstSpeechUserMuteStrategy(BaseUserMuteStrategy):

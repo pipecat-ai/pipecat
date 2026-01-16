@@ -40,7 +40,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.mute import FirstSpeechUserMuteStrategy, FunctionCallUserMuteStrategy
+from pipecat.turns.user_mute import FirstSpeechUserMuteStrategy, FunctionCallUserMuteStrategy
 from pipecat.turns.user_stop import TranscriptionUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 

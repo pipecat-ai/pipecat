@@ -62,7 +62,7 @@ from pipecat.processors.aggregators.llm_context import (
     NotGiven,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.turns.mute import BaseUserMuteStrategy
+from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
 from pipecat.turns.user_turn_controller import UserTurnController
