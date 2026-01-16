@@ -878,7 +878,6 @@ class TokenDetails(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
-    __pydantic_extra__: dict[str, Any]
 
     cached_tokens: Optional[int] = 0
     text_tokens: Optional[int] = 0

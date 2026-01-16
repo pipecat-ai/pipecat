@@ -102,9 +102,6 @@ class DailyRoomProperties(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    # Pydantic v2.12+ requires explicit annotation for extra fields
-    __pydantic_extra__: dict[str, Any]
-
     exp: Optional[float] = None
     enable_chat: bool = False
     enable_prejoin_ui: bool = False
