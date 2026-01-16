@@ -18,9 +18,11 @@ import os
 from typing import List, Optional
 
 import numpy as np
+from aic_sdk import Model, ProcessorAsync, ProcessorConfig, ProcessorParameter
 from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
+from pipecat.audio.vad.aic_vad import AICVADAnalyzer
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
 
@@ -125,8 +127,6 @@ class AICFilter(BaseAudioFilter):
             A lazily-initialized AICVADAnalyzer that will bind to the VAD context
             once the filter's processor has been created (after start(sample_rate)).
         """
-        from pipecat.audio.vad.aic_vad import AICVADAnalyzer
-
         return AICVADAnalyzer(
             vad_context_factory=lambda: self.get_vad_context(),
             speech_hold_duration=speech_hold_duration,
@@ -142,8 +142,6 @@ class AICFilter(BaseAudioFilter):
         Returns:
             None
         """
-        from aic_sdk import Model, ProcessorAsync, ProcessorConfig, ProcessorParameter
-
         self._sample_rate = sample_rate
 
         try:
@@ -232,8 +230,6 @@ class AICFilter(BaseAudioFilter):
             None
         """
         if isinstance(frame, FilterEnableFrame):
-            from aic_sdk import ProcessorParameter
-
             self._enabled = frame.enable
             if self._processor_ctx is not None:
                 try:
