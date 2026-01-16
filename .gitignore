@@ -52,3 +52,13 @@ docs/api/api
 
 # uv
 .python-version
+
+# Infer Assignment
+infer-assignment/backend/venv/
+infer-assignment/backend/__pycache__/
+infer-assignment/backend/*.pyc
+infer-assignment/backend/*.pyo
+infer-assignment/backend/.env
+infer-assignment/frontend/node_modules/
+infer-assignment/frontend/.next/
+infer-assignment/frontend/.turbo/

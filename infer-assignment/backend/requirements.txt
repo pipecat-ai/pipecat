@@ -1,0 +1,22 @@
+# Pipecat with required extras (websocket instead of webrtc to avoid cv2)
+pipecat-ai[groq,deepgram,elevenlabs,silero,websocket]
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Async utilities
+aiofiles>=23.2.1
+python-multipart>=0.0.6
+
+# Environment management
+python-dotenv>=1.0.0
+
+# SSL certificates
+certifi>=2023.0.0
+
+# Audio processing
+numpy>=1.24.0
+
+# CORS support
+starlette>=0.27.0
