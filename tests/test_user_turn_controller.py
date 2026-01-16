@@ -84,7 +84,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(should_start, 0)
 
         await controller.process_frame(
-            TranscriptionFrame(text=" two three!", user_id="cat", timestamp="")
+            TranscriptionFrame(text="One two three!", user_id="cat", timestamp="")
         )
         self.assertEqual(should_start, 1)
 
@@ -92,13 +92,11 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(USER_TURN_STOP_TIMEOUT + 0.1)
 
         await controller.process_frame(BotStartedSpeakingFrame())
-        await controller.process_frame(
-            TranscriptionFrame(text="Hello", user_id="cat", timestamp="")
-        )
+        await controller.process_frame(TranscriptionFrame(text="Hi!", user_id="cat", timestamp=""))
         self.assertEqual(should_start, 1)
 
         await controller.process_frame(
-            TranscriptionFrame(text=" there friend!", user_id="cat", timestamp="")
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
         )
         self.assertEqual(should_start, 2)
 

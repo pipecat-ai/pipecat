@@ -41,12 +41,10 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         self._min_words = min_words
         self._use_interim = use_interim
         self._bot_speaking = False
-        self._text = ""
 
     async def reset(self):
         """Reset the strategy to its initial state."""
         await super().reset()
-        self._text = ""
         self._bot_speaking = False
 
     async def process_frame(self, frame: Frame):
@@ -67,7 +65,7 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
         elif isinstance(frame, InterimTranscriptionFrame) and self._use_interim:
-            await self._handle_interim_transcription(frame)
+            await self._handle_transcription(frame)
 
     async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
         """Handle bot started speaking frame.
@@ -89,41 +87,21 @@ class MinWordsUserTurnStartStrategy(BaseUserTurnStartStrategy):
         """
         self._bot_speaking = False
 
-    async def _handle_transcription(self, frame: TranscriptionFrame):
+    async def _handle_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
         """Handle a completed transcription frame and check word count.
 
         Args:
             frame: The transcription frame to be processed.
         """
-        self._text += frame.text
-
-        min_words = self._min_words if self._bot_speaking else 1
-
-        word_count = len(self._text.split())
-        should_trigger = word_count >= min_words
-
-        logger.debug(
-            f"{self} should_trigger={should_trigger} num_spoken_words={word_count} "
-            f"min_words={min_words} bot_speaking={self._bot_speaking}"
-        )
-
-        if should_trigger:
-            await self.trigger_user_turn_started()
-
-    async def _handle_interim_transcription(self, frame: InterimTranscriptionFrame):
-        """Handle an interim transcription frame and check word count.
-
-        Args:
-            frame: The interim transcription frame to be processed.
-        """
         min_words = self._min_words if self._bot_speaking else 1
 
         word_count = len(frame.text.split())
         should_trigger = word_count >= min_words
+        is_interim = isinstance(frame, InterimTranscriptionFrame)
 
         logger.debug(
-            f"{self} interim=True should_trigger={should_trigger} num_spoken_words={word_count} "
-            f"min_words={min_words} bot_speaking={self._bot_speaking}"
+            f"{self} should_trigger={should_trigger} num_spoken_words={word_count} "
+            f"min_words={min_words} bot_speaking={self._bot_speaking} interim_transcription={is_interim}"
         )
 
         if should_trigger:
