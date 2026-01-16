@@ -20,7 +20,6 @@ from typing import Awaitable, Callable, Optional
 import websockets
 from loguru import logger
 from pydantic.main import BaseModel
-from websockets import HeadersLike
 from websockets.asyncio.client import connect as websocket_connect
 
 from pipecat.frames.frames import (
