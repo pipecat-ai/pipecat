@@ -17,6 +17,8 @@ from pipecat.frames.frames import (
     ErrorFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.stt_service import STTService
@@ -155,6 +157,7 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        logger.info(f"Sarvam STT initialized with SDK headers: {self._sdk_headers}")
 
     def language_to_service_language(self, language: Language) -> str:
         """Convert pipecat Language enum to Sarvam's language code.
@@ -414,10 +417,13 @@ class SarvamSTTService(STTService):
                     await self.start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
+                    await self.broadcast_frame(UserStartedSpeakingFrame)
+                    await self.push_interruption_task_frame_and_wait()
 
                 elif signal == "END_SPEECH":
                     logger.debug("User stopped speaking")
                     await self._call_event_handler("on_speech_stopped")
+                    await self.broadcast_frame(UserStoppedSpeakingFrame)
 
             elif message.type == "data":
                 await self.stop_ttfb_metrics()
