@@ -533,20 +533,29 @@ class AWSNovaSonicLLMService(LLMService):
         if system_instruction:
             await self._send_text_event(text=system_instruction, role=Role.SYSTEM)
 
-        # Send conversation history
+        # Send conversation history (except for the last message if it's from the
+        # user, which we'll send as interactive after starting audio input)
         messages = llm_connection_params["messages"]
+        last_user_message = None
         for i, message in enumerate(messages):
             # logger.debug(f"Seeding conversation history with message: {message}")
-            # If last message is from user, mark it as interactive to trigger
-            # bot response
             is_last_message = i == len(messages) - 1
-            interactive = is_last_message and message.role == Role.USER
-            await self._send_text_event(
-                text=message.text, role=message.role, interactive=interactive
-            )
+            if is_last_message and message.role == Role.USER:
+                # Save for sending after audio input starts
+                last_user_message = message
+            else:
+                await self._send_text_event(text=message.text, role=message.role)
 
         # Start audio input
         await self._send_audio_input_start_event()
+
+        # Now send the last user message as interactive to trigger bot response
+        if last_user_message:
+            # logger.debug(
+            #     f"Sending last user message as interactive to trigger bot response: {last_user_message}")
+            await self._send_text_event(
+                text=last_user_message.text, role=last_user_message.role, interactive=True
+            )
 
         # Start receiving events
         self._receive_task = self.create_task(self._receive_task_handler())
