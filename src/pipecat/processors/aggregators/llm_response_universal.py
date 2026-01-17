@@ -298,6 +298,8 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_stopped: Called when the user turn ends
     - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
     - on_user_turn_idle: Called when the user has been idle for the configured timeout
+    - on_user_mute_started: Called when the user becomes muted
+    - on_user_mute_stopped: Called when the user becomes unmuted
 
     Example::
 
@@ -315,6 +317,14 @@ class LLMUserAggregator(LLMContextAggregator):
 
         @aggregator.event_handler("on_user_turn_idle")
         async def on_user_turn_idle(aggregator):
+            ...
+
+        @aggregator.event_handler("on_user_mute_started")
+        async def on_user_mute_started(aggregator):
+            ...
+
+        @aggregator.event_handler("on_user_mute_stopped")
+        async def on_user_mute_stopped(aggregator):
             ...
 
     """
@@ -340,6 +350,8 @@ class LLMUserAggregator(LLMContextAggregator):
         self._register_event_handler("on_user_turn_stopped")
         self._register_event_handler("on_user_turn_stop_timeout")
         self._register_event_handler("on_user_turn_idle")
+        self._register_event_handler("on_user_mute_started")
+        self._register_event_handler("on_user_mute_stopped")
 
         user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
 
@@ -491,6 +503,12 @@ class LLMUserAggregator(LLMContextAggregator):
         if should_mute_next_time != self._user_is_muted:
             logger.debug(f"{self}: user is now {'muted' if should_mute_next_time else 'unmuted'}")
             self._user_is_muted = should_mute_next_time
+
+            # Emit mute state change events
+            if self._user_is_muted:
+                await self._call_event_handler("on_user_mute_started")
+            else:
+                await self._call_event_handler("on_user_mute_stopped")
 
         return should_mute_frame
 
