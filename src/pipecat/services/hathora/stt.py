@@ -123,7 +123,8 @@ class HathoraSTTService(SegmentedSTTService):
                 payload["language"] = self._settings["language"]
             if self._settings["config"] is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value} for option in self._settings["config"]
+                    {"name": option.name, "value": option.value}
+                    for option in self._settings["config"]
                 ]
 
             base64_audio = base64.b64encode(audio).decode("utf-8")

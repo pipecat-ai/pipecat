@@ -138,7 +138,8 @@ class HathoraTTSService(TTSService):
                 payload["speed"] = self._settings["speed"]
             if self._settings["config"] is not None:
                 payload["model_config"] = [
-                    {"name": option.name, "value": option.value} for option in self._settings["config"]
+                    {"name": option.name, "value": option.value}
+                    for option in self._settings["config"]
                 ]
 
             yield TTSStartedFrame()
