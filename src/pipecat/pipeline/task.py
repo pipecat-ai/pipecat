@@ -291,6 +291,8 @@ class PipelineTask(BasePipelineTask):
 
         self._finished = False
         self._cancelled = False
+        self._started = False
+        self._ended = False
 
         # This task maneger will handle all the asyncio tasks created by this
         # PipelineTask and its frame processors.
@@ -792,6 +794,14 @@ class PipelineTask(BasePipelineTask):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
         if isinstance(frame, StartFrame):
+            if self._started:
+                logger.warning(
+                    f"{self}: Duplicate StartFrame detected. The pipeline automatically "
+                    "sends a StartFrame - you should not queue one manually."
+                )
+            else:
+                self._started = True
+
             await self._call_event_handler("on_pipeline_started", frame)
 
             # Start heartbeat tasks now that StartFrame has been processed
@@ -800,6 +810,11 @@ class PipelineTask(BasePipelineTask):
 
             self._pipeline_start_event.set()
         elif isinstance(frame, EndFrame):
+            if self._ended:
+                logger.warning(f"{self}: Duplicate EndFrame detected.")
+            else:
+                self._ended = True
+
             await self._call_event_handler("on_pipeline_ended", frame)
             await self._call_event_handler("on_pipeline_finished", frame)
             self._pipeline_end_event.set()
