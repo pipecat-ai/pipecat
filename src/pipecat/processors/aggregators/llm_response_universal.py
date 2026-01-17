@@ -890,10 +890,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         logger.debug(
             f"{self} FunctionCallCancelFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
-        if frame.tool_call_id not in self._function_calls_in_progress:
-            return
-
-        if self._function_calls_in_progress[frame.tool_call_id].cancel_on_interruption:
+        function_call = self._function_calls_in_progress.get(frame.tool_call_id)
+        if function_call and function_call.cancel_on_interruption:
             # Update context with the function call cancellation
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
             del self._function_calls_in_progress[frame.tool_call_id]
