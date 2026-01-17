@@ -348,6 +348,16 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         await self.cancel_task(self._word_processor_task)
         self._word_processor_task = None
 
+    def _is_cjk_language(self) -> bool:
+        """Check if the configured language is CJK (Chinese, Japanese, Korean).
+
+        Returns:
+            True if the language is CJK, False otherwise.
+        """
+        language = self._settings.get("language", "").lower()
+        # Check if language starts with CJK language codes
+        return language.startswith(("zh", "ja", "ko", "cmn", "yue", "wuu"))
+
     def _is_punctuation_only(self, text: str) -> bool:
         """Check if text consists only of punctuation and whitespace.
 
@@ -362,9 +372,9 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
     def _handle_word_boundary(self, evt):
         """Handle word boundary events from Azure SDK.
 
-        Azure sends punctuation as separate word boundaries, which causes
-        spacing issues in the final transcript. This method merges punctuation
-        with the previous word to maintain proper formatting.
+        Azure sends punctuation as separate word boundaries, and breaks CJK text
+        into individual characters/particles. This method routes to language-specific
+        handlers to properly merge and emit word boundaries.
 
         Args:
             evt: SpeechSynthesisWordBoundaryEventArgs from Azure Speech SDK
@@ -382,20 +392,72 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         if not word:
             return
 
-        # Check if this is punctuation-only
-        is_punctuation = self._is_punctuation_only(word)
-
-        if is_punctuation and self._last_word is not None:
-            # Merge punctuation with the previous word (don't queue yet, more punctuation might follow)
-            self._last_word += word
+        # Route to language-specific handler
+        if self._is_cjk_language():
+            self._handle_cjk_word_boundary(word, absolute_seconds)
         else:
-            # This is a real word. First, queue any pending word from before.
-            if self._last_word is not None:
-                self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            self._handle_non_cjk_word_boundary(word, absolute_seconds)
 
-            # Now store this new word for next time
+    def _emit_pending_word(self):
+        """Emit the currently buffered word if one exists."""
+        if self._last_word is not None:
+            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            self._last_word = None
+            self._last_timestamp = None
+
+    def _handle_cjk_word_boundary(self, word: str, timestamp: float):
+        """Handle word boundaries for CJK languages (Chinese, Japanese, Korean).
+
+        CJK languages don't use spaces between words, so we merge characters together
+        and only emit at natural break points (punctuation or whitespace boundaries).
+        Without this logic, we don't get word output for CJK languages.
+
+        Args:
+            word: The word/character from Azure.
+            timestamp: Timestamp in seconds.
+        """
+        # First word: just store it
+        if self._last_word is None:
             self._last_word = word
-            self._last_timestamp = absolute_seconds
+            self._last_timestamp = timestamp
+            return
+
+        # Punctuation: merge and emit (natural break)
+        if self._is_punctuation_only(word):
+            self._last_word += word
+            self._emit_pending_word()
+            return
+
+        # Whitespace: emit before boundary, start new segment
+        if word.strip() != word:
+            self._emit_pending_word()
+            self._last_word = word
+            self._last_timestamp = timestamp
+            return
+
+        # Default: continue merging CJK characters
+        self._last_word += word
+
+    def _handle_non_cjk_word_boundary(self, word: str, timestamp: float):
+        """Handle word boundaries for non-CJK languages.
+
+        Non-CJK languages use spaces between words, so we emit each word separately
+        after merging any trailing punctuation.
+
+        Args:
+            word: The word from Azure.
+            timestamp: Timestamp in seconds.
+        """
+        # Punctuation: merge with previous word (don't emit yet)
+        if self._is_punctuation_only(word) and self._last_word is not None:
+            self._last_word += word
+            return
+
+        # Regular word: emit previous, store current
+        if self._last_word is not None:
+            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+        self._last_word = word
+        self._last_timestamp = timestamp
 
     async def _word_processor_task_handler(self):
         """Process word timestamps from the queue and call add_word_timestamps."""
