@@ -137,6 +137,7 @@ TESTS_07 = [
     # ("07zd-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
     ("07ze-interruptible-hume.py", EVAL_SIMPLE_MATH),
     ("07zf-interruptible-gradium.py", EVAL_SIMPLE_MATH),
+    ("07zh-interruptible-hathora.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
     # Needs a Krisp license.
