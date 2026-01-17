@@ -161,6 +161,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client disconnected")
         await task.cancel()
 
+    @user_aggregator.event_handler("on_user_mute_started")
+    async def on_user_mute_started(aggregator):
+        logger.info(f"User mute started")
+
+    @user_aggregator.event_handler("on_user_mute_stopped")
+    async def on_user_mute_stopped(aggregator):
+        logger.info(f"User mute stopped")
+
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
