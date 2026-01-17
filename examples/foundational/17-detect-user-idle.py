@@ -14,7 +14,6 @@ from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnal
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    EndFrame,
     EndTaskFrame,
     LLMMessagesAppendFrame,
     LLMRunFrame,
@@ -155,12 +154,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Set up idle handling with retry logic
     idle_handler = IdleHandler()
 
-    @user_aggregator.event_handler("on_user_idle")
-    async def handle_user_idle(aggregator):
+    @user_aggregator.event_handler("on_user_turn_idle")
+    async def on_user_turn_idle(aggregator):
         await idle_handler.handle_idle(aggregator)
 
     @user_aggregator.event_handler("on_user_turn_started")
-    async def handle_user_turn_started(aggregator, strategy):
+    async def on_user_turn_started(aggregator, strategy):
         idle_handler.reset()
 
     @transport.event_handler("on_client_connected")

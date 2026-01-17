@@ -36,12 +36,12 @@ class UserIdleController(BaseObject):
 
     Event handlers available:
 
-    - on_user_idle: Emitted when the user has been idle for the timeout period.
+    - on_user_turn_idle: Emitted when the user has been idle for the timeout period.
 
     Example::
 
-        @controller.event_handler("on_user_idle")
-        async def on_user_idle(controller):
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
             # Handle user idle - send reminder, prompt, etc.
             ...
     """
@@ -68,7 +68,7 @@ class UserIdleController(BaseObject):
         self.user_idle_event = asyncio.Event()
         self.user_idle_task: Optional[asyncio.Task] = None
 
-        self._register_event_handler("on_user_idle", sync=True)
+        self._register_event_handler("on_user_turn_idle", sync=True)
 
     @property
     def task_manager(self) -> BaseTaskManager:
@@ -161,7 +161,7 @@ class UserIdleController(BaseObject):
         frames are received (UserSpeakingFrame or BotSpeakingFrame). Function calls
         are tracked via state since they only send start/end frames. If no activity
         is detected for the configured timeout period and no function call is in
-        progress, the on_user_idle event is triggered.
+        progress, the on_user_turn_idle event is triggered.
         """
         while True:
             try:
@@ -170,4 +170,4 @@ class UserIdleController(BaseObject):
             except asyncio.TimeoutError:
                 # Only trigger if conversation has started and no function call is in progress
                 if self._conversation_started and not self._function_call_in_progress:
-                    await self._call_event_handler("on_user_idle")
+                    await self._call_event_handler("on_user_turn_idle")
