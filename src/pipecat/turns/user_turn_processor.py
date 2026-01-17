@@ -39,7 +39,7 @@ class UserTurnProcessor(FrameProcessor):
     - on_user_turn_started: Emitted when a user turn starts.
     - on_user_turn_stopped: Emitted when a user turn stops.
     - on_user_turn_stop_timeout: Emitted if no stop strategy triggers before timeout.
-    - on_user_idle: Emitted when the user has been idle for the configured timeout.
+    - on_user_turn_idle: Emitted when the user has been idle for the configured timeout.
 
     Example::
 
@@ -55,8 +55,8 @@ class UserTurnProcessor(FrameProcessor):
         async def on_user_turn_stop_timeout(processor):
             ...
 
-        @processor.event_handler("on_user_idle")
-        async def on_user_idle(processor):
+        @processor.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(processor):
             ...
 
     """
@@ -76,7 +76,7 @@ class UserTurnProcessor(FrameProcessor):
             user_turn_stop_timeout: Timeout in seconds to automatically stop a user turn
                 if no activity is detected.
             user_idle_timeout: Optional timeout in seconds for detecting user idle state.
-                If set, the processor will emit an `on_user_idle` event when the user
+                If set, the processor will emit an `on_user_turn_idle` event when the user
                 has been idle (not speaking) for this duration. Set to None to disable
                 idle detection.
             **kwargs: Additional keyword arguments.
@@ -86,7 +86,7 @@ class UserTurnProcessor(FrameProcessor):
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
         self._register_event_handler("on_user_turn_stop_timeout")
-        self._register_event_handler("on_user_idle")
+        self._register_event_handler("on_user_turn_idle")
 
         self._user_turn_controller = UserTurnController(
             user_turn_strategies=user_turn_strategies or UserTurnStrategies(),
@@ -108,7 +108,9 @@ class UserTurnProcessor(FrameProcessor):
         self._user_idle_controller: Optional[UserIdleController] = None
         if user_idle_timeout:
             self._user_idle_controller = UserIdleController(user_idle_timeout=user_idle_timeout)
-            self._user_idle_controller.add_event_handler("on_user_idle", self._on_user_idle)
+            self._user_idle_controller.add_event_handler(
+                "on_user_turn_idle", self._on_user_turn_idle
+            )
 
     async def cleanup(self):
         """Clean up processor resources."""
@@ -208,5 +210,5 @@ class UserTurnProcessor(FrameProcessor):
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
 
-    async def _on_user_idle(self, controller):
-        await self._call_event_handler("on_user_idle")
+    async def _on_user_turn_idle(self, controller):
+        await self._call_event_handler("on_user_turn_idle")

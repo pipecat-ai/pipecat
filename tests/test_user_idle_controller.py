@@ -32,8 +32,8 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         idle_triggered = False
 
-        @controller.event_handler("on_user_idle")
-        async def on_user_idle(controller):
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
             nonlocal idle_triggered
             idle_triggered = True
 
@@ -54,8 +54,8 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         idle_triggered = False
 
-        @controller.event_handler("on_user_idle")
-        async def on_user_idle(controller):
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
             nonlocal idle_triggered
             idle_triggered = True
 
@@ -78,8 +78,8 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         idle_triggered = False
 
-        @controller.event_handler("on_user_idle")
-        async def on_user_idle(controller):
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
             nonlocal idle_triggered
             idle_triggered = True
 
@@ -102,8 +102,8 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         idle_triggered = False
 
-        @controller.event_handler("on_user_idle")
-        async def on_user_idle(controller):
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
             nonlocal idle_triggered
             idle_triggered = True
 
@@ -143,8 +143,8 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         idle_triggered = False
 
-        @controller.event_handler("on_user_idle")
-        async def on_user_idle(controller):
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
             nonlocal idle_triggered
             idle_triggered = True
 
@@ -162,8 +162,8 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         idle_triggered = False
 
-        @controller.event_handler("on_user_idle")
-        async def on_user_idle(controller):
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
             nonlocal idle_triggered
             idle_triggered = True
 
@@ -184,8 +184,8 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
 
         idle_count = 0
 
-        @controller.event_handler("on_user_idle")
-        async def on_user_idle(controller):
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
             nonlocal idle_count
             idle_count += 1
 
