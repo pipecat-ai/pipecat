@@ -341,6 +341,11 @@ class TextFrame(DataFrame):
 
     Parameters:
         text: The text content.
+        skip_tts: Whether this text should be skipped by the TTS service.
+        includes_inter_frame_spaces: Whether any necessary inter-frame (leading/trailing) spaces are already
+            included in the text.
+        append_to_context: Whether this text should be appended to the LLM context.
+            Defaults to True.
     """
 
     text: str
@@ -918,9 +923,12 @@ class TTSSpeakFrame(DataFrame):
 
     Parameters:
         text: The text to be spoken.
+        append_to_context: Whether this text should be appended to the LLM context.
+            Defaults to False.
     """
 
     text: str
+    append_to_context: bool = False
 
 
 @dataclass
