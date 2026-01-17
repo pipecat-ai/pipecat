@@ -17,6 +17,8 @@ from pipecat.frames.frames import (
     ErrorFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.stt_service import STTService
@@ -155,6 +157,7 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        logger.info(f"Sarvam STT initialized with SDK headers: {self._sdk_headers}")
 
     def language_to_service_language(self, language: Language) -> str:
         """Convert pipecat Language enum to Sarvam's language code.
@@ -411,16 +414,20 @@ class SarvamSTTService(STTService):
                 logger.debug(f"VAD Signal: {signal}, Occurred at: {timestamp}")
 
                 if signal == "START_SPEECH":
-                    await self.start_metrics()
+                    await self.start_processing_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
+                    await self.broadcast_frame(UserStartedSpeakingFrame)
+                    await self.push_interruption_task_frame_and_wait()
 
                 elif signal == "END_SPEECH":
+                    await self.start_ttfb_metrics()
                     logger.debug("User stopped speaking")
                     await self._call_event_handler("on_speech_stopped")
+                    await self.broadcast_frame(UserStoppedSpeakingFrame)
 
             elif message.type == "data":
-                await self.stop_ttfb_metrics()
+                await self.stop_all_metrics()
                 transcript = message.data.transcript
                 language_code = message.data.language_code
                 # Prefer language from message (auto-detected for translate models). Fallback to configured.
@@ -446,8 +453,6 @@ class SarvamSTTService(STTService):
                             result=(message.dict() if hasattr(message, "dict") else str(message)),
                         )
                     )
-
-                await self.stop_processing_metrics()
 
         except Exception as e:
             await self.push_error(error_msg=f"Failed to handle message: {e}", exception=e)
