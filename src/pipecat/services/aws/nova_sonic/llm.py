@@ -296,6 +296,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._user_text_buffer = ""
         self._assistant_text_buffer = ""
         self._completed_tool_calls = set()
+        self._audio_input_started = False
 
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
@@ -532,13 +533,29 @@ class AWSNovaSonicLLMService(LLMService):
         if system_instruction:
             await self._send_text_event(text=system_instruction, role=Role.SYSTEM)
 
-        # Send conversation history
-        for message in llm_connection_params["messages"]:
+        # Send conversation history (except for the last message if it's from the
+        # user, which we'll send as interactive after starting audio input)
+        messages = llm_connection_params["messages"]
+        last_user_message = None
+        for i, message in enumerate(messages):
             # logger.debug(f"Seeding conversation history with message: {message}")
-            await self._send_text_event(text=message.text, role=message.role)
+            is_last_message = i == len(messages) - 1
+            if is_last_message and message.role == Role.USER:
+                # Save for sending after audio input starts
+                last_user_message = message
+            else:
+                await self._send_text_event(text=message.text, role=message.role)
 
         # Start audio input
         await self._send_audio_input_start_event()
+
+        # Now send the last user message as interactive to trigger bot response
+        if last_user_message:
+            # logger.debug(
+            #     f"Sending last user message as interactive to trigger bot response: {last_user_message}")
+            await self._send_text_event(
+                text=last_user_message.text, role=last_user_message.role, interactive=True
+            )
 
         # Start receiving events
         self._receive_task = self.create_task(self._receive_task_handler())
@@ -602,6 +619,7 @@ class AWSNovaSonicLLMService(LLMService):
             self._user_text_buffer = ""
             self._assistant_text_buffer = ""
             self._completed_tool_calls = set()
+            self._audio_input_started = False
 
             logger.info("Finished disconnecting")
         except Exception as e:
@@ -727,8 +745,18 @@ class AWSNovaSonicLLMService(LLMService):
         }}
         '''
         await self._send_client_event(audio_content_start)
+        self._audio_input_started = True
 
-    async def _send_text_event(self, text: str, role: Role):
+    async def _send_text_event(self, text: str, role: Role, interactive: bool = False):
+        """Send a text event to the LLM.
+
+        Args:
+            text: The text content to send.
+            role: The role associated with the text (e.g., USER, ASSISTANT, SYSTEM).
+            interactive: Whether the content is interactive. Defaults to False.
+                False: conversation history or system instruction, sent prior to interactive audio
+                True: text input sent during (or at the start of) interactive audio
+        """
         if not self._stream or not self._prompt_name or not text:
             return
 
@@ -741,7 +769,7 @@ class AWSNovaSonicLLMService(LLMService):
                     "promptName": "{self._prompt_name}",
                     "contentName": "{content_name}",
                     "type": "TEXT",
-                    "interactive": true,
+                    "interactive": {json.dumps(interactive)},
                     "role": "{role.value}",
                     "textInputConfiguration": {{
                         "mediaType": "text/plain"
@@ -779,7 +807,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(text_content_end)
 
     async def _send_user_audio_event(self, audio: bytes):
-        if not self._stream:
+        if not self._stream or not self._audio_input_started:
             return
 
         blob = base64.b64encode(audio)
