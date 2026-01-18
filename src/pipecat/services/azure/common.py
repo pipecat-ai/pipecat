@@ -8,8 +8,6 @@
 
 from typing import Optional
 
-from loguru import logger
-
 from pipecat.transcriptions.language import Language, resolve_language
 
 
