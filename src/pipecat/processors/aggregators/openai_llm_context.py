@@ -34,7 +34,6 @@ from PIL import Image
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame, Frame
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 # JSON custom encoder to handle bytes arrays so that we can log contexts
 # with images to the console.

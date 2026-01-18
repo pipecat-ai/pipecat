@@ -10,7 +10,6 @@ This module provides a WebSocket-based connection to AWS Transcribe for real-tim
 speech-to-text transcription with support for multiple languages and audio formats.
 """
 
-import asyncio
 import json
 import os
 import random

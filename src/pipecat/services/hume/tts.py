@@ -16,7 +16,6 @@ from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InterruptionFrame,
     StartFrame,

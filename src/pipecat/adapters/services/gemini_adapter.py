@@ -9,7 +9,7 @@
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from loguru import logger
 from openai import NotGiven

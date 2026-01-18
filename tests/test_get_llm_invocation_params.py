@@ -43,7 +43,6 @@ For AWS Bedrock adapter:
 import unittest
 
 from google.genai.types import Content, Part
-from openai.types.chat import ChatCompletionMessage
 
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
@@ -51,7 +50,6 @@ from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
-    LLMSpecificMessage,
     LLMStandardMessage,
 )
 

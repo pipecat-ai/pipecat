@@ -15,7 +15,6 @@ import io
 from typing import AsyncGenerator
 
 import aiohttp
-from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame

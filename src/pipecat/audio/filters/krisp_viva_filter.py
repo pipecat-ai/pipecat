@@ -9,7 +9,6 @@
 This module provides an audio filter implementation using Krisp VIVA SDK.
 """
 
-import asyncio
 import os
 
 import numpy as np

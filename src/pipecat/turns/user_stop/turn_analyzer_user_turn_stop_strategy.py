@@ -10,7 +10,6 @@ import asyncio
 from typing import Optional
 
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
