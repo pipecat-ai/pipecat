@@ -89,7 +89,8 @@ class STTService(AIService):
         # STT TTFB tracking state
         self._vad_stop_secs: Optional[float] = None
         self._speech_end_time: Optional[float] = None
-        self._awaiting_stt_ttfb: bool = False
+        self._user_speaking: bool = False
+        self._last_transcription_time: Optional[float] = None
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -234,20 +235,21 @@ class STTService(AIService):
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream, calculating STT TTFB for TranscriptionFrames.
 
-        When a TranscriptionFrame is pushed after a VADUserStoppedSpeakingFrame,
-        calculates and reports the time from actual speech end to transcription.
+        Handles two cases:
+        1. TranscriptionFrame while user is speaking: store timestamp for later calculation
+        2. TranscriptionFrame after VAD stop: calculate and report TTFB immediately
 
         Args:
             frame: The frame to push.
             direction: The direction to push the frame.
         """
-        # Calculate STT TTFB when pushing a final TranscriptionFrame
-        if (
-            self._awaiting_stt_ttfb
-            and isinstance(frame, TranscriptionFrame)
-            and self._speech_end_time is not None
-        ):
-            await self._report_stt_ttfb()
+        if isinstance(frame, TranscriptionFrame):
+            if self._user_speaking:
+                # Store timestamp - we'll calculate TTFB when VAD stop arrives
+                self._last_transcription_time = time.time()
+            elif self._speech_end_time is not None:
+                # Calculate and report TTFB immediately
+                await self._report_stt_ttfb()
 
         await super().push_frame(frame, direction)
 
@@ -261,51 +263,55 @@ class STTService(AIService):
             self._vad_stop_secs = frame.vad_params.stop_secs
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        """Handle VAD user started speaking frame to reset TTFB tracking state.
+        """Handle VAD user started speaking frame to start tracking transcriptions.
 
-        If the user starts speaking again before we received the transcription
-        from the previous utterance, we reset the TTFB tracking state since
-        the previous measurement is now stale.
+        Resets TTFB tracking state for the new utterance.
 
         Args:
             frame: The VAD user started speaking frame.
         """
-        if self._awaiting_stt_ttfb:
-            self._awaiting_stt_ttfb = False
-            self._speech_end_time = None
+        self._user_speaking = True
+        self._speech_end_time = None
+        self._last_transcription_time = None
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        """Handle VAD user stopped speaking frame to start TTFB measurement.
+        """Handle VAD user stopped speaking frame.
 
-        Calculates the actual speech end time by subtracting the VAD stop delay
-        from the current time, and sets the flag to await the final transcription.
+        Calculates the actual speech end time, then calculates and reports TTFB
+        if a TranscriptionFrame arrived while user was speaking.
 
         Args:
             frame: The VAD user stopped speaking frame.
         """
+        self._user_speaking = False
+
         # Skip TTFB measurement if we don't have VAD params
         if self._vad_stop_secs is None:
             return
 
         # Calculate the actual speech end time (current time minus VAD stop delay)
         self._speech_end_time = time.time() - self._vad_stop_secs
-        self._awaiting_stt_ttfb = True
+
+        # Calculate and report TTFB for transcription that arrived while speaking
+        if self._last_transcription_time is not None:
+            ttfb = self._last_transcription_time - self._speech_end_time
+            await self._emit_stt_ttfb_metric(ttfb)
+            self._last_transcription_time = None
 
     async def _report_stt_ttfb(self):
-        """Calculate and report STT TTFB metrics.
-
-        Calculates the time from actual speech end to transcription receipt.
-        Reports TTFB for every TranscriptionFrame after VAD stop - the last
-        one reported (before the next utterance) represents the final TTFB.
-        Only reports non-negative values (negative would mean transcription
-        arrived before speech end, which we discard).
-        """
+        """Calculate and report STT TTFB metrics for TranscriptionFrames after VAD stop."""
         if self._speech_end_time is None:
             return
 
         ttfb = time.time() - self._speech_end_time
+        await self._emit_stt_ttfb_metric(ttfb)
 
-        # Only report non-negative TTFB values
+    async def _emit_stt_ttfb_metric(self, ttfb: float):
+        """Emit STT TTFB metric if value is non-negative.
+
+        Args:
+            ttfb: The TTFB value in seconds.
+        """
         if ttfb >= 0:
             logger.debug(f"{self} TTFB: {ttfb:.3f}s")
             if self.metrics_enabled:
@@ -315,8 +321,6 @@ class STTService(AIService):
                     value=ttfb,
                 )
                 await super().push_frame(MetricsFrame(data=[ttfb_data]))
-        else:
-            logger.debug(f"{self} TTFB: discarding negative value {ttfb:.3f}s")
 
 
 class SegmentedSTTService(STTService):
