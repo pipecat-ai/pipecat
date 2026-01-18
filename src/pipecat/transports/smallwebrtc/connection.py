@@ -23,7 +23,6 @@ from pipecat.utils.base_object import BaseObject
 
 try:
     from aiortc import (
-        MediaStreamTrack,
         RTCConfiguration,
         RTCIceServer,
         RTCPeerConnection,
