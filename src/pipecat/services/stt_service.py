@@ -7,6 +7,7 @@
 """Base classes for Speech-to-Text services with continuous and segmented processing."""
 
 import io
+import time
 import wave
 from abc import abstractmethod
 from typing import Any, AsyncGenerator, Dict, Mapping, Optional
@@ -17,12 +18,16 @@ from pipecat.frames.frames import (
     AudioRawFrame,
     ErrorFrame,
     Frame,
+    MetricsFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
+    TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
@@ -80,6 +85,11 @@ class STTService(AIService):
         self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
+
+        # STT TTFB tracking state
+        self._vad_stop_secs: Optional[float] = None
+        self._speech_end_time: Optional[float] = None
+        self._awaiting_stt_ttfb: bool = False
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -204,6 +214,15 @@ class STTService(AIService):
             await self.process_audio_frame(frame, direction)
             if self._audio_passthrough:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, SpeechControlParamsFrame):
+            await self._handle_speech_control_params(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._handle_vad_user_started_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._handle_vad_user_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, STTMuteFrame):
@@ -211,6 +230,93 @@ class STTService(AIService):
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
         else:
             await self.push_frame(frame, direction)
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream, calculating STT TTFB for TranscriptionFrames.
+
+        When a TranscriptionFrame is pushed after a VADUserStoppedSpeakingFrame,
+        calculates and reports the time from actual speech end to transcription.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        # Calculate STT TTFB when pushing a final TranscriptionFrame
+        if (
+            self._awaiting_stt_ttfb
+            and isinstance(frame, TranscriptionFrame)
+            and self._speech_end_time is not None
+        ):
+            await self._report_stt_ttfb()
+
+        await super().push_frame(frame, direction)
+
+    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
+        """Handle speech control parameters frame to extract VAD stop_secs.
+
+        Args:
+            frame: The speech control parameters frame.
+        """
+        if frame.vad_params is not None:
+            self._vad_stop_secs = frame.vad_params.stop_secs
+
+    async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
+        """Handle VAD user started speaking frame to reset TTFB tracking state.
+
+        If the user starts speaking again before we received the transcription
+        from the previous utterance, we reset the TTFB tracking state since
+        the previous measurement is now stale.
+
+        Args:
+            frame: The VAD user started speaking frame.
+        """
+        if self._awaiting_stt_ttfb:
+            self._awaiting_stt_ttfb = False
+            self._speech_end_time = None
+
+    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
+        """Handle VAD user stopped speaking frame to start TTFB measurement.
+
+        Calculates the actual speech end time by subtracting the VAD stop delay
+        from the current time, and sets the flag to await the final transcription.
+
+        Args:
+            frame: The VAD user stopped speaking frame.
+        """
+        # Skip TTFB measurement if we don't have VAD params
+        if self._vad_stop_secs is None:
+            return
+
+        # Calculate the actual speech end time (current time minus VAD stop delay)
+        self._speech_end_time = time.time() - self._vad_stop_secs
+        self._awaiting_stt_ttfb = True
+
+    async def _report_stt_ttfb(self):
+        """Calculate and report STT TTFB metrics.
+
+        Calculates the time from actual speech end to transcription receipt.
+        Reports TTFB for every TranscriptionFrame after VAD stop - the last
+        one reported (before the next utterance) represents the final TTFB.
+        Only reports non-negative values (negative would mean transcription
+        arrived before speech end, which we discard).
+        """
+        if self._speech_end_time is None:
+            return
+
+        ttfb = time.time() - self._speech_end_time
+
+        # Only report non-negative TTFB values
+        if ttfb >= 0:
+            logger.debug(f"{self} TTFB: {ttfb:.3f}s")
+            if self.metrics_enabled:
+                ttfb_data = TTFBMetricsData(
+                    processor=self.name,
+                    model=self.model_name,
+                    value=ttfb,
+                )
+                await super().push_frame(MetricsFrame(data=[ttfb_data]))
+        else:
+            logger.debug(f"{self} TTFB: discarding negative value {ttfb:.3f}s")
 
 
 class SegmentedSTTService(STTService):

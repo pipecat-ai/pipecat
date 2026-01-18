@@ -276,9 +276,8 @@ class DeepgramSTTService(STTService):
             # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
             await self._connection.finish()
 
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        await self.start_ttfb_metrics()
+    async def _start_metrics(self):
+        """Start processing metrics collection for this utterance."""
         await self.start_processing_metrics()
 
     async def _on_error(self, *args, **kwargs):
@@ -292,7 +291,7 @@ class DeepgramSTTService(STTService):
         await self._connect()
 
     async def _on_speech_started(self, *args, **kwargs):
-        await self.start_metrics()
+        await self._start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
@@ -320,7 +319,6 @@ class DeepgramSTTService(STTService):
             language = result.channel.alternatives[0].languages[0]
             language = Language(language)
         if len(transcript) > 0:
-            await self.stop_ttfb_metrics()
             if is_final:
                 await self.push_frame(
                     TranscriptionFrame(
@@ -356,7 +354,7 @@ class DeepgramSTTService(STTService):
 
         if isinstance(frame, VADUserStartedSpeakingFrame) and not self.vad_enabled:
             # Start metrics if Deepgram VAD is disabled & pipeline VAD has detected speech
-            await self.start_metrics()
+            await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             await self._connection.finalize()
