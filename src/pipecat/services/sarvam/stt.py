@@ -411,7 +411,7 @@ class SarvamSTTService(STTService):
                 logger.debug(f"VAD Signal: {signal}, Occurred at: {timestamp}")
 
                 if signal == "START_SPEECH":
-                    await self.start_metrics()
+                    await self._start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
 
@@ -420,7 +420,6 @@ class SarvamSTTService(STTService):
                     await self._call_event_handler("on_speech_stopped")
 
             elif message.type == "data":
-                await self.stop_ttfb_metrics()
                 transcript = message.data.transcript
                 language_code = message.data.language_code
                 # Prefer language from message (auto-detected for translate models). Fallback to configured.
@@ -482,7 +481,6 @@ class SarvamSTTService(STTService):
         }
         return mapping.get(language_code, Language.HI_IN)
 
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        await self.start_ttfb_metrics()
+    async def _start_metrics(self):
+        """Start processing metrics collection."""
         await self.start_processing_metrics()

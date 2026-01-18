@@ -207,9 +207,8 @@ class CartesiaSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def start_metrics(self):
+    async def _start_metrics(self):
         """Start performance metrics collection for transcription processing."""
-        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -222,7 +221,7 @@ class CartesiaSTTService(WebsocketSTTService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_metrics()
+            await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize command to flush the transcription session
             if self._websocket and self._websocket.state is State.OPEN:
@@ -342,7 +341,6 @@ class CartesiaSTTService(WebsocketSTTService):
                 pass
 
         if len(transcript) > 0:
-            await self.stop_ttfb_metrics()
             if is_final:
                 await self.push_frame(
                     TranscriptionFrame(
