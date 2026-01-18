@@ -17,3 +17,8 @@ with warnings.catch_warnings():
         DeprecationWarning,
         stacklevel=2,
     )
+
+__all__ = [
+    "AWSNovaSonicLLMService",
+    "Params",
+]
