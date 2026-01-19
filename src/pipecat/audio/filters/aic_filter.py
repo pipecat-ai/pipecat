@@ -18,7 +18,14 @@ import os
 from typing import List, Optional
 
 import numpy as np
-from aic_sdk import Model, ProcessorAsync, ProcessorConfig, ProcessorParameter, set_sdk_id
+from aic_sdk import (
+    Model,
+    ParameterFixedError,
+    ProcessorAsync,
+    ProcessorConfig,
+    ProcessorParameter,
+    set_sdk_id,
+)
 from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
@@ -156,61 +163,64 @@ class AICFilter(BaseAudioFilter):
         """
         self._sample_rate = sample_rate
 
+        # Load or download model
+        if self._model_path:
+            logger.debug(f"Loading AIC model from: {self._model_path}")
+            self._model = Model.from_file(self._model_path)
+        else:
+            logger.debug(f"Downloading AIC model: {self._model_id}")
+            os.makedirs(self._model_download_dir, exist_ok=True)
+            model_path = await Model.download_async(self._model_id, self._model_download_dir)
+            logger.debug(f"Model downloaded to: {model_path}")
+            self._model = Model.from_file(model_path)
+
+        # Get optimal frames for this sample rate
+        self._frames_per_block = self._model.get_optimal_num_frames(self._sample_rate)
+
+        # Allocate processing buffers now that we know the block size
+        self._in_f32 = np.zeros((1, self._frames_per_block), dtype=np.float32)
+        self._out_i16 = np.zeros(self._frames_per_block, dtype=np.int16)
+
+        # Create configuration
+        config = ProcessorConfig.optimal(
+            self._model,
+            sample_rate=self._sample_rate,
+        )
+
+        # Create async processor
         try:
-            # Load or download model
-            if self._model_path:
-                logger.debug(f"Loading AIC model from: {self._model_path}")
-                self._model = Model.from_file(self._model_path)
-            else:
-                logger.debug(f"Downloading AIC model: {self._model_id}")
-                os.makedirs(self._model_download_dir, exist_ok=True)
-                model_path = await Model.download_async(self._model_id, self._model_download_dir)
-                logger.debug(f"Model downloaded to: {model_path}")
-                self._model = Model.from_file(model_path)
-
-            # Get optimal frames for this sample rate
-            self._frames_per_block = self._model.get_optimal_num_frames(self._sample_rate)
-
-            # Allocate processing buffers now that we know the block size
-            self._in_f32 = np.zeros((1, self._frames_per_block), dtype=np.float32)
-            self._out_i16 = np.zeros(self._frames_per_block, dtype=np.int16)
-
-            # Create configuration
-            config = ProcessorConfig.optimal(
-                self._model,
-                sample_rate=self._sample_rate,
-            )
-
-            # Create async processor
             self._processor = ProcessorAsync(self._model, self._license_key, config)
+            self._aic_ready = True
+        except Exception as e:  # noqa: BLE001 - surfacing SDK initialization errors
+            logger.error(f"AIC model initialization failed: {e}")
+            self._aic_ready = False
 
-            # Get contexts for parameter control and VAD
-            self._processor_ctx = self._processor.get_processor_context()
-            self._vad_ctx = self._processor.get_vad_context()
+        # Get contexts for parameter control and VAD
+        self._processor_ctx = self._processor.get_processor_context()
+        self._vad_ctx = self._processor.get_vad_context()
 
+        try:
             # Apply initial parameters
             if self._enhancement_level is not None:
                 level = self._enhancement_level if self._enabled else 0.0
                 self._processor_ctx.set_parameter(ProcessorParameter.EnhancementLevel, level)
+
             if self._voice_gain is not None:
                 self._processor_ctx.set_parameter(ProcessorParameter.VoiceGain, self._voice_gain)
+        except ParameterFixedError as e:
+            logger.error(f"AIC parameter update failed: {e}")
 
-            self._aic_ready = True
-
-            # Log processor information
-            logger.debug(f"ai-coustics filter started:")
-            logger.debug(f"  Model ID: {self._model.get_id()}")
-            logger.debug(f"  Sample rate: {self._sample_rate} Hz")
-            logger.debug(f"  Frames per chunk: {self._frames_per_block}")
-            logger.debug(f"  Enhancement strength: {int((self._enhancement_level or 1.0) * 100)}%")
-            logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
-            logger.debug(
-                f"  Output delay: {self._processor_ctx.get_output_delay()} samples "
-                f"({self._processor_ctx.get_output_delay() / self._sample_rate * 1000:.2f}ms)"
-            )
-        except Exception as e:  # noqa: BLE001 - surfacing SDK initialization errors
-            logger.error(f"AIC model initialization failed: {e}")
-            self._aic_ready = False
+        # Log processor information
+        logger.debug(f"ai-coustics filter started:")
+        logger.debug(f"  Model ID: {self._model.get_id()}")
+        logger.debug(f"  Sample rate: {self._sample_rate} Hz")
+        logger.debug(f"  Frames per chunk: {self._frames_per_block}")
+        logger.debug(f"  Enhancement strength: {int((self._enhancement_level or 1.0) * 100)}%")
+        logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
+        logger.debug(
+            f"  Output delay: {self._processor_ctx.get_output_delay()} samples "
+            f"({self._processor_ctx.get_output_delay() / self._sample_rate * 1000:.2f}ms)"
+        )
 
     async def stop(self):
         """Clean up the AIC processor when stopping.
