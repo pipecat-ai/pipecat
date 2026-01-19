@@ -50,7 +50,6 @@ class AICFilter(BaseAudioFilter):
         model_id: Optional[str] = None,
         model_path: Optional[str] = None,
         model_download_dir: Optional[str] = None,
-        enhancement_level: Optional[float] = 1.0,
         voice_gain: Optional[float] = 1.0,
     ) -> None:
         """Initialize the AIC filter.
@@ -63,7 +62,6 @@ class AICFilter(BaseAudioFilter):
                 model_id is ignored and no download occurs.
             model_download_dir: Directory for downloading models. Defaults to
                 a cache directory in user's home folder.
-            enhancement_level: Optional overall enhancement strength (0.0..1.0).
             voice_gain: Optional linear gain applied to detected speech (0.1..4.0).
 
         Raises:
@@ -85,7 +83,6 @@ class AICFilter(BaseAudioFilter):
             "~/.cache/pipecat/aic-models"
         )
 
-        self._enhancement_level = enhancement_level
         self._voice_gain = voice_gain
 
         self._enabled = True
@@ -201,9 +198,9 @@ class AICFilter(BaseAudioFilter):
 
         try:
             # Apply initial parameters
-            if self._enhancement_level is not None:
-                level = self._enhancement_level if self._enabled else 0.0
-                self._processor_ctx.set_parameter(ProcessorParameter.EnhancementLevel, level)
+            self._processor_ctx.set_parameter(
+                ProcessorParameter.Bypass, 0.0 if self._enabled else 1.0
+            )
 
             if self._voice_gain is not None:
                 self._processor_ctx.set_parameter(ProcessorParameter.VoiceGain, self._voice_gain)
@@ -215,7 +212,6 @@ class AICFilter(BaseAudioFilter):
         logger.debug(f"  Model ID: {self._model.get_id()}")
         logger.debug(f"  Sample rate: {self._sample_rate} Hz")
         logger.debug(f"  Frames per chunk: {self._frames_per_block}")
-        logger.debug(f"  Enhancement strength: {int((self._enhancement_level or 1.0) * 100)}%")
         logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
         logger.debug(
             f"  Output delay: {self._processor_ctx.get_output_delay()} samples "
@@ -252,8 +248,9 @@ class AICFilter(BaseAudioFilter):
             self._enabled = frame.enable
             if self._processor_ctx is not None:
                 try:
-                    level = self._enhancement_level if self._enabled else 0.0
-                    self._processor_ctx.set_parameter(ProcessorParameter.EnhancementLevel, level)
+                    self._processor_ctx.set_parameter(
+                        ProcessorParameter.Bypass, 0.0 if self._enabled else 1.0
+                    )
                 except Exception as e:  # noqa: BLE001
                     logger.error(f"AIC set_parameter failed: {e}")
 
