@@ -50,7 +50,6 @@ class AICFilter(BaseAudioFilter):
         model_id: Optional[str] = None,
         model_path: Optional[str] = None,
         model_download_dir: Optional[str] = None,
-        voice_gain: Optional[float] = 1.0,
     ) -> None:
         """Initialize the AIC filter.
 
@@ -62,7 +61,6 @@ class AICFilter(BaseAudioFilter):
                 model_id is ignored and no download occurs.
             model_download_dir: Directory for downloading models. Defaults to
                 a cache directory in user's home folder.
-            voice_gain: Optional linear gain applied to detected speech (0.1..4.0).
 
         Raises:
             ValueError: If neither model_id nor model_path is provided.
@@ -82,8 +80,6 @@ class AICFilter(BaseAudioFilter):
         self._model_download_dir = model_download_dir or os.path.expanduser(
             "~/.cache/pipecat/aic-models"
         )
-
-        self._voice_gain = voice_gain
 
         self._enabled = True
         self._sample_rate = 0
@@ -203,14 +199,11 @@ class AICFilter(BaseAudioFilter):
         self._processor_ctx = self._processor.get_processor_context()
         self._vad_ctx = self._processor.get_vad_context()
 
+        # Apply initial parameters
         try:
-            # Apply initial parameters
             self._processor_ctx.set_parameter(
                 ProcessorParameter.Bypass, 0.0 if self._enabled else 1.0
             )
-
-            if self._voice_gain is not None:
-                self._processor_ctx.set_parameter(ProcessorParameter.VoiceGain, self._voice_gain)
         except ParameterFixedError as e:
             logger.error(f"AIC parameter update failed: {e}")
 
