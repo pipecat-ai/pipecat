@@ -90,7 +90,7 @@ class AzureBaseTTSService:
             emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
             language: Language for synthesis. Defaults to English (US).
             pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
-            rate: Speech rate multiplier. Defaults to "1.05".
+            rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
             role: Voice role for expression (e.g., "YoungAdultFemale").
             style: Speaking style (e.g., "cheerful", "sad", "excited").
             style_degree: Intensity of the speaking style (0.01 to 2.0).
@@ -100,7 +100,7 @@ class AzureBaseTTSService:
         emphasis: Optional[str] = None
         language: Optional[Language] = Language.EN_US
         pitch: Optional[str] = None
-        rate: Optional[str] = "1.05"
+        rate: Optional[str] = None
         role: Optional[str] = None
         style: Optional[str] = None
         style_degree: Optional[str] = None
@@ -185,7 +185,9 @@ class AzureBaseTTSService:
         if self._settings["volume"]:
             prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
-        ssml += f"<prosody {' '.join(prosody_attrs)}>"
+        # Only wrap in prosody tag if there are prosody attributes
+        if prosody_attrs:
+            ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
         if self._settings["emphasis"]:
             ssml += f"<emphasis level='{self._settings['emphasis']}'>"
@@ -195,7 +197,8 @@ class AzureBaseTTSService:
         if self._settings["emphasis"]:
             ssml += "</emphasis>"
 
-        ssml += "</prosody>"
+        if prosody_attrs:
+            ssml += "</prosody>"
 
         if self._settings["style"]:
             ssml += "</mstts:express-as>"
