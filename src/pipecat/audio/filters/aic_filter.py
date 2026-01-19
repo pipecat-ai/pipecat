@@ -121,6 +121,7 @@ class AICFilter(BaseAudioFilter):
         self,
         *,
         speech_hold_duration: Optional[float] = None,
+        minimum_speech_duration: Optional[float] = None,
         sensitivity: Optional[float] = None,
     ):
         """Return an analyzer that will lazily instantiate the AIC VAD when ready.
@@ -129,6 +130,9 @@ class AICFilter(BaseAudioFilter):
           - speech_hold_duration:
               How long VAD continues detecting after speech ends (in seconds).
               Range: 0.0 .. 20x model window length, Default (SDK): 0.05s
+          - minimum_speech_duration:
+              Minimum duration of speech required before VAD reports speech detected
+              (in seconds). Range: 0.0 .. 20x model window length, Default (SDK): 0.0s
           - sensitivity:
               Energy threshold sensitivity. Energy threshold = 10 ** (-sensitivity).
               Range: 1.0 .. 15.0, Default (SDK): 6.0
@@ -136,6 +140,8 @@ class AICFilter(BaseAudioFilter):
         Args:
             speech_hold_duration: Optional speech hold duration to configure on the VAD.
                 If None, SDK default (0.05s) is used.
+            minimum_speech_duration: Optional minimum speech duration before VAD reports
+                speech detected. If None, SDK default (0.0s) is used.
             sensitivity: Optional sensitivity (energy threshold) to configure on the VAD.
                 Range: 1.0 .. 15.0. If None, SDK default (6.0) is used.
 
@@ -146,6 +152,7 @@ class AICFilter(BaseAudioFilter):
         return AICVADAnalyzer(
             vad_context_factory=lambda: self.get_vad_context(),
             speech_hold_duration=speech_hold_duration,
+            minimum_speech_duration=minimum_speech_duration,
             sensitivity=sensitivity,
         )
 

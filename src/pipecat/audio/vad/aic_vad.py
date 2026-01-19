@@ -10,6 +10,7 @@ Classes:
 
 from typing import Any, Callable, Optional
 
+from aic_sdk import VadParameter
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
@@ -29,6 +30,10 @@ class AICVADAnalyzer(VADAnalyzer):
           no longer contains speech (in seconds).
           Range: 0.0 .. 20x model window length
           Default (SDK): 0.05s (50ms)
+      - minimum_speech_duration:
+          Minimum duration of speech required before VAD reports speech detected (in seconds).
+          Range: 0.0 .. 20x model window length
+          Default (SDK): 0.0s
       - sensitivity:
           Controls the energy threshold sensitivity. Higher values make the detector
           less sensitive (require more energy to count as speech).
@@ -37,7 +42,7 @@ class AICVADAnalyzer(VADAnalyzer):
           Default (SDK): 6.0
 
     .. note::
-        This class requires aic-sdk >= 2.0.0 (uses 'aic_sdk' module).
+        This class requires aic-sdk ~= 2.0.0 (uses 'aic_sdk' module).
     """
 
     def __init__(
@@ -45,6 +50,7 @@ class AICVADAnalyzer(VADAnalyzer):
         *,
         vad_context_factory: Optional[Callable[[], Any]] = None,
         speech_hold_duration: Optional[float] = None,
+        minimum_speech_duration: Optional[float] = None,
         sensitivity: Optional[float] = None,
     ):
         """Create an AIC VAD analyzer.
@@ -58,6 +64,11 @@ class AICVADAnalyzer(VADAnalyzer):
                 Optional override for AIC VAD speech hold duration (in seconds).
                 Range: 0.0 .. 20x model window length.
                 If None, the SDK default (0.05s) is used.
+            minimum_speech_duration:
+                Optional override for minimum speech duration before VAD reports
+                speech detected (in seconds).
+                Range: 0.0 .. 20x model window length.
+                If None, the SDK default (0.0s) is used.
             sensitivity:
                 Optional override for AIC VAD sensitivity (energy threshold).
                 Range: 1.0 .. 15.0. Energy threshold = 10 ** (-sensitivity).
@@ -66,9 +77,11 @@ class AICVADAnalyzer(VADAnalyzer):
         # Use fixed VAD parameters for AIC: no user override
         fixed_params = VADParams(confidence=0.5, start_secs=0.0, stop_secs=0.0, min_volume=0.0)
         super().__init__(sample_rate=None, params=fixed_params)
+
         self._vad_context_factory = vad_context_factory
         self._vad_ctx: Optional[Any] = None
         self._pending_speech_hold_duration: Optional[float] = speech_hold_duration
+        self._pending_minimum_speech_duration: Optional[float] = minimum_speech_duration
         self._pending_sensitivity: Optional[float] = sensitivity
 
     def bind_vad_context_factory(self, vad_context_factory: Callable[[], Any]):
@@ -78,19 +91,20 @@ class AICVADAnalyzer(VADAnalyzer):
 
     def _apply_vad_params(self):
         """Apply optional AIC VAD parameters if available."""
-        from aic_sdk import VadParameter
-
         if self._vad_ctx is None or VadParameter is None:
             return
+
         try:
             if self._pending_speech_hold_duration is not None:
                 self._vad_ctx.set_parameter(
-                    VadParameter.SpeechHoldDuration, float(self._pending_speech_hold_duration)
+                    VadParameter.SpeechHoldDuration, self._pending_speech_hold_duration
+                )
+            if self._pending_minimum_speech_duration is not None:
+                self._vad_ctx.set_parameter(
+                    VadParameter.MinimumSpeechDuration, self._pending_minimum_speech_duration
                 )
             if self._pending_sensitivity is not None:
-                self._vad_ctx.set_parameter(
-                    VadParameter.Sensitivity, float(self._pending_sensitivity)
-                )
+                self._vad_ctx.set_parameter(VadParameter.Sensitivity, self._pending_sensitivity)
         except Exception as e:  # noqa: BLE001
             logger.debug(f"AIC VAD parameter application deferred/failed: {e}")
 

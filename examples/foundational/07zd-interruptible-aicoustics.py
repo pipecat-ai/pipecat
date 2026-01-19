@@ -62,7 +62,9 @@ transport_params = {
         lambda aic: DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(speech_hold_duration=0.05, sensitivity=6.0),
+            vad_analyzer=aic.create_vad_analyzer(
+                speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
+            ),
             audio_in_filter=aic,
         )
     )(_create_aic_filter()),
@@ -70,7 +72,9 @@ transport_params = {
         lambda aic: FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(speech_hold_duration=0.05, sensitivity=6.0),
+            vad_analyzer=aic.create_vad_analyzer(
+                speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
+            ),
             audio_in_filter=aic,
         )
     )(_create_aic_filter()),
@@ -78,7 +82,9 @@ transport_params = {
         lambda aic: TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(speech_hold_duration=0.05, sensitivity=6.0),
+            vad_analyzer=aic.create_vad_analyzer(
+                speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
+            ),
             audio_in_filter=aic,
         )
     )(_create_aic_filter()),
