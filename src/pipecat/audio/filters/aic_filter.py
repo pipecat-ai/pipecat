@@ -156,22 +156,14 @@ class AICFilter(BaseAudioFilter):
                 logger.debug(f"Model downloaded to: {model_path}")
                 self._model = Model.from_file(model_path)
 
-            # Create async processor
-            self._processor = ProcessorAsync(self._model, self._license_key or "")
-
-            # Get optimal frames for this sample rate
-            self._frames_per_block = self._model.get_optimal_num_frames(self._sample_rate)
-
             # Create configuration
-            config = ProcessorConfig(
+            config = ProcessorConfig.optimal(
+                self._model,
                 sample_rate=self._sample_rate,
-                num_channels=1,
-                num_frames=self._frames_per_block,
-                allow_variable_frames=False,
             )
 
-            # Initialize processor
-            await self._processor.initialize_async(config)
+            # Create async processor
+            self._processor = ProcessorAsync(self._model, self._license_key or "", config)
 
             # Get contexts for parameter control and VAD
             self._processor_ctx = self._processor.get_processor_context()
