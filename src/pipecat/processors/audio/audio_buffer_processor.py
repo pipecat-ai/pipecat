@@ -14,14 +14,7 @@ configurations and event-driven processing.
 import time
 from typing import Optional
 
-from loguru import logger
-
-from pipecat.audio.utils import (
-    create_stream_resampler,
-    interleave_stereo_audio,
-    mix_audio,
-    ulaw_to_pcm,
-)
+from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -34,8 +27,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.audio.audio_buffer_input_processor import AudioBufferInputProcessor
-from pipecat.processors.audio.audio_buffer_output_processor import AudioBufferOutputProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -373,124 +364,3 @@ class AudioBufferProcessor(FrameProcessor):
         num_bytes = int(quiet_time * self._sample_rate) * 2
         silence = b"\x00" * num_bytes
         return silence
-
-
-class AudioBuffer:
-    """Factory for creating and managing split audio buffer processors.
-
-    Provides unified access to input and output audio buffer processors with the ability
-    to record audio separately for better pipeline efficiency.
-
-    Example:
-        ```python
-        # Create split audio buffers
-        audio_buffer = AudioBuffer(sample_rate=16000, buffer_size=24000)
-
-        # Create synchronizer for merged audio (outside pipeline)
-        audio_synchronizer = AudioSynchronizer(sample_rate=16000, buffer_size=24000)
-        audio_synchronizer.register_processors(
-            audio_buffer.input(),
-            audio_buffer.output()
-        )
-
-        pipeline = Pipeline([
-            transport.input(),
-            stt_mute_filter,
-            audio_buffer.input(),  # Only processes InputAudioRawFrame
-            stt,  # audio_passthrough=False
-            # ... rest of pipeline ...
-            tts,
-            audio_buffer.output(),  # Only processes OutputAudioRawFrame
-            transport.output(),
-        ])
-
-        # Register handler for merged audio
-        @audio_synchronizer.event_handler("on_merged_audio")
-        async def handle_merged_audio(synchronizer, pcm, sample_rate, num_channels):
-            # Process merged audio
-            pass
-        ```
-    """
-
-    def __init__(
-        self,
-        *,
-        sample_rate: Optional[int] = None,
-        buffer_size: int = 0,
-        enable_turn_audio: bool = False,
-        max_recording_bytes: int = 0,
-    ):
-        """Initialize factory with shared configuration.
-
-        Args:
-            sample_rate: Desired output sample rate. If None, uses source rate
-            buffer_size: Size of buffer before triggering events. 0 for no buffering
-            enable_turn_audio: Whether turn audio event handlers should be triggered
-            max_recording_bytes: Maximum total bytes to record per processor. 0 for unlimited
-        """
-        self._sample_rate = sample_rate
-        self._buffer_size = buffer_size
-        self._enable_turn_audio = enable_turn_audio
-        self._max_recording_bytes = max_recording_bytes
-        self._input_processor = None
-        self._output_processor = None
-
-    def input(self, **kwargs) -> AudioBufferInputProcessor:
-        """Get the input audio buffer processor.
-
-        Args:
-            **kwargs: Additional arguments specific to AudioBufferInputProcessor
-
-        Returns:
-            AudioBufferInputProcessor instance
-        """
-        if self._input_processor is None:
-            self._input_processor = AudioBufferInputProcessor(
-                sample_rate=self._sample_rate,
-                buffer_size=self._buffer_size,
-                enable_turn_audio=self._enable_turn_audio,
-                max_recording_bytes=self._max_recording_bytes,
-                **kwargs,
-            )
-        else:
-            logger.debug(f"AudioBuffer: Returning existing AudioBufferInputProcessor")
-        return self._input_processor
-
-    def output(self, **kwargs) -> AudioBufferOutputProcessor:
-        """Get the output audio buffer processor.
-
-        Args:
-            **kwargs: Additional arguments specific to AudioBufferOutputProcessor
-
-        Returns:
-            AudioBufferOutputProcessor instance
-        """
-        if self._output_processor is None:
-            self._output_processor = AudioBufferOutputProcessor(
-                sample_rate=self._sample_rate,
-                buffer_size=self._buffer_size,
-                enable_turn_audio=self._enable_turn_audio,
-                max_recording_bytes=self._max_recording_bytes,
-                **kwargs,
-            )
-        else:
-            logger.debug(f"AudioBuffer: Returning existing AudioBufferOutputProcessor")
-        return self._output_processor
-
-    async def start_recording(self):
-        """Start recording on both input and output processors."""
-        if self._input_processor:
-            await self._input_processor.start_recording()
-        else:
-            logger.warning(f"AudioBuffer: No input processor created yet!")
-        if self._output_processor:
-            await self._output_processor.start_recording()
-        else:
-            logger.warning(f"AudioBuffer: No output processor created yet!")
-
-    async def stop_recording(self):
-        """Stop recording on both input and output processors."""
-        if self._input_processor:
-            await self._input_processor.stop_recording()
-        if self._output_processor:
-            await self._output_processor.stop_recording()

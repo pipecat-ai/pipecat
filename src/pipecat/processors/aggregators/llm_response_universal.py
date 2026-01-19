@@ -16,7 +16,7 @@ import json
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Set, Type
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Type
 
 from loguru import logger
 
@@ -102,9 +102,12 @@ class LLMAssistantAggregatorParams:
             in text frames by adding spaces between tokens. This parameter is
             ignored when used with the newer LLMAssistantAggregator, which
             handles word spacing automatically.
+        correct_aggregation_callback: Optional callback to correct corrupted
+            TTS text before it's added to the conversation context.
     """
 
     expect_stripped_words: bool = True
+    correct_aggregation_callback: Optional[Callable[[str], str]] = None
 
 
 @dataclass
@@ -776,10 +779,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         else:
             await self.push_frame(frame, direction)
 
-    async def push_aggregation(self):
+    async def push_aggregation(self) -> str:
         """Push the current assistant aggregation with timestamp."""
         if not self._aggregation:
-            return
+            return ""
 
         aggregation = self.aggregation_string()
         await self.reset()
