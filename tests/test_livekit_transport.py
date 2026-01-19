@@ -7,12 +7,12 @@
 """Tests for LiveKit transport video stream handling.
 
 Regression tests for issue #3116: Memory leak when video_in_enabled=False
-but video tracks are subscribed.
+but video tracks are subscribed. The fix ensures video stream processing
+only starts when there is a consumer for the frames.
 """
 
-import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from livekit import rtc
 
@@ -23,13 +23,19 @@ from pipecat.transports.livekit.transport import (
 )
 
 
-class TestLiveKitTransportClient(unittest.IsolatedAsyncioTestCase):
-    """Tests for LiveKitTransportClient video stream handling."""
+class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
+    """Regression tests for video queue memory leak (#3116).
+
+    The bug: When video_in_enabled=False, subscribing to a video track would
+    start a producer that fills _video_queue, but no consumer would drain it,
+    causing unbounded memory growth (~3GB/min).
+
+    The fix: Only start video stream processing when video_in_enabled=True.
+    """
 
     def _create_client(self, video_in_enabled: bool) -> LiveKitTransportClient:
-        """Create a LiveKitTransportClient with the specified video_in_enabled setting."""
+        """Create a client with the specified video input setting."""
         params = LiveKitParams(video_in_enabled=video_in_enabled)
-
         callbacks = LiveKitCallbacks(
             on_connected=AsyncMock(),
             on_disconnected=AsyncMock(),
@@ -43,7 +49,6 @@ class TestLiveKitTransportClient(unittest.IsolatedAsyncioTestCase):
             on_data_received=AsyncMock(),
             on_first_participant_joined=AsyncMock(),
         )
-
         client = LiveKitTransportClient(
             url="wss://test.livekit.cloud",
             token="test-token",
@@ -52,81 +57,65 @@ class TestLiveKitTransportClient(unittest.IsolatedAsyncioTestCase):
             callbacks=callbacks,
             transport_name="test-transport",
         )
-
-        # Mock the task manager
         client._task_manager = MagicMock()
-        client._task_manager.create_task = MagicMock()
-
         return client
 
-    def _create_mock_video_track(self) -> tuple:
-        """Create mock video track, publication, and participant."""
-        mock_track = MagicMock()
-        mock_track.kind = rtc.TrackKind.KIND_VIDEO
-        mock_track.sid = "test-track-sid"
+    def _create_mock_video_track(self):
+        """Create a mock video track subscription event."""
+        track = MagicMock()
+        track.kind = rtc.TrackKind.KIND_VIDEO
+        track.sid = "video-track-123"
+        publication = MagicMock()
+        participant = MagicMock()
+        participant.sid = "participant-456"
+        return track, publication, participant
 
-        mock_publication = MagicMock()
+    async def test_disabled_video_input_does_not_start_queue_producer(self):
+        """When video input is disabled, no producer should fill the queue.
 
-        mock_participant = MagicMock()
-        mock_participant.sid = "test-participant-sid"
-
-        return mock_track, mock_publication, mock_participant
-
-    def _was_video_stream_task_created(self, client: LiveKitTransportClient) -> bool:
-        """Check if _process_video_stream task was created."""
-        for call in client._task_manager.create_task.call_args_list:
-            task_name = call[0][1] if len(call[0]) > 1 else call[1].get("name", "")
-            if "_process_video_stream" in task_name:
-                return True
-        return False
-
-    async def test_video_stream_not_started_when_video_in_disabled(self):
-        """Test that _process_video_stream is NOT started when video_in_enabled=False.
-
-        This prevents unbounded queue growth when there is no consumer for video frames.
-        Regression test for issue #3116.
+        This prevents the memory leak where frames accumulate with no consumer.
         """
         client = self._create_client(video_in_enabled=False)
-        mock_track, mock_publication, mock_participant = self._create_mock_video_track()
+        track, publication, participant = self._create_mock_video_track()
 
-        # Call the track subscribed handler
-        await client._async_on_track_subscribed(mock_track, mock_publication, mock_participant)
+        await client._async_on_track_subscribed(track, publication, participant)
 
-        # Verify that create_task was NOT called for video stream processing
-        self.assertFalse(
-            self._was_video_stream_task_created(client),
-            "Video stream processing should NOT be started when video_in_enabled=False",
-        )
+        # Verify no video processing task was started
+        task_names = [
+            call[0][1] for call in client._task_manager.create_task.call_args_list
+        ]
+        video_tasks = [name for name in task_names if "video" in name.lower()]
+        self.assertEqual(video_tasks, [], "No video processing task should be started")
 
-        # Verify that the callback was still called
-        client._callbacks.on_video_track_subscribed.assert_called_once_with(mock_participant.sid)
+        # Queue should remain empty
+        self.assertEqual(client._video_queue.qsize(), 0)
 
-        # Verify that the track was still added to _video_tracks
-        self.assertIn(mock_participant.sid, client._video_tracks)
+        # Track metadata should still be recorded
+        self.assertIn(participant.sid, client._video_tracks)
 
-    async def test_video_stream_started_when_video_in_enabled(self):
-        """Test that _process_video_stream IS started when video_in_enabled=True."""
-        from unittest.mock import patch
+        # Callback should still fire for user code
+        client._callbacks.on_video_track_subscribed.assert_called_once()
 
+    async def test_enabled_video_input_starts_queue_producer(self):
+        """When video input is enabled, the producer should start."""
         client = self._create_client(video_in_enabled=True)
-        mock_track, mock_publication, mock_participant = self._create_mock_video_track()
+        track, publication, participant = self._create_mock_video_track()
 
-        # Mock rtc.VideoStream to avoid needing a real LiveKit connection
-        with patch("pipecat.transports.livekit.transport.rtc.VideoStream"):
-            # Call the track subscribed handler
-            await client._async_on_track_subscribed(mock_track, mock_publication, mock_participant)
+        with patch.object(rtc, "VideoStream"):
+            await client._async_on_track_subscribed(track, publication, participant)
 
-        # Verify that create_task WAS called for video stream processing
-        self.assertTrue(
-            self._was_video_stream_task_created(client),
-            "Video stream processing SHOULD be started when video_in_enabled=True",
-        )
+        # Verify video processing task was started
+        task_names = [
+            call[0][1] for call in client._task_manager.create_task.call_args_list
+        ]
+        video_tasks = [name for name in task_names if "video" in name.lower()]
+        self.assertEqual(len(video_tasks), 1, "Video processing task should be started")
 
-        # Verify that the callback was called
-        client._callbacks.on_video_track_subscribed.assert_called_once_with(mock_participant.sid)
+        # Track metadata should be recorded
+        self.assertIn(participant.sid, client._video_tracks)
 
-        # Verify that the track was added to _video_tracks
-        self.assertIn(mock_participant.sid, client._video_tracks)
+        # Callback should fire
+        client._callbacks.on_video_track_subscribed.assert_called_once()
 
 
 if __name__ == "__main__":
