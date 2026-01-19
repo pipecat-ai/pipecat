@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     AudioRawFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     MetricsFrame,
     SpeechControlParamsFrame,
     StartFrame,
@@ -229,6 +230,9 @@ class STTService(AIService):
         elif isinstance(frame, STTMuteFrame):
             self._muted = frame.mute
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
+        elif isinstance(frame, InterruptionFrame):
+            self._reset_stt_ttfb_state()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -262,17 +266,30 @@ class STTService(AIService):
         if frame.vad_params is not None:
             self._vad_stop_secs = frame.vad_params.stop_secs
 
+    def _reset_stt_ttfb_state(self):
+        """Reset STT TTFB measurement state.
+
+        Called when starting a new utterance or on interruption to ensure
+        we don't use stale state for TTFB calculations. This specifically guards
+        against the case where a TranscriptionFrame is received without corresponding
+        VADUserStartedSpeakingFrame and VADUserStoppedSpeakingFrame frames.
+
+        Note: Does not reset _user_speaking since InterruptionFrame can arrive
+        while user is still speaking.
+        """
+        self._speech_end_time = None
+        self._last_transcription_time = None
+
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle VAD user started speaking frame to start tracking transcriptions.
 
-        Resets TTFB tracking state for the new utterance.
+        Resets TTFB tracking state and marks user as speaking.
 
         Args:
             frame: The VAD user started speaking frame.
         """
+        self._reset_stt_ttfb_state()
         self._user_speaking = True
-        self._speech_end_time = None
-        self._last_transcription_time = None
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle VAD user stopped speaking frame.
