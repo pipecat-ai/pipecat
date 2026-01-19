@@ -6,7 +6,7 @@
 
 """ai-coustics AIC SDK audio filter for Pipecat.
 
-This module provides audio filter implementations using ai-coustics' AIC SDK to
+This module provides an audio filter implementation using ai-coustics' AIC SDK to
 enhance audio streams in real time. It mirrors the structure of other filters like
 the Koala filter and integrates with Pipecat's input transport pipeline.
 
