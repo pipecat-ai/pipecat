@@ -12,7 +12,7 @@ import wave
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.filters.aic_filter import AICFilterV2
+from pipecat.audio.filters.aic_filter import AICFilter
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -45,10 +45,10 @@ audiobuffer = AudioBufferProcessor(
 )
 
 
-def _create_aic_filter() -> AICFilterV2:
+def _create_aic_filter() -> AICFilter:
     license_key = os.getenv("AICOUSTICS_LICENSE_KEY", "")
 
-    return AICFilterV2(
+    return AICFilter(
         license_key=license_key,
         model_id="sparrow-xxs-48khz",
         enhancement_level=0.5,
