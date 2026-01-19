@@ -81,9 +81,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
         await client._async_on_track_subscribed(track, publication, participant)
 
         # Verify no video processing task was started
-        task_names = [
-            call[0][1] for call in client._task_manager.create_task.call_args_list
-        ]
+        task_names = [call[0][1] for call in client._task_manager.create_task.call_args_list]
         video_tasks = [name for name in task_names if "video" in name.lower()]
         self.assertEqual(video_tasks, [], "No video processing task should be started")
 
@@ -105,9 +103,7 @@ class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
             await client._async_on_track_subscribed(track, publication, participant)
 
         # Verify video processing task was started
-        task_names = [
-            call[0][1] for call in client._task_manager.create_task.call_args_list
-        ]
+        task_names = [call[0][1] for call in client._task_manager.create_task.call_args_list]
         video_tasks = [name for name in task_names if "video" in name.lower()]
         self.assertEqual(len(video_tasks), 1, "Video processing task should be started")
 
