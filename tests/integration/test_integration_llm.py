@@ -298,5 +298,3 @@ async def test_mock_llm_empty_response():
     # Verify no text frames were generated
     text_frames = [f for f in received_frames if isinstance(f, LLMTextFrame)]
     assert len(text_frames) == 0
-
-

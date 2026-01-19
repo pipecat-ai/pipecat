@@ -107,7 +107,10 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
     - The bot is interrupted (InterruptionFrame)
     - The pipeline ends (EndFrame, CancelFrame)
     """
-    def __init__(self, *, process_thoughts: bool = False, correct_aggregation_callback=None, **kwargs):
+
+    def __init__(
+        self, *, process_thoughts: bool = False, correct_aggregation_callback=None, **kwargs
+    ):
         """Initialize processor with aggregation state.
 
         Args:
@@ -124,7 +127,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         self._current_thought_parts: List[TextPartForConcatenation] = []
         self._thought_start_time: Optional[str] = None
         self._thought_active = False
-        
+
         self._correct_aggregation_callback = correct_aggregation_callback
 
     async def _emit_aggregated_assistant_text(self):
@@ -135,14 +138,14 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """
         if self._current_assistant_text_parts and self._assistant_text_start_time:
             content = concatenate_aggregated_text(self._current_assistant_text_parts)
-            
+
             # Apply correction if callback is provided
             if content and self._correct_aggregation_callback:
                 try:
                     content = self._correct_aggregation_callback(content)
                 except Exception as e:
                     logger.error(f"Error in transcript correction callback: {e}")
-            
+
             if content:
                 logger.trace(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(
@@ -291,7 +294,10 @@ class TranscriptProcessor:
         `TranscriptProcessor` is deprecated and will be removed in a future version.
         Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.
     """
-    def __init__(self, *, process_thoughts: bool = False, assistant_correct_aggregation_callback=None):
+
+    def __init__(
+        self, *, process_thoughts: bool = False, assistant_correct_aggregation_callback=None
+    ):
         """Initialize factory.
 
         Args:
@@ -347,7 +353,9 @@ class TranscriptProcessor:
         if self._assistant_processor is None:
             # Pass the correction callback to the assistant processor
             self._assistant_processor = AssistantTranscriptProcessor(
-                process_thoughts=self._process_thoughts, correct_aggregation_callback=self._assistant_correct_aggregation_callback, **kwargs
+                process_thoughts=self._process_thoughts,
+                correct_aggregation_callback=self._assistant_correct_aggregation_callback,
+                **kwargs,
             )
             # Apply any registered event handlers
             for event_name, handler in self._event_handlers.items():

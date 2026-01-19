@@ -791,9 +791,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 except Exception as e:
                     logger.error(f"Error in aggregation correction callback: {e}")
 
-            logger.debug(
-                f"{self} push_aggregation called - self._aggregation = {aggregation}"
-            )
+            logger.debug(f"{self} push_aggregation called - self._aggregation = {aggregation}")
 
             self._context.add_message({"role": "assistant", "content": aggregation})
 

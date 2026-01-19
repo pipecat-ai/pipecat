@@ -19,7 +19,7 @@ import os
 
 import pytest
 import pytest_asyncio
-from pipecat.tests import MockLLMService, run_test
+from loguru import logger
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -36,9 +36,9 @@ from pipecat.processors.aggregators.llm_response_universal import LLMContextAggr
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.elevenlabs.elevenlabs_cached_tts import ElevenLabsCachedTTSService
 from pipecat.services.elevenlabs.tts_cache_warmer import ElevenLabsCacheWarmer
+from pipecat.tests import MockLLMService, run_test
 from pipecat.tests.utils import QueuedFrameProcessor
 
-from loguru import logger
 logger.remove()
 logger.add(lambda msg: print(msg, end=""), level="TRACE")
 
@@ -80,7 +80,7 @@ async def run_pipeline_collect_frames(pipeline, frames_to_send):
         await asyncio.sleep(0.05)
         for frame in frames_to_send:
             await task.queue_frame(frame)
-            
+
         # Lets wait for some time before pushing EndFrame
         await asyncio.sleep(10)
         await task.queue_frame(EndFrame())
