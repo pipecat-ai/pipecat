@@ -57,7 +57,7 @@ class DograhSTTService(STTService, WebsocketService):
         base_url: str = "wss://services.dograh.com",
         ws_path: str = "/api/v1/stt/stream",
         model: str = "default",
-        language: Language = Language.EN,
+        language: str = "multi",
         sample_rate: Optional[int] = None,
         interim_results: bool = True,
         vad_events: bool = False,
@@ -71,7 +71,7 @@ class DograhSTTService(STTService, WebsocketService):
             ws_path: WebSocket path for STT streaming. Defaults to "/api/v1/stt/stream".
             model: STT model to use. Options include "default", "fast", "accurate".
                    The actual model used is determined by Dograh backend configuration.
-            language: Language for speech recognition. Defaults to English.
+            language: Language for speech recognition. Defaults to multi.
             sample_rate: Audio sample rate in Hz. Defaults to None.
             interim_results: Whether to receive interim transcription results.
             vad_events: Whether to receive voice activity detection events.
@@ -144,7 +144,7 @@ class DograhSTTService(STTService, WebsocketService):
             config_msg = {
                 "type": "config",
                 "model": self._model,
-                "language": self._language.value,
+                "language": self._language,
                 "sample_rate": self.sample_rate,
                 "interim_results": self._interim_results,
                 "vad_events": self._vad_events,
