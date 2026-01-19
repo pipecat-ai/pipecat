@@ -18,7 +18,7 @@ import os
 from typing import List, Optional
 
 import numpy as np
-from aic_sdk import Model, ProcessorAsync, ProcessorConfig, ProcessorParameter
+from aic_sdk import Model, ProcessorAsync, ProcessorConfig, ProcessorParameter, set_sdk_id
 from loguru import logger
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
@@ -62,6 +62,9 @@ class AICFilter(BaseAudioFilter):
         Raises:
             ValueError: If neither model_id nor model_path is provided.
         """
+        # Set SDK ID for telemetry identification (6 = pipecat)
+        set_sdk_id(6)
+
         if model_id is None and model_path is None:
             raise ValueError(
                 "Either 'model_id' or 'model_path' must be provided. "
