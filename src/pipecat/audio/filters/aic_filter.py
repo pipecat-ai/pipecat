@@ -81,7 +81,7 @@ class AICFilter(BaseAudioFilter):
             "~/.cache/pipecat/aic-models"
         )
 
-        self._enabled = True
+        self._bypass = False
         self._sample_rate = 0
         self._aic_ready = False
         self._frames_per_block = 0
@@ -202,7 +202,7 @@ class AICFilter(BaseAudioFilter):
         # Apply initial parameters
         try:
             self._processor_ctx.set_parameter(
-                ProcessorParameter.Bypass, 0.0 if self._enabled else 1.0
+                ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0
             )
         except ParameterFixedError as e:
             logger.error(f"AIC parameter update failed: {e}")
@@ -245,11 +245,11 @@ class AICFilter(BaseAudioFilter):
             None
         """
         if isinstance(frame, FilterEnableFrame):
-            self._enabled = frame.enable
+            self._bypass = not frame.enable
             if self._processor_ctx is not None:
                 try:
                     self._processor_ctx.set_parameter(
-                        ProcessorParameter.Bypass, 0.0 if self._enabled else 1.0
+                        ProcessorParameter.Bypass, 1.0 if self._bypass else 0.0
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.error(f"AIC set_parameter failed: {e}")
