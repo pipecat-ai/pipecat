@@ -6,7 +6,6 @@
 
 import base64
 import json
-import uuid
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 from loguru import logger

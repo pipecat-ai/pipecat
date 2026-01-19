@@ -8,8 +8,6 @@
 
 import warnings
 
-from pipecat.utils.sync.event_notifier import EventNotifier
-
 with warnings.catch_warnings():
     warnings.simplefilter("always")
     warnings.warn(

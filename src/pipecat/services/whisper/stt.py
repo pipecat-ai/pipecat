@@ -33,7 +33,7 @@ if TYPE_CHECKING:
         raise Exception(f"Missing module: {e}")
 
     try:
-        import mlx_whisper
+        import mlx_whisper  # noqa: F401
     except ModuleNotFoundError as e:
         logger.error(f"Exception: {e}")
         logger.error("In order to use Whisper, you need to `pip install pipecat-ai[mlx-whisper]`.")
