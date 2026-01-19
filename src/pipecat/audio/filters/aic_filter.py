@@ -260,9 +260,13 @@ class AICFilter(BaseAudioFilter):
 
             # Convert to float32 in -1..+1 range and reshape to (channels, frames)
             block_i16 = np.frombuffer(block_bytes, dtype=np.int16)
-            block_f32 = (block_i16.astype(np.float32) / 32768.0).reshape(
-                (1, self._frames_per_block)
-            )
+            # Convert to float32 and normalize
+            block_f32 = block_i16.astype(np.float32)
+            
+            block_f32 *= (1.0 / 32768.0)
+            
+            # Reshape to (1, frames) for AIC SDK
+            block_f32 = block_f32.reshape((1, self._frames_per_block))
 
             # Process via async processor; returns ndarray (same shape)
             out_f32 = await self._processor.process_async(block_f32)
