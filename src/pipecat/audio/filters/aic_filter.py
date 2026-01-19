@@ -272,7 +272,12 @@ class AICFilter(BaseAudioFilter):
             out_f32 = await self._processor.process_async(block_f32)
 
             # Convert back to int16 bytes
-            out_i16 = np.clip(out_f32 * 32768.0, -32768, 32767).astype(np.int16)
+            # Denormalize and convert back to int16
+            out_f32 *= 32768.0
+            
+            # In-place clip to valid int16 range (-32768 to 32767)
+            np.clip(out_f32, -32768.0, 32767, out=out_f32)
+            out_i16 = out_f32.astype(dtype)
             filtered_chunks.append(out_i16.reshape(-1).tobytes())
 
             # Slide buffer
