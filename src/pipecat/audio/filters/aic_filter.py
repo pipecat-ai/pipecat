@@ -40,7 +40,7 @@ class AICFilter(BaseAudioFilter):
     frames using float32 samples normalized to the -1..+1 range.
 
     .. note::
-        This class requires aic-sdk >= 2.0.0 (uses 'aic_sdk' module).
+        This class requires aic-sdk ~= 2.0.0 (uses 'aic_sdk' module).
     """
 
     def __init__(
