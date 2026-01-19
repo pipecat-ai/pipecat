@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -116,6 +116,7 @@ class NvidiaSTTService(STTService):
         },
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        use_ssl: bool = True,
         **kwargs,
     ):
         """Initialize the NVIDIA Riva STT service.
@@ -126,6 +127,7 @@ class NvidiaSTTService(STTService):
             model_function_map: Mapping containing 'function_id' and 'model_name' for the ASR model.
             sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
             params: Additional configuration parameters for NVIDIA Riva.
+            use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             **kwargs: Additional arguments passed to STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -133,6 +135,7 @@ class NvidiaSTTService(STTService):
         params = params or NvidiaSTTService.InputParams()
 
         self._api_key = api_key
+        self._use_ssl = use_ssl
         self._profanity_filter = False
         self._automatic_punctuation = True
         self._no_verbatim_transcripts = False
@@ -163,7 +166,7 @@ class NvidiaSTTService(STTService):
             ["function-id", self._function_id],
             ["authorization", f"Bearer {api_key}"],
         ]
-        auth = riva.client.Auth(None, True, server, metadata)
+        auth = riva.client.Auth(None, self._use_ssl, server, metadata)
 
         self._asr_service = riva.client.ASRService(auth)
 
@@ -421,6 +424,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         },
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        use_ssl: bool = True,
         **kwargs,
     ):
         """Initialize the NVIDIA Riva segmented STT service.
@@ -431,6 +435,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             model_function_map: Mapping of model name and its corresponding NVIDIA Cloud Function ID
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
             params: Additional configuration parameters for NVIDIA Riva
+            use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             **kwargs: Additional arguments passed to SegmentedSTTService
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -443,6 +448,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         # Initialize NVIDIA Riva settings
         self._api_key = api_key
         self._server = server
+        self._use_ssl = use_ssl
         self._function_id = model_function_map.get("function_id")
         self._model_name = model_function_map.get("model_name")
 
@@ -494,7 +500,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         ]
 
         # Create authenticated client
-        auth = riva.client.Auth(None, True, self._server, metadata)
+        auth = riva.client.Auth(None, self._use_ssl, self._server, metadata)
         self._asr_service = riva.client.ASRService(auth)
 
         logger.info(f"Initialized NvidiaSegmentedSTTService with model: {self.model_name}")

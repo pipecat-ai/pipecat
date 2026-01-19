@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -31,6 +31,7 @@ from typing import (
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
+from pipecat import version as pipecat_version
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -85,7 +86,7 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.string import match_endofsentence
 
-RTVI_PROTOCOL_VERSION = "1.0.0"
+RTVI_PROTOCOL_VERSION = "1.1.0"
 
 RTVI_MESSAGE_LABEL = "rtvi-ai"
 RTVIMessageLiteral = Literal["rtvi-ai"]
@@ -1417,15 +1418,20 @@ class RTVIProcessor(FrameProcessor):
         self._client_ready = True
         await self._call_event_handler("on_client_ready")
 
-    async def set_bot_ready(self):
-        """Mark the bot as ready and send the bot-ready message."""
+    async def set_bot_ready(self, about: Mapping[str, Any] = None):
+        """Mark the bot as ready and send the bot-ready message.
+
+        Args:
+            about: Optional information about the bot to include in the ready message.
+                   If left as None, the Pipecat library and version will be used.
+        """
         self._bot_ready = True
         # Only call the (deprecated) _update_config method if the we're using a
         # config (which is deprecated). Otherwise we'd always print an
         # unnecessary deprecation warning.
         if self._config.config:
             await self._update_config(self._config, False)
-        await self._send_bot_ready()
+        await self._send_bot_ready(about=about)
 
     async def interrupt_bot(self):
         """Send a bot interruption frame upstream."""
@@ -1873,14 +1879,21 @@ class RTVIProcessor(FrameProcessor):
             message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
             await self.push_transport_message(message)
 
-    async def _send_bot_ready(self):
-        """Send the bot-ready message to the client."""
+    async def _send_bot_ready(self, about: Mapping[str, Any] = None):
+        """Send the bot-ready message to the client.
+
+        Args:
+            about: Optional information about the bot to include in the ready message.
+                   If left as None, the pipecat library and version will be used.
+        """
         config = None
         if self._client_version and self._client_version[0] < 1:
             config = self._config.config
+        if not about:
+            about = {"library": "pipecat-ai", "library_version": f"{pipecat_version()}"}
         message = RTVIBotReady(
             id=self._client_ready_id,
-            data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, config=config),
+            data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, about=about, config=config),
         )
         await self.push_transport_message(message)
 

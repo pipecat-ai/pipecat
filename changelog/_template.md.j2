@@ -5,6 +5,7 @@
 
 {% for text, values in sections[section][category].items() %}
 {{ text }}
+(PR {{ values|join(', ') }})
 
 {% endfor %}
 {% endfor %}
@@ -13,4 +14,3 @@ No significant changes.
 
 {% endif %}
 {% endfor %}
-

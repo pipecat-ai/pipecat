@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -37,9 +37,13 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 from pipecat.utils.sync.base_notifier import BaseNotifier
 from pipecat.utils.sync.event_notifier import EventNotifier
 
@@ -378,11 +382,13 @@ class ClassificationProcessor(FrameProcessor):
             # User started speaking - set the voicemail event
             if self._voicemail_detected:
                 self._voicemail_event.set()
+            await self.push_frame(frame, direction)
 
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # User stopped speaking - clear the voicemail event
             if self._voicemail_detected:
                 self._voicemail_event.clear()
+            await self.push_frame(frame, direction)
 
         else:
             # Pass all non-LLM frames through
@@ -681,7 +687,10 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
 
         # Create the LLM context and aggregators for conversation management
         self._context = LLMContext(self._messages)
-        self._context_aggregator = LLMContextAggregatorPair(self._context)
+        self._context_aggregator = LLMContextAggregatorPair(
+            self._context,
+            user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
+        )
 
         # Create notification system for coordinating between components
         self._gate_notifier = EventNotifier()  # Signals classification completion

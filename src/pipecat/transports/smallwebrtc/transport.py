@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -318,7 +318,11 @@ class SmallWebRTCClient:
             try:
                 frame = await asyncio.wait_for(video_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
-                if self._webrtc_connection.is_connected():
+                if (
+                    self._webrtc_connection.is_connected()
+                    and video_track
+                    and video_track.is_enabled()
+                ):
                     logger.warning("Timeout: No video frame received within the specified time.")
                     # self._webrtc_connection.ask_to_renegotiate()
                 frame = None
@@ -368,7 +372,11 @@ class SmallWebRTCClient:
             try:
                 frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
-                if self._webrtc_connection.is_connected():
+                if (
+                    self._webrtc_connection.is_connected()
+                    and self._audio_input_track
+                    and self._audio_input_track.is_enabled()
+                ):
                     logger.warning("Timeout: No audio frame received within the specified time.")
                 frame = None
             except MediaStreamError:
@@ -690,7 +698,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                                 format=video_frame.format,
                                 text=request_text,
                                 append_to_context=add_to_context,
-                                # Deprecated fields below.
                                 request=request_frame,
                             )
                             image_frame.transport_source = video_source

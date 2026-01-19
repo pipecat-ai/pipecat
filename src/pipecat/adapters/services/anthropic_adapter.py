@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -94,6 +94,8 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     for item in msg["content"]:
                         if item["type"] == "image":
                             item["source"]["data"] = "..."
+                        if item["type"] == "thinking" and item.get("signature"):
+                            item["signature"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
 
@@ -165,8 +167,43 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
         if isinstance(message, LLMSpecificMessage):
-            return copy.deepcopy(message.message)
+            return self._from_anthropic_specific_message(message)
         return self._from_standard_message(message)
+
+    def _from_anthropic_specific_message(self, message: LLMSpecificMessage) -> MessageParam:
+        """Convert LLMSpecificMessage to Anthropic format.
+
+        Anthropic-specific messages may either be special thought messages that
+        need to be handled in a special way, or messages already in Anthropic
+        format.
+
+        Args:
+            message: Anthropic-specific message.
+        """
+        # Handle special case of thought messages.
+        # These can be converted to standalone "assistant" messages; later
+        # these thinking messages will be properly merged into the assistant
+        # response messages before the context is sent to Anthropic for the
+        # next turn.
+        if (
+            isinstance(message.message, dict)
+            and message.message.get("type") == "thought"
+            and (text := message.message.get("text"))
+            and (signature := message.message.get("signature"))
+        ):
+            return {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": text,
+                        "signature": signature,
+                    }
+                ],
+            }
+
+        # Fall back to assuming that the message is already in Anthropic format
+        return copy.deepcopy(message.message)
 
     def _from_standard_message(self, message: LLMStandardMessage) -> MessageParam:
         """Convert standard universal context message to Anthropic format.
@@ -246,11 +283,14 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 # handle image_url -> image conversion
                 if item["type"] == "image_url":
                     if item["image_url"]["url"].startswith("data:"):
+                        # Extract MIME type from data URL (format: "data:image/jpeg;base64,...")
+                        url = item["image_url"]["url"]
+                        mime_type = url.split(":")[1].split(";")[0]
                         item["type"] = "image"
                         item["source"] = {
                             "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": item["image_url"]["url"].split(",")[1],
+                            "media_type": mime_type,
+                            "data": url.split(",")[1],
                         }
                         del item["image_url"]
                     elif item["image_url"]["url"].startswith("http"):

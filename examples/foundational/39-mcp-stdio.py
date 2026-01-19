@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -17,7 +17,6 @@ from loguru import logger
 from mcp import StdioServerParameters
 from PIL import Image
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -31,7 +30,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -41,6 +43,8 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -119,7 +123,6 @@ transport_params = {
         video_out_width=1024,
         video_out_height=1024,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -128,7 +131,6 @@ transport_params = {
         video_out_width=1024,
         video_out_height=1024,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -190,18 +192,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages = [{"role": "system", "content": system}]
 
         context = LLMContext(messages, tools)
-        context_aggregator = LLMContextAggregatorPair(context)
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
+                    ]
+                ),
+            ),
+        )
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 stt,
-                context_aggregator.user(),  # User spoken responses
+                user_aggregator,  # User spoken responses
                 llm,  # LLM
                 tts,  # TTS
                 mcp_image,  # URL image -> output
                 transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses and tool context
+                assistant_aggregator,  # Assistant spoken responses and tool context
             ]
         )
 

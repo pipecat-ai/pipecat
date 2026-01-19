@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -23,8 +23,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import WebsocketSTTService
@@ -221,9 +221,9 @@ class CartesiaSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             await self.start_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize command to flush the transcription session
             if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send("finalize")
@@ -245,12 +245,16 @@ class CartesiaSTTService(WebsocketSTTService):
         yield None
 
     async def _connect(self):
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None

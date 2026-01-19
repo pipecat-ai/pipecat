@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -43,9 +43,11 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
+from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
@@ -105,13 +107,21 @@ class PipelineParams(BaseModel):
 
     Parameters:
         allow_interruptions: Whether to allow pipeline interruptions.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
+
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
         enable_heartbeats: Whether to enable heartbeat monitoring.
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
-        interruption_strategies: Strategies for bot interruption behavior.
+        interruption_strategies: [deprecated] Strategies for bot interruption behavior.
+
+            .. deprecated:: 0.0.99
+                Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
+
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
 
             .. deprecated:: 0.0.58
@@ -204,7 +214,7 @@ class PipelineTask(BasePipelineTask):
 
     def __init__(
         self,
-        pipeline: FrameProcessor,
+        pipeline: BasePipeline,
         *,
         params: Optional[PipelineParams] = None,
         additional_span_attributes: Optional[dict] = None,
@@ -278,6 +288,7 @@ class PipelineTask(BasePipelineTask):
                 additional_span_attributes=self._additional_span_attributes,
             )
             observers.append(self._turn_trace_observer)
+
         self._finished = False
         self._cancelled = False
 
@@ -357,6 +368,17 @@ class PipelineTask(BasePipelineTask):
             The pipeline parameters configuration.
         """
         return self._params
+
+    @property
+    def pipeline(self) -> BasePipeline:
+        """Get the full pipeline managed by this pipeline task.
+
+        This will also include any internal processors added by the pipeline task.
+
+        Returns:
+            The pipeline managed by the pipeline task.
+        """
+        return self._pipeline
 
     @property
     def turn_tracking_observer(self) -> Optional[TurnTrackingObserver]:
@@ -644,6 +666,9 @@ class PipelineTask(BasePipelineTask):
 
     async def _setup(self, params: PipelineTaskParams):
         """Set up the pipeline task and all processors."""
+        # Do any additional pipeline task setup externally.
+        await self._load_setup_files()
+
         # Load additional observers.
         await self._load_observer_files()
 
@@ -695,7 +720,7 @@ class PipelineTask(BasePipelineTask):
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             interruption_strategies=self._params.interruption_strategies,
         )
-        start_frame.metadata = self._params.start_metadata
+        start_frame.metadata = self._create_start_metadata()
         await self._pipeline.queue_frame(start_frame)
 
         # Wait for the pipeline to be started before pushing any other frame.
@@ -850,9 +875,51 @@ class PipelineTask(BasePipelineTask):
             return False
         return True
 
+    async def _load_setup_files(self):
+        """Dynamically setup pipeline task from files listed in PIPECAT_SETUP_FILES.
+
+        Each file should contain a `setup_pipeline_task(task)` async function
+        that receives the `PipelineTask` instance and can perform any custom
+        setup (e.g., adding event handlers, observers, or modifying task
+        configuration).
+
+        """
+        setup_files = [f for f in os.environ.get("PIPECAT_SETUP_FILES", "").split(":") if f]
+        for f in setup_files:
+            try:
+                path = Path(f).resolve()
+                module_name = path.stem
+                spec = importlib.util.spec_from_file_location(module_name, str(path))
+                if spec and spec.loader:
+                    logger.debug(f"{self} running setup from {path}")
+
+                    # Load module.
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+
+                    # Run setup function.
+                    if hasattr(module, "setup_pipeline_task"):
+                        await module.setup_pipeline_task(self)
+                    else:
+                        logger.warning(
+                            f"{self} setup file {path} has no setup_pipeline_task function"
+                        )
+            except Exception as e:
+                logger.error(f"{self} error running external setup from {f}: {e}")
+
     async def _load_observer_files(self):
-        observer_files = os.environ.get("PIPECAT_OBSERVER_FILES", "").split(":")
+        """Dynamically load observers from files listed in PIPECAT_OBSERVER_FILES."""
+        observer_files = [f for f in os.environ.get("PIPECAT_OBSERVER_FILES", "").split(":") if f]
         for f in observer_files:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Observer files (and environment variable `PIPECAT_OBSERVER_FILES`) is deprecated, use setup files instead (and `PIPECAT_SETUP_FILES`) instead.",
+                    DeprecationWarning,
+                )
+
             try:
                 path = Path(f).resolve()
                 module_name = path.stem
@@ -876,3 +943,26 @@ class PipelineTask(BasePipelineTask):
         tasks = [t.get_name() for t in self._task_manager.current_tasks()]
         if tasks:
             logger.warning(f"Dangling tasks detected: {tasks}")
+
+    def _create_start_metadata(self) -> Dict[str, Any]:
+        """Build and return start metadata including user-provided values."""
+        start_metadata = {}
+
+        # NOTE(aleix): Remove when OpenAILLMContext/LLMUserContextAggregator is removed.
+        if self._find_deprecated_openaillmcontext(self._pipeline):
+            start_metadata["deprecated_openaillmcontext"] = True
+
+        # Update with user provided metadata.
+        start_metadata.update(self._params.start_metadata)
+
+        return start_metadata
+
+    def _find_deprecated_openaillmcontext(self, processor: FrameProcessor) -> bool:
+        """Check whether there is a deprecated LLMUserContextAggregator in the pipeline."""
+        if isinstance(processor, LLMUserContextAggregator):
+            return True
+
+        for p in processor.processors:
+            if self._find_deprecated_openaillmcontext(p):
+                return True
+        return False

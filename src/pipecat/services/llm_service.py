@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,6 +8,7 @@
 
 import asyncio
 import inspect
+import warnings
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -44,7 +45,10 @@ from pipecat.frames.frames import (
     StartFrame,
     UserImageRequestFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMSpecificMessage,
+)
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -238,7 +242,21 @@ class LLMService(AIService):
 
         Returns:
             A context aggregator instance.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "create_context_aggregator() is deprecated and will be removed in a future version. "
+                "Use the universal LLMContext and LLMContextAggregatorPair directly instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         pass
 
     async def start(self, frame: StartFrame):
@@ -331,8 +349,6 @@ class LLMService(AIService):
         signature = inspect.signature(handler)
         handler_deprecated = len(signature.parameters) > 1
         if handler_deprecated:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -351,8 +367,6 @@ class LLMService(AIService):
 
         # Start callbacks are now deprecated.
         if start_callback:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -394,7 +408,7 @@ class LLMService(AIService):
             function_name: The name of the function handler to remove.
         """
         del self._functions[function_name]
-        if self._start_callbacks[function_name]:
+        if function_name in self._start_callbacks:
             del self._start_callbacks[function_name]
 
     def unregister_direct_function(self, handler: Any):
@@ -495,8 +509,6 @@ class LLMService(AIService):
             timeout: Optional timeout for the requested image to be added to the LLM context.
 
         """
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
@@ -507,9 +519,10 @@ class LLMService(AIService):
             UserImageRequestFrame(
                 user_id=user_id,
                 text=text_content,
-                # Deprecated fields below.
+                append_to_context=True,
                 function_name=function_name,
                 tool_call_id=tool_call_id,
+                # Deprecated fields below.
                 context=text_content,
             ),
             FrameDirection.UPSTREAM,
@@ -583,10 +596,14 @@ class LLMService(AIService):
             cancel_on_interruption=item.cancel_on_interruption,
         )
 
+        callback_executed = False
+
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
         async def function_call_result_callback(
             result: Any, *, properties: Optional[FunctionCallResultProperties] = None
         ):
+            nonlocal callback_executed
+            callback_executed = True
             await self.broadcast_frame(
                 FunctionCallResultFrame,
                 function_name=runner_item.function_name,
@@ -597,40 +614,48 @@ class LLMService(AIService):
                 properties=properties,
             )
 
-        if isinstance(item.handler, DirectFunctionWrapper):
-            # Handler is a DirectFunctionWrapper
-            await item.handler.invoke(
-                args=runner_item.arguments,
-                params=FunctionCallParams(
-                    function_name=runner_item.function_name,
-                    tool_call_id=runner_item.tool_call_id,
-                    arguments=runner_item.arguments,
-                    llm=self,
-                    context=runner_item.context,
-                    result_callback=function_call_result_callback,
-                ),
-            )
-        else:
-            # Handler is a FunctionCallHandler
-            if item.handler_deprecated:
-                await item.handler(
-                    runner_item.function_name,
-                    runner_item.tool_call_id,
-                    runner_item.arguments,
-                    self,
-                    runner_item.context,
-                    function_call_result_callback,
+        try:
+            if isinstance(item.handler, DirectFunctionWrapper):
+                # Handler is a DirectFunctionWrapper
+                await item.handler.invoke(
+                    args=runner_item.arguments,
+                    params=FunctionCallParams(
+                        function_name=runner_item.function_name,
+                        tool_call_id=runner_item.tool_call_id,
+                        arguments=runner_item.arguments,
+                        llm=self,
+                        context=runner_item.context,
+                        result_callback=function_call_result_callback,
+                    ),
                 )
             else:
-                params = FunctionCallParams(
-                    function_name=runner_item.function_name,
-                    tool_call_id=runner_item.tool_call_id,
-                    arguments=runner_item.arguments,
-                    llm=self,
-                    context=runner_item.context,
-                    result_callback=function_call_result_callback,
-                )
-                await item.handler(params)
+                # Handler is a FunctionCallHandler
+                if item.handler_deprecated:
+                    await item.handler(
+                        runner_item.function_name,
+                        runner_item.tool_call_id,
+                        runner_item.arguments,
+                        self,
+                        runner_item.context,
+                        function_call_result_callback,
+                    )
+                else:
+                    params = FunctionCallParams(
+                        function_name=runner_item.function_name,
+                        tool_call_id=runner_item.tool_call_id,
+                        arguments=runner_item.arguments,
+                        llm=self,
+                        context=runner_item.context,
+                        result_callback=function_call_result_callback,
+                    )
+                    await item.handler(params)
+        except Exception as e:
+            error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
+            logger.error(f"{self} {error_message}")
+            await self.push_error(error_msg=error_message, exception=e, fatal=False)
+        finally:
+            if not callback_executed:
+                await function_call_result_callback(None)
 
     async def _cancel_function_call(self, function_name: Optional[str]):
         cancelled_tasks = set()

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 @dataclasses.dataclass
@@ -63,15 +63,6 @@ class ProtobufFrameSerializer(FrameSerializer):
     def __init__(self):
         """Initialize the Protobuf frame serializer."""
         pass
-
-    @property
-    def type(self) -> FrameSerializerType:
-        """Get the serializer type.
-
-        Returns:
-            FrameSerializerType.BINARY indicating binary serialization format.
-        """
-        return FrameSerializerType.BINARY
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize a frame to Protocol Buffer binary format.

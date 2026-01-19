@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -23,6 +23,7 @@ from pipecat.audio.dtmf.utils import load_dtmf_audio
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import create_stream_resampler, is_silence
 from pipecat.frames.frames import (
+    AssistantImageRawFrame,
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -336,6 +337,10 @@ class BaseOutputTransport(FrameProcessor):
             await sender.handle_audio_frame(frame)
         elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
             await sender.handle_image_frame(frame)
+            if isinstance(frame, AssistantImageRawFrame):
+                # This will push it further, to be handled by the assistant
+                # aggregator, say
+                await sender.handle_sync_frame(frame)
         elif isinstance(frame, MixerControlFrame):
             await sender.handle_mixer_control_frame(frame)
         elif frame.pts:
@@ -399,7 +404,7 @@ class BaseOutputTransport(FrameProcessor):
             # Last time a BotSpeakingFrame was pushed.
             self._bot_speaking_frame_time = 0
             # How often a BotSpeakingFrame should be pushed (value should be
-            # lower than the audio chunks).
+            # greater than the audio chunks to have any effect).
             self._bot_speaking_frame_period = 0.2
             # Last time the bot actually spoke.
             self._bot_speech_last_time = 0
@@ -494,17 +499,19 @@ class BaseOutputTransport(FrameProcessor):
             Args:
                 _: The start interruption frame (unused).
             """
-            if not self._transport.interruptions_allowed:
+            if not self._transport._allow_interruptions:
                 return
 
             # Cancel tasks.
             await self._cancel_audio_task()
             await self._cancel_clock_task()
             await self._cancel_video_task()
+
             # Create tasks.
             self._create_video_task()
             self._create_clock_task()
             self._create_audio_task()
+
             # Let's send a bot stopped speaking if we have to.
             await self._bot_stopped_speaking()
 
@@ -597,6 +604,8 @@ class BaseOutputTransport(FrameProcessor):
             if self._bot_speaking:
                 return
 
+            self._bot_speaking = True
+
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
             )
@@ -608,12 +617,16 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
-            self._bot_speaking = True
-
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
                 return
+
+            self._bot_speaking = False
+
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
 
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
@@ -626,20 +639,13 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
-            self._bot_speaking = False
-
-            # Clean audio buffer (there could be tiny left overs if not multiple
-            # to our output chunk size).
-            self._audio_buffer = bytearray()
-
         async def _bot_currently_speaking(self):
             """Handle bot speaking event."""
             await self._bot_started_speaking()
 
             diff_time = time.time() - self._bot_speaking_frame_time
             if diff_time >= self._bot_speaking_frame_period:
-                await self._transport.push_frame(BotSpeakingFrame())
-                await self._transport.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                await self._transport.broadcast_frame(BotSpeakingFrame)
                 self._bot_speaking_frame_time = time.time()
 
             self._bot_speech_last_time = time.time()
@@ -757,7 +763,7 @@ class BaseOutputTransport(FrameProcessor):
                 await self._handle_frame(frame)
 
                 # If we are not able to write to the transport we shouldn't
-                # pushb downstream.
+                # push downstream.
                 push_downstream = True
 
                 # Try to send audio to the transport.

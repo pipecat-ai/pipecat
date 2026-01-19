@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -74,6 +74,7 @@ class NvidiaTTSService(TTSService):
             "model_name": "magpie-tts-multilingual",
         },
         params: Optional[InputParams] = None,
+        use_ssl: bool = True,
         **kwargs,
     ):
         """Initialize the NVIDIA Riva TTS service.
@@ -85,6 +86,7 @@ class NvidiaTTSService(TTSService):
             sample_rate: Audio sample rate. If None, uses service default.
             model_function_map: Dictionary containing function_id and model_name for the TTS model.
             params: Additional configuration parameters for TTS synthesis.
+            use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -96,7 +98,7 @@ class NvidiaTTSService(TTSService):
         self._language_code = params.language
         self._quality = params.quality
         self._function_id = model_function_map.get("function_id")
-
+        self._use_ssl = use_ssl
         self.set_model_name(model_function_map.get("model_name"))
         self.set_voice(voice_id)
 
@@ -104,7 +106,7 @@ class NvidiaTTSService(TTSService):
             ["function-id", self._function_id],
             ["authorization", f"Bearer {api_key}"],
         ]
-        auth = riva.client.Auth(None, True, server, metadata)
+        auth = riva.client.Auth(None, self._use_ssl, server, metadata)
 
         self._service = riva.client.SpeechSynthesisService(auth)
 

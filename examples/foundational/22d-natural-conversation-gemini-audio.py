@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,6 +11,7 @@ import time
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     CancelFrame,
@@ -22,7 +23,6 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseStartFrame,
-    LLMRunFrame,
     StartFrame,
     SystemFrame,
     TextFrame,
@@ -39,7 +39,10 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantResponseAggregator,
 )
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
@@ -50,6 +53,8 @@ from pipecat.services.llm_service import LLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.sync.base_notifier import BaseNotifier
 from pipecat.utils.sync.event_notifier import EventNotifier
 from pipecat.utils.time import time_now_iso8601
@@ -438,6 +443,7 @@ class CompletenessCheck(FrameProcessor):
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
                 self._idle_task = None
+            await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
@@ -445,7 +451,7 @@ class CompletenessCheck(FrameProcessor):
             logger.debug("Completeness check YES")
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
-            await self.push_frame(UserStoppedSpeakingFrame())
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
             await self._audio_accumulator.reset()
             await self._notifier.notify()
         elif isinstance(frame, TextFrame):
@@ -736,17 +742,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     context = LLMContext()
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
+        ),
+    )
 
     llm = TurnDetectionLLM(conversation_llm, context)
 
     pipeline = Pipeline(
         [
             transport.input(),
+            user_aggregator,
             llm,
             tts,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ],
     )
 

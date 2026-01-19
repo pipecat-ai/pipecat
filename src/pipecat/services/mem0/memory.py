@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -121,7 +121,6 @@ class Mem0MemoryService(FrameProcessor):
         try:
             logger.debug(f"Storing {len(messages)} messages in Mem0")
             params = {
-                "async_mode": True,
                 "messages": messages,
                 "metadata": {"platform": "pipecat"},
                 "output_format": "v1.1",
