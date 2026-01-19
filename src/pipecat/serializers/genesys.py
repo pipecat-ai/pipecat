@@ -694,7 +694,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         if deserialized_data is None or len(deserialized_data) == 0:
             return None
             
-        # Always use mono for STT - ElevenLabs expects single channel
+        # Always use mono for STT 
         num_channels = 1
             
         audio_frame = InputAudioRawFrame(
