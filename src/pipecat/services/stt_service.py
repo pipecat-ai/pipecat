@@ -6,6 +6,7 @@
 
 """Base classes for Speech-to-Text services with continuous and segmented processing."""
 
+import asyncio
 import io
 import time
 import wave
@@ -67,6 +68,8 @@ class STTService(AIService):
         audio_passthrough=True,
         # STT input sample rate
         sample_rate: Optional[int] = None,
+        # STT TTFB timeout - time to wait after VAD stop before reporting TTFB
+        stt_ttfb_timeout: float = 2.0,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -76,6 +79,8 @@ class STTService(AIService):
                 Defaults to True.
             sample_rate: The sample rate for audio input. If None, will be determined
                 from the start frame.
+            stt_ttfb_timeout: Time in seconds to wait after VAD stop before reporting
+                TTFB. This delay allows the final transcription to arrive. Defaults to 2.0.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -88,6 +93,8 @@ class STTService(AIService):
         self._user_id: str = ""
 
         # STT TTFB tracking state
+        self._stt_ttfb_timeout = stt_ttfb_timeout
+        self._ttfb_timeout_task: Optional[asyncio.Task] = None
         self._vad_stop_secs: Optional[float] = None
         self._speech_end_time: Optional[float] = None
         self._user_speaking: bool = False
@@ -155,6 +162,11 @@ class STTService(AIService):
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
         self._tracing_enabled = frame.enable_tracing
+
+    async def cleanup(self):
+        """Clean up STT service resources."""
+        await super().cleanup()
+        await self._cancel_ttfb_timeout()
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         logger.info(f"Updating STT settings: {self._settings}")
@@ -231,29 +243,25 @@ class STTService(AIService):
             self._muted = frame.mute
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
         elif isinstance(frame, InterruptionFrame):
-            self._reset_stt_ttfb_state()
+            await self._reset_stt_ttfb_state()
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push a frame downstream, calculating STT TTFB for TranscriptionFrames.
+        """Push a frame downstream, tracking TranscriptionFrame timestamps for TTFB.
 
-        Handles two cases:
-        1. TranscriptionFrame while user is speaking: store timestamp for later calculation
-        2. TranscriptionFrame after VAD stop: calculate and report TTFB immediately
+        Stores the timestamp of each TranscriptionFrame for TTFB calculation.
+        The actual TTFB is reported after a timeout to ensure we capture the
+        final transcription.
 
         Args:
             frame: The frame to push.
             direction: The direction to push the frame.
         """
         if isinstance(frame, TranscriptionFrame):
-            if self._user_speaking:
-                # Store timestamp - we'll calculate TTFB when VAD stop arrives
-                self._last_transcription_time = time.time()
-            elif self._speech_end_time is not None:
-                # Calculate and report TTFB immediately
-                await self._report_stt_ttfb()
+            # Always store the latest transcription time for TTFB calculation
+            self._last_transcription_time = time.time()
 
         await super().push_frame(frame, direction)
 
@@ -266,7 +274,13 @@ class STTService(AIService):
         if frame.vad_params is not None:
             self._vad_stop_secs = frame.vad_params.stop_secs
 
-    def _reset_stt_ttfb_state(self):
+    async def _cancel_ttfb_timeout(self):
+        """Cancel any pending TTFB timeout task."""
+        if self._ttfb_timeout_task:
+            await self.cancel_task(self._ttfb_timeout_task)
+            self._ttfb_timeout_task = None
+
+    async def _reset_stt_ttfb_state(self):
         """Reset STT TTFB measurement state.
 
         Called when starting a new utterance or on interruption to ensure
@@ -277,25 +291,26 @@ class STTService(AIService):
         Note: Does not reset _user_speaking since InterruptionFrame can arrive
         while user is still speaking.
         """
+        await self._cancel_ttfb_timeout()
         self._speech_end_time = None
         self._last_transcription_time = None
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle VAD user started speaking frame to start tracking transcriptions.
 
-        Resets TTFB tracking state and marks user as speaking.
+        Cancels any pending TTFB timeout, resets TTFB tracking state, and marks user as speaking.
 
         Args:
             frame: The VAD user started speaking frame.
         """
-        self._reset_stt_ttfb_state()
+        await self._reset_stt_ttfb_state()
         self._user_speaking = True
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle VAD user stopped speaking frame.
 
-        Calculates the actual speech end time, then calculates and reports TTFB
-        if a TranscriptionFrame arrived while user was speaking.
+        Calculates the actual speech end time and starts a timeout task to wait
+        for the final transcription before reporting TTFB.
 
         Args:
             frame: The VAD user stopped speaking frame.
@@ -309,19 +324,34 @@ class STTService(AIService):
         # Calculate the actual speech end time (current time minus VAD stop delay)
         self._speech_end_time = time.time() - self._vad_stop_secs
 
-        # Calculate and report TTFB for transcription that arrived while speaking
-        if self._last_transcription_time is not None:
-            ttfb = self._last_transcription_time - self._speech_end_time
-            await self._emit_stt_ttfb_metric(ttfb)
+        # Start timeout task (any previous timeout was cancelled by VADUserStartedSpeakingFrame
+        # or InterruptionFrame)
+        self._ttfb_timeout_task = self.create_task(
+            self._ttfb_timeout_handler(), name="stt_ttfb_timeout"
+        )
+
+    async def _ttfb_timeout_handler(self):
+        """Wait for timeout then report TTFB using the last transcription timestamp.
+
+        This timeout allows the final transcription to arrive before we calculate
+        and report TTFB. If no transcription arrived, no TTFB is reported.
+        """
+        try:
+            await asyncio.sleep(self._stt_ttfb_timeout)
+
+            # Report TTFB if we have both speech end time and transcription time
+            if self._speech_end_time is not None and self._last_transcription_time is not None:
+                ttfb = self._last_transcription_time - self._speech_end_time
+                await self._emit_stt_ttfb_metric(ttfb)
+
+            # Clear state after reporting
+            self._speech_end_time = None
             self._last_transcription_time = None
-
-    async def _report_stt_ttfb(self):
-        """Calculate and report STT TTFB metrics for TranscriptionFrames after VAD stop."""
-        if self._speech_end_time is None:
-            return
-
-        ttfb = time.time() - self._speech_end_time
-        await self._emit_stt_ttfb_metric(ttfb)
+        except asyncio.CancelledError:
+            # Task was cancelled (new utterance or interruption), which is expected behavior
+            pass
+        finally:
+            self._ttfb_timeout_task = None
 
     async def _emit_stt_ttfb_metric(self, ttfb: float):
         """Emit STT TTFB metric if value is non-negative.
