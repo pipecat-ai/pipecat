@@ -214,6 +214,9 @@ class AICFilter(BaseAudioFilter):
         logger.debug(f"  Frames per chunk: {self._frames_per_block}")
         logger.debug(f"  Optimal sample rate: {self._model.get_optimal_sample_rate()} Hz")
         logger.debug(
+            f"  Optimal number of frames for {self._sample_rate} Hz: {self._model.get_optimal_num_frames(self._sample_rate)}"
+        )
+        logger.debug(
             f"  Output delay: {self._processor_ctx.get_output_delay()} samples "
             f"({self._processor_ctx.get_output_delay() / self._sample_rate * 1000:.2f}ms)"
         )
