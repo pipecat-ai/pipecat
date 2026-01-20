@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    CancelTaskFrame,
     EndFrame,
     Frame,
     InterruptionFrame,
@@ -750,7 +751,7 @@ class BaseOutputTransport(FrameProcessor):
         async def _audio_task_handler(self):
             """Main audio processing task handler."""
             consecutive_failures = 0
-            max_consecutive_failures = 4
+            max_consecutive_failures = 10
 
             async for frame in self._next_frame():
                 # No need to push EndFrame, it's pushed from process_frame().
@@ -785,6 +786,9 @@ class BaseOutputTransport(FrameProcessor):
                     if consecutive_failures >= max_consecutive_failures:
                         logger.warning(
                             f"{self} Breaking out of audio task handler after {consecutive_failures} consecutive failures"
+                        )
+                        await self._transport.push_frame(
+                            CancelTaskFrame(), FrameDirection.UPSTREAM
                         )
                         break
 
