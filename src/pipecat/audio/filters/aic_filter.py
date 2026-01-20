@@ -48,7 +48,7 @@ class AICFilter(BaseAudioFilter):
         *,
         license_key: str,
         model_id: Optional[str] = None,
-        model_path: Optional[str] = None,
+        model_path: Optional[Path] = None,
         model_download_dir: Optional[Path] = None,
     ) -> None:
         """Initialize the AIC filter.
@@ -168,7 +168,7 @@ class AICFilter(BaseAudioFilter):
         # Load or download model
         if self._model_path:
             logger.debug(f"Loading AIC model from: {self._model_path}")
-            self._model = Model.from_file(self._model_path)
+            self._model = Model.from_file(str(self._model_path))
         else:
             logger.debug(f"Downloading AIC model: {self._model_id}")
             self._model_download_dir.mkdir(parents=True, exist_ok=True)
