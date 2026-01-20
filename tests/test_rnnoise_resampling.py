@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import sys
 import unittest
 from unittest.mock import MagicMock, patch

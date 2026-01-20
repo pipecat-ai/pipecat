@@ -15,9 +15,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
-from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import FramePushed
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame
 

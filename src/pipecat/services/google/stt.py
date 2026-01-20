@@ -29,7 +29,6 @@ from pydantic import BaseModel, Field, field_validator
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,

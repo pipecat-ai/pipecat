@@ -10,7 +10,6 @@ This module provides integration with Amazon Polly for text-to-speech synthesis,
 supporting multiple languages, voices, and SSML features.
 """
 
-import asyncio
 import os
 from typing import AsyncGenerator, List, Optional
 
