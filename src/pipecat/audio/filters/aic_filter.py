@@ -14,7 +14,7 @@ Classes:
     AICFilter: For aic-sdk (uses 'aic_sdk' module)
 """
 
-import os
+from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
@@ -49,7 +49,7 @@ class AICFilter(BaseAudioFilter):
         license_key: str = "",
         model_id: Optional[str] = None,
         model_path: Optional[str] = None,
-        model_download_dir: Optional[str] = None,
+        model_download_dir: Optional[Path] = None,
     ) -> None:
         """Initialize the AIC filter.
 
@@ -59,8 +59,8 @@ class AICFilter(BaseAudioFilter):
                 is not provided. See https://artifacts.ai-coustics.io/ for available models.
             model_path: Optional path to a local .aicmodel file. If provided,
                 model_id is ignored and no download occurs.
-            model_download_dir: Directory for downloading models. Defaults to
-                a cache directory in user's home folder.
+            model_download_dir: Directory for downloading models as a Path object.
+                Defaults to a cache directory in user's home folder.
 
         Raises:
             ValueError: If neither model_id nor model_path is provided.
@@ -77,8 +77,8 @@ class AICFilter(BaseAudioFilter):
         self._license_key = license_key
         self._model_id = model_id
         self._model_path = model_path
-        self._model_download_dir = model_download_dir or os.path.expanduser(
-            "~/.cache/pipecat/aic-models"
+        self._model_download_dir = model_download_dir or (
+            Path.home() / ".cache" / "pipecat" / "aic-models"
         )
 
         self._bypass = False
@@ -169,8 +169,8 @@ class AICFilter(BaseAudioFilter):
             self._model = Model.from_file(self._model_path)
         else:
             logger.debug(f"Downloading AIC model: {self._model_id}")
-            os.makedirs(self._model_download_dir, exist_ok=True)
-            model_path = await Model.download_async(self._model_id, self._model_download_dir)
+            self._model_download_dir.mkdir(parents=True, exist_ok=True)
+            model_path = await Model.download_async(self._model_id, str(self._model_download_dir))
             logger.debug(f"Model downloaded to: {model_path}")
             self._model = Model.from_file(model_path)
 
