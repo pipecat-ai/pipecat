@@ -510,8 +510,6 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         auth = riva.client.Auth(None, self._use_ssl, self._server, metadata)
         self._asr_service = riva.client.ASRService(auth)
 
-        logger.info(f"Initialized NvidiaSegmentedSTTService with model: {self.model_name}")
-
     def _create_recognition_config(self):
         """Create the NVIDIA Riva ASR recognition configuration."""
         # Create base configuration
@@ -579,6 +577,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         await super().start(frame)
         self._initialize_client()
         self._config = self._create_recognition_config()
+        logger.debug(f"Initialized NvidiaSegmentedSTTService with model: {self.model_name}")
 
     async def set_language(self, language: Language):
         """Set the language for the STT service.
@@ -612,20 +611,11 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             Frame: TranscriptionFrame containing the transcribed text.
         """
         try:
-            await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
-
-            # Make sure the client is initialized
-            if self._asr_service is None:
-                self._initialize_client()
-
-            # Make sure the config is created
-            if self._config is None:
-                self._config = self._create_recognition_config()
-
-            # Type assertion to satisfy the IDE
             assert self._asr_service is not None, "ASR service not initialized"
             assert self._config is not None, "Recognition config not created"
+
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
 
             # Process audio with NVIDIA Riva ASR - explicitly request non-future response
             raw_response = self._asr_service.offline_recognize(audio, self._config, future=False)
@@ -634,43 +624,40 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             await self.stop_processing_metrics()
 
             # Process the response - handle different possible return types
-            try:
-                # If it's a future-like object, get the result
-                if hasattr(raw_response, "result"):
-                    response = raw_response.result()
-                else:
-                    response = raw_response
+            # If it's a future-like object, get the result
+            if hasattr(raw_response, "result"):
+                response = raw_response.result()
+            else:
+                response = raw_response
 
-                # Process transcription results
-                transcription_found = False
+            # Process transcription results
+            transcription_found = False
 
-                # Now we can safely check results
-                # Type hint for the IDE
-                results = getattr(response, "results", [])
+            # Now we can safely check results
+            # Type hint for the IDE
+            results = getattr(response, "results", [])
 
-                for result in results:
-                    alternatives = getattr(result, "alternatives", [])
-                    if alternatives:
-                        text = alternatives[0].transcript.strip()
-                        if text:
-                            logger.debug(f"Transcription: [{text}]")
-                            yield TranscriptionFrame(
-                                text,
-                                self._user_id,
-                                time_now_iso8601(),
-                                self._language_enum,
-                            )
-                            transcription_found = True
+            for result in results:
+                alternatives = getattr(result, "alternatives", [])
+                if alternatives:
+                    text = alternatives[0].transcript.strip()
+                    if text:
+                        logger.debug(f"Transcription: [{text}]")
+                        yield TranscriptionFrame(
+                            text,
+                            self._user_id,
+                            time_now_iso8601(),
+                            self._language_enum,
+                        )
+                        transcription_found = True
 
-                            await self._handle_transcription(text, True, self._language_enum)
+                        await self._handle_transcription(text, True, self._language_enum)
 
-                if not transcription_found:
-                    logger.debug("No transcription results found in NVIDIA Riva response")
-
-            except AttributeError as ae:
-                logger.error(f"Unexpected response structure from NVIDIA Riva: {ae}")
-                yield ErrorFrame(f"Unexpected NVIDIA Riva response format: {str(ae)}")
-
+            if not transcription_found:
+                logger.debug(f"{self}: No transcription results found in NVIDIA Riva response")
+        except AttributeError as ae:
+            logger.error(f"{self}: Unexpected response structure from NVIDIA Riva: {ae}")
+            yield ErrorFrame(f"{self}: Unexpected NVIDIA Riva response format: {str(ae)}")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
             yield ErrorFrame(error=f"{self} error: {e}")
