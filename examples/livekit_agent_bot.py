@@ -100,11 +100,8 @@ async def pipeline_factory(room):
 
     session = aiohttp.ClientSession()
 
-    # Inject the existing room into the transport
+    # Inject the existing room into the transport (Worker mode - "Dream Code" API)
     transport = LiveKitTransport(
-        url=os.getenv("LIVEKIT_URL", "ws://localhost:7880"),
-        token="",
-        room_name=room.name,
         room=room,
         params=LiveKitParams(
             audio_in_enabled=True,

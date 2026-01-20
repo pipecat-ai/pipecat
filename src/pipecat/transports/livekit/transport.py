@@ -956,9 +956,9 @@ class LiveKitTransport(BaseTransport):
 
     def __init__(
         self,
-        url: str,
-        token: str,
-        room_name: str,
+        url: str = "",
+        token: str = "",
+        room_name: str = "",
         params: Optional[LiveKitParams] = None,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
@@ -966,16 +966,36 @@ class LiveKitTransport(BaseTransport):
     ):
         """Initialize the LiveKit transport.
 
+        For Worker mode (LiveKit Agents), pass an existing room:
+            transport = LiveKitTransport(room=room, params=LiveKitParams(...))
+
+        For Client mode (dial-out), pass connection details:
+            transport = LiveKitTransport(url=url, token=token, room_name=room_name)
+
         Args:
-            url: LiveKit server URL to connect to.
-            token: Authentication token for the room.
-            room_name: Name of the LiveKit room to join.
+            url: LiveKit server URL to connect to (required for client mode).
+            token: Authentication token for the room (required for client mode).
+            room_name: Name of the LiveKit room to join (can be inferred from room).
             params: Configuration parameters for the transport.
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.
-            room: Optional existing LiveKit room instance.
+            room: Existing LiveKit room instance (for worker/agent mode).
+
+        Raises:
+            ValueError: If neither room nor connection details (url, token, room_name) are provided.
         """
         super().__init__(input_name=input_name, output_name=output_name)
+
+        # Worker mode: room is injected, derive room_name from it
+        if room:
+            room_name = room_name or room.name
+        # Client mode: must have url, token, room_name
+        elif not url or not token or not room_name:
+            raise ValueError(
+                "LiveKitTransport requires either:\n"
+                "  - room: for worker/agent mode (room injected by LiveKit Agents)\n"
+                "  - url, token, room_name: for client mode (dial-out connection)"
+            )
 
         callbacks = LiveKitCallbacks(
             on_connected=self._on_connected,
