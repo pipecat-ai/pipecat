@@ -68,7 +68,7 @@ class AICVADAnalyzer(VADAnalyzer):
             minimum_speech_duration:
                 Optional override for minimum speech duration before VAD reports
                 speech detected (in seconds).
-                Range: 0.0 to 20x model window length.
+                Range: 0.0 to 1.0.
                 If None, the SDK default (0.0s) is used.
             sensitivity:
                 Optional override for AIC VAD sensitivity (energy threshold).
