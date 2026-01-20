@@ -22,7 +22,7 @@ from pipecat.transports.livekit.transport import LiveKitTransport
 
 try:
     from livekit import rtc
-    from livekit.agents import JobContext, WorkerOptions, cli
+    from livekit.agents import JobContext, JobRequest, WorkerOptions, cli
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -43,15 +43,33 @@ class LiveKitWorkerRunner:
         self._pipeline_factory = None
 
     def set_pipeline_factory(
-        self, factory: Callable[[rtc.Room], Awaitable[Tuple[LiveKitTransport, Pipeline]]]
+        self, factory: Callable[[rtc.Room], Awaitable[Tuple[LiveKitTransport, PipelineTask]]]
     ):
         """Set the factory function to create pipelines for assigned rooms.
 
         Args:
            factory: A callable that takes an `rtc.Room` and returns a tuple of
-               `(LiveKitTransport, Pipeline)`.
+               `(LiveKitTransport, PipelineTask)`.
         """
         self._pipeline_factory = factory
+
+    async def _request_fnc(self, req: JobRequest):
+        """Handle incoming job requests.
+        
+        This function is called when the LiveKit server dispatches a job to this worker.
+        By default, we accept all jobs.
+        
+        Args:
+            req: The job request from LiveKit.
+        """
+        logger.info(f"🔔 JOB REQUEST RECEIVED: room={req.room.name}, id={req.id}")
+        logger.info(f"   Job metadata: {req.room.metadata}")
+        logger.info(f"   Accepting job...")
+        await req.accept(
+            name="Pipecat Agent",
+            identity=f"pipecat-agent-{req.id[:8]}",
+        )
+        logger.info(f"✅ Job accepted for room: {req.room.name}")
 
     async def _entrypoint(self, ctx: JobContext):
         """Internal entrypoint for the LiveKit worker job.
@@ -59,23 +77,37 @@ class LiveKitWorkerRunner:
         Args:
             ctx: The LiveKit job context.
         """
-        logger.info(f"Connecting to room {ctx.room.name}")
+        logger.info(f"🚀 ENTRYPOINT CALLED for room {ctx.room.name}")
+        logger.info(f"   Job ID: {ctx.job.id}")
+        
+        logger.info(f"🔗 Connecting to room {ctx.room.name}...")
         await ctx.connect()
-        logger.info(f"Connected to room {ctx.room.name}")
+        logger.info(f"✅ Connected to room {ctx.room.name}")
+        
+        room_sid = await ctx.room.sid
+        logger.info(f"   Room SID: {room_sid}")
 
         if not self._pipeline_factory:
-            logger.error("No pipeline factory set")
+            logger.error("❌ No pipeline factory set")
             return
 
-        transport, pipeline = await self._pipeline_factory(ctx.room)
+        logger.info("🏗️ Creating pipeline via factory...")
+        transport, task = await self._pipeline_factory(ctx.room)
+        logger.info("✅ Pipeline created, starting runner...")
 
         runner = PipelineRunner()
-        task = PipelineTask(pipeline)
         await runner.run(task)
+        logger.info("🏁 Pipeline runner finished")
 
     def run(self):
         """Start the worker to listen for jobs.
 
         This method blocks until the worker is stopped.
         """
-        cli.run_app(WorkerOptions(entrypoint_fnc=self._entrypoint))
+        logger.info("🤖 Starting LiveKit Worker Runner...")
+        cli.run_app(
+            WorkerOptions(
+                entrypoint_fnc=self._entrypoint,
+                request_fnc=self._request_fnc,
+            )
+        )
