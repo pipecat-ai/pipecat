@@ -137,14 +137,14 @@ async def pipeline_factory(room):
         voice_id="abhilash",
         model="bulbul:v2",
         aiohttp_session=session,
-        aggregate_sentences=False,
+        aggregate_sentences=True,  # Buffer text to avoid single-character sends
     )
     logger.info(f"✅ Sarvam TTS created (API key set: {bool(os.getenv('SARVAM_API_KEY'))})")
 
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful AI assistant running as a LiveKit Agent. Respond politely and concisely.",
+            "content": "You are a helpful AI assistant running as a LiveKit Agent. Always respond in English, regardless of what language the user speaks. Respond politely and concisely.",
         },
     ]
 
