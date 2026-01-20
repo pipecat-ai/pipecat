@@ -1,8 +1,7 @@
 """AIC-integrated VAD analyzer that lazily binds to the AIC SDK backend.
 
 This module provides VAD analyzer implementations that query the AIC SDK's
-is_speech_detected() and map it to a float confidence (1.0/0.0). They use
-10 ms windows based on the sample rate and apply optional AIC VAD parameters.
+is_speech_detected() and map it to a float confidence (1.0/0.0).
 
 Classes:
     AICVADAnalyzer: For aic-sdk >= 2.0.0 (uses 'aic_sdk' module)
