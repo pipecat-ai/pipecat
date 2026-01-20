@@ -167,7 +167,6 @@ class NvidiaSTTService(STTService):
         self._queue = None
         self._config = None
         self._thread_task = None
-        self._response_task = None
 
     def _initialize_client(self):
         metadata = [
@@ -251,10 +250,6 @@ class NvidiaSTTService(STTService):
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
 
-        if not self._response_task:
-            self._response_queue = asyncio.Queue()
-            self._response_task = self.create_task(self._response_task_handler())
-
         logger.debug(f"Initialized NvidiaSTTService with model: {self.model_name}")
 
     async def stop(self, frame: EndFrame):
@@ -280,10 +275,6 @@ class NvidiaSTTService(STTService):
             await self.cancel_task(self._thread_task)
             self._thread_task = None
 
-        if self._response_task:
-            await self.cancel_task(self._response_task)
-            self._response_task = None
-
     def _response_handler(self):
         responses = self._asr_service.streaming_response_generator(
             audio_chunks=self,
@@ -292,9 +283,7 @@ class NvidiaSTTService(STTService):
         for response in responses:
             if not response.results:
                 continue
-            asyncio.run_coroutine_threadsafe(
-                self._response_queue.put(response), self.get_event_loop()
-            )
+            asyncio.run_coroutine_threadsafe(self._handle_response(response), self.get_event_loop())
 
     async def _thread_task_handler(self):
         try:
@@ -345,12 +334,6 @@ class NvidiaSTTService(STTService):
                             result=result,
                         )
                     )
-
-    async def _response_task_handler(self):
-        while True:
-            response = await self._response_queue.get()
-            await self._handle_response(response)
-            self._response_queue.task_done()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process audio data for speech-to-text transcription.
