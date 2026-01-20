@@ -125,7 +125,6 @@ dev = [
     "build~=1.2.2",
     "coverage~=7.9.1",
     "grpcio-tools~=1.67.1",
-    "livekit~=1.0.13",
     "pip-tools~=7.4.1",
     "pre-commit~=4.2.0",
     "pyright>=1.1.404,<1.2",

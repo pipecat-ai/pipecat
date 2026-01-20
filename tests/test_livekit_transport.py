@@ -14,15 +14,21 @@ only starts when there is a consumer for the frames.
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from livekit import rtc
+try:
+    from livekit import rtc
 
-from pipecat.transports.livekit.transport import (
-    LiveKitCallbacks,
-    LiveKitParams,
-    LiveKitTransportClient,
-)
+    from pipecat.transports.livekit.transport import (
+        LiveKitCallbacks,
+        LiveKitParams,
+        LiveKitTransportClient,
+    )
+
+    LIVEKIT_AVAILABLE = True
+except ImportError:
+    LIVEKIT_AVAILABLE = False
 
 
+@unittest.skipUnless(LIVEKIT_AVAILABLE, "livekit package not installed")
 class TestLiveKitVideoStreamMemoryLeak(unittest.IsolatedAsyncioTestCase):
     """Regression tests for video queue memory leak (#3116).
 
