@@ -4,7 +4,7 @@ This module provides VAD analyzer implementations that query the AIC SDK's
 is_speech_detected() and map it to a float confidence (1.0/0.0).
 
 Classes:
-    AICVADAnalyzer: For aic-sdk >= 2.0.0 (uses 'aic_sdk' module)
+    AICVADAnalyzer: For aic-sdk (uses 'aic_sdk' module)
 """
 
 from typing import Any, Callable, Optional
@@ -27,16 +27,16 @@ class AICVADAnalyzer(VADAnalyzer):
       - speech_hold_duration:
           Controls for how long the VAD continues to detect speech after the audio signal
           no longer contains speech (in seconds).
-          Range: 0.0 .. 20x model window length
+          Range: 0.0 to 20x model window length
           Default (SDK): 0.05s (50ms)
       - minimum_speech_duration:
           Controls for how long speech needs to be present in the audio signal before the VAD considers it speech (in seconds).
-          Range: 0.0 .. 1.0
+          Range: 0.0 to 1.0
           Default (SDK): 0.0s
       - sensitivity:
           Controls the energy threshold sensitivity. Higher values make the detector
           less sensitive (require more energy to count as speech).
-          Range: 1.0 .. 15.0
+          Range: 1.0 to 15.0
           Formula: Energy threshold = 10 ** (-sensitivity)
           Default (SDK): 6.0
 
@@ -61,16 +61,16 @@ class AICVADAnalyzer(VADAnalyzer):
                 will retry on set_sample_rate/first use.
             speech_hold_duration:
                 Optional override for AIC VAD speech hold duration (in seconds).
-                Range: 0.0 .. 20x model window length.
+                Range: 0.0 to 20x model window length.
                 If None, the SDK default (0.05s) is used.
             minimum_speech_duration:
                 Optional override for minimum speech duration before VAD reports
                 speech detected (in seconds).
-                Range: 0.0 .. 20x model window length.
+                Range: 0.0 to 20x model window length.
                 If None, the SDK default (0.0s) is used.
             sensitivity:
                 Optional override for AIC VAD sensitivity (energy threshold).
-                Range: 1.0 .. 15.0. Energy threshold = 10 ** (-sensitivity).
+                Range: 1.0 to 15.0. Energy threshold = 10 ** (-sensitivity).
                 If None, the SDK default (6.0) is used.
         """
         # Use fixed VAD parameters for AIC: no user override

@@ -37,7 +37,7 @@ class AICFilter(BaseAudioFilter):
     """Audio filter using ai-coustics' AIC SDK for real-time enhancement.
 
     Buffers incoming audio to the model's preferred block size and processes
-    frames using float32 samples normalized to the -1..+1 range.
+    frames using float32 samples normalized to the range -1 to +1.
 
     .. note::
         This class requires aic-sdk ~= 2.0.0 (uses 'aic_sdk' module).
@@ -90,7 +90,9 @@ class AICFilter(BaseAudioFilter):
         # Audio format constants
         self._bytes_per_sample = 2  # int16 = 2 bytes
         self._dtype = np.int16
-        self._scale = 32768.0  # 2^15, for normalizing int16 (-32768..32767) to float32 (-1.0..1.0)
+        self._scale = (
+            32768.0  # 2^15, for normalizing int16 (-32768 to 32767) to float32 (-1.0 to 1.0)
+        )
 
         # AIC SDK objects
         self._model = None
@@ -125,13 +127,13 @@ class AICFilter(BaseAudioFilter):
         AIC VAD parameters:
           - speech_hold_duration:
               How long VAD continues detecting after speech ends (in seconds).
-              Range: 0.0 .. 20x model window length, Default (SDK): 0.05s
+              Range: 0.0 to 20x model window length, Default (SDK): 0.05s
           - minimum_speech_duration:
               Minimum duration of speech required before VAD reports speech detected
-              (in seconds). Range: 0.0 .. 1.0, Default (SDK): 0.0s
+              (in seconds). Range: 0.0 to 1.0, Default (SDK): 0.0s
           - sensitivity:
               Energy threshold sensitivity. Energy threshold = 10 ** (-sensitivity).
-              Range: 1.0 .. 15.0, Default (SDK): 6.0
+              Range: 1.0 to 15.0, Default (SDK): 6.0
 
         Args:
             speech_hold_duration: Optional speech hold duration to configure on the VAD.
@@ -139,7 +141,7 @@ class AICFilter(BaseAudioFilter):
             minimum_speech_duration: Optional minimum speech duration before VAD reports
                 speech detected. If None, SDK default (0.0s) is used.
             sensitivity: Optional sensitivity (energy threshold) to configure on the VAD.
-                Range: 1.0 .. 15.0. If None, SDK default (6.0) is used.
+                Range: 1.0 to 15.0. If None, SDK default (6.0) is used.
 
         Returns:
             A lazily-initialized AICVADAnalyzer that will bind to the VAD context
