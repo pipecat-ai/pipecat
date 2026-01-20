@@ -223,7 +223,7 @@ class ElevenLabsCachedTTSService(ElevenLabsTTSService):
             cached_data: The cached TTS data to replay
         """
         await self.stop_ttfb_metrics()
-        self.start_word_timestamps()
+        await self.start_word_timestamps()
 
         # Push all audio chunks using the persistent context
         for audio_chunk in cached_data.audio_chunks:

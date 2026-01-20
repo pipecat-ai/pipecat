@@ -288,7 +288,7 @@ class DograhTTSService(AudioContextWordTTSService):
 
                 if msg_type == "audio":
                     await self.stop_ttfb_metrics()
-                    self.start_word_timestamps()
+                    await self.start_word_timestamps()
 
                     audio_data = msg.get("audio")
                     if audio_data:
