@@ -32,7 +32,7 @@ class AICVADAnalyzer(VADAnalyzer):
           Default (SDK): 0.05s (50ms)
       - minimum_speech_duration:
           Minimum duration of speech required before VAD reports speech detected (in seconds).
-          Range: 0.0 .. 20x model window length
+          Range: 0.0 .. 1.0
           Default (SDK): 0.0s
       - sensitivity:
           Controls the energy threshold sensitivity. Higher values make the detector
