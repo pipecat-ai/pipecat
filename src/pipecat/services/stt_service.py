@@ -415,6 +415,20 @@ class SegmentedSTTService(STTService):
         await super().start(frame)
         self._audio_buffer_size_1s = self.sample_rate * 2
 
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame, marking TranscriptionFrames as finalized.
+
+        Segmented STT services process complete speech segments and return a single
+        TranscriptionFrame per segment, so every transcription is inherently finalized.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame flow in the pipeline.
+        """
+        if isinstance(frame, TranscriptionFrame):
+            frame.finalized = True
+        await super().push_frame(frame, direction)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, handling VAD events and audio segmentation."""
         await super().process_frame(frame, direction)
