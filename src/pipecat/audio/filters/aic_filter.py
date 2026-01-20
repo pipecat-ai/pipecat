@@ -46,7 +46,7 @@ class AICFilter(BaseAudioFilter):
     def __init__(
         self,
         *,
-        license_key: str = "",
+        license_key: str,
         model_id: Optional[str] = None,
         model_path: Optional[str] = None,
         model_download_dir: Optional[Path] = None,
