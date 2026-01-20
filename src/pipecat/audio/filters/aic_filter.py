@@ -128,7 +128,7 @@ class AICFilter(BaseAudioFilter):
               Range: 0.0 .. 20x model window length, Default (SDK): 0.05s
           - minimum_speech_duration:
               Minimum duration of speech required before VAD reports speech detected
-              (in seconds). Range: 0.0 .. 20x model window length, Default (SDK): 0.0s
+              (in seconds). Range: 0.0 .. 1.0, Default (SDK): 0.0s
           - sensitivity:
               Energy threshold sensitivity. Energy threshold = 10 ** (-sensitivity).
               Range: 1.0 .. 15.0, Default (SDK): 6.0
