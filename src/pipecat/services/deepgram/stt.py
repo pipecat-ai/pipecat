@@ -153,6 +153,9 @@ class DeepgramSTTService(STTService):
             self._register_event_handler("on_speech_started")
             self._register_event_handler("on_utterance_end")
 
+        # Track when finalize() has been called to mark the next TranscriptionFrame
+        self._finalize_pending: bool = False
+
     @property
     def vad_enabled(self):
         """Check if Deepgram VAD events are enabled.
@@ -320,6 +323,9 @@ class DeepgramSTTService(STTService):
             language = Language(language)
         if len(transcript) > 0:
             if is_final:
+                # Check if this response is from a finalize() call
+                from_finalize = getattr(result, "from_finalize", False)
+                finalized = self._finalize_pending and from_finalize
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,
@@ -327,8 +333,11 @@ class DeepgramSTTService(STTService):
                         time_now_iso8601(),
                         language,
                         result=result,
+                        finalized=finalized,
                     )
                 )
+                if finalized:
+                    self._finalize_pending = False
                 await self._handle_transcription(transcript, is_final, language)
                 await self.stop_processing_metrics()
             else:
@@ -353,9 +362,13 @@ class DeepgramSTTService(STTService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStartedSpeakingFrame) and not self.vad_enabled:
+            # Reset finalize state for new utterance
+            self._finalize_pending = False
             # Start metrics if Deepgram VAD is disabled & pipeline VAD has detected speech
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
+            # Mark that the next final TranscriptionFrame should be considered finalized
+            self._finalize_pending = True
             await self._connection.finalize()
             logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")

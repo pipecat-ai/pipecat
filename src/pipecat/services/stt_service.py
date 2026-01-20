@@ -252,16 +252,26 @@ class STTService(AIService):
         """Push a frame downstream, tracking TranscriptionFrame timestamps for TTFB.
 
         Stores the timestamp of each TranscriptionFrame for TTFB calculation.
-        The actual TTFB is reported after a timeout to ensure we capture the
-        final transcription.
+        If the frame is marked as finalized, reports TTFB immediately and cancels
+        any pending timeout. Otherwise, TTFB is reported after a timeout.
 
         Args:
             frame: The frame to push.
             direction: The direction to push the frame.
         """
         if isinstance(frame, TranscriptionFrame):
-            # Always store the latest transcription time for TTFB calculation
+            # Store the transcription time for TTFB calculation
             self._last_transcription_time = time.time()
+
+            # If this is a finalized transcription, report TTFB immediately
+            if frame.finalized and self._speech_end_time is not None:
+                ttfb = self._last_transcription_time - self._speech_end_time
+                await self._emit_stt_ttfb_metric(ttfb)
+                # Cancel the timeout since we've already reported
+                await self._cancel_ttfb_timeout()
+                # Clear state
+                self._speech_end_time = None
+                self._last_transcription_time = None
 
         await super().push_frame(frame, direction)
 
