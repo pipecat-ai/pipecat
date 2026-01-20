@@ -184,6 +184,7 @@ class LiveKitTransportClient:
         params: LiveKitParams,
         callbacks: LiveKitCallbacks,
         transport_name: str,
+        room: Optional[rtc.Room] = None,
     ):
         """Initialize the LiveKit transport client.
 
@@ -194,6 +195,7 @@ class LiveKitTransportClient:
             params: Configuration parameters for the transport.
             callbacks: Event callback handlers.
             transport_name: Name identifier for the transport.
+            room: Optional existing LiveKit room instance.
         """
         self._url = url
         self._token = token
@@ -201,7 +203,7 @@ class LiveKitTransportClient:
         self._params = params
         self._callbacks = callbacks
         self._transport_name = transport_name
-        self._room: Optional[rtc.Room] = None
+        self._room: Optional[rtc.Room] = room
         self._participant_id: str = ""
         self._connected = False
         self._disconnect_counter = 0
@@ -214,6 +216,7 @@ class LiveKitTransportClient:
         self._other_participant_has_joined = False
         self._task_manager: Optional[BaseTaskManager] = None
         self._async_lock = asyncio.Lock()
+        self._should_connect = room is None
 
     @property
     def participant_id(self) -> str:
@@ -248,7 +251,8 @@ class LiveKitTransportClient:
             return
 
         self._task_manager = setup.task_manager
-        self._room = rtc.Room(loop=self._task_manager.get_event_loop())
+        if not self._room:
+            self._room = rtc.Room(loop=self._task_manager.get_event_loop())
 
         # Set up room event handlers
         self.room.on("participant_connected")(self._on_participant_connected_wrapper)
@@ -283,11 +287,12 @@ class LiveKitTransportClient:
             logger.info(f"Connecting to {self._room_name}")
 
             try:
-                await self.room.connect(
-                    self._url,
-                    self._token,
-                    options=rtc.RoomOptions(auto_subscribe=True),
-                )
+                if self._should_connect:
+                    await self.room.connect(
+                        self._url,
+                        self._token,
+                        options=rtc.RoomOptions(auto_subscribe=True),
+                    )
                 self._connected = True
                 # Increment disconnect counter if we successfully connected.
                 self._disconnect_counter += 1
@@ -957,6 +962,7 @@ class LiveKitTransport(BaseTransport):
         params: Optional[LiveKitParams] = None,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
+        room: Optional[rtc.Room] = None,
     ):
         """Initialize the LiveKit transport.
 
@@ -967,6 +973,7 @@ class LiveKitTransport(BaseTransport):
             params: Configuration parameters for the transport.
             input_name: Optional name for the input transport.
             output_name: Optional name for the output transport.
+            room: Optional existing LiveKit room instance.
         """
         super().__init__(input_name=input_name, output_name=output_name)
 
@@ -986,7 +993,7 @@ class LiveKitTransport(BaseTransport):
         self._params = params or LiveKitParams()
 
         self._client = LiveKitTransportClient(
-            url, token, room_name, self._params, callbacks, self.name
+            url, token, room_name, self._params, callbacks, self.name, room
         )
         self._input: Optional[LiveKitInputTransport] = None
         self._output: Optional[LiveKitOutputTransport] = None
