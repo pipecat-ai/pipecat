@@ -1728,8 +1728,9 @@ class DailyInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = DailyInputTransportMessageFrame(message=message, participant_id=sender)
-        await self.push_frame(frame)
+        await self.broadcast_frame_class(
+            DailyInputTransportMessageFrame, message=message, participant_id=sender
+        )
 
     #
     # Audio in
