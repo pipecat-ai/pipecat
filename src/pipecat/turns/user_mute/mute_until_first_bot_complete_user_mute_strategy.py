@@ -51,6 +51,5 @@ class MuteUntilFirstBotCompleteUserMuteStrategy(BaseUserMuteStrategy):
         return not self._first_speech_handled
 
     async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
-        self._bot_speaking = False
         if not self._first_speech_handled:
             self._first_speech_handled = True
