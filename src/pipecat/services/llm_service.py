@@ -56,6 +56,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.mixins.turn_completion import TurnCompletionMixin
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -142,7 +143,7 @@ class FunctionCallRunnerItem:
     run_llm: Optional[bool] = None
 
 
-class LLMService(AIService):
+class LLMService(TurnCompletionMixin, AIService):
     """Base class for all LLM services.
 
     Handles function calling registration and execution with support for both
@@ -171,7 +172,11 @@ class LLMService(AIService):
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
     def __init__(
-        self, run_in_parallel: bool = True, function_call_timeout_secs: float = 10.0, **kwargs
+        self,
+        run_in_parallel: bool = True,
+        function_call_timeout_secs: float = 10.0,
+        enable_turn_completion: bool = False,
+        **kwargs,
     ):
         """Initialize the LLM service.
 
@@ -180,12 +185,16 @@ class LLMService(AIService):
                 Defaults to True.
             function_call_timeout_secs: Timeout in seconds for deferred function calls.
                 Defaults to 10.0 seconds.
+            enable_turn_completion: Whether to enable turn completion detection.
+                When enabled, the service will detect <turn>COMPLETE</turn> and
+                <turn>INCOMPLETE</turn> markers in LLM responses. Defaults to False.
             **kwargs: Additional arguments passed to the parent AIService.
 
         """
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
         self._function_call_timeout_secs = function_call_timeout_secs
+        self._enable_turn_completion = enable_turn_completion
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
