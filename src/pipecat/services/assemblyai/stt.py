@@ -161,7 +161,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            pass  # TTFB handled by base class
+            pass
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if (
                 self._vad_force_turn_endpoint

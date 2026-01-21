@@ -81,6 +81,10 @@ class STTService(AIService):
                 from the start frame.
             stt_ttfb_timeout: Time in seconds to wait after VAD stop before reporting
                 TTFB. This delay allows the final transcription to arrive. Defaults to 2.0.
+                Note: STT "TTFB" differs from traditional TTFB (which measures from a discrete
+                request to first response byte). Since STT receives continuous audio, we measure
+                from when the user stops speaking to when the final transcript arrives—capturing
+                the latency that matters for voice AI applications.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -331,7 +335,9 @@ class STTService(AIService):
         if self._vad_stop_secs is None:
             return
 
-        # Calculate the actual speech end time (current time minus VAD stop delay)
+        # Calculate the actual speech end time (current time minus VAD stop delay).
+        # This approximates when the last user audio was sent to the STT service,
+        # which we use to measure against the eventual transcription response.
         self._speech_end_time = time.time() - self._vad_stop_secs
 
         # Start timeout task (any previous timeout was cancelled by VADUserStartedSpeakingFrame
