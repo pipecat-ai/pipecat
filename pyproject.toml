@@ -117,7 +117,7 @@ tracing = [ "opentelemetry-sdk>=1.33.0", "opentelemetry-api>=1.33.0", "opentelem
 ultravox = [ "pipecat-ai[websockets-base]" ]
 webrtc = [ "aiortc>=1.14.0,<2", "opencv-python>=4.11.0.86,<5" ]
 websocket = [ "pipecat-ai[websockets-base]", "fastapi>=0.115.6,<=0.128.0" ]
-websockets-base = [ "websockets>=13.1,<16.0" ]
+websockets-base = [ "websockets>=13.1,<=16.0" ]
 whisper = [ "faster-whisper~=1.1.1" ]
 
 [dependency-groups]
