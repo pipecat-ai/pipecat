@@ -12,7 +12,7 @@ gRPC API for high-quality speech synthesis.
 
 import asyncio
 import os
-from typing import AsyncGenerator, Mapping, Optional
+from typing import AsyncGenerator, AsyncIterable, Generator, Mapping, Optional
 
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -35,13 +35,11 @@ from pipecat.transcriptions.language import Language
 
 try:
     import riva.client
-
+    import riva.client.proto.riva_tts_pb2 as rtts
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use NVIDIA Riva TTS, you need to `pip install pipecat-ai[nvidia]`.")
     raise Exception(f"Missing module: {e}")
-
-NVIDIA_TTS_TIMEOUT_SECS = 5
 
 
 class NvidiaTTSService(TTSService):
@@ -165,26 +163,30 @@ class NvidiaTTSService(TTSService):
             Frame: Audio frames containing the synthesized speech data.
         """
 
-        def read_audio_responses(queue: asyncio.Queue):
-            def add_response(r):
-                asyncio.run_coroutine_threadsafe(queue.put(r), self.get_event_loop())
+        def read_audio_responses() -> Generator[rtts.SynthesizeSpeechResponse, None, None]:
+            responses = self._service.synthesize_online(
+                text,
+                self._voice_id,
+                self._language_code,
+                sample_rate_hz=self.sample_rate,
+                zero_shot_audio_prompt_file=None,
+                zero_shot_quality=self._quality,
+                custom_dictionary={},
+            )
+            return responses
 
+        def async_next(it):
             try:
-                responses = self._service.synthesize_online(
-                    text,
-                    self._voice_id,
-                    self._language_code,
-                    sample_rate_hz=self.sample_rate,
-                    zero_shot_audio_prompt_file=None,
-                    zero_shot_quality=self._quality,
-                    custom_dictionary={},
-                )
-                for r in responses:
-                    add_response(r)
-                add_response(None)
-            except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                add_response(None)
+                return next(it)
+            except StopIteration:
+                return None
+
+        async def async_iterator(iterator) -> AsyncIterable[rtts.SynthesizeSpeechResponse]:
+            while True:
+                item = await asyncio.to_thread(async_next, iterator)
+                if item is None:
+                    return
+                yield item
 
         try:
             assert self._service is not None, "TTS service not initialized"
@@ -195,12 +197,9 @@ class NvidiaTTSService(TTSService):
 
             logger.debug(f"{self}: Generating TTS [{text}]")
 
-            queue = asyncio.Queue()
-            await asyncio.to_thread(read_audio_responses, queue)
+            responses = await asyncio.to_thread(read_audio_responses)
 
-            # Wait for the thread to start.
-            resp = await asyncio.wait_for(queue.get(), timeout=NVIDIA_TTS_TIMEOUT_SECS)
-            while resp:
+            async for resp in async_iterator(responses):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
                     audio=resp.audio,
@@ -208,7 +207,6 @@ class NvidiaTTSService(TTSService):
                     num_channels=1,
                 )
                 yield frame
-                resp = await asyncio.wait_for(queue.get(), timeout=NVIDIA_TTS_TIMEOUT_SECS)
 
             await self.start_tts_usage_metrics(text)
             yield TTSStoppedFrame()
