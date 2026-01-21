@@ -1100,13 +1100,11 @@ class RTVIObserver(BaseObserver):
 
         if (
             isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
-            and (direction == FrameDirection.DOWNSTREAM)
             and self._params.user_speaking_enabled
         ):
             await self._handle_interruptions(frame)
         elif (
             isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame))
-            and (direction == FrameDirection.UPSTREAM)
             and self._params.bot_speaking_enabled
         ):
             await self._handle_bot_speaking(frame)
