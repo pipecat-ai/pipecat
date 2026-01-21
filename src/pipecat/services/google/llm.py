@@ -1023,7 +1023,11 @@ class GoogleLLMService(LLMService):
                                     await self.push_frame(LLMThoughtEndFrame())
                                 else:
                                     accumulated_text += part.text
-                                    await self.push_frame(LLMTextFrame(part.text))
+                                    # Use turn completion if enabled, otherwise push normally
+                                    if self._enable_turn_completion:
+                                        await self._push_turn_text(part.text)
+                                    else:
+                                        await self.push_frame(LLMTextFrame(part.text))
                             elif part.function_call:
                                 function_call = part.function_call
                                 function_call_id = function_call.id or str(uuid.uuid4())
@@ -1161,6 +1165,9 @@ class GoogleLLMService(LLMService):
                 )
             )
             await self.push_frame(LLMFullResponseEndFrame())
+            # Reset turn completion state if enabled
+            if self._enable_turn_completion:
+                await self._turn_reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle different frame types.

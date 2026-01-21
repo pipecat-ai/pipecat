@@ -1107,7 +1107,11 @@ class AWSBedrockLLMService(LLMService):
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]
                         if "text" in delta:
-                            await self.push_frame(LLMTextFrame(delta["text"]))
+                            # Use turn completion if enabled, otherwise push normally
+                            if self._enable_turn_completion:
+                                await self._push_turn_text(delta["text"])
+                            else:
+                                await self.push_frame(LLMTextFrame(delta["text"]))
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use
@@ -1180,6 +1184,9 @@ class AWSBedrockLLMService(LLMService):
                 cache_read_input_tokens=cache_read_input_tokens,
                 cache_creation_input_tokens=cache_creation_input_tokens,
             )
+            # Reset turn completion state if enabled
+            if self._enable_turn_completion:
+                await self._turn_reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle LLM-specific frame types.

@@ -9,7 +9,6 @@ import os
 from dotenv import load_dotenv
 from idle_handler import IdleHandler
 from loguru import logger
-from turn_processor import TURN_COMPLETION_INSTRUCTIONS, TurnProcessor
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -23,18 +22,20 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.aggregators.llm_text_processor import LLMTextProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.mixins.turn_completion import TURN_COMPLETION_INSTRUCTIONS
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_stop import (
+    TranscriptionUserTurnStopStrategy,
+    TurnAnalyzerUserTurnStopStrategy,
+)
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.utils.text.pattern_pair_aggregator import MatchAction, PatternPairAggregator
 
 load_dotenv(override=True)
 
@@ -65,19 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    llm_text_aggregator = PatternPairAggregator()
-    llm_text_aggregator.add_pattern(
-        type="turn",
-        start_pattern="<turn>",
-        end_pattern="</turn>",
-        action=MatchAction.AGGREGATE,
-    )
-
-    llm_text_processor = LLMTextProcessor(text_aggregator=llm_text_aggregator)
-
-    turn_processor = TurnProcessor()
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), enable_turn_completion=True)
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -97,9 +86,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+                stop=[TranscriptionUserTurnStopStrategy(timeout=0)]
             ),
-            user_idle_timeout=6.0,
+            user_idle_timeout=5.0,
         ),
     )
 
@@ -109,8 +98,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             user_aggregator,  # User responses
             llm,  # LLM
-            llm_text_processor,
-            turn_processor,
             tts,  # TTS
             transport.output(),  # Transport bot output
             assistant_aggregator,  # Assistant spoken responses

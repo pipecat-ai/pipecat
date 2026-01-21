@@ -422,14 +422,21 @@ class BaseOpenAILLMService(LLMService):
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
-
+                # Use turn completion if enabled, otherwise push normally
+                if self._enable_turn_completion:
+                    await self._push_turn_text(chunk.choices[0].delta.content)
+                else:
+                    await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript
             elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
                 "transcript"
             ):
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
+
+        # Reset turn completion state if enabled
+        if self._enable_turn_completion:
+            await self._turn_reset()
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to

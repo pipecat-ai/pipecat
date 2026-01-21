@@ -439,7 +439,11 @@ class AnthropicLLMService(LLMService):
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
-                        await self.push_frame(LLMTextFrame(event.delta.text))
+                        # Use turn completion if enabled, otherwise push normally
+                        if self._enable_turn_completion:
+                            await self._push_turn_text(event.delta.text)
+                        else:
+                            await self.push_frame(LLMTextFrame(event.delta.text))
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
                     elif hasattr(event.delta, "partial_json") and tool_use_block:
                         json_accumulator += event.delta.partial_json
@@ -550,6 +554,9 @@ class AnthropicLLMService(LLMService):
                 cache_creation_input_tokens=cache_creation_input_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
             )
+            # Reset turn completion state if enabled
+            if self._enable_turn_completion:
+                await self._turn_reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and route them appropriately.
