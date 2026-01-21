@@ -1413,6 +1413,18 @@ class RTVIProcessor(FrameProcessor):
 
         self._registered_services[service.name] = service
 
+    def create_rtvi_observer(self, *, params: Optional[RTVIObserverParams] = None, **kwargs):
+        """Creates a new RTVI Observer.
+
+        Args:
+            params: Settings to enable/disable specific messages.
+            **kwargs: Additional arguments passed to the observer.
+
+        Returns:
+            A new RTVI observer.
+        """
+        return RTVIObserver(self, params=params, **kwargs)
+
     async def set_client_ready(self):
         """Mark the client as ready and trigger the ready event."""
         self._client_ready = True
