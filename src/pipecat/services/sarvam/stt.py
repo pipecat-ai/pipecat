@@ -15,9 +15,15 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
+    Frame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -75,14 +81,14 @@ class SarvamSTTService(STTService):
             language: Target language for transcription. Defaults to None (required for saarika models).
             prompt: Optional prompt to guide translation style/context for STT-Translate models.
                    Only applicable to saaras (STT-Translate) models. Defaults to None.
-            vad_signals: Enable VAD signals in response. Defaults to True.
-            high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to False.
+            vad_signals: Enable VAD signals in response. Defaults to None.
+            high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to None.
         """
 
         language: Optional[Language] = None
         prompt: Optional[str] = None
-        vad_signals: bool = True
-        high_vad_sensitivity: bool = False
+        vad_signals: bool = None
+        high_vad_sensitivity: bool = None
 
     def __init__(
         self,
@@ -155,6 +161,10 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        logger.info(f"Sarvam STT initialized with SDK headers: {self._sdk_headers}")
+
+        # Track pending finalize for TTFB measurement
+        self._finalize_pending: bool = False
 
     def language_to_service_language(self, language: Language) -> str:
         """Convert pipecat Language enum to Sarvam's language code.
@@ -174,6 +184,24 @@ class SarvamSTTService(STTService):
             True, as Sarvam service supports metrics generation.
         """
         return True
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames.
+
+        Handles VAD frames for TTFB tracking when using Pipecat's VAD
+        instead of Sarvam's built-in VAD.
+        """
+        await super().process_frame(frame, direction)
+
+        # Only handle VAD frames when not using Sarvam's VAD signals
+        if not self._vad_signals:
+            if isinstance(frame, VADUserStartedSpeakingFrame):
+                self._finalize_pending = False
+                await self._start_metrics()
+            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                if self._socket_client:
+                    self._finalize_pending = True
+                    await self._socket_client.flush()
 
     async def set_language(self, language: Language):
         """Set the recognition language and reconnect.
@@ -414,10 +442,13 @@ class SarvamSTTService(STTService):
                     await self._start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
+                    await self.broadcast_frame(UserStartedSpeakingFrame)
+                    await self.push_interruption_task_frame_and_wait()
 
                 elif signal == "END_SPEECH":
                     logger.debug("User stopped speaking")
                     await self._call_event_handler("on_speech_stopped")
+                    await self.broadcast_frame(UserStoppedSpeakingFrame)
 
             elif message.type == "data":
                 transcript = message.data.transcript
@@ -443,8 +474,10 @@ class SarvamSTTService(STTService):
                             time_now_iso8601(),
                             language,
                             result=(message.dict() if hasattr(message, "dict") else str(message)),
+                            finalized=self._finalize_pending,
                         )
                     )
+                    self._finalize_pending = False
 
                 await self.stop_processing_metrics()
 
