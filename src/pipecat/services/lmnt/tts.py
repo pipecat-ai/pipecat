@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for LMNT configuration needed
@@ -46,7 +46,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding LMNT language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.DE: "de",
         Language.EN: "en",
         Language.ES: "es",
@@ -68,17 +68,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
         Language.ZH: "zh",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class LmntTTSService(InterruptibleTTSService):
@@ -185,6 +175,8 @@ class LmntTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         """Connect to LMNT WebSocket and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -192,6 +184,8 @@ class LmntTTSService(InterruptibleTTSService):
 
     async def _disconnect(self):
         """Disconnect from LMNT WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -224,7 +218,7 @@ class LmntTTSService(InterruptibleTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -240,7 +234,7 @@ class LmntTTSService(InterruptibleTTSService):
                 # await self._websocket.send(json.dumps({"eof": True}))
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error disconnecting from LMNT: {e}", exception=e)
         finally:
             self._started = False
             self._websocket = None
@@ -274,10 +268,9 @@ class LmntTTSService(InterruptibleTTSService):
                 try:
                     msg = json.loads(message)
                     if "error" in msg:
-                        logger.error(f"{self} error: {msg['error']}")
                         await self.push_frame(TTSStoppedFrame())
                         await self.stop_all_metrics()
-                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
+                        await self.push_error(error_msg=f"Error: {msg['error']}")
                         return
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
@@ -310,11 +303,11 @@ class LmntTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(json.dumps({"flush": True}))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")

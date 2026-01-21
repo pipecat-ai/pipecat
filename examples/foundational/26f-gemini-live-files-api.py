@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -16,7 +16,8 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -103,7 +104,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     - Answer questions about what's in the document
     - Use the information from the document in our conversation
 
-    Your output will be converted to audio so don't include special characters in your answers.
+    Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
     Be friendly and demonstrate your ability to work with the uploaded file.
     """
 
@@ -129,7 +130,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         mime_type = "text/plain"
 
         # Create context with file reference
-        context = OpenAILLMContext(
+        context = LLMContext(
             [
                 {
                     "role": "user",
@@ -152,7 +153,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     except Exception as e:
         logger.error(f"Error uploading file: {e}")
         # Continue with a basic context if file upload fails
-        context = OpenAILLMContext(
+        context = LLMContext(
             [
                 {
                     "role": "user",
@@ -162,16 +163,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
     # Create context aggregator
-    context_aggregator = llm.create_context_aggregator(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -179,7 +180,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,7 +15,7 @@ import asyncio
 import fractions
 import time
 from collections import deque
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 import numpy as np
 from loguru import logger
@@ -304,7 +304,11 @@ class SmallWebRTCClient:
             try:
                 frame = await asyncio.wait_for(video_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
-                if self._webrtc_connection.is_connected():
+                if (
+                    self._webrtc_connection.is_connected()
+                    and video_track
+                    and video_track.is_enabled()
+                ):
                     logger.warning("Timeout: No video frame received within the specified time.")
                     # self._webrtc_connection.ask_to_renegotiate()
                 frame = None
@@ -354,7 +358,11 @@ class SmallWebRTCClient:
             try:
                 frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
-                if self._webrtc_connection.is_connected():
+                if (
+                    self._webrtc_connection.is_connected()
+                    and self._audio_input_track
+                    and self._audio_input_track.is_enabled()
+                ):
                     logger.warning("Timeout: No audio frame received within the specified time.")
                 frame = None
             except MediaStreamError:
@@ -567,7 +575,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_audio_task = None
         self._receive_video_task = None
         self._receive_screen_video_task = None
-        self._image_requests = {}
+        self._image_requests: List[UserImageRequestFrame] = []
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
@@ -657,23 +665,28 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                 if video_frame:
                     await self.push_video_frame(video_frame)
 
-                    # Check if there are any pending image requests and create UserImageRawFrame
-                    if self._image_requests:
-                        for req_id, request_frame in list(self._image_requests.items()):
-                            if request_frame.video_source == video_source:
-                                # Create UserImageRawFrame using the current video frame
-                                image_frame = UserImageRawFrame(
-                                    user_id=request_frame.user_id,
-                                    request=request_frame,
-                                    image=video_frame.image,
-                                    size=video_frame.size,
-                                    format=video_frame.format,
-                                )
-                                image_frame.transport_source = video_source
-                                # Push the frame to the pipeline
-                                await self.push_video_frame(image_frame)
-                                # Remove from pending requests
-                                del self._image_requests[req_id]
+                    # Check if there are any pending image requests and create
+                    # UserImageRawFrame. Use a shallow copy so we can remove
+                    # elements.
+                    for request_frame in self._image_requests[:]:
+                        request_text = request_frame.text if request_frame else None
+                        add_to_context = request_frame.append_to_context if request_frame else None
+                        if request_frame.video_source == video_source:
+                            # Create UserImageRawFrame using the current video frame
+                            image_frame = UserImageRawFrame(
+                                user_id=request_frame.user_id,
+                                image=video_frame.image,
+                                size=video_frame.size,
+                                format=video_frame.format,
+                                text=request_text,
+                                append_to_context=add_to_context,
+                                request=request_frame,
+                            )
+                            image_frame.transport_source = video_source
+                            # Push the frame to the pipeline
+                            await self.push_video_frame(image_frame)
+                            # Remove from pending requests
+                            self._image_requests.remove(request_frame)
 
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
@@ -701,8 +714,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         logger.debug(f"Requesting image from participant: {frame.user_id}")
 
         # Store the request
-        request_id = f"{frame.function_name}:{frame.tool_call_id}"
-        self._image_requests[request_id] = frame
+        self._image_requests.append(frame)
 
         # Default to camera if no source specified
         if frame.video_source is None:

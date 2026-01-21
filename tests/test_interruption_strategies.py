@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,7 +9,7 @@ import unittest
 from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
 
 
-class TestInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
+class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
     async def test_min_words(self):
         strategy = MinWordsInterruptionStrategy(min_words=2)
         await strategy.append_text("Hello")

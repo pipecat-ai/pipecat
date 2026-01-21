@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -18,7 +18,8 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.azure.realtime.llm import AzureRealtimeLLMService
@@ -147,7 +148,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         api_key=os.getenv("AZURE_REALTIME_API_KEY"),
         base_url=os.getenv("AZURE_REALTIME_BASE_URL"),
         session_properties=session_properties,
-        start_audio_paused=False,
     )
 
     # you can either register a single function for all function calls, or specific functions
@@ -155,10 +155,10 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
-    # Create a standard OpenAI LLM context object using the normal messages format. The
+    # Create a standard LLM context object using the normal messages format. The
     # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
-    context = OpenAILLMContext(
+    context = LLMContext(
         [{"role": "user", "content": "Say hello!"}],
         # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
         #     [
@@ -173,15 +173,15 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         tools,
     )
 
-    context_aggregator = llm.create_context_aggregator(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            context_aggregator.user(),
+            user_aggregator,
             llm,  # LLM
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

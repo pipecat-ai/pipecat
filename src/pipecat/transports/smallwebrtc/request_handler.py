@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -38,6 +38,13 @@ class SmallWebRTCRequest:
     pc_id: Optional[str] = None
     restart_pc: Optional[bool] = None
     request_data: Optional[Any] = None
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Accept both snake_case and camelCase for the request_data field."""
+        if "requestData" in data and "request_data" not in data:
+            data["request_data"] = data.pop("requestData")
+        return cls(**data)
 
 
 @dataclass
@@ -153,7 +160,7 @@ class SmallWebRTCRequestHandler:
         self,
         request: SmallWebRTCRequest,
         webrtc_connection_callback: Callable[[Any], Awaitable[None]],
-    ) -> None:
+    ) -> Optional[Dict[str, str]]:
         """Handle a SmallWebRTC request and resolve the pending answer.
 
         This method will:
@@ -168,6 +175,10 @@ class SmallWebRTCRequestHandler:
                 SDP, type, and optionally a `pc_id`.
             webrtc_connection_callback (Callable[[Any], Awaitable[None]]): An
                 asynchronous callback function that is invoked with the WebRTC connection.
+
+        Returns:
+            Dictionary containing SDP answer, type, and peer connection ID,
+            or None if no answer is available.
 
         Raises:
             HTTPException: If connection mode constraints are violated

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -110,7 +110,6 @@ class FalImageGenService(ImageGenService):
         image_url = response["images"][0]["url"] if response else None
 
         if not image_url:
-            logger.error(f"{self} error: image generation failed")
             yield ErrorFrame("Image generation failed")
             return
 

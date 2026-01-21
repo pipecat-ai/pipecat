@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,9 +14,10 @@ translation from this universal context into whatever format it needs, using a
 service-specific adapter.
 """
 
+import asyncio
 import base64
-import copy
 import io
+import wave
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
 
@@ -29,7 +30,7 @@ from openai.types.chat import (
 )
 from PIL import Image
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
 
 if TYPE_CHECKING:
@@ -77,15 +78,40 @@ class LLMContext:
         from OpenAILLMContext to LLMContext. New user code should use
         LLMContext directly.
 
+        .. deprecated:: 0.0.99
+            `from_openai_context()` is deprecated and will be removed in a future version.
+            Directly use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
+
         Args:
             openai_context: The OpenAI LLM context to convert.
 
         Returns:
             New LLMContext instance with converted messages and settings.
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "from_openai_context() (likely invoked by create_context_aggregator()) is deprecated and will be removed in a future version. "
+                "Directly use the universal LLMContext and LLMContextAggregatorPair instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        # Convert tools to ToolsSchema if needed.
+        # If the tools are already a ToolsSchema, this is a no-op.
+        # Otherwise, we wrap them in a shim ToolsSchema.
+        converted_tools = openai_context.tools
+        if isinstance(converted_tools, list):
+            converted_tools = ToolsSchema(
+                standard_tools=[], custom_tools={AdapterType.SHIM: converted_tools}
+            )
         return LLMContext(
             messages=openai_context.get_messages(),
-            tools=openai_context.tools,
+            tools=converted_tools,
             tool_choice=openai_context.tool_choice,
         )
 
@@ -106,6 +132,107 @@ class LLMContext:
         self._tools: ToolsSchema | NotGiven = LLMContext._normalize_and_validate_tools(tools)
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
 
+    @staticmethod
+    def create_image_url_message(
+        *,
+        role: str = "user",
+        url: str,
+        text: Optional[str] = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing an image URL.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            url: The URL of the image.
+            text: Optional text to include with the image.
+        """
+        content = []
+        if text:
+            content.append({"type": "text", "text": text})
+
+        content.append({"type": "image_url", "image_url": {"url": url}})
+
+        return {"role": role, "content": content}
+
+    @staticmethod
+    async def create_image_message(
+        *,
+        role: str = "user",
+        format: str,
+        size: tuple[int, int],
+        image: bytes,
+        text: Optional[str] = None,
+    ) -> LLMContextMessage:
+        """Create a context message containing an image.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            format: Image format (e.g., 'RGB', 'RGBA', or, if already encoded,
+                the MIME type like 'image/jpeg').
+            size: Image dimensions as (width, height) tuple.
+            image: Raw image bytes.
+            text: Optional text to include with the image.
+        """
+        # Format is a mime type: image is already encoded
+        image_already_encoded = format.startswith("image/")
+
+        def encode_image():
+            if image_already_encoded:
+                bytes = image
+            else:
+                # Encode to JPEG
+                buffer = io.BytesIO()
+                Image.frombytes(format, size, image).save(buffer, format="JPEG")
+                bytes = buffer.getvalue()
+            encoded_image = base64.b64encode(bytes).decode("utf-8")
+            return encoded_image
+
+        encoded_image = await asyncio.to_thread(encode_image)
+
+        url = f"data:{format if image_already_encoded else 'image/jpeg'};base64,{encoded_image}"
+
+        return LLMContext.create_image_url_message(role=role, url=url, text=text)
+
+    @staticmethod
+    async def create_audio_message(
+        *, role: str = "user", audio_frames: list[AudioRawFrame], text: str = "Audio follows"
+    ) -> LLMContextMessage:
+        """Create a context message containing audio.
+
+        Args:
+            role: The role of this message (defaults to "user").
+            audio_frames: List of audio frame objects to include.
+            text: Optional text to include with the audio.
+        """
+        content = [{"type": "text", "text": text}]
+
+        def encode_audio():
+            sample_rate = audio_frames[0].sample_rate
+            num_channels = audio_frames[0].num_channels
+
+            data = b"".join(frame.audio for frame in audio_frames)
+
+            with io.BytesIO() as buffer:
+                with wave.open(buffer, "wb") as wf:
+                    wf.setsampwidth(2)
+                    wf.setnchannels(num_channels)
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(data)
+
+                encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            return encoded_audio
+
+        encoded_audio = await asyncio.to_thread(encode_audio)
+
+        content.append(
+            {
+                "type": "input_audio",
+                "input_audio": {"data": encoded_audio, "format": "wav"},
+            }
+        )
+
+        return {"role": role, "content": content}
+
     @property
     def messages(self) -> List[LLMContextMessage]:
         """Get the current messages list.
@@ -117,6 +244,33 @@ class LLMContext:
         Returns:
             List of conversation messages.
         """
+        return self.get_messages()
+
+    def get_messages_for_persistent_storage(self) -> List[LLMContextMessage]:
+        """Get messages suitable for persistent storage.
+
+        NOTE: the only reason this method exists is because we're "silently"
+        switching from OpenAILLMContext to LLMContext under the hood in some
+        services and don't want to trip up users who may have been relying on
+        this method, which is part of the public API of OpenAILLMContext but
+        doesn't need to be for LLMContext.
+
+        .. deprecated::
+            Use `get_messages()` instead.
+
+        Returns:
+            List of conversation messages.
+        """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "get_messages_for_persistent_storage() is deprecated, use get_messages() instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         return self.get_messages()
 
     def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:
@@ -203,30 +357,31 @@ class LLMContext:
         """
         self._tool_choice = tool_choice
 
-    def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+    async def add_image_frame_message(
+        self,
+        *,
+        format: str,
+        size: tuple[int, int],
+        image: bytes,
+        text: Optional[str] = None,
+        role: str = "user",
     ):
         """Add a message containing an image frame.
 
         Args:
-            format: Image format (e.g., 'RGB', 'RGBA').
+            format: Image format (e.g., 'RGB', 'RGBA', or, if already encoded,
+                the MIME type like 'image/jpeg').
             size: Image dimensions as (width, height) tuple.
             image: Raw image bytes.
             text: Optional text to include with the image.
+            role: The role of this message (defaults to "user").
         """
-        buffer = io.BytesIO()
-        Image.frombytes(format, size, image).save(buffer, format="JPEG")
-        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-        content = []
-        if text:
-            content.append({"type": "text", "text": text})
-        content.append(
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
+        message = await LLMContext.create_image_message(
+            role=role, format=format, size=size, image=image, text=text
         )
-        self.add_message({"role": "user", "content": content})
+        self.add_message(message)
 
-    def add_audio_frames_message(
+    async def add_audio_frames_message(
         self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
     ):
         """Add a message containing audio frames.
@@ -235,66 +390,8 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
-        if not audio_frames:
-            return
-
-        sample_rate = audio_frames[0].sample_rate
-        num_channels = audio_frames[0].num_channels
-
-        content = []
-        content.append({"type": "text", "text": text})
-        data = b"".join(frame.audio for frame in audio_frames)
-        data = bytes(
-            self._create_wav_header(
-                sample_rate,
-                num_channels,
-                16,
-                len(data),
-            )
-            + data
-        )
-        encoded_audio = base64.b64encode(data).decode("utf-8")
-        content.append(
-            {
-                "type": "input_audio",
-                "input_audio": {"data": encoded_audio, "format": "wav"},
-            }
-        )
-        self.add_message({"role": "user", "content": content})
-
-    def _create_wav_header(self, sample_rate, num_channels, bits_per_sample, data_size):
-        """Create a WAV file header for audio data.
-
-        Args:
-            sample_rate: Audio sample rate in Hz.
-            num_channels: Number of audio channels.
-            bits_per_sample: Bits per audio sample.
-            data_size: Size of audio data in bytes.
-
-        Returns:
-            WAV header as a bytearray.
-        """
-        # RIFF chunk descriptor
-        header = bytearray()
-        header.extend(b"RIFF")  # ChunkID
-        header.extend((data_size + 36).to_bytes(4, "little"))  # ChunkSize: total size - 8
-        header.extend(b"WAVE")  # Format
-        # "fmt " sub-chunk
-        header.extend(b"fmt ")  # Subchunk1ID
-        header.extend((16).to_bytes(4, "little"))  # Subchunk1Size (16 for PCM)
-        header.extend((1).to_bytes(2, "little"))  # AudioFormat (1 for PCM)
-        header.extend(num_channels.to_bytes(2, "little"))  # NumChannels
-        header.extend(sample_rate.to_bytes(4, "little"))  # SampleRate
-        # Calculate byte rate and block align
-        byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
-        block_align = num_channels * (bits_per_sample // 8)
-        header.extend(byte_rate.to_bytes(4, "little"))  # ByteRate
-        header.extend(block_align.to_bytes(2, "little"))  # BlockAlign
-        header.extend(bits_per_sample.to_bytes(2, "little"))  # BitsPerSample
-        # "data" sub-chunk
-        header.extend(b"data")  # Subchunk2ID
-        header.extend(data_size.to_bytes(4, "little"))  # Subchunk2Size
-        return header
+        message = await LLMContext.create_audio_message(audio_frames=audio_frames, text=text)
+        self.add_message(message)
 
     @staticmethod
     def _normalize_and_validate_tools(tools: ToolsSchema | NotGiven) -> ToolsSchema | NotGiven:

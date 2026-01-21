@@ -1,14 +1,17 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Deepgram Flux speech-to-text service implementation."""
 
+import asyncio
 import json
+import time
 from enum import Enum
 from typing import Any, AsyncGenerator, Dict, Optional
+from urllib.parse import urlencode
 
 from loguru import logger
 from pydantic import BaseModel
@@ -24,7 +27,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -93,6 +95,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             mip_opt_out: Optional. Opts out requests from the Deepgram Model Improvement Program
                 (default False).
             tag: List of tags to label requests for identification during usage reporting.
+            min_confidence: Optional. Minimum confidence required confidence to create a TranscriptionFrame
         """
 
         eager_eot_threshold: Optional[float] = None
@@ -101,6 +104,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         keyterm: list = []
         mip_opt_out: Optional[bool] = None
         tag: list = []
+        min_confidence: Optional[float] = None  # New parameter
 
     def __init__(
         self,
@@ -111,6 +115,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         model: str = "flux-general-en",
         flux_encoding: str = "linear16",
         params: Optional[InputParams] = None,
+        should_interrupt: bool = True,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT service.
@@ -124,6 +129,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 Raw signed little-endian 16-bit PCM encoding.
             params: InputParams instance containing detailed API configuration options.
                 If None, default parameters will be used.
+            should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
             **kwargs: Additional arguments passed to the parent WebsocketSTTService class.
 
         Examples:
@@ -145,17 +151,41 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                     params=params
                 )
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # Note: For DeepgramFluxSTTService, differently from other processes, we need to create
+        # the _receive_task inside _connect_websocket, because the websocket should only be
+        # considered connected and ready to send audio once we receive from Flux the message
+        # which confirms the connection has been established.
+        # If we try to keep the logic reconnect_on_error, when receiving a message, the
+        # _receive_task_handler would try to reconnect in case of error, invoking the
+        # _connect_websocket again and leading to a case where the first _receive_task_handler
+        # was never destroyed.
+        # So we can keep it here as false, because inside the method send_with_retry, it will
+        # already try to reconnect if needed.
+        super().__init__(sample_rate=sample_rate, reconnect_on_error=False, **kwargs)
 
         self._api_key = api_key
         self._url = url
         self._model = model
         self._params = params or DeepgramFluxSTTService.InputParams()
+        self._should_interrupt = should_interrupt
         self._flux_encoding = flux_encoding
         # This is the currently only supported language
         self._language = Language.EN
         self._websocket_url = None
         self._receive_task = None
+        # Flux event handlers
+        self._register_event_handler("on_start_of_turn")
+        self._register_event_handler("on_turn_resumed")
+        self._register_event_handler("on_end_of_turn")
+        self._register_event_handler("on_eager_end_of_turn")
+        self._register_event_handler("on_update")
+        self._connection_established_event = asyncio.Event()
+        # Watchdog task to prevent dangling tasks
+        # If we stop sending audio to Flux after we have received that the User has started speaking
+        # we never receive the user stopped speaking event unless we resume sending audio to it.
+        self._last_stt_time = None
+        self._watchdog_task = None
+        self._user_is_speaking = False
 
     async def _connect(self):
         """Connect to WebSocket and start background tasks.
@@ -163,10 +193,9 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Establishes the WebSocket connection to the Deepgram Flux API and starts
         the background task for receiving transcription results.
         """
-        await self._connect_websocket()
+        await super()._connect()
 
-        if self._websocket and not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+        await self._connect_websocket()
 
     async def _disconnect(self):
         """Disconnect from WebSocket and clean up tasks.
@@ -174,20 +203,34 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Gracefully disconnects from the Deepgram Flux API, cancels background tasks,
         and cleans up resources to prevent memory leaks.
         """
+        await super()._disconnect()
+
         try:
-            # Cancel background tasks BEFORE closing websocket
-            if self._receive_task:
-                await self.cancel_task(self._receive_task, timeout=2.0)
-                self._receive_task = None
-
-            # Now close the websocket
             await self._disconnect_websocket()
-
         except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             # Reset state only after everything is cleaned up
             self._websocket = None
+
+    async def _send_silence(self, duration_secs: float = 0.5):
+        """Send a block of silence of the specified duration (default 500 ms)."""
+        sample_width = 2  # bytes per sample for 16-bit PCM
+        num_channels = 1  # mono
+        num_samples = int(self.sample_rate * duration_secs)
+        silence = b"\x00" * (num_samples * sample_width * num_channels)
+        await self._websocket.send(silence)
+
+    async def _watchdog_task_handler(self):
+        while self._websocket and self._websocket.state is State.OPEN:
+            now = time.monotonic()
+            # More than 500 ms without sending new audio to Flux
+            if self._user_is_speaking and self._last_stt_time and now - self._last_stt_time > 0.5:
+                logger.warning("Sending silence to Flux to prevent dangling task")
+                await self._send_silence()
+                self._last_stt_time = time.monotonic()
+            # check every 100ms
+            await asyncio.sleep(0.1)
 
     async def _connect_websocket(self):
         """Establish WebSocket connection to API.
@@ -200,14 +243,35 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
+            self._connection_established_event.clear()
+            self._user_is_speaking = False
             self._websocket = await websocket_connect(
                 self._websocket_url,
                 additional_headers={"Authorization": f"Token {self._api_key}"},
             )
+
+            headers = {
+                k: v for k, v in self._websocket.response.headers.items() if k.startswith("dg-")
+            }
+            logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
+
+            # Creating the receiver task
+            if not self._receive_task:
+                self._receive_task = self.create_task(
+                    self._receive_task_handler(self._report_error)
+                )
+
+            # Creating the watchdog task
+            if not self._watchdog_task:
+                self._watchdog_task = self.create_task(self._watchdog_task_handler())
+
+            # Now wait for the connection established event
+            logger.debug("WebSocket connected, waiting for server confirmation...")
+            await self._connection_established_event.wait()
             logger.debug("Connected to Deepgram Flux Websocket")
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -218,6 +282,16 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         metrics collection. Handles disconnection errors gracefully.
         """
         try:
+            # Cancel background tasks BEFORE closing websocket
+            if self._receive_task:
+                await self.cancel_task(self._receive_task, timeout=2.0)
+                self._receive_task = None
+            if self._watchdog_task:
+                await self.cancel_task(self._watchdog_task, timeout=2.0)
+                self._watchdog_task = None
+                self._last_stt_time = None
+
+            self._connection_established_event.clear()
             await self.stop_all_metrics()
 
             if self._websocket:
@@ -225,7 +299,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 logger.debug("Disconnecting from Deepgram Flux Websocket")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
             await self._call_event_handler("on_disconnected")
@@ -235,10 +309,13 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         This signals to the server that no more audio data will be sent.
         """
-        if self._websocket:
-            logger.debug("Sending CloseStream message to Deepgram Flux")
-            message = {"type": "CloseStream"}
-            await self._websocket.send(json.dumps(message))
+        try:
+            if self._websocket:
+                logger.debug("Sending CloseStream message to Deepgram Flux")
+                message = {"type": "CloseStream"}
+                await self._websocket.send(json.dumps(message))
+        except Exception as e:
+            await self.push_error(error_msg=f"Error sending closeStream: {e}", exception=e)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -279,11 +356,11 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         # Add keyterm parameters (can have multiple)
         for keyterm in self._params.keyterm:
-            url_params.append(f"keyterm={keyterm}")
+            url_params.append(urlencode({"keyterm": keyterm}))
 
         # Add tag parameters (can have multiple)
         for tag_value in self._params.tag:
-            url_params.append(f"tag={tag_value}")
+            url_params.append(urlencode({"tag": tag_value}))
 
         self._websocket_url = f"{self._url}?{'&'.join(url_params)}"
         await self._connect()
@@ -325,15 +402,13 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 are issues sending the audio data.
         """
         if not self._websocket:
-            logger.error("Not connected to Deepgram Flux.")
-            yield ErrorFrame("Not connected to Deepgram Flux.", fatal=True)
             return
 
         try:
-            await self._websocket.send(audio)
+            self._last_stt_time = time.monotonic()
+            await self.send_with_retry(audio, self._report_error)
         except Exception as e:
-            logger.error(f"Failed to send audio to Flux: {e}")
-            yield ErrorFrame(f"Failed to send audio to Flux:  {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
             return
 
         yield None
@@ -410,7 +485,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                     # Skip malformed messages
                     continue
                 except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+                    await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
                     # Error will be handled inside WebsocketService->_receive_task_handler
                     raise
             else:
@@ -452,6 +527,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         transcription processing.
         """
         logger.info("Connected to Flux - ready to stream audio")
+        # Notify connection is established
+        self._connection_established_event.set()
 
     async def _handle_fatal_error(self, data: Dict[str, Any]):
         """Handle fatal error messages from Deepgram Flux.
@@ -519,10 +596,12 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             transcript: maybe the first few words of the turn.
         """
         logger.debug("User started speaking")
-        await self.push_interruption_task_frame_and_wait()
-        await self.push_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-        await self.push_frame(UserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+        self._user_is_speaking = True
+        await self.broadcast_frame(UserStartedSpeakingFrame)
+        if self._should_interrupt:
+            await self.push_interruption_task_frame_and_wait()
         await self.start_metrics()
+        await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
             logger.trace(f"Start of turn transcript: {transcript}")
 
@@ -537,6 +616,23 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             event: The event type string for logging purposes.
         """
         logger.trace(f"Received event TurnResumed: {event}")
+        await self._call_event_handler("on_turn_resumed")
+
+    def _calculate_average_confidence(self, transcript_data) -> Optional[float]:
+        """Calculate the average confidence from transcript data.
+
+        Return None if the data is missing or invalid.
+        """
+        # Example: Assume transcript_data has a list of words with confidence
+        words = transcript_data.get("words")
+        if not words or not isinstance(words, list):
+            return None
+        confidences = [
+            w.get("confidence") for w in words if isinstance(w.get("confidence"), (float, int))
+        ]
+        if not confidences:
+            return None
+        return sum(confidences) / len(confidences)
 
     async def _handle_end_of_turn(self, transcript: str, data: Dict[str, Any]):
         """Handle EndOfTurn events from Deepgram Flux.
@@ -557,20 +653,30 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             data: The TurnInfo message data containing event type, transcript and some extra metadata.
         """
         logger.debug("User stopped speaking")
+        self._user_is_speaking = False
 
-        await self.push_frame(
-            TranscriptionFrame(
-                transcript,
-                self._user_id,
-                time_now_iso8601(),
-                self._language,
-                result=data,
+        # Compute the average confidence
+        average_confidence = self._calculate_average_confidence(data)
+
+        if not self._params.min_confidence or average_confidence > self._params.min_confidence:
+            await self.push_frame(
+                TranscriptionFrame(
+                    transcript,
+                    self._user_id,
+                    time_now_iso8601(),
+                    self._language,
+                    result=data,
+                )
             )
-        )
+        else:
+            logger.warning(
+                f"Transcription confidence below min_confidence threshold: {average_confidence}"
+            )
+
         await self._handle_transcription(transcript, True, self._language)
         await self.stop_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
+        await self._call_event_handler("on_end_of_turn", transcript)
 
     async def _handle_eager_end_of_turn(self, transcript: str, data: Dict[str, Any]):
         """Handle EagerEndOfTurn events from Deepgram Flux.
@@ -615,6 +721,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 result=data,
             )
         )
+        await self._call_event_handler("on_eager_end_of_turn", transcript)
 
     async def _handle_update(self, transcript: str):
         """Handle Update events from Deepgram Flux.
@@ -638,3 +745,4 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             # both the "user started speaking" event and the first transcript simultaneously,
             # making this timing measurement meaningless in this context.
             # await self.stop_ttfb_metrics()
+            await self._call_event_handler("on_update", transcript)

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -68,7 +68,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         params=SpeechmaticsSTTService.InputParams(
             language=Language.EN,
-            enable_diarization=True,
             speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
         ),
     )

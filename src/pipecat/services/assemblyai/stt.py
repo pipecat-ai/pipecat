@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 
 from loguru import logger
 
-from pipecat import __version__ as pipecat_version
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -25,11 +25,11 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.stt_service import STTService
+from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -43,15 +43,15 @@ from .models import (
 )
 
 try:
-    import websockets
     from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use AssemblyAI, you need to `pip install "pipecat-ai[assemblyai]"`.')
     raise Exception(f"Missing module: {e}")
 
 
-class AssemblyAISTTService(STTService):
+class AssemblyAISTTService(WebsocketSTTService):
     """AssemblyAI real-time speech-to-text service.
 
     Provides real-time speech transcription using AssemblyAI's WebSocket API.
@@ -79,15 +79,14 @@ class AssemblyAISTTService(STTService):
             vad_force_turn_endpoint: Whether to force turn endpoint on VAD stop. Defaults to True.
             **kwargs: Additional arguments passed to parent STTService class.
         """
+        super().__init__(sample_rate=connection_params.sample_rate, **kwargs)
+
         self._api_key = api_key
         self._language = language
         self._api_endpoint_base_url = api_endpoint_base_url
         self._connection_params = connection_params
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
 
-        super().__init__(sample_rate=self._connection_params.sample_rate, **kwargs)
-
-        self._websocket = None
         self._termination_event = asyncio.Event()
         self._received_termination = False
         self._connected = False
@@ -113,7 +112,7 @@ class AssemblyAISTTService(STTService):
             frame: Start frame to begin processing.
         """
         await super().start(frame)
-        self._chunk_size_bytes = int(self._chunk_size_ms * self._sample_rate * 2 / 1000)
+        self._chunk_size_bytes = int(self._chunk_size_ms * self.sample_rate * 2 / 1000)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -145,10 +144,11 @@ class AssemblyAISTTService(STTService):
         """
         self._audio_buffer.extend(audio)
 
-        while len(self._audio_buffer) >= self._chunk_size_bytes:
-            chunk = bytes(self._audio_buffer[: self._chunk_size_bytes])
-            self._audio_buffer = self._audio_buffer[self._chunk_size_bytes :]
-            await self._websocket.send(chunk)
+        if self._websocket and self._websocket.state is State.OPEN:
+            while len(self._audio_buffer) >= self._chunk_size_bytes:
+                chunk = bytes(self._audio_buffer[: self._chunk_size_bytes])
+                self._audio_buffer = self._audio_buffer[self._chunk_size_bytes :]
+                await self._websocket.send(chunk)
 
         yield None
 
@@ -160,10 +160,14 @@ class AssemblyAISTTService(STTService):
             direction: Direction of frame processing.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             await self.start_ttfb_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            if self._vad_force_turn_endpoint:
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            if (
+                self._vad_force_turn_endpoint
+                and self._websocket
+                and self._websocket.state is State.OPEN
+            ):
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
             await self.start_processing_metrics()
 
@@ -190,27 +194,24 @@ class AssemblyAISTTService(STTService):
         return self._api_endpoint_base_url
 
     async def _connect(self):
-        try:
-            ws_url = self._build_ws_url()
-            headers = {
-                "Authorization": self._api_key,
-                "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version})",
-            }
-            self._websocket = await websocket_connect(
-                ws_url,
-                additional_headers=headers,
-            )
-            self._connected = True
-            self._receive_task = self.create_task(self._receive_task_handler())
+        """Connect to the AssemblyAI service.
 
-            await self._call_event_handler("on_connected")
-        except Exception as e:
-            logger.error(f"Failed to connect to AssemblyAI: {e}")
-            self._connected = False
-            raise
+        Establishes websocket connection and starts receive task.
+        """
+        await super()._connect()
+
+        await self._connect_websocket()
+
+        if self._websocket and not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
-        """Disconnect from AssemblyAI WebSocket and wait for termination message."""
+        """Disconnect from the AssemblyAI service.
+
+        Sends termination message, waits for acknowledgment, and cleans up.
+        """
+        await super()._disconnect()
+
         if not self._connected or not self._websocket:
             return
 
@@ -218,51 +219,96 @@ class AssemblyAISTTService(STTService):
             self._termination_event.clear()
             self._received_termination = False
 
-            if len(self._audio_buffer) > 0:
-                await self._websocket.send(bytes(self._audio_buffer))
-                self._audio_buffer.clear()
+            if self._websocket.state is State.OPEN:
+                # Send any remaining audio
+                if len(self._audio_buffer) > 0:
+                    await self._websocket.send(bytes(self._audio_buffer))
+                    self._audio_buffer.clear()
 
-            try:
-                await self._websocket.send(json.dumps({"type": "Terminate"}))
-
+                # Send termination message and wait for acknowledgment
                 try:
-                    await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    logger.warning("Timed out waiting for termination message from server")
+                    await self._websocket.send(json.dumps({"type": "Terminate"}))
 
-            except Exception as e:
-                logger.warning(f"Error during termination handshake: {e}")
+                    try:
+                        await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("Timed out waiting for termination message from server")
 
-            if self._receive_task:
-                await self.cancel_task(self._receive_task)
-
-            await self._websocket.close()
+                except Exception as e:
+                    await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
         except Exception as e:
-            logger.error(f"Error during disconnect: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+        finally:
+            # Clean up tasks and connection
+            if self._receive_task:
+                await self.cancel_task(self._receive_task)
+                self._receive_task = None
 
+            await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
+        """Establish the websocket connection to AssemblyAI."""
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+
+            logger.debug("Connecting to AssemblyAI WebSocket")
+
+            ws_url = self._build_ws_url()
+            headers = {
+                "Authorization": self._api_key,
+                "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version()})",
+            }
+            self._websocket = await websocket_connect(
+                ws_url,
+                additional_headers=headers,
+            )
+            self._connected = True
+            await self._call_event_handler("on_connected")
+            logger.debug(f"{self} Connected to AssemblyAI WebSocket")
+        except Exception as e:
+            self._connected = False
+            await self.push_error(error_msg=f"Unable to connect to AssemblyAI: {e}", exception=e)
+            raise
+
+    async def _disconnect_websocket(self):
+        """Close the websocket connection to AssemblyAI."""
+        try:
+            if self._websocket:
+                logger.debug("Disconnecting from AssemblyAI WebSocket")
+                await self._websocket.close()
+        except Exception as e:
+            await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
             self._websocket = None
             self._connected = False
-            self._receive_task = None
             await self._call_event_handler("on_disconnected")
 
-    async def _receive_task_handler(self):
-        """Handle incoming WebSocket messages."""
-        try:
-            while self._connected:
-                try:
-                    message = await self._websocket.recv()
-                    data = json.loads(message)
-                    await self._handle_message(data)
-                except websockets.exceptions.ConnectionClosedOK:
-                    break
-                except Exception as e:
-                    logger.error(f"Error processing WebSocket message: {e}")
-                    break
+    def _get_websocket(self):
+        """Get the current WebSocket connection.
 
-        except Exception as e:
-            logger.error(f"Fatal error in receive handler: {e}")
+        Returns:
+            The WebSocket connection.
+
+        Raises:
+            Exception: If WebSocket is not connected.
+        """
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
+    async def _receive_messages(self):
+        """Receive and process websocket messages.
+
+        Continuously processes messages from the websocket connection.
+        """
+        async for message in self._get_websocket():
+            try:
+                data = json.loads(message)
+                await self._handle_message(data)
+            except json.JSONDecodeError:
+                logger.warning(f"Received non-JSON message: {message}")
 
     def _parse_message(self, message: Dict[str, Any]) -> BaseMessage:
         """Parse a raw message into the appropriate message type."""
@@ -291,7 +337,7 @@ class AssemblyAISTTService(STTService):
             elif isinstance(parsed_message, TerminationMessage):
                 await self._handle_termination(parsed_message)
         except Exception as e:
-            logger.error(f"Error handling message: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -216,6 +216,7 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "account_sid": start_data.get("account_sid"),
                 "from": start_data.get("from", ""),
                 "to": start_data.get("to", ""),
+                "custom_parameters": start_data.get("custom_parameters", ""),
             }
 
         else:
@@ -280,6 +281,14 @@ async def maybe_capture_participant_camera(
     except ImportError:
         pass
 
+    try:
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+
+        if isinstance(transport, SmallWebRTCTransport):
+            await transport.capture_participant_video(video_source="camera")
+    except ImportError:
+        pass
+
 
 async def maybe_capture_participant_screen(
     transport: BaseTransport, client: Any, framerate: int = 0
@@ -299,6 +308,14 @@ async def maybe_capture_participant_screen(
                 client["id"], framerate=framerate, video_source="screenVideo"
             )
 
+    except ImportError:
+        pass
+
+    try:
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+
+        if isinstance(transport, SmallWebRTCTransport):
+            await transport.capture_participant_video(video_source="screenVideo")
     except ImportError:
         pass
 

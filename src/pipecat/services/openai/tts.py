@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -190,7 +190,7 @@ class OpenAITTSService(TTSService):
                         f"{self} error getting audio (status: {r.status_code}, error: {error})"
                     )
                     yield ErrorFrame(
-                        f"Error getting audio (status: {r.status_code}, error: {error})"
+                        error=f"Error getting audio (status: {r.status_code}, error: {error})"
                     )
                     return
 
@@ -206,4 +206,4 @@ class OpenAITTSService(TTSService):
                         yield frame
                 yield TTSStoppedFrame()
         except BadRequestError as e:
-            logger.exception(f"{self} error generating TTS: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")

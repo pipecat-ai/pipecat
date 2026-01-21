@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -83,4 +83,4 @@ class ConsumerProcessor(FrameProcessor):
         while True:
             frame = await self._queue.get()
             new_frame = await self._transformer(frame)
-            await self.push_frame(new_frame, self._direction)
+            await self.queue_frame(new_frame, self._direction)

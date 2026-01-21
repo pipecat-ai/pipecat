@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -37,7 +37,7 @@ from pipecat.services.tts_service import (
     AudioContextWordTTSService,
     WordTTSService,
 )
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for ElevenLabs configuration needed
@@ -72,7 +72,7 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding ElevenLabs language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AR: "ar",
         Language.BG: "bg",
         Language.CS: "cs",
@@ -107,17 +107,7 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
         Language.ZH: "zh",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 def output_format_from_sample_rate(sample_rate: int) -> str:
@@ -165,6 +155,18 @@ def build_elevenlabs_voice_settings(
             voice_settings[key] = settings[key]
 
     return voice_settings or None
+
+
+class PronunciationDictionaryLocator(BaseModel):
+    """Locator for a pronunciation dictionary.
+
+    Parameters:
+        pronunciation_dictionary_id: The ID of the pronunciation dictionary.
+        version_id: The version ID of the pronunciation dictionary.
+    """
+
+    pronunciation_dictionary_id: str
+    version_id: str
 
 
 def calculate_word_times(
@@ -249,6 +251,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             enable_ssml_parsing: Whether to parse SSML tags in text.
             enable_logging: Whether to enable ElevenLabs logging.
             apply_text_normalization: Text normalization mode ("auto", "on", "off").
+            pronunciation_dictionary_locators: List of pronunciation dictionary locators to use.
         """
 
         language: Optional[Language] = None
@@ -261,6 +264,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         enable_ssml_parsing: Optional[bool] = None
         enable_logging: Optional[bool] = None
         apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
+        pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None
 
     def __init__(
         self,
@@ -331,6 +335,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         self.set_voice(voice_id)
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
 
         # Indicates if we have sent TTSStartedFrame. It will reset to False when
         # there's an interruption or TTSStoppedFrame.
@@ -419,7 +424,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                         json.dumps({"context_id": self._context_id, "close_context": True})
                     )
             except Exception as e:
-                logger.warning(f"Error closing context for voice settings update: {e}")
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._context_id = None
             self._started = False
 
@@ -473,6 +478,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self.add_word_timestamps([("Reset", 0)])
 
     async def _connect(self):
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -482,6 +489,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -530,8 +539,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             await self._call_event_handler("on_connected")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
@@ -546,7 +555,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self._websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._started = False
             self._context_id = None
@@ -576,7 +585,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     json.dumps({"context_id": self._context_id, "close_context": True})
                 )
             except Exception as e:
-                logger.error(f"Error closing context on interruption: {e}")
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._context_id = None
             self._started = False
             self._partial_word = ""
@@ -612,7 +621,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
 
                 audio = base64.b64decode(msg["audio"])
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
@@ -704,35 +713,37 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
                     # If a context ID does not exist, create a new one and
-                    # register it. If an ID exists, that means the Pipeline is
-                    # configured for allow_interruptions=False, so continue
-                    # using the current ID. When interruptions are enabled
-                    # (e.g. allow_interruptions=True), user speech results in
-                    # an interruption, which resets the context ID.
+                    # register it. If an ID exists, that means the Pipeline
+                    # doesn't allow user interruptions, so continue using the
+                    # current ID. When interruptions are allowed, user speech
+                    # results in an interruption, which resets the context ID.
                     if not self._context_id:
                         self._context_id = str(uuid.uuid4())
                     if not self.audio_context_available(self._context_id):
                         await self.create_audio_context(self._context_id)
 
-                    # Initialize context with voice settings
+                    # Initialize context with voice settings and pronunciation dictionaries
                     msg = {"text": " ", "context_id": self._context_id}
                     if self._voice_settings:
                         msg["voice_settings"] = self._voice_settings
+                    if self._pronunciation_dictionary_locators:
+                        msg["pronunciation_dictionary_locators"] = [
+                            locator.model_dump()
+                            for locator in self._pronunciation_dictionary_locators
+                        ]
                     await self._websocket.send(json.dumps(msg))
-                    logger.trace(f"Created new context {self._context_id} with voice settings")
+                    logger.trace(f"Created new context {self._context_id}")
 
-                    await self._send_text(text)
-                    await self.start_tts_usage_metrics(text)
-                else:
-                    await self._send_text(text)
+                await self._send_text(text)
+                await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 self._started = False
                 return
             yield None
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class ElevenLabsHttpTTSService(WordTTSService):
@@ -755,6 +766,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             use_speaker_boost: Whether to use speaker boost enhancement.
             speed: Voice speed control (0.25 to 4.0).
             apply_text_normalization: Text normalization mode ("auto", "on", "off").
+            pronunciation_dictionary_locators: List of pronunciation dictionary locators to use.
         """
 
         language: Optional[Language] = None
@@ -765,6 +777,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         use_speaker_boost: Optional[bool] = None
         speed: Optional[float] = None
         apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
+        pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None
 
     def __init__(
         self,
@@ -823,6 +836,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self.set_voice(voice_id)
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
 
         # Track cumulative time to properly sequence word timestamps across utterances
         self._cumulative_time = 0
@@ -856,6 +870,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
+
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        await super()._update_settings(settings)
+        # Update voice settings for the next context creation
+        self._voice_settings = self._set_voice_settings()
 
     def _reset_state(self):
         """Reset internal state variables."""
@@ -987,6 +1006,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
 
+        if self._pronunciation_dictionary_locators:
+            payload["pronunciation_dictionary_locators"] = [
+                locator.model_dump() for locator in self._pronunciation_dictionary_locators
+            ]
+
         if self._settings["apply_text_normalization"] is not None:
             payload["apply_text_normalization"] = self._settings["apply_text_normalization"]
 
@@ -1019,7 +1043,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"{self} error: {error_text}")
                     yield ErrorFrame(error=f"ElevenLabs API error: {error_text}")
                     return
 
@@ -1027,7 +1050,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
                 # Start TTS sequence if not already started
                 if not self._started:
-                    self.start_word_timestamps()
+                    await self.start_word_timestamps()
                     yield TTSStartedFrame()
                     self._started = True
 
@@ -1067,7 +1090,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         logger.warning(f"Failed to parse JSON from stream: {e}")
                         continue
                     except Exception as e:
-                        logger.error(f"Error processing response: {e}", exc_info=True)
+                        yield ErrorFrame(error=f"Unknown error occurred: {e}")
                         continue
 
                 # After processing all chunks, emit any remaining partial word
@@ -1091,8 +1114,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                     self._previous_text = text
 
         except Exception as e:
-            logger.error(f"Error in run_tts: {e}")
-            yield ErrorFrame(error=str(e))
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             # Let the parent class handle TTSStoppedFrame

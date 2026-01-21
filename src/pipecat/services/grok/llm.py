@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -36,11 +36,17 @@ class GrokContextAggregatorPair:
     Provides a convenient container for managing both user and assistant
     context aggregators together for Grok LLM interactions.
 
+    .. deprecated:: 0.0.99
+        `GrokContextAggregatorPair` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         _user: The user context aggregator instance.
         _assistant: The assistant context aggregator instance.
     """
 
+    # Aggregators handle deprecation warnings
     _user: OpenAIUserContextAggregator
     _assistant: OpenAIAssistantContextAggregator
 
@@ -123,6 +129,8 @@ class GrokLLMService(OpenAILLMService):
         self._prompt_tokens = 0
         self._completion_tokens = 0
         self._total_tokens = 0
+        self._cache_read_input_tokens = None
+        self._reasoning_tokens = None
         self._has_reported_prompt_tokens = False
         self._is_processing = True
 
@@ -137,6 +145,8 @@ class GrokLLMService(OpenAILLMService):
                     prompt_tokens=self._prompt_tokens,
                     completion_tokens=self._completion_tokens,
                     total_tokens=self._total_tokens,
+                    cache_read_input_tokens=self._cache_read_input_tokens,
+                    reasoning_tokens=self._reasoning_tokens,
                 )
                 await super().start_llm_usage_metrics(tokens)
 
@@ -149,7 +159,7 @@ class GrokLLMService(OpenAILLMService):
 
         Args:
             tokens: The token usage metrics for the current chunk of processing,
-                containing prompt_tokens and completion_tokens counts.
+                containing prompt_tokens, completion_tokens, and optional cached/reasoning tokens.
         """
         # Only accumulate metrics during active processing
         if not self._is_processing:
@@ -163,6 +173,13 @@ class GrokLLMService(OpenAILLMService):
         # Update completion tokens count if it has increased
         if tokens.completion_tokens > self._completion_tokens:
             self._completion_tokens = tokens.completion_tokens
+
+        # Capture cached & reasoning tokens (these typically only appear once per request)
+        if tokens.cache_read_input_tokens is not None:
+            self._cache_read_input_tokens = tokens.cache_read_input_tokens
+
+        if tokens.reasoning_tokens is not None:
+            self._reasoning_tokens = tokens.reasoning_tokens
 
     def create_context_aggregator(
         self,
@@ -185,9 +202,16 @@ class GrokLLMService(OpenAILLMService):
             GrokContextAggregatorPair: A pair of context aggregators, one for
             the user and one for the assistant, encapsulated in an
             GrokContextAggregatorPair.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
+        # Aggregators handle deprecation warnings
         user = OpenAIUserContextAggregator(context, params=user_params)
         assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
+
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)

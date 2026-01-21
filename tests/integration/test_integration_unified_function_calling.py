@@ -1,11 +1,10 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import os
-from unittest.mock import AsyncMock
 
 import pytest
 from dotenv import load_dotenv

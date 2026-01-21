@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,6 +10,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_core.language_models import FakeStreamingListLLM
 
 from pipecat.frames.frames import (
+    InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -18,12 +19,11 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-)
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.processors.frameworks.langchain import LangchainProcessor
@@ -65,22 +65,24 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         self.mock_proc = self.MockProcessor("token_collector")
 
         context = LLMContext()
-        context_aggregator = LLMContextAggregatorPair(
-            context, assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False)
-        )
+        context_aggregator = LLMContextAggregatorPair(context)
 
         pipeline = Pipeline(
             [context_aggregator.user(), proc, self.mock_proc, context_aggregator.assistant()]
         )
 
         frames_to_send = [
-            UserStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hi World", user_id="user", timestamp="now"),
             SleepFrame(),
-            UserStoppedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=1.0),
         ]
         expected_down_frames = [
+            VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
+            InterruptionFrame,
+            VADUserStoppedSpeakingFrame,
             UserStoppedSpeakingFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,

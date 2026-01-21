@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024–2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,9 +10,10 @@ import os
 import re
 import time
 import wave
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import aiofiles
 from deepgram import LiveOptions
@@ -30,7 +31,13 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import EndTaskFrame, LLMRunFrame, OutputImageRawFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    EndTaskFrame,
+    LLMRunFrame,
+    OutputImageRawFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -49,8 +56,17 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 PIPELINE_IDLE_TIMEOUT_SECS = 60
 EVAL_TIMEOUT_SECS = 120
+EVAL_RESULT_TIMEOUT_SECS = 10
 
 EvalPrompt = str | Tuple[str, ImageFile]
+
+
+@dataclass
+class EvalConfig:
+    prompt: EvalPrompt
+    eval: str
+    eval_speaks_first: bool = False
+    runner_args_body: Optional[Any] = None
 
 
 class EvalRunner:
@@ -69,7 +85,7 @@ class EvalRunner:
         self._log_level = log_level
         self._total_success = 0
         self._tests: List[EvalResult] = []
-        self._queue = asyncio.Queue()
+        self._result_future: Optional[asyncio.Future[bool]] = None
 
         # We to save runner files.
         name = name or f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -79,23 +95,21 @@ class EvalRunner:
         os.makedirs(self._logs_dir, exist_ok=True)
         os.makedirs(self._recordings_dir, exist_ok=True)
 
-    async def assert_eval(self, params: FunctionCallParams):
+    async def function_assert_eval(self, params: FunctionCallParams):
         result = params.arguments["result"]
         reasoning = params.arguments["reasoning"]
         logger.debug(f"🧠 EVAL REASONING(result: {result}): {reasoning}")
-        await self._queue.put(result)
         await params.result_callback(None)
-        await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        await params.llm.push_frame(EndTaskFrame(reason=result), FrameDirection.UPSTREAM)
 
-    async def assert_eval_false(self):
-        await self._queue.put(False)
+    async def assert_eval(self, result: bool):
+        if self._result_future:
+            self._result_future.set_result(result)
 
     async def run_eval(
         self,
         example_file: str,
-        prompt: EvalPrompt,
-        eval: str,
-        user_speaks_first: bool = False,
+        eval_config: EvalConfig,
     ):
         if not re.match(self._pattern, example_file):
             return
@@ -110,12 +124,13 @@ class EvalRunner:
 
         start_time = time.time()
 
+        # Create a future to store the eval result.
+        self._result_future = asyncio.get_running_loop().create_future()
+
         try:
             tasks = [
-                asyncio.create_task(run_example_pipeline(script_path)),
-                asyncio.create_task(
-                    run_eval_pipeline(self, example_file, prompt, eval, user_speaks_first)
-                ),
+                asyncio.create_task(run_example_pipeline(script_path, eval_config)),
+                asyncio.create_task(run_eval_pipeline(self, example_file, eval_config)),
             ]
             _, pending = await asyncio.wait(tasks, timeout=EVAL_TIMEOUT_SECS)
             if pending:
@@ -131,8 +146,10 @@ class EvalRunner:
             logger.error(f"ERROR: Unable to run {example_file}: {e}")
 
         try:
-            result = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+            # Wait for the future to resolve.
+            result = await asyncio.wait_for(self._result_future, timeout=EVAL_RESULT_TIMEOUT_SECS)
         except asyncio.TimeoutError:
+            logger.error(f"ERROR: Timeout waiting for eval result.")
             result = False
 
         if result:
@@ -177,7 +194,7 @@ class EvalRunner:
         return os.path.join(self._recordings_dir, f"{base_name}.wav")
 
 
-async def run_example_pipeline(script_path: Path):
+async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
 
     module = load_module_from_path(script_path)
@@ -196,6 +213,7 @@ async def run_example_pipeline(script_path: Path):
 
     runner_args = RunnerArguments()
     runner_args.pipeline_idle_timeout_secs = PIPELINE_IDLE_TIMEOUT_SECS
+    runner_args.body = eval_config.runner_args_body
 
     await module.run_bot(transport, runner_args)
 
@@ -203,9 +221,7 @@ async def run_example_pipeline(script_path: Path):
 async def run_eval_pipeline(
     eval_runner: EvalRunner,
     example_file: str,
-    prompt: EvalPrompt,
-    eval: str,
-    user_speaks_first: bool = False,
+    eval_config: EvalConfig,
 ):
     logger.info(f"Starting eval bot")
 
@@ -240,19 +256,25 @@ async def run_eval_pipeline(
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    llm.register_function("assert_eval", eval_runner.assert_eval)
+    llm.register_function("eval_function", eval_runner.function_assert_eval)
 
     eval_function = FunctionSchema(
-        name="assert_eval",
-        description="Called when the user answers a question.",
+        name="eval_function",
+        description=(
+            "Determines whether the user's response satisfies the evaluation "
+            "criteria defined for the current prompt or interaction."
+        ),
         properties={
             "result": {
                 "type": "boolean",
-                "description": "Whether the answer is correct or not",
+                "description": "Whether the user's response meets the evaluation criteria.",
             },
             "reasoning": {
                 "type": "string",
-                "description": "Why the answer was considered correct or invalid",
+                "description": (
+                    "A concise explanation of how the user's response did or did "
+                    "not satisfy the evaluation criteria."
+                ),
             },
         },
         required=["result", "reasoning"],
@@ -262,20 +284,22 @@ async def run_eval_pipeline(
     # Load example prompt depending on image.
     example_prompt = ""
     example_image: Optional[ImageFile] = None
-    if isinstance(prompt, str):
-        example_prompt = prompt
-    elif isinstance(prompt, tuple):
-        example_prompt, example_image = prompt
+    if isinstance(eval_config.prompt, str):
+        example_prompt = eval_config.prompt
+    elif isinstance(eval_config.prompt, tuple):
+        example_prompt, example_image = eval_config.prompt
 
-    eval_prompt = f"The answer is correct if it matches: {eval}."
     common_system_prompt = (
-        "The user might say things other than the answer and that's allowed. "
-        f"You should only call the eval function with your assessment when the user actually answers the question. {eval_prompt}"
+        "You should only call the eval function if:\n"
+        "- The user explicitly attempts to answer the question, AND\n"
+        f"- Their answer can be cleanly evaluated using: {eval_config.eval}\n"
+        "Ignore greetings, comments, non-answers, or requests for clarification.\n"
+        "Numerical word answers are allowed (e.g., 'five' is the same as '5').\n"
     )
-    if user_speaks_first:
-        system_prompt = f"You are an LLM eval, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
+    if eval_config.eval_speaks_first:
+        system_prompt = f"You are an evaluation agent, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
     else:
-        system_prompt = f"You are an LLM eval, be extremly brief. Your goal is to first ask one question: {example_prompt}. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
 
     messages = [
         {
@@ -330,9 +354,9 @@ async def run_eval_pipeline(
 
         # Default behavior is for the bot to speak first
         # If the eval bot speaks first, we append the prompt to the messages
-        if user_speaks_first:
+        if eval_config.eval_speaks_first:
             messages.append(
-                {"role": "user", "content": f"Start by saying this exactly: '{prompt}'"}
+                {"role": "user", "content": f"Start by saying this exactly: '{eval_config.prompt}'"}
             )
             await task.queue_frames([LLMRunFrame()])
 
@@ -341,9 +365,12 @@ async def run_eval_pipeline(
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    @task.event_handler("on_idle_timeout")
-    async def on_pipeline_idle_timeout(task):
-        await eval_runner.assert_eval_false()
+    @task.event_handler("on_pipeline_finished")
+    async def on_pipeline_finished(task, frame):
+        if isinstance(frame, EndFrame):
+            await eval_runner.assert_eval(frame.reason)
+        elif isinstance(frame, CancelFrame):
+            await eval_runner.assert_eval(False)
 
     # TODO(aleix): We should handle SIGINT and SIGTERM so we can cancel both the
     # eval and the example.

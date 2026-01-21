@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -39,7 +39,7 @@ class AICFilter(BaseAudioFilter):
         self,
         *,
         license_key: str = "",
-        model_type: AICModelType = AICModelType.QUAIL_L,
+        model_type: AICModelType = AICModelType.QUAIL_STT,
         enhancement_level: Optional[float] = 1.0,
         voice_gain: Optional[float] = 1.0,
         noise_gate_enable: Optional[bool] = True,
@@ -52,12 +52,27 @@ class AICFilter(BaseAudioFilter):
             enhancement_level: Optional overall enhancement strength (0.0..1.0).
             voice_gain: Optional linear gain applied to detected speech (0.0..4.0).
             noise_gate_enable: Optional enable/disable noise gate (default: True).
+
+                .. deprecated:: 1.3.0
+                    The `noise_gate_enable` parameter is deprecated and no longer has any effect.
+                    It will be removed in a future version.
         """
         self._license_key = license_key
         self._model_type = model_type
 
         self._enhancement_level = enhancement_level
         self._voice_gain = voice_gain
+        if noise_gate_enable is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter `noise_gate_enable` is deprecated and no longer has any effect. "
+                    "It will be removed in a future version. Use AIC VAD instead (create_vad_analyzer()).",
+                    DeprecationWarning,
+                )
+
         self._noise_gate_enable = noise_gate_enable
 
         self._enabled = True
@@ -67,6 +82,58 @@ class AICFilter(BaseAudioFilter):
         self._audio_buffer = bytearray()
         # Model will be created in start() since the API now requires sample_rate
         self._aic = None
+
+    def get_vad_factory(self):
+        """Return a zero-arg factory that will create the VAD once the model exists.
+
+        Returns:
+            A zero-argument callable that, when invoked, returns an initialized
+            VoiceActivityDetector bound to the underlying AIC model. Raises a
+            RuntimeError if the model has not been initialized (i.e. start()
+            has not been called successfully).
+        """
+
+        def _factory():
+            if self._aic is None:
+                raise RuntimeError("AIC model not initialized yet. Call start(sample_rate) first.")
+            return self._aic.create_vad()
+
+        return _factory
+
+    def create_vad_analyzer(
+        self,
+        *,
+        lookback_buffer_size: Optional[float] = None,
+        sensitivity: Optional[float] = None,
+    ):
+        """Return an analyzer that will lazily instantiate the AIC VAD when ready.
+
+        AIC VAD parameters:
+          - lookback_buffer_size:
+              Number of window-length audio buffers used as a lookback buffer.
+              Higher values increase prediction stability but add latency.
+              Range: 1.0 .. 20.0, Default (SDK): 6.0
+          - sensitivity:
+              Energy threshold sensitivity. Energy threshold = 10 ** (-sensitivity).
+              Range: 1.0 .. 15.0, Default (SDK): 6.0
+
+        Args:
+            lookback_buffer_size: Optional lookback buffer size to configure on the VAD.
+                Range: 1.0 .. 20.0. If None, SDK default is used.
+            sensitivity: Optional sensitivity (energy threshold) to configure on the VAD.
+                Range: 1.0 .. 15.0. If None, SDK default is used.
+
+        Returns:
+            A lazily-initialized AICVADAnalyzer that will bind to the VAD backend
+            once the filter's model has been created (after start(sample_rate)).
+        """
+        from pipecat.audio.vad.aic_vad import AICVADAnalyzer
+
+        return AICVADAnalyzer(
+            vad_factory=self.get_vad_factory(),
+            lookback_buffer_size=lookback_buffer_size,
+            sensitivity=sensitivity,
+        )
 
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
@@ -97,10 +164,6 @@ class AICFilter(BaseAudioFilter):
                 )
             if self._voice_gain is not None:
                 self._aic.set_parameter(AICParameter.VOICE_GAIN, float(self._voice_gain))
-            if self._noise_gate_enable is not None:
-                self._aic.set_parameter(
-                    AICParameter.NOISE_GATE_ENABLE, 1.0 if bool(self._noise_gate_enable) else 0.0
-                )
 
             self._aic_ready = True
 
@@ -185,7 +248,7 @@ class AICFilter(BaseAudioFilter):
             )
 
             # Process planar in-place; returns ndarray (same shape)
-            out_f32 = self._aic.process(block_f32)
+            out_f32 = await self._aic.process_async(block_f32)
 
             # Convert back to int16 bytes, planar layout
             out_i16 = np.clip(out_f32 * 32768.0, -32768, 32767).astype(np.int16)

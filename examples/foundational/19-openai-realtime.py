@@ -1,10 +1,11 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 
+import asyncio
 import os
 from datetime import datetime
 
@@ -14,13 +15,17 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.transcript_processor import TranscriptProcessor
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
+    LLMContextAggregatorPair,
+    UserTurnStoppedMessage,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
@@ -52,6 +57,18 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     )
 
 
+async def get_news(params: FunctionCallParams):
+    await params.result_callback(
+        {
+            "news": [
+                "Massive UFO currently hovering above New York City",
+                "Stock markets reach all-time highs",
+                "Living dinosaur species discovered in the Amazon rainforest",
+            ],
+        }
+    )
+
+
 async def fetch_restaurant_recommendation(params: FunctionCallParams):
     await params.result_callback({"name": "The Golden Dragon"})
 
@@ -71,6 +88,13 @@ weather_function = FunctionSchema(
         },
     },
     required=["location", "format"],
+)
+
+get_news_function = FunctionSchema(
+    name="get_news",
+    description="Get the current news.",
+    properties={},
+    required=[],
 )
 
 restaurant_function = FunctionSchema(
@@ -126,6 +150,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 noise_reduction=InputAudioNoiseReduction(type="near_field"),
             )
         ),
+        # In this example we provide tools through the context, but you could
+        # alternatively provide them here.
         # tools=tools,
         instructions="""You are a helpful and friendly AI.
 
@@ -140,45 +166,37 @@ even if you're asked about them.
 You are participating in a voice conversation. Keep your responses concise, short, and to the point
 unless specifically asked to elaborate on a topic.
 
-You have access to the following tools:
-- get_current_weather: Get the current weather for a given location.
-- get_restaurant_recommendation: Get a restaurant recommendation for a given location.
-
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
     )
 
     llm = OpenAIRealtimeLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         session_properties=session_properties,
-        start_audio_paused=False,
     )
 
     # you can either register a single function for all function calls, or specific functions
     # llm.register_function(None, fetch_weather_from_api)
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
-
-    transcript = TranscriptProcessor()
+    llm.register_function("get_news", get_news)
 
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
-    context = OpenAILLMContext(
+    context = LLMContext(
         [{"role": "user", "content": "Say hello!"}],
         tools,
     )
 
-    context_aggregator = llm.create_context_aggregator(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            context_aggregator.user(),
+            user_aggregator,
             llm,  # LLM
-            transcript.user(),  # Placed after the LLM, as LLM pushes TranscriptionFrames downstream
             transport.output(),  # Transport bot output
-            transcript.assistant(),  # After the transcript output, to time with the audio output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -198,19 +216,39 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
 
+        # Add a new tool at runtime after a delay.
+        await asyncio.sleep(15)
+        new_tools = ToolsSchema(
+            standard_tools=[weather_function, restaurant_function, get_news_function]
+        )
+        await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
+        # Alternative pattern, useful if you're changing other session properties, too.
+        # (Though note that tools in your LLMContext take precedence over those
+        # in session properties, so if you have context-provided tools, prefer
+        # LLMSetToolsFrame instead, as it updates your context. Ditto for
+        # updating system instructions: send an LLMMessagesUpdateFrame with
+        # context messages updated with your new desired system message.)
+        # await task.queue_frames(
+        #     [LLMUpdateSettingsFrame(settings=SessionProperties(tools=new_tools).model_dump())]
+        # )
+
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    # Register event handler for transcript updates
-    @transcript.event_handler("on_transcript_update")
-    async def on_transcript_update(processor, frame):
-        for msg in frame.messages:
-            if isinstance(msg, TranscriptionMessage):
-                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
-                line = f"{timestamp}{msg.role}: {msg.content}"
-                logger.info(f"Transcript: {line}")
+    # Log transcript updates
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}user: {message.content}"
+        logger.info(f"Transcript: {line}")
+
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

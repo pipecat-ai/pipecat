@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -70,7 +70,7 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
                 # handle disconnections in the send/recv code paths.
                 return
 
-            logger.info(f"Connecting to {self.base_url}, api key: {self.api_key}")
+            logger.info(f"Connecting to {self.base_url}")
             self._websocket = await websocket_connect(
                 uri=self.base_url,
                 additional_headers={
@@ -79,5 +79,5 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None

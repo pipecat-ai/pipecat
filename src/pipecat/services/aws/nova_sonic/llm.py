@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
+    AggregationType,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -37,6 +38,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -156,6 +158,12 @@ class Params(BaseModel):
         max_tokens: Maximum number of tokens to generate.
         top_p: Nucleus sampling parameter.
         temperature: Sampling temperature for text generation.
+        endpointing_sensitivity: Controls how quickly Nova Sonic decides the
+            user has stopped speaking. Can be "LOW", "MEDIUM", or "HIGH", with
+            "HIGH" being the most sensitive (i.e., causing the model to respond
+            most quickly).
+            If not set, uses the model's default behavior.
+            Only supported with Nova 2 Sonic (the default model).
     """
 
     # Audio input
@@ -172,6 +180,9 @@ class Params(BaseModel):
     max_tokens: Optional[int] = Field(default=1024)
     top_p: Optional[float] = Field(default=0.9)
     temperature: Optional[float] = Field(default=0.7)
+
+    # Turn-taking
+    endpointing_sensitivity: Optional[str] = Field(default=None)
 
 
 class AWSNovaSonicLLMService(LLMService):
@@ -191,8 +202,8 @@ class AWSNovaSonicLLMService(LLMService):
         access_key_id: str,
         session_token: Optional[str] = None,
         region: str,
-        model: str = "amazon.nova-sonic-v1:0",
-        voice_id: str = "matthew",  # matthew, tiffany, amy
+        model: str = "amazon.nova-2-sonic-v1:0",
+        voice_id: str = "matthew",
         params: Optional[Params] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
@@ -206,8 +217,15 @@ class AWSNovaSonicLLMService(LLMService):
             access_key_id: AWS access key ID for authentication.
             session_token: AWS session token for authentication.
             region: AWS region where the service is hosted.
-            model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
-            voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
+                Supported regions:
+                - Nova 2 Sonic (the default model): "us-east-1", "us-west-2", "ap-northeast-1"
+                - Nova Sonic (the older model): "us-east-1", "ap-northeast-1"
+            model: Model identifier. Defaults to "amazon.nova-2-sonic-v1:0".
+            voice_id: Voice ID for speech synthesis.
+                Note that some voices are designed for use with a specific language.
+                Options:
+                - Nova 2 Sonic (the default model): see https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html
+                - Nova Sonic (the older model): see https://docs.aws.amazon.com/nova/latest/userguide/available-voices.html.
             params: Model parameters for audio configuration and inference.
             system_instruction: System-level instruction for the model.
             tools: Available tools/functions for the model to use.
@@ -230,6 +248,17 @@ class AWSNovaSonicLLMService(LLMService):
         self._params = params or Params()
         self._system_instruction = system_instruction
         self._tools = tools
+
+        # Validate endpointing_sensitivity parameter
+        if (
+            self._params.endpointing_sensitivity
+            and not self._is_endpointing_sensitivity_supported()
+        ):
+            logger.warning(
+                f"endpointing_sensitivity is not supported for model '{model}' and will be ignored. "
+                "This parameter is only supported starting with Nova 2 Sonic (amazon.nova-2-sonic-v1:0)."
+            )
+            self._params.endpointing_sensitivity = None
 
         if not send_transcription_frames:
             import warnings
@@ -267,6 +296,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._user_text_buffer = ""
         self._assistant_text_buffer = ""
         self._completed_tool_calls = set()
+        self._audio_input_started = False
 
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
@@ -452,13 +482,13 @@ class AWSNovaSonicLLMService(LLMService):
             self._ready_to_send_context = True
             await self._finish_connecting_if_context_available()
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Initialization error: {e}", exception=e)
             await self._disconnect()
 
     async def _process_completed_function_calls(self, send_new_results: bool):
         # Check for set of completed function calls in the context
         for message in self._context.get_messages():
-            if message.get("role") and message.get("content") != "IN_PROGRESS":
+            if message.get("role") and message.get("content") not in ["IN_PROGRESS", "CANCELLED"]:
                 tool_call_id = message.get("tool_call_id")
                 if tool_call_id and tool_call_id not in self._completed_tool_calls:
                     # Found a newly-completed function call - send the result to the service
@@ -503,13 +533,29 @@ class AWSNovaSonicLLMService(LLMService):
         if system_instruction:
             await self._send_text_event(text=system_instruction, role=Role.SYSTEM)
 
-        # Send conversation history
-        for message in llm_connection_params["messages"]:
+        # Send conversation history (except for the last message if it's from the
+        # user, which we'll send as interactive after starting audio input)
+        messages = llm_connection_params["messages"]
+        last_user_message = None
+        for i, message in enumerate(messages):
             # logger.debug(f"Seeding conversation history with message: {message}")
-            await self._send_text_event(text=message.text, role=message.role)
+            is_last_message = i == len(messages) - 1
+            if is_last_message and message.role == Role.USER:
+                # Save for sending after audio input starts
+                last_user_message = message
+            else:
+                await self._send_text_event(text=message.text, role=message.role)
 
         # Start audio input
         await self._send_audio_input_start_event()
+
+        # Now send the last user message as interactive to trigger bot response
+        if last_user_message:
+            # logger.debug(
+            #     f"Sending last user message as interactive to trigger bot response: {last_user_message}")
+            await self._send_text_event(
+                text=last_user_message.text, role=last_user_message.role, interactive=True
+            )
 
         # Start receiving events
         self._receive_task = self.create_task(self._receive_task_handler())
@@ -573,10 +619,11 @@ class AWSNovaSonicLLMService(LLMService):
             self._user_text_buffer = ""
             self._assistant_text_buffer = ""
             self._completed_tool_calls = set()
+            self._audio_input_started = False
 
             logger.info("Finished disconnecting")
         except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
 
     def _create_client(self) -> BedrockRuntimeClient:
         config = Config(
@@ -590,11 +637,33 @@ class AWSNovaSonicLLMService(LLMService):
         )
         return BedrockRuntimeClient(config=config)
 
+    def _is_first_generation_sonic_model(self) -> bool:
+        # Nova Sonic (the older model) is identified by "amazon.nova-sonic-v1:0"
+        return self._model == "amazon.nova-sonic-v1:0"
+
+    def _is_endpointing_sensitivity_supported(self) -> bool:
+        # endpointing_sensitivity is only supported with Nova 2 Sonic (and,
+        # presumably, future models)
+        return not self._is_first_generation_sonic_model()
+
+    def _is_assistant_response_trigger_needed(self) -> bool:
+        # Assistant response trigger audio is only needed with the older model
+        return self._is_first_generation_sonic_model()
+
     #
     # LLM communication: input events (pipecat -> LLM)
     #
 
     async def _send_session_start_event(self):
+        turn_detection_config = (
+            f""",
+              "turnDetectionConfiguration": {{
+                "endpointingSensitivity": "{self._params.endpointing_sensitivity}"
+              }}"""
+            if self._params.endpointing_sensitivity
+            else ""
+        )
+
         session_start = f"""
         {{
           "event": {{
@@ -603,7 +672,7 @@ class AWSNovaSonicLLMService(LLMService):
                 "maxTokens": {self._params.max_tokens},
                 "topP": {self._params.top_p},
                 "temperature": {self._params.temperature}
-              }}
+              }}{turn_detection_config}
             }}
           }}
         }}
@@ -676,8 +745,18 @@ class AWSNovaSonicLLMService(LLMService):
         }}
         '''
         await self._send_client_event(audio_content_start)
+        self._audio_input_started = True
 
-    async def _send_text_event(self, text: str, role: Role):
+    async def _send_text_event(self, text: str, role: Role, interactive: bool = False):
+        """Send a text event to the LLM.
+
+        Args:
+            text: The text content to send.
+            role: The role associated with the text (e.g., USER, ASSISTANT, SYSTEM).
+            interactive: Whether the content is interactive. Defaults to False.
+                False: conversation history or system instruction, sent prior to interactive audio
+                True: text input sent during (or at the start of) interactive audio
+        """
         if not self._stream or not self._prompt_name or not text:
             return
 
@@ -690,7 +769,7 @@ class AWSNovaSonicLLMService(LLMService):
                     "promptName": "{self._prompt_name}",
                     "contentName": "{content_name}",
                     "type": "TEXT",
-                    "interactive": true,
+                    "interactive": {json.dumps(interactive)},
                     "role": "{role.value}",
                     "textInputConfiguration": {{
                         "mediaType": "text/plain"
@@ -728,7 +807,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(text_content_end)
 
     async def _send_user_audio_event(self, audio: bytes):
-        if not self._stream:
+        if not self._stream or not self._audio_input_started:
             return
 
         blob = base64.b64encode(audio)
@@ -884,7 +963,7 @@ class AWSNovaSonicLLMService(LLMService):
                 # Errors are kind of expected while disconnecting, so just
                 # ignore them and do nothing
                 return
-            logger.error(f"{self} error processing responses: {e}")
+            await self.push_error(error_msg=f"Error processing responses: {e}", exception=e)
             if self._wants_connection:
                 await self.reset_conversation()
 
@@ -1027,7 +1106,7 @@ class AWSNovaSonicLLMService(LLMService):
         logger.debug(f"Assistant response text added: {text}")
 
         # Report the text of the assistant response.
-        await self.push_frame(TTSTextFrame(text))
+        await self._push_assistant_response_text_frames(text)
 
         # HACK: here we're also buffering the assistant text ourselves as a
         # backup rather than relying solely on the assistant context aggregator
@@ -1060,7 +1139,7 @@ class AWSNovaSonicLLMService(LLMService):
                 # TTSTextFrame would be ignored otherwise (the interruption frame
                 # would have cleared the assistant aggregator state).
                 await self.push_frame(LLMFullResponseStartFrame())
-                await self.push_frame(TTSTextFrame(self._assistant_text_buffer))
+                await self._push_assistant_response_text_frames(self._assistant_text_buffer)
             self._may_need_repush_assistant_text = False
 
         # Report the end of the assistant response.
@@ -1071,6 +1150,25 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Clear out the buffered assistant text
         self._assistant_text_buffer = ""
+
+    async def _push_assistant_response_text_frames(self, text: str):
+        # In a typical "cascade" LLM + TTS setup, LLMTextFrames would not
+        # proceed beyond the TTS service. Therefore, since a speech-to-speech
+        # service like Nova Sonic combines both LLM and TTS functionality, you
+        # would think we wouldn't need to push LLMTextFrames at all. However,
+        # RTVI relies on LLMTextFrames being pushed to trigger its
+        # "bot-llm-text" event. So here we push an LLMTextFrame, too, but avoid
+        # appending it to context to avoid context message duplication.
+
+        # Push LLMTextFrame
+        llm_text_frame = LLMTextFrame(text)
+        llm_text_frame.append_to_context = False
+        await self.push_frame(llm_text_frame)
+
+        # Push TTSTextFrame
+        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame.includes_inter_frame_spaces = True
+        await self.push_frame(tts_text_frame)
 
     #
     # user transcription reporting
@@ -1131,7 +1229,7 @@ class AWSNovaSonicLLMService(LLMService):
             logger.debug(
                 "Wrapping assistant response trigger transcription with upstream UserStarted/StoppedSpeakingFrames"
             )
-            await self.push_frame(UserStartedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+            await self.broadcast_frame(UserStartedSpeakingFrame)
 
         # Send the transcription upstream for the user context aggregator
         frame = TranscriptionFrame(
@@ -1141,7 +1239,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Finish wrapping the upstream transcription in UserStarted/StoppedSpeakingFrames if needed
         if should_wrap_in_user_started_stopped_speaking_frames:
-            await self.push_frame(UserStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
 
         # Clear out the buffered user text
         self._user_text_buffer = ""
@@ -1163,7 +1261,8 @@ class AWSNovaSonicLLMService(LLMService):
         """Create context aggregator pair for managing conversation context.
 
         NOTE: this method exists only for backward compatibility. New code
-        should instead do:
+        should instead do::
+
             context = LLMContext(...)
             context_aggregator = LLMContextAggregatorPair(context)
 
@@ -1174,14 +1273,21 @@ class AWSNovaSonicLLMService(LLMService):
 
         Returns:
             A pair of user and assistant context aggregators.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # from_openai_context handles deprecation warning
         context = LLMContext.from_openai_context(context)
         return LLMContextAggregatorPair(
             context, user_params=user_params, assistant_params=assistant_params
         )
 
     #
-    # assistant response trigger (HACK)
+    # assistant response trigger
+    # HACK: only needed for the older Nova Sonic (as opposed to Nova 2 Sonic) model
     #
 
     # Class variable
@@ -1195,12 +1301,17 @@ class AWSNovaSonicLLMService(LLMService):
 
         Sends a pre-recorded "ready" audio trigger to prompt the assistant
         to start speaking. This is useful for controlling conversation flow.
-
-        Returns:
-            False if already triggering a response, True otherwise.
         """
+        if not self._is_assistant_response_trigger_needed():
+            logger.warning(
+                f"Assistant response trigger not needed for model '{self._model}'; skipping. "
+                "An LLMRunFrame() should be sufficient to prompt the assistant to respond, "
+                "assuming the context ends in a user message."
+            )
+            return
+
         if self._triggering_assistant_response:
-            return False
+            return
 
         self._triggering_assistant_response = True
 

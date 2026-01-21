@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,6 +11,8 @@ import uuid
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
 #
 # session properties
@@ -170,6 +172,8 @@ class SessionProperties(BaseModel):
         object: Object type identifier, always "realtime.session".
         id: Unique identifier for the session.
         model: The Realtime model used for this session.
+            Note: The model is set at connection time via model arg in __init__
+            and cannot be changed during the session.
         output_modalities: The set of modalities the model can respond with.
         instructions: System instructions for the assistant.
         audio: Configuration for input and output audio.
@@ -182,6 +186,9 @@ class SessionProperties(BaseModel):
         include: Additional fields to include in server outputs.
     """
 
+    # Needed to support ToolSchema in tools field.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     type: Optional[Literal["realtime"]] = "realtime"
     object: Optional[Literal["realtime.session"]] = None
     id: Optional[str] = None
@@ -189,7 +196,10 @@ class SessionProperties(BaseModel):
     output_modalities: Optional[List[Literal["text", "audio"]]] = None
     instructions: Optional[str] = None
     audio: Optional[AudioConfiguration] = None
-    tools: Optional[List[Dict]] = None
+    # Tools can only be ToolsSchema when provided by the user, in either the
+    # OpenAIRealtimeLLMService constructor or through LLMUpdateSettingsFrame.
+    # We'll never serialize/deserialize ToolsSchema when talking to the server.
+    tools: Optional[ToolsSchema | List[Dict]] = None
     tool_choice: Optional[Literal["auto", "none", "required"]] = None
     max_output_tokens: Optional[Union[int, Literal["inf"]]] = None
     tracing: Optional[Union[Literal["auto"], Dict]] = None
@@ -207,16 +217,22 @@ class ItemContent(BaseModel):
     """Content within a conversation item.
 
     Parameters:
-        type: Content type (text, audio, input_text, input_audio, output_text, or output_audio).
+        type: Content type (text, audio, input_text, input_audio, input_image, output_text, or output_audio).
         text: Text content for text-based items.
         audio: Base64-encoded audio data for audio items.
         transcript: Transcribed text for audio items.
+        image_url: Base64-encoded image data as a data URI for input_image items.
+        detail: Detail level for image processing ("auto", "low", or "high").
     """
 
-    type: Literal["text", "audio", "input_text", "input_audio", "output_text", "output_audio"]
+    type: Literal[
+        "text", "audio", "input_text", "input_audio", "input_image", "output_text", "output_audio"
+    ]
     text: Optional[str] = None
     audio: Optional[str] = None  # base64-encoded audio
     transcript: Optional[str] = None
+    image_url: Optional[str] = None  # base64-encoded image as data URI
+    detail: Optional[Literal["auto", "low", "high"]] = None
 
 
 class ConversationItem(BaseModel):
@@ -986,16 +1002,13 @@ class TokenDetails(BaseModel):
         image_tokens: Number of image tokens used (for input only).
     """
 
+    model_config = ConfigDict(extra="allow")
+
     cached_tokens: Optional[int] = 0
     text_tokens: Optional[int] = 0
     audio_tokens: Optional[int] = 0
     cached_tokens_details: Optional[CachedTokensDetails] = None
     image_tokens: Optional[int] = 0
-
-    class Config:
-        """Pydantic configuration for TokenDetails."""
-
-        extra = "allow"
 
 
 class Usage(BaseModel):

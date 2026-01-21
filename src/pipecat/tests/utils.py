@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,7 +8,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Awaitable, Callable, List, Optional, Sequence, Tuple
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -203,8 +203,16 @@ async def run_test(
             if not isinstance(frame, EndFrame) or not send_end_frame:
                 received_down_frames.append(frame)
 
-        print("received DOWN frames =", received_down_frames)
-        print("expected DOWN frames =", expected_down_frames)
+        down_frames_printed = "["
+        for frame in received_down_frames:
+            down_frames_printed += f"{frame.__class__.__name__}, "
+        down_frames_printed += "]"
+        expected_frames_printed = "["
+        for frame in expected_down_frames:
+            expected_frames_printed += f"{frame.__name__}, "
+        expected_frames_printed += "]"
+        print("received DOWN frames =", down_frames_printed)
+        print("expected DOWN frames =", expected_frames_printed)
 
         assert len(received_down_frames) == len(expected_down_frames)
 

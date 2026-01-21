@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -265,7 +265,7 @@ class TavusTransportClient:
         try:
             await self._client.cleanup()
         except Exception as e:
-            logger.exception(f"Exception during cleanup: {e}")
+            logger.error(f"Exception during cleanup: {e}")
 
     async def _on_joined(self, data):
         """Handle joined event."""

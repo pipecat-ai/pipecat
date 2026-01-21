@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,7 +12,7 @@ from typing import Awaitable, Callable, Optional
 
 import websockets
 from loguru import logger
-from websockets.exceptions import ConnectionClosedOK
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
@@ -36,6 +36,8 @@ class WebsocketService(ABC):
         """
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
         self._reconnect_on_error = reconnect_on_error
+        self._reconnect_in_progress: bool = False
+        self._disconnecting: bool = False
 
     async def _verify_connection(self) -> bool:
         """Verify the websocket connection is active and responsive.
@@ -66,6 +68,92 @@ class WebsocketService(ABC):
         await self._connect_websocket()
         return await self._verify_connection()
 
+    async def _try_reconnect(
+        self,
+        max_retries: int = 3,
+        report_error: Optional[Callable[[ErrorFrame], Awaitable[None]]] = None,
+    ) -> bool:
+        # Prevent concurrent reconnection attempts
+        if self._reconnect_in_progress:
+            logger.warning(f"{self} reconnect attempt aborted: already in progress")
+            return False
+
+        self._reconnect_in_progress = True
+        last_exception: Optional[Exception] = None
+        try:
+            for attempt in range(1, max_retries + 1):
+                try:
+                    logger.warning(f"{self} reconnecting, attempt {attempt}")
+                    if await self._reconnect_websocket(attempt):
+                        logger.info(f"{self} reconnected successfully on attempt {attempt}")
+                        return True
+                except Exception as e:
+                    last_exception = e
+                    logger.error(f"{self} reconnection attempt {attempt} failed: {e}")
+                    if report_error:
+                        await report_error(
+                            ErrorFrame(f"{self} reconnection attempt {attempt} failed: {e}")
+                        )
+                wait_time = exponential_backoff_time(attempt)
+                await asyncio.sleep(wait_time)
+            fatal_msg = f"{self} failed to reconnect after {max_retries} attempts"
+            if last_exception:
+                fatal_msg += f": {last_exception}"
+            logger.error(fatal_msg)
+            if report_error:
+                await report_error(ErrorFrame(fatal_msg, fatal=True))
+            return False
+        finally:
+            self._reconnect_in_progress = False
+
+    async def send_with_retry(self, message, report_error: Callable[[ErrorFrame], Awaitable[None]]):
+        """Attempt to send a message, retrying after reconnect if necessary."""
+        try:
+            await self._websocket.send(message)
+        except Exception as e:
+            logger.error(f"{self} send failed: {e}, will try to reconnect")
+            # Try to reconnect before retrying
+            success = await self._try_reconnect(report_error=report_error)
+            if success:
+                logger.info(f"{self} reconnected successfully, will retry send the message")
+                # trying to send the message one more time
+                await self._websocket.send(message)
+            else:
+                logger.error(f"{self} send failed; unable to reconnect")
+
+    async def _maybe_try_reconnect(
+        self,
+        error: Exception,
+        error_message: str,
+        report_error: Callable[[ErrorFrame], Awaitable[None]],
+    ) -> bool:
+        """Check if reconnection should be attempted and try if appropriate.
+
+        Args:
+            error: The exception that occurred.
+            error_message: Human-readable error message for logging.
+            report_error: Callback function to report connection errors.
+
+        Returns:
+            True if should continue the receive loop, False if should break.
+        """
+        # Don't reconnect if we're intentionally disconnecting
+        if self._disconnecting:
+            logger.warning(f"{self} error during disconnect: {error}")
+            return False
+
+        # Log the error
+        logger.warning(error_message)
+
+        # Try to reconnect if enabled
+        if self._reconnect_on_error:
+            success = await self._try_reconnect(report_error=report_error)
+            return success
+        else:
+            # Reconnection disabled
+            await report_error(ErrorFrame(error_message))
+            return False
+
     async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
         """Handle websocket message receiving with automatic retry logic.
 
@@ -76,58 +164,46 @@ class WebsocketService(ABC):
         Args:
             report_error: Callback function to report connection errors.
         """
-        retry_count = 0
-        MAX_RETRIES = 3
-
         while True:
             try:
                 await self._receive_messages()
-                retry_count = 0  # Reset counter on successful message receive
             except ConnectionClosedOK as e:
                 # Normal closure, don't retry
                 logger.debug(f"{self} connection closed normally: {e}")
                 break
+            except ConnectionClosedError as e:
+                # Connection closed with error (e.g., no close frame received/sent)
+                # This often indicates network issues, server problems, or abrupt disconnection
+                message = f"{self} connection closed, but with an error: {e}"
+                should_continue = await self._maybe_try_reconnect(e, message, report_error)
+                if not should_continue:
+                    break
             except Exception as e:
+                # General error during message receiving
                 message = f"{self} error receiving messages: {e}"
-                logger.error(message)
-
-                if self._reconnect_on_error:
-                    retry_count += 1
-                    if retry_count >= MAX_RETRIES:
-                        await report_error(ErrorFrame(message, fatal=True))
-                        break
-
-                    logger.warning(f"{self} connection error, will retry: {e}")
-                    await report_error(ErrorFrame(message))
-
-                    try:
-                        if await self._reconnect_websocket(retry_count):
-                            retry_count = 0  # Reset counter on successful reconnection
-                        wait_time = exponential_backoff_time(retry_count)
-                        await asyncio.sleep(wait_time)
-                    except Exception as reconnect_error:
-                        logger.error(f"{self} reconnection failed: {reconnect_error}")
-                else:
-                    await report_error(ErrorFrame(message))
+                should_continue = await self._maybe_try_reconnect(e, message, report_error)
+                if not should_continue:
                     break
 
-    @abstractmethod
     async def _connect(self):
-        """Connect to the service.
+        """Connect to the service and reset disconnecting flag.
 
-        Implement service-specific connection logic including websocket connection
-        via _connect_websocket() and any additional setup required.
+        Manages the disconnecting flag to enable reconnection. Subclasses should
+        call super()._connect() first, then implement their specific connection
+        logic including websocket connection via _connect_websocket() and any
+        additional setup required.
         """
-        pass
+        self._disconnecting = False
 
-    @abstractmethod
     async def _disconnect(self):
-        """Disconnect from the service.
+        """Disconnect from the service and set disconnecting flag.
 
-        Implement service-specific disconnection logic including websocket
+        Manages the disconnecting flag to prevent reconnection during intentional
+        disconnect. Subclasses should call super()._disconnect() first, then
+        implement their specific disconnection logic including websocket
         disconnection via _disconnect_websocket() and any cleanup required.
         """
-        pass
+        self._disconnecting = True
 
     @abstractmethod
     async def _connect_websocket(self):

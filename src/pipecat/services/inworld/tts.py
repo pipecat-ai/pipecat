@@ -1,158 +1,70 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Inworld AI Text-to-Speech Service Implementation.
 
-This module provides integration with Inworld AI's HTTP-based TTS API, enabling
-both streaming and non-streaming text-to-speech synthesis with high-quality,
-natural-sounding voices.
+Contains two TTS services:
+- InworldTTSService: WebSocket-based TTS service.
+- InworldHttpTTSService: HTTP-based TTS service.
 
-Key Features:
-
-- HTTP streaming and non-streaming API support for flexible audio generation
-- Multiple voice options (Ashley, Hades, etc.)
-- Automatic language detection from input text (no manual language setting required)
-- Real-time audio chunk processing with proper buffering
-- WAV header handling and audio format conversion
-- Comprehensive error handling and metrics tracking
-
-Technical Implementation:
-
-- Uses aiohttp for HTTP connections
-- Implements both JSON line-by-line parsing (streaming) and complete response (non-streaming)
-- Handles base64-encoded audio data with proper decoding
-- Manages audio continuity to prevent clicks and artifacts
-- Integrates with Pipecat's frame-based pipeline architecture
-
-Examples::
-
-    async with aiohttp.ClientSession() as session:
-        # Streaming mode (default) - real-time audio generation
-        tts = InworldTTSService(
-            api_key=os.getenv("INWORLD_API_KEY"),
-            aiohttp_session=session,
-            voice_id="Ashley",
-            model="inworld-tts-1",
-            streaming=True,  # Default
-            params=InworldTTSService.InputParams(
-                temperature=1.1,  # Optional: control synthesis variability (range: [0, 2])
-            ),
-        )
-
-        # Non-streaming mode - complete audio generation then playback
-        tts = InworldTTSService(
-            api_key=os.getenv("INWORLD_API_KEY"),
-            aiohttp_session=session,
-            voice_id="Ashley",
-            model="inworld-tts-1",
-            streaming=False,
-            params=InworldTTSService.InputParams(
-                temperature=1.1,
-            ),
-        )
+Inworld’s text-to-speech (TTS) models offer ultra-realistic, context-aware speech synthesis and precise voice cloning capabilities, enabling developers to build natural and engaging experiences with human-like speech quality at an accessible price point.
 """
 
+import asyncio
 import base64
 import json
-from typing import AsyncGenerator, Optional
+import uuid
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 import aiohttp
+import websockets
 from loguru import logger
 from pydantic import BaseModel
+
+try:
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use Inworld WebSocket TTS, you need to `pip install websockets`.")
+    raise Exception(f"Missing module: {e}")
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.tts_service import TTSService
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.tts_service import AudioContextWordTTSService, WordTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-class InworldTTSService(TTSService):
-    """Inworld AI HTTP-based Text-to-Speech Service.
+class InworldHttpTTSService(WordTTSService):
+    """Inworld AI HTTP-based TTS service.
 
-    This unified service integrates Inworld AI's high-quality TTS API with Pipecat's pipeline
-    architecture. It supports both streaming and non-streaming modes, providing flexible
-    speech synthesis with natural-sounding voices.
-
-    Key Features:
-
-    - **Streaming Mode**: Real-time HTTP streaming for minimal latency
-    - **Non-Streaming Mode**: Complete audio synthesis then chunked playback
-    - Multiple voice options (Ashley, Hades, etc.)
-    - High-quality audio output (48kHz LINEAR16 PCM)
-    - Automatic audio format handling and header stripping
-    - Comprehensive error handling and recovery
-    - Built-in performance metrics and monitoring
-    - Unified interface for both modes
-
-    Technical Architecture:
-
-    - Uses aiohttp for non-blocking HTTP requests
-    - **Streaming**: Implements JSON line-by-line streaming protocol
-    - **Non-Streaming**: Single HTTP POST with complete response
-    - Processes base64-encoded audio chunks in real-time or batch
-    - Manages audio continuity to prevent artifacts
-    - Integrates with Pipecat's frame-based pipeline system
-
-    Supported Configuration:
-
-    - Voice Selection: Ashley, Hades, and other Inworld voices
-    - Models: inworld-tts-1 and other available models
-    - Audio Formats: LINEAR16 PCM at various sample rates
-    - Language Detection: Automatically inferred from input text (no explicit language setting required)
-    - Mode Selection: streaming=True for real-time, streaming=False for complete synthesis
-
-    Examples::
-
-        async with aiohttp.ClientSession() as session:
-            # Streaming mode (default) - Real-time audio generation
-            tts_streaming = InworldTTSService(
-                api_key=os.getenv("INWORLD_API_KEY"),
-                aiohttp_session=session,
-                voice_id="Ashley",
-                model="inworld-tts-1",
-                streaming=True,  # Default behavior
-                params=InworldTTSService.InputParams(
-                    temperature=1.1,  # Add variability to speech synthesis (range: [0, 2])
-                ),
-            )
-
-            # Non-streaming mode - Complete audio then playback
-            tts_complete = InworldTTSService(
-                api_key=os.getenv("INWORLD_API_KEY"),
-                aiohttp_session=session,
-                voice_id="Hades",
-                model="inworld-tts-1-max",
-                streaming=False,
-                params=InworldTTSService.InputParams(
-                    temperature=1.1,
-                ),
-            )
+    Supports both streaming and non-streaming modes via the `streaming` parameter.
+    Outputs LINEAR16 audio at configurable sample rates with word-level timestamps.
     """
 
     class InputParams(BaseModel):
-        """Optional input parameters for Inworld TTS configuration.
+        """Input parameters for Inworld TTS configuration.
 
         Parameters:
-            temperature: Voice temperature control for synthesis variability (e.g., 1.1).
-                        Valid range: [0, 2]. Higher values increase variability.
-
-        Note:
-            Language is automatically inferred from the input text by Inworld's TTS models,
-            so no explicit language parameter is required.
+            temperature: Temperature for speech synthesis.
+            speaking_rate: Speaking rate for speech synthesis.
         """
 
-        temperature: Optional[float] = None  # optional temperature control (range: [0, 2])
+        temperature: Optional[float] = None
+        speaking_rate: Optional[float] = None
 
     def __init__(
         self,
@@ -164,83 +76,60 @@ class InworldTTSService(TTSService):
         streaming: bool = True,
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
-        params: Optional[InputParams] = None,
+        params: InputParams = None,
         **kwargs,
     ):
         """Initialize the Inworld TTS service.
 
-        Sets up the TTS service with Inworld AI's API configuration.
-        This constructor prepares all necessary parameters for speech synthesis.
-
         Args:
-            api_key: Inworld API key for authentication (base64-encoded from Inworld Portal).
-                    Get this from: Inworld Portal > Settings > API Keys > Runtime API Key
-            aiohttp_session: Shared aiohttp session for HTTP requests. Must be provided
-                           for proper connection pooling and resource management.
-            voice_id: Voice selection for speech synthesis. Common options include:
-                     - "Ashley": Clear, professional female voice (default)
-                     - "Hades": Deep, authoritative male voice
-                     - And many more available in your Inworld account
-            model: TTS model to use for speech synthesis:
-                  - "inworld-tts-1": Standard quality model (default)
-                  - "inworld-tts-1-max": Higher quality model
-                  - Other models as available in your Inworld account
-            streaming: Whether to use streaming mode (True) or non-streaming mode (False).
-                      - True: Real-time audio chunks as they're generated (lower latency)
-                      - False: Complete audio file generated first, then chunked for playback (simpler)
-                      The base URL is automatically selected based on this mode:
-                      - Streaming: "https://api.inworld.ai/tts/v1/voice:stream"
-                      - Non-streaming: "https://api.inworld.ai/tts/v1/voice"
-            sample_rate: Audio sample rate in Hz. If None, uses default from StartFrame.
-                        Common values: 48000 (high quality), 24000 (good quality), 16000 (basic)
-            encoding: Audio encoding format. Supported options:
-                     - "LINEAR16" (default) - Uncompressed PCM, best quality
-                     - Other formats as supported by Inworld API
-            params: Optional input parameters for additional configuration. Use this to specify:
-                   - temperature: Voice temperature control for variability (range: [0, 2], e.g., 1.1, optional)
-                   Language is automatically inferred from input text.
-            **kwargs: Additional arguments passed to the parent TTSService class.
-
-        Note:
-            The aiohttp_session parameter is required because Inworld's HTTP API
-            benefits from connection reuse and proper async session management.
+            api_key: Inworld API key.
+            aiohttp_session: aiohttp ClientSession for HTTP requests.
+            voice_id: ID of the voice to use for synthesis.
+            model: ID of the model to use for synthesis.
+            streaming: Whether to use streaming mode.
+            sample_rate: Audio sample rate in Hz.
+            encoding: Audio encoding format.
+            params: Input parameters for Inworld TTS configuration.
+            **kwargs: Additional arguments passed to the parent class.
         """
-        # Initialize parent TTSService with audio configuration
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            push_text_frames=False,
+            push_stop_frames=True,
+            sample_rate=sample_rate,
+            **kwargs,
+        )
 
-        # Use provided params or create default configuration
-        params = params or InworldTTSService.InputParams()
+        params = params or InworldHttpTTSService.InputParams()
 
-        # Store core configuration for API requests
-        self._api_key = api_key  # Authentication credentials
-        self._session = aiohttp_session  # HTTP session for requests
-        self._streaming = streaming  # Streaming mode selection
+        self._api_key = api_key
+        self._session = aiohttp_session
+        self._streaming = streaming
+        self._timestamp_type = "WORD"
 
-        # Set base URL based on streaming mode
         if streaming:
-            self._base_url = "https://api.inworld.ai/tts/v1/voice:stream"  # Streaming endpoint
+            self._base_url = "https://api.inworld.ai/tts/v1/voice:stream"
         else:
-            self._base_url = "https://api.inworld.ai/tts/v1/voice"  # Non-streaming endpoint
+            self._base_url = "https://api.inworld.ai/tts/v1/voice"
 
-        # Build settings dictionary that matches Inworld's API expectations
-        # This will be sent as JSON payload in each TTS request
-        # Note: Language is automatically inferred from text by Inworld's models
         self._settings = {
-            "voiceId": voice_id,  # Voice selection from direct parameter
-            "modelId": model,  # TTS model selection from direct parameter
-            "audio_config": {  # Audio format configuration
-                "audio_encoding": encoding,  # Format: LINEAR16, MP3, etc.
-                "sample_rate_hertz": 0,  # Will be set in start() from parent service
+            "voiceId": voice_id,
+            "modelId": model,
+            "audioConfig": {
+                "audioEncoding": encoding,
+                "sampleRateHertz": 0,
             },
         }
 
-        # Add optional temperature parameter if provided (valid range: [0, 2])
-        if params and params.temperature is not None:
+        if params.temperature is not None:
             self._settings["temperature"] = params.temperature
+        if params.speaking_rate is not None:
+            self._settings["audioConfig"]["speakingRate"] = params.speaking_rate
 
-        # Register voice and model with parent service for metrics and tracking
-        self.set_voice(voice_id)  # Used for logging and metrics
-        self.set_model_name(model)  # Used for performance tracking
+        self._started = False
+        self._cumulative_time = 0.0
+
+        self.set_voice(voice_id)
+        self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -254,10 +143,10 @@ class InworldTTSService(TTSService):
         """Start the Inworld TTS service.
 
         Args:
-            frame: The start frame containing initialization parameters.
+            frame: The start frame.
         """
         await super().start(frame)
-        self._settings["audio_config"]["sample_rate_hertz"] = self.sample_rate
+        self._settings["audioConfig"]["sampleRateHertz"] = self.sample_rate
 
     async def stop(self, frame: EndFrame):
         """Stop the Inworld TTS service.
@@ -275,263 +164,203 @@ class InworldTTSService(TTSService):
         """
         await super().cancel(frame)
 
-    @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Generate speech from text using Inworld's HTTP API.
-
-        This is the core TTS processing function that adapts its behavior based on the streaming mode:
-
-        **Streaming Mode (streaming=True)**:
-        1. Sends text to Inworld's streaming TTS endpoint
-        2. Receives JSON-streamed audio chunks in real-time
-        3. Processes and cleans audio data (removes WAV headers, validates content)
-        4. Yields audio frames for immediate playback in the pipeline
-
-        **Non-Streaming Mode (streaming=False)**:
-        1. Sends text to Inworld's non-streaming TTS endpoint
-        2. Receives complete audio file as base64-encoded response
-        3. Processes entire audio and chunks for playback
-        4. Yields audio frames in manageable pieces
-
-        Technical Details:
-
-        - **Streaming**: Uses HTTP streaming with JSON line-by-line responses
-        - **Non-Streaming**: Single HTTP POST with complete JSON response
-        - Each audio chunk contains base64-encoded audio data
-        - Implements buffering to handle partial data (streaming mode)
-        - Strips WAV headers to prevent audio artifacts/clicks
-        - Provides optimized audio delivery for each mode
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame and handle state changes.
 
         Args:
-            text: The text to synthesize into speech.
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+        if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
+            self._started = False
+            self._cumulative_time = 0.0
+            if isinstance(frame, TTSStoppedFrame):
+                await self.add_word_timestamps([("Reset", 0)])
 
-        Yields:
-            Frame: Audio frames containing the synthesized speech, plus control frames.
+    def _calculate_word_times(
+        self,
+        timestamp_info: Dict[str, Any],
+    ) -> Tuple[List[Tuple[str, float]], float]:
+        """Calculate word timestamps from Inworld HTTP API word-level response.
 
-        Raises:
-            ErrorFrame: If API errors occur or audio processing fails.
+        Note: Inworld HTTP provides timestamps that reset for each request.
+        We track cumulative time across requests to maintain continuity.
+
+        Args:
+            timestamp_info: The timestamp information from Inworld API.
+
+        Returns:
+            Tuple of (word_times, chunk_end_time) where chunk_end_time is the
+            end time of the last word in this chunk (not cumulative).
+        """
+        word_times: List[Tuple[str, float]] = []
+        chunk_end_time = 0.0
+
+        alignment = timestamp_info.get("wordAlignment", {})
+        words = alignment.get("words", [])
+        start_times = alignment.get("wordStartTimeSeconds", [])
+        end_times = alignment.get("wordEndTimeSeconds", [])
+
+        if words and start_times and len(words) == len(start_times):
+            for i, word in enumerate(words):
+                word_start = self._cumulative_time + start_times[i]
+                word_times.append((word, word_start))
+
+            # Track the end time of the last word in this chunk
+            if end_times and len(end_times) > 0:
+                chunk_end_time = end_times[-1]
+
+        return (word_times, chunk_end_time)
+
+    @traced_tts
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate TTS audio for the given text.
+
+        Args:
+            text: The text to generate TTS audio for.
+
+        Returns:
+            An asynchronous generator of frames.
         """
         logger.debug(f"{self}: Generating TTS [{text}] (streaming={self._streaming})")
 
-        # ================================================================================
-        # STEP 1: PREPARE API REQUEST
-        # ================================================================================
-        # Build the JSON payload according to Inworld's API specification
-        # This matches the format shown in their documentation examples
-        # Note: Language is automatically inferred from the input text by Inworld's models
         payload = {
-            "text": text,  # Text to synthesize
-            "voiceId": self._settings["voiceId"],  # Voice selection (Ashley, Hades, etc.)
-            "modelId": self._settings["modelId"],  # TTS model (inworld-tts-1)
-            "audio_config": self._settings[
-                "audio_config"
-            ],  # Audio format settings (LINEAR16, 48kHz)
+            "text": text,
+            "voiceId": self._settings["voiceId"],
+            "modelId": self._settings["modelId"],
+            "audioConfig": self._settings["audioConfig"],
         }
 
-        # Add optional temperature parameter if configured (valid range: [0, 2])
         if "temperature" in self._settings:
             payload["temperature"] = self._settings["temperature"]
 
-        # Set up HTTP headers for authentication and content type
-        # Inworld requires Basic auth with base64-encoded API key
+        # Use WORD timestamps for simplicity and correct spacing/capitalization
+        payload["timestampType"] = self._timestamp_type
+
         headers = {
-            "Authorization": f"Basic {self._api_key}",  # Base64 API key from Inworld Portal
-            "Content-Type": "application/json",  # JSON request body
+            "Authorization": f"Basic {self._api_key}",
+            "Content-Type": "application/json",
         }
 
         try:
-            # ================================================================================
-            # STEP 2: INITIALIZE METRICS AND PROCESSING
-            # ================================================================================
-            # Start measuring Time To First Byte (TTFB) for performance tracking
             await self.start_ttfb_metrics()
 
-            # Signal to the pipeline that TTS generation has started
-            # This allows downstream processors to prepare for incoming audio
-            yield TTSStartedFrame()
+            if not self._started:
+                await self.start_word_timestamps()
+                yield TTSStartedFrame()
+                self._started = True
 
-            # ================================================================================
-            # STEP 3: MAKE HTTP REQUEST (MODE-SPECIFIC)
-            # ================================================================================
-            # Use aiohttp to make request to Inworld's endpoint
-            # Behavior differs based on streaming mode
             async with self._session.post(
                 self._base_url, json=payload, headers=headers
             ) as response:
-                # ================================================================================
-                # STEP 4: HANDLE HTTP ERRORS
-                # ================================================================================
-                # Check for API errors (expired keys, invalid requests, etc.)
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Inworld API error: {error_text}")
-                    await self.push_error(ErrorFrame(f"Inworld API error: {error_text}"))
+                    yield ErrorFrame(error=f"Inworld API error: {error_text}")
                     return
 
-                # ================================================================================
-                # STEP 5: PROCESS RESPONSE (MODE-SPECIFIC)
-                # ================================================================================
-                # Choose processing method based on streaming mode
                 if self._streaming:
-                    # Stream processing: JSON line-by-line with real-time audio
                     async for frame in self._process_streaming_response(response):
                         yield frame
                 else:
-                    # Non-stream processing: Complete JSON response with batch audio
                     async for frame in self._process_non_streaming_response(response):
                         yield frame
 
-            # ================================================================================
-            # STEP 6: FINALIZE METRICS AND CLEANUP
-            # ================================================================================
-            # Start usage metrics tracking after successful completion
             await self.start_tts_usage_metrics(text)
 
         except Exception as e:
-            # ================================================================================
-            # STEP 7: ERROR HANDLING
-            # ================================================================================
-            # Log any unexpected errors and notify the pipeline
-            logger.error(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
-        finally:
-            # ================================================================================
-            # STEP 8: CLEANUP AND COMPLETION
-            # ================================================================================
-            # Always stop metrics tracking, even if errors occurred
-            await self.stop_all_metrics()
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
-            # Signal to pipeline that TTS generation is complete
-            # This allows downstream processors to finalize audio processing
-            yield TTSStoppedFrame()
+        finally:
+            await self.stop_all_metrics()
 
     async def _process_streaming_response(
         self, response: aiohttp.ClientResponse
     ) -> AsyncGenerator[Frame, None]:
-        """Process streaming JSON response with real-time audio chunks.
-
-        This method handles Inworld's streaming endpoint response format:
-        - JSON lines containing base64-encoded audio chunks
-        - Real-time processing as data arrives
-        - Line buffering to handle partial JSON data
+        """Process a streaming response from the Inworld API.
 
         Args:
-            response: The aiohttp response object from streaming endpoint.
+            response: The response from the Inworld API.
 
         Yields:
-            Frame: Audio frames as they're processed from the stream.
+            An asynchronous generator of frames.
         """
-        # ================================================================================
-        # STREAMING: PROCESS JSON LINE-BY-LINE RESPONSE
-        # ================================================================================
-        # Inworld streams JSON lines where each line contains audio data
-        # We need to buffer incoming data and process complete lines
-
-        # Buffer to accumulate incoming text data
-        # This handles cases where JSON lines are split across HTTP chunks
         buffer = ""
+        # Track the duration of this utterance based on the last word's end time
+        utterance_duration = 0.0
 
-        # Read HTTP response in manageable chunks (1KB each)
-        # This prevents memory issues with large responses
         async for chunk in response.content.iter_chunked(1024):
-            if not chunk:
-                continue
-
-            # ============================================================================
-            # BUFFER MANAGEMENT
-            # ============================================================================
-            # Decode binary chunk to text and add to our line buffer
-            # Each chunk may contain partial JSON lines, so we need to accumulate
             buffer += chunk.decode("utf-8")
 
-            # ============================================================================
-            # LINE-BY-LINE JSON PROCESSING
-            # ============================================================================
-            # Process all complete lines in the buffer (lines ending with \n)
-            # Leave partial lines in buffer for next iteration
             while "\n" in buffer:
-                # Split on first newline, keeping remainder in buffer
                 line, buffer = buffer.split("\n", 1)
                 line_str = line.strip()
 
-                # Skip empty lines (common in streaming responses)
                 if not line_str:
                     continue
 
                 try:
-                    # ================================================================
-                    # PARSE JSON AND EXTRACT AUDIO
-                    # ================================================================
-                    # Parse the JSON line - should contain audio data
                     chunk_data = json.loads(line_str)
 
-                    # Check if this line contains audio content
-                    # Inworld's response format: {"result": {"audioContent": "base64data"}}
                     if "result" in chunk_data and "audioContent" in chunk_data["result"]:
-                        # Process the audio chunk
                         await self.stop_ttfb_metrics()
                         async for frame in self._process_audio_chunk(
                             base64.b64decode(chunk_data["result"]["audioContent"])
                         ):
                             yield frame
 
+                    if "result" in chunk_data and "timestampInfo" in chunk_data["result"]:
+                        timestamp_info = chunk_data["result"]["timestampInfo"]
+                        word_times, chunk_end_time = self._calculate_word_times(timestamp_info)
+                        if word_times:
+                            await self.add_word_timestamps(word_times)
+                        # Track the maximum end time across all chunks
+                        utterance_duration = max(utterance_duration, chunk_end_time)
+
                 except json.JSONDecodeError:
-                    # Ignore malformed JSON lines - streaming can have partial data
-                    # This is normal in HTTP streaming scenarios
                     continue
+
+        # After processing all chunks, add the total utterance duration
+        # to the cumulative time to ensure next utterance starts after this one
+        if utterance_duration > 0:
+            self._cumulative_time += utterance_duration
 
     async def _process_non_streaming_response(
         self, response: aiohttp.ClientResponse
     ) -> AsyncGenerator[Frame, None]:
-        """Process complete JSON response with full audio content.
-
-        This method handles Inworld's non-streaming endpoint response format:
-        - Single JSON response with complete base64-encoded audio
-        - Full audio download then chunked playback
-        - Simpler processing without line buffering
+        """Process a non-streaming response from the Inworld API.
 
         Args:
-            response: The aiohttp response object from non-streaming endpoint.
+            response: The response from the Inworld API.
 
-        Yields:
-            Frame: Audio frames chunked from the complete audio.
+        Returns:
+            An asynchronous generator of frames.
         """
-        # ================================================================================
-        # NON-STREAMING: PARSE COMPLETE JSON RESPONSE
-        # ================================================================================
-        # Parse the complete JSON response containing base64 audio data
         response_data = await response.json()
 
-        # ================================================================================
-        # EXTRACT AND VALIDATE AUDIO CONTENT
-        # ================================================================================
-        # Extract the base64-encoded audio content from response
         if "audioContent" not in response_data:
             logger.error("No audioContent in Inworld API response")
-            await self.push_error(ErrorFrame("No audioContent in response"))
+            yield ErrorFrame(error="No audioContent in response")
             return
 
-        # ================================================================================
-        # DECODE AND PROCESS COMPLETE AUDIO DATA
-        # ================================================================================
-        # Decode the base64 audio data to binary
+        utterance_duration = 0.0
+        if "timestampInfo" in response_data:
+            timestamp_info = response_data["timestampInfo"]
+            word_times, chunk_end_time = self._calculate_word_times(timestamp_info)
+            if word_times:
+                await self.add_word_timestamps(word_times)
+            utterance_duration = chunk_end_time
+
         audio_data = base64.b64decode(response_data["audioContent"])
 
-        # Strip WAV header if present (Inworld may include WAV header)
-        # This prevents audio clicks and ensures clean audio playback
         if len(audio_data) > 44 and audio_data.startswith(b"RIFF"):
             audio_data = audio_data[44:]
 
-        # ================================================================================
-        # CHUNK AND YIELD COMPLETE AUDIO FOR PLAYBACK
-        # ================================================================================
-        # Chunk the complete audio for streaming playback
-        # This allows the pipeline to process audio in manageable pieces
-        CHUNK_SIZE = self.chunk_size
-
-        for i in range(0, len(audio_data), CHUNK_SIZE):
-            chunk = audio_data[i : i + CHUNK_SIZE]
-            if len(chunk) > 0:
+        chunk_size = self.chunk_size
+        for i in range(0, len(audio_data), chunk_size):
+            chunk = audio_data[i : i + chunk_size]
+            if chunk:
                 await self.stop_ttfb_metrics()
                 yield TTSAudioRawFrame(
                     audio=chunk,
@@ -539,54 +368,536 @@ class InworldTTSService(TTSService):
                     num_channels=1,
                 )
 
-    async def _process_audio_chunk(self, audio_chunk: bytes) -> AsyncGenerator[Frame, None]:
-        """Process a single audio chunk (common logic for both modes).
+        # After processing all audio, add the utterance duration to cumulative time
+        if utterance_duration > 0:
+            self._cumulative_time += utterance_duration
 
-        This method handles audio chunk processing that's common to both streaming
-        and non-streaming modes:
-        - WAV header removal
-        - Audio validation
-        - Frame creation and yielding
+    async def _process_audio_chunk(self, audio_chunk: bytes) -> AsyncGenerator[Frame, None]:
+        """Process an audio chunk from the Inworld API.
 
         Args:
-            audio_chunk: Raw audio data bytes to process.
+            audio_chunk: The audio chunk to process.
 
-        Yields:
-            Frame: Audio frame if chunk contains valid audio data.
+        Returns:
+            An asynchronous generator of frames.
         """
-        # ========================================================
-        # AUDIO DATA VALIDATION
-        # ========================================================
-        # Skip empty audio chunks that could cause discontinuities
-        # Empty chunks can create gaps or clicks in audio playback
         if not audio_chunk:
             return
 
-        # Start with the raw audio data
         audio_data = audio_chunk
 
-        # ========================================================
-        # WAV HEADER REMOVAL (CRITICAL FOR AUDIO QUALITY)
-        # ========================================================
-        # Each audio chunk may have its own WAV header (44 bytes)
-        # These headers contain metadata and will sound like clicks if played
-        # We must strip them from EVERY chunk, not just the first one
-        if (
-            len(audio_chunk) > 44  # Ensure chunk is large enough
-            and audio_chunk.startswith(b"RIFF")  # Check for WAV header magic bytes
-        ):
-            # Remove the 44-byte WAV header to get pure audio data
+        if len(audio_chunk) > 44 and audio_chunk.startswith(b"RIFF"):
             audio_data = audio_chunk[44:]
 
-        # ========================================================
-        # YIELD AUDIO FRAME TO PIPELINE
-        # ========================================================
-        # Only yield frames with actual audio content
-        # Empty frames can cause pipeline issues
-        if len(audio_data) > 0:
-            # Create Pipecat audio frame with processed audio data
+        if audio_data:
             yield TTSAudioRawFrame(
-                audio=audio_data,  # Clean audio without headers
-                sample_rate=self.sample_rate,  # Configured sample rate (48kHz)
-                num_channels=1,  # Mono audio
+                audio=audio_data,
+                sample_rate=self.sample_rate,
+                num_channels=1,
             )
+
+
+class InworldTTSService(AudioContextWordTTSService):
+    """Inworld AI WebSocket-based TTS service.
+
+    Uses bidirectional WebSocket for lower latency streaming. Supports multiple
+    independent audio contexts per connection (max 5). Outputs LINEAR16 audio
+    with word-level timestamps.
+    """
+
+    class InputParams(BaseModel):
+        """Input parameters for Inworld WebSocket TTS configuration.
+
+        Parameters:
+            temperature: Temperature for speech synthesis.
+            speaking_rate: Speaking rate for speech synthesis.
+            apply_text_normalization: Whether to apply text normalization.
+            max_buffer_delay_ms: Maximum buffer delay in milliseconds.
+            buffer_char_threshold: Buffer character threshold.
+        """
+
+        temperature: Optional[float] = None
+        speaking_rate: Optional[float] = None
+        apply_text_normalization: Optional[str] = None
+        max_buffer_delay_ms: Optional[int] = None
+        buffer_char_threshold: Optional[int] = None
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        voice_id: str = "Ashley",
+        model: str = "inworld-tts-1",
+        url: str = "wss://api.inworld.ai/tts/v1/voice:streamBidirectional",
+        sample_rate: Optional[int] = None,
+        encoding: str = "LINEAR16",
+        params: InputParams = None,
+        **kwargs: Any,
+    ):
+        """Initialize the Inworld WebSocket TTS service.
+
+        Args:
+            api_key: Inworld API key.
+            voice_id: ID of the voice to use for synthesis.
+            model: ID of the model to use for synthesis.
+            url: URL of the Inworld WebSocket API.
+            sample_rate: Audio sample rate in Hz.
+            encoding: Audio encoding format.
+            params: Input parameters for Inworld WebSocket TTS configuration.
+            **kwargs: Additional arguments passed to the parent class.
+        """
+        super().__init__(
+            push_text_frames=False,
+            push_stop_frames=True,
+            pause_frame_processing=True,
+            sample_rate=sample_rate,
+            **kwargs,
+        )
+
+        params = params or InworldTTSService.InputParams()
+
+        self._api_key = api_key
+        self._url = url
+        self._settings: Dict[str, Any] = {
+            "voiceId": voice_id,
+            "modelId": model,
+            "audioConfig": {
+                "audioEncoding": encoding,
+                "sampleRateHertz": 0,
+            },
+        }
+        self._timestamp_type = "WORD"
+
+        if params.temperature is not None:
+            self._settings["temperature"] = params.temperature
+        if params.speaking_rate is not None:
+            self._settings["audioConfig"]["speakingRate"] = params.speaking_rate
+        if params.apply_text_normalization is not None:
+            self._settings["applyTextNormalization"] = params.apply_text_normalization
+
+        self._buffer_settings = {
+            "maxBufferDelayMs": params.max_buffer_delay_ms,
+            "bufferCharThreshold": params.buffer_char_threshold,
+        }
+
+        self._receive_task = None
+        self._keepalive_task = None
+        self._context_id = None
+        self._started = False
+
+        self.set_voice(voice_id)
+        self.set_model_name(model)
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Inworld WebSocket TTS service supports metrics generation.
+        """
+        return True
+
+    async def start(self, frame: StartFrame):
+        """Start the Inworld WebSocket TTS service.
+
+        Args:
+            frame: The start frame.
+        """
+        await super().start(frame)
+        self._settings["audioConfig"]["sampleRateHertz"] = self.sample_rate
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the Inworld WebSocket TTS service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the Inworld WebSocket TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def flush_audio(self):
+        """Flush any pending audio without closing the context.
+
+        This triggers synthesis of all accumulated text in the buffer while
+        keeping the context open for subsequent text. The context is only
+        closed on interruption, disconnect, or end of session.
+        """
+        if self._context_id and self._websocket:
+            logger.trace(f"Flushing audio for context {self._context_id}")
+            await self._send_flush(self._context_id)
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame and handle state changes.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
+            self._started = False
+            if isinstance(frame, TTSStoppedFrame):
+                await self.add_word_timestamps([("Reset", 0)])
+
+    def _calculate_word_times(self, timestamp_info: Dict[str, Any]) -> List[Tuple[str, float]]:
+        """Calculate word timestamps from Inworld WebSocket API response.
+
+        Args:
+            timestamp_info: The timestamp information from Inworld API.
+
+        Returns:
+            A list of (word, timestamp) tuples.
+        """
+        word_times: List[Tuple[str, float]] = []
+
+        alignment = timestamp_info.get("wordAlignment", {})
+        words = alignment.get("words", [])
+        start_times = alignment.get("wordStartTimeSeconds", [])
+
+        if words and start_times and len(words) == len(start_times):
+            for i, word in enumerate(words):
+                word_times.append((word, start_times[i]))
+
+        return word_times
+
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        """Handle an interruption from the Inworld WebSocket TTS service.
+
+        Args:
+            frame: The interruption frame.
+            direction: The direction of the interruption.
+        """
+        old_context_id = self._context_id
+        logger.trace(f"{self}: Handling interruption, old context: {old_context_id}")
+
+        await super()._handle_interruption(frame, direction)
+
+        if old_context_id and self._websocket:
+            logger.trace(f"{self}: Closing context {old_context_id} due to interruption")
+            try:
+                await self._send_close_context(old_context_id)
+            except Exception as e:
+                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+
+        self._context_id = None
+        self._started = False
+        logger.trace(f"{self}: Interruption handled, context reset to None")
+
+    def _get_websocket(self):
+        """Get the websocket for the Inworld WebSocket TTS service.
+
+        Returns:
+            The websocket.
+        """
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
+    async def _connect(self):
+        """Connect to the Inworld WebSocket TTS service.
+
+        Returns:
+            The websocket.
+        """
+        await super()._connect()
+
+        await self._connect_websocket()
+
+        if self._websocket and not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+        if self._websocket and not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+
+    async def _disconnect(self):
+        """Disconnect from the Inworld WebSocket TTS service.
+
+        Returns:
+            The websocket.
+        """
+        await super()._disconnect()
+
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
+        await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
+        """Connect to the Inworld WebSocket TTS service.
+
+        Returns:
+            The websocket.
+        """
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+
+            logger.debug("Connecting to Inworld WebSocket TTS")
+            headers = [("Authorization", f"Basic {self._api_key}")]
+            self._websocket = await websocket_connect(self._url, additional_headers=headers)
+            await self._call_event_handler("on_connected")
+        except Exception as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+            self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
+
+    async def _disconnect_websocket(self):
+        """Disconnect from the Inworld WebSocket TTS service.
+
+        Returns:
+            The websocket.
+        """
+        try:
+            await self.stop_all_metrics()
+
+            if self._websocket:
+                logger.debug("Disconnecting from Inworld WebSocket TTS")
+                if self._context_id:
+                    try:
+                        await self._send_close_context(self._context_id)
+                    except Exception:
+                        pass
+                await self._websocket.close()
+                logger.debug("Disconnected from Inworld WebSocket TTS")
+        except Exception as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+        finally:
+            self._started = False
+            self._context_id = None
+            self._websocket = None
+            await self._call_event_handler("on_disconnected")
+
+    async def _receive_messages(self):
+        """Handle incoming WebSocket messages from Inworld."""
+        async for message in self._get_websocket():
+            try:
+                msg = json.loads(message)
+            except json.JSONDecodeError:
+                logger.warning(f"{self} received non-JSON message")
+                continue
+
+            result = msg.get("result", {})
+            ctx_id = result.get("contextId") or result.get("context_id")
+
+            # Log all incoming messages for debugging
+            msg_types = [
+                k
+                for k in ["contextCreated", "audioChunk", "flushCompleted", "contextClosed"]
+                if k in result
+            ]
+            logger.debug(
+                f"{self}: Received message types={msg_types}, ctx_id={ctx_id}, "
+                f"current_ctx={self._context_id}, available={self.audio_context_available(ctx_id) if ctx_id else 'N/A'}"
+            )
+
+            # Check for errors
+            status = result.get("status", {})
+            if status.get("code", 0) != 0:
+                error_msg = status.get("message", "Unknown error")
+                error_code = status.get("code")
+
+                # Handle "Context not found" error (code 5)
+                # This can happen when a keepalive message is sent but no context is available.
+                if error_code == 5 and "not found" in error_msg.lower():
+                    logger.debug(f"{self}: Context {ctx_id or self._context_id} not found.")
+                    continue
+
+                # For other errors, push error frame
+                await self.push_error(error_msg=f"Inworld API error: {error_msg}")
+                continue
+
+            if "error" in msg:
+                await self.push_error(error_msg=str(msg["error"]))
+                continue
+
+            # Check if this message belongs to an available context.
+            # If the context isn't available but matches our current context ID,
+            # recreate it (handles race conditions during interruption recovery).
+            if ctx_id and not self.audio_context_available(ctx_id):
+                if self._context_id == ctx_id:
+                    logger.trace(
+                        f"{self}: Recreating audio context for current context: {self._context_id}"
+                    )
+                    await self.create_audio_context(self._context_id)
+                else:
+                    # This is a message from an old/closed context - skip it
+                    logger.trace(f"{self}: Skipping message from unavailable context: {ctx_id}")
+                    continue
+
+            # Process audio chunk
+            audio_chunk = result.get("audioChunk", {})
+            audio_b64 = audio_chunk.get("audioContent")
+
+            if audio_b64:
+                logger.trace(f"{self}: Processing audio chunk for context {ctx_id}")
+                await self.stop_ttfb_metrics()
+                await self.start_word_timestamps()
+                audio = base64.b64decode(audio_b64)
+                if len(audio) > 44 and audio.startswith(b"RIFF"):
+                    audio = audio[44:]
+                frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+
+                if ctx_id:
+                    await self.append_to_audio_context(ctx_id, frame)
+
+                # timestampInfo is inside audioChunk
+                timestamp_info = audio_chunk.get("timestampInfo")
+                if timestamp_info:
+                    word_times = self._calculate_word_times(timestamp_info)
+                    if word_times:
+                        await self.add_word_timestamps(word_times)
+
+            # Handle context created confirmation
+            if "contextCreated" in result:
+                logger.trace(f"{self}: Context created on server: {ctx_id}")
+
+            # Handle flush completion - context is still valid, just acknowledge it
+            if "flushCompleted" in result:
+                logger.trace(f"{self}: Flush completed for context {ctx_id}")
+
+            # Handle context closed - context no longer exists on server
+            if "contextClosed" in result:
+                logger.trace(f"{self}: Context closed on server: {ctx_id}")
+                await self.stop_ttfb_metrics()
+                # Only reset if this is our current context
+                if ctx_id == self._context_id:
+                    self._context_id = None
+                    self._started = False
+                if ctx_id and self.audio_context_available(ctx_id):
+                    await self.remove_audio_context(ctx_id)
+                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
+
+    async def _keepalive_task_handler(self):
+        """Send periodic keepalive messages to maintain WebSocket connection."""
+        KEEPALIVE_SLEEP = 60
+        while True:
+            await asyncio.sleep(KEEPALIVE_SLEEP)
+            try:
+                if self._websocket and self._websocket.state is State.OPEN:
+                    if self._context_id:
+                        keepalive_message = {
+                            "send_text": {"text": ""},
+                            "contextId": self._context_id,
+                        }
+                        logger.trace(f"Sending keepalive for context {self._context_id}")
+                    else:
+                        keepalive_message = {"send_text": {"text": ""}}
+                        logger.trace("Sending keepalive without context")
+                    await self._websocket.send(json.dumps(keepalive_message))
+            except websockets.ConnectionClosed as e:
+                logger.warning(f"{self} keepalive error: {e}")
+                break
+
+    async def _send_context(self, context_id: str):
+        """Send a context to the Inworld WebSocket TTS service.
+
+        Args:
+            context_id: The context ID.
+        """
+        create_config: Dict[str, Any] = {
+            "voiceId": self._settings["voiceId"],
+            "modelId": self._settings["modelId"],
+            "audioConfig": self._settings["audioConfig"],
+        }
+
+        if "temperature" in self._settings:
+            create_config["temperature"] = self._settings["temperature"]
+        if "applyTextNormalization" in self._settings:
+            create_config["applyTextNormalization"] = self._settings["applyTextNormalization"]
+
+        # Set buffer settings for timely audio generation.
+        # Use provided values or defaults that work well for streaming LLM output.
+        create_config["maxBufferDelayMs"] = self._buffer_settings["maxBufferDelayMs"] or 3000
+        create_config["bufferCharThreshold"] = self._buffer_settings["bufferCharThreshold"] or 250
+
+        create_config["timestampType"] = self._timestamp_type
+
+        msg = {"create": create_config, "contextId": context_id}
+        logger.trace(f"{self}: Sending context create: {create_config}")
+        await self.send_with_retry(json.dumps(msg), self._report_error)
+
+    async def _send_text(self, context_id: str, text: str):
+        """Send text to the Inworld WebSocket TTS service.
+
+        Args:
+            context_id: The context ID.
+            text: The text to send.
+        """
+        msg = {"send_text": {"text": text}, "contextId": context_id}
+        await self.send_with_retry(json.dumps(msg), self._report_error)
+
+    async def _send_flush(self, context_id: str):
+        """Send a flush to the Inworld WebSocket TTS service.
+
+        Args:
+            context_id: The context ID.
+        """
+        msg = {"flush_context": {}, "contextId": context_id}
+        await self.send_with_retry(json.dumps(msg), self._report_error)
+
+    async def _send_close_context(self, context_id: str):
+        """Send a close context to the Inworld WebSocket TTS service.
+
+        Args:
+            context_id: The context ID.
+        """
+        msg = {"close_context": {}, "contextId": context_id}
+        await self.send_with_retry(json.dumps(msg), self._report_error)
+
+    @traced_tts
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate TTS audio for the given text using the Inworld WebSocket TTS service.
+
+        Args:
+            text: The text to generate TTS audio for.
+
+        Returns:
+            An asynchronous generator of frames.
+        """
+        logger.debug(f"{self}: Generating WebSocket TTS [{text}]")
+
+        try:
+            if not self._websocket or self._websocket.state is State.CLOSED:
+                await self._connect()
+
+            try:
+                if not self._started:
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame()
+                    self._started = True
+
+                    if not self._context_id:
+                        self._context_id = str(uuid.uuid4())
+                        logger.trace(f"{self}: Creating new context {self._context_id}")
+                        await self.create_audio_context(self._context_id)
+                        await self._send_context(self._context_id)
+                    elif not self.audio_context_available(self._context_id):
+                        # Context exists on server but local tracking was removed
+                        logger.trace(f"{self}: Recreating local audio context {self._context_id}")
+                        await self.create_audio_context(self._context_id)
+
+                await self._send_text(self._context_id, text)
+                await self.start_tts_usage_metrics(text)
+
+            except Exception as e:
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
+                yield TTSStoppedFrame()
+                self._started = False
+                return
+            yield None
+        except Exception as e:
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")

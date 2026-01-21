@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -16,7 +16,8 @@ import base64
 import json
 import time
 import uuid
-from typing import Awaitable, Callable, Optional
+from enum import Enum
+from typing import Awaitable, Callable, Optional, Union
 
 import aiohttp
 from loguru import logger
@@ -28,7 +29,12 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.services.heygen.api import HeyGenApi, HeyGenSession, NewSessionRequest
+from pipecat.services.heygen.api_interactive_avatar import HeyGenApi, NewSessionRequest
+from pipecat.services.heygen.api_liveavatar import (
+    LiveAvatarApi,
+    LiveAvatarNewSessionRequest,
+)
+from pipecat.services.heygen.base_api import StandardSessionResponse
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
@@ -43,6 +49,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 HEY_GEN_SAMPLE_RATE = 24000
+
+
+class ServiceType(Enum):
+    """Enum for HeyGen service types."""
+
+    INTERACTIVE_AVATAR = "INTERACTIVE_AVATAR"
+    LIVE_AVATAR = "LIVE_AVATAR"
 
 
 class HeyGenCallbacks(BaseModel):
@@ -78,11 +91,10 @@ class HeyGenClient:
         api_key: str,
         session: aiohttp.ClientSession,
         params: TransportParams,
-        session_request: NewSessionRequest = NewSessionRequest(
-            avatarName="Shawn_Therapist_public",
-            version="v2",
-        ),
+        session_request: Optional[Union[LiveAvatarNewSessionRequest, NewSessionRequest]] = None,
+        service_type: Optional[ServiceType] = None,
         callbacks: HeyGenCallbacks,
+        connect_as_user: bool = False,
     ) -> None:
         """Initialize the HeyGen client.
 
@@ -90,11 +102,52 @@ class HeyGenClient:
             api_key: HeyGen API key for authentication
             session: HTTP client session for API requests
             params: Transport configuration parameters
-            session_request: Configuration for the HeyGen session (default: uses Shawn_Therapist_public avatar)
+            session_request: Configuration for the HeyGen session (optional)
+            service_type: Type of service to use
             callbacks: Callback handlers for HeyGen events
+            connect_as_user: Whether to connect using the user token or not (default: False)
         """
-        self._api = HeyGenApi(api_key, session=session)
-        self._heyGen_session: Optional[HeyGenSession] = None
+        # Set default service type for backwards compatibility
+        self._service_type = (
+            service_type if service_type is not None else ServiceType.INTERACTIVE_AVATAR
+        )
+
+        # Validate session_request matches service_type if both are provided
+        if session_request is not None and service_type is not None:
+            if service_type == ServiceType.LIVE_AVATAR and not isinstance(
+                session_request, LiveAvatarNewSessionRequest
+            ):
+                logger.warning(
+                    f"Service type is LIVE_AVATAR but session_request is not SessionTokenRequest. Ignoring session_request."
+                )
+                session_request = None
+            elif service_type == ServiceType.INTERACTIVE_AVATAR and not isinstance(
+                session_request, NewSessionRequest
+            ):
+                logger.warning(
+                    f"Service type is INTERACTIVE_AVATAR but session_request is not NewSessionRequest. Ignoring session_request."
+                )
+                session_request = None
+
+        # Create default session_request based on service_type if not provided
+        if session_request is None:
+            if self._service_type == ServiceType.INTERACTIVE_AVATAR:
+                session_request = NewSessionRequest(
+                    avatar_id="Shawn_Therapist_public",
+                    version="v2",
+                )
+            else:  # LIVE_AVATAR
+                session_request = LiveAvatarNewSessionRequest(
+                    avatar_id="1c690fe7-23e0-49f9-bfba-14344450285b"
+                )
+
+        # Initialize API based on service type
+        if self._service_type == ServiceType.INTERACTIVE_AVATAR:
+            self._api = HeyGenApi(api_key, session=session)
+        else:
+            self._api = LiveAvatarApi(api_key, session=session)
+
+        self._heyGen_session: Optional[StandardSessionResponse] = None
         self._websocket = None
         self._task_manager: Optional[BaseTaskManager] = None
         self._params = params
@@ -119,18 +172,21 @@ class HeyGenClient:
         self._next_send_time = 0
         self._audio_seconds_sent = 0.0
         self._transport_ready = False
+        # HeyGen enforces a protection mechanism that will automatically disconnect the avatar if a user does not join within 5 minutes,
+        # regardless of whether the Pipecat agent remains present in the room.
+        # To prevent unexpected disconnections in HeyGenVideoService, we ensure that a user connection is established using the user's token.
+        # This keeps the avatar session active and avoids forced logouts due to inactivity from the user side.
+        self._connect_as_user = connect_as_user
 
     async def _initialize(self):
         self._heyGen_session = await self._api.new_session(self._session_request)
         logger.debug(f"HeyGen sessionId: {self._heyGen_session.session_id}")
-        logger.debug(f"HeyGen realtime_endpoint: {self._heyGen_session.realtime_endpoint}")
-        logger.debug(f"HeyGen livekit URL: {self._heyGen_session.url}")
-        logger.debug(f"HeyGen livekit toke: {self._heyGen_session.access_token}")
+        logger.debug(f"HeyGen realtime_endpoint: {self._heyGen_session.ws_url}")
+        logger.debug(f"HeyGen livekit URL: {self._heyGen_session.livekit_url}")
+        logger.debug(f"HeyGen livekit token: {self._heyGen_session.access_token}")
         logger.info(
-            f"Full Link: https://meet.livekit.io/custom?liveKitUrl={self._heyGen_session.url}&token={self._heyGen_session.access_token}"
+            f"Full Link: https://meet.livekit.io/custom?liveKitUrl={self._heyGen_session.livekit_url}&token={self._heyGen_session.access_token}"
         )
-
-        await self._api.start_session(self._heyGen_session.session_id)
         logger.info("HeyGen session started")
 
     async def setup(self, setup: FrameProcessorSetup) -> None:
@@ -172,7 +228,7 @@ class HeyGenClient:
                 await self._task_manager.cancel_task(self._event_task)
                 self._event_task = None
         except Exception as e:
-            logger.exception(f"Exception during cleanup: {e}")
+            logger.error(f"Exception during cleanup: {e}")
 
     async def start(self, frame: StartFrame, audio_chunk_size: int) -> None:
         """Start the client and establish all necessary connections.
@@ -215,7 +271,7 @@ class HeyGenClient:
                 return
             logger.debug(f"HeyGenClient ws connecting")
             self._websocket = await websocket_connect(
-                uri=self._heyGen_session.realtime_endpoint,
+                uri=self._heyGen_session.ws_url,
             )
             self._connected = True
             self._receive_task = self._task_manager.create_task(
@@ -502,7 +558,9 @@ class HeyGenClient:
     async def _livekit_connect(self):
         """Connect to LiveKit room."""
         try:
-            logger.debug(f"HeyGenClient livekit connecting to room URL: {self._heyGen_session.url}")
+            logger.debug(
+                f"HeyGenClient livekit connecting to room URL: {self._heyGen_session.livekit_url}"
+            )
             self._livekit_room = rtc.Room()
 
             @self._livekit_room.on("participant_connected")
@@ -562,9 +620,13 @@ class HeyGenClient:
                     self._callbacks.on_participant_disconnected, participant.identity
                 )
 
-            await self._livekit_room.connect(
-                self._heyGen_session.url, self._heyGen_session.livekit_agent_token
+            access_token = (
+                self._heyGen_session.livekit_agent_token
+                if not self._connect_as_user
+                else self._heyGen_session.access_token
             )
+
+            await self._livekit_room.connect(self._heyGen_session.livekit_url, access_token)
             logger.debug(f"Successfully connected to LiveKit room: {self._livekit_room.name}")
             logger.debug(f"Local participant SID: {self._livekit_room.local_participant.sid}")
             logger.debug(

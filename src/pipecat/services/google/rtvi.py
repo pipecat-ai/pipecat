@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,9 +15,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
-from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import FramePushed
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame
 

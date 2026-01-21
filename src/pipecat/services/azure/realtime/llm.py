@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -38,7 +38,7 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
         Args:
             api_key: The API key for the Azure OpenAI service.
             base_url: The full Azure WebSocket endpoint URL including api-version and deployment.
-                Example: "wss://my-project.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment=my-realtime-deployment"
+                Example: "wss://my-project.openai.azure.com/openai/realtime?api-version=2025-04-01-preview&deployment=my-realtime-deployment"
             **kwargs: Additional arguments passed to parent OpenAIRealtimeLLMService.
         """
         super().__init__(base_url=base_url, api_key=api_key, **kwargs)
@@ -52,7 +52,7 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
                 # handle disconnections in the send/recv code paths.
                 return
 
-            logger.info(f"Connecting to {self.base_url}, api key: {self.api_key}")
+            logger.info(f"Connecting to {self.base_url}")
             self._websocket = await websocket_connect(
                 uri=self.base_url,
                 additional_headers={
@@ -61,5 +61,5 @@ class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"initialization error: {e}", exception=e)
             self._websocket = None

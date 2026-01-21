@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -21,13 +21,13 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
-    FunctionCallInProgressFrame,
+    FunctionCallCancelFrame,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     StartFrame,
-    STTMuteFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -51,6 +51,10 @@ class STTMuteStrategy(Enum):
         FUNCTION_CALL: Mute STT during function calls to prevent interruptions.
         ALWAYS: Always mute STT when the bot is speaking.
         CUSTOM: Use a custom callback to determine muting logic dynamically.
+
+    .. deprecated:: 0.0.99
+        `STTMuteStrategy` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s new `user_mute_strategies` instead.
     """
 
     FIRST_SPEECH = "first_speech"
@@ -77,6 +81,10 @@ class STTMuteConfig:
     Note:
         MUTE_UNTIL_FIRST_BOT_COMPLETE and FIRST_SPEECH strategies should not be used together
         as they handle the first bot speech differently.
+
+    .. deprecated:: 0.0.99
+        `STTMuteConfig` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s new `user_mute_strategies` instead.
     """
 
     strategies: set[STTMuteStrategy]
@@ -104,6 +112,10 @@ class STTMuteFilter(FrameProcessor):
     feature. When STT is muted, interruptions are automatically disabled by
     suppressing VAD-related frames. This prevents unwanted speech detection
     during bot speech, function calls, or other specified conditions.
+
+    .. deprecated:: 0.0.99
+        `STTMuteFilter` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s new `user_mute_strategies` instead.
     """
 
     def __init__(self, *, config: STTMuteConfig, **kwargs):
@@ -117,25 +129,27 @@ class STTMuteFilter(FrameProcessor):
         self._config = config
         self._first_speech_handled = False
         self._bot_is_speaking = False
-        self._function_call_in_progress = False
-        self._is_muted = False  # Initialize as unmuted, will set state on StartFrame if needed
+        self._function_call_in_progress = set()
+        self._is_muted = False
 
-    @property
-    def is_muted(self) -> bool:
-        """Check if STT is currently muted.
+        import warnings
 
-        Returns:
-            True if STT is currently muted and audio frames are being suppressed.
-        """
-        return self._is_muted
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`STTMuteFilter` is deprecated and will be removed in a future version. "
+                "Use `LLMUserAggregator`'s new `user_mute_strategies` instead.",
+                DeprecationWarning,
+            )
 
     async def _handle_mute_state(self, should_mute: bool):
         """Handle STT muting and interruption control state changes."""
-        if should_mute != self.is_muted:
+        if should_mute != self._is_muted:
             logger.debug(f"STTMuteFilter {'muting' if should_mute else 'unmuting'}")
             self._is_muted = should_mute
-            await self.push_frame(STTMuteFrame(mute=should_mute), FrameDirection.UPSTREAM)
-            await self.push_frame(STTMuteFrame(mute=should_mute), FrameDirection.DOWNSTREAM)
+            # Note: We don't send STTMuteFrame to the STT service itself.
+            # The filter blocks frames locally, but the STT service continues
+            # processing audio to keep streaming connections alive (e.g., Google STT).
 
     async def _should_mute(self) -> bool:
         """Determine if STT should be muted based on current state and strategies."""
@@ -185,11 +199,12 @@ class STTMuteFilter(FrameProcessor):
         # Process frames to determine mute state
         if isinstance(frame, StartFrame):
             should_mute = await self._should_mute()
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            self._function_call_in_progress = True
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            for f in frame.function_calls:
+                self._function_call_in_progress.add(f.tool_call_id)
             should_mute = await self._should_mute()
-        elif isinstance(frame, FunctionCallResultFrame):
-            self._function_call_in_progress = False
+        elif isinstance(frame, (FunctionCallCancelFrame, FunctionCallResultFrame)):
+            self._function_call_in_progress.remove(frame.tool_call_id)
             should_mute = await self._should_mute()
         elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_is_speaking = True
@@ -215,7 +230,7 @@ class STTMuteFilter(FrameProcessor):
             ),
         ):
             # Only pass VAD-related frames when not muted
-            if not self.is_muted:
+            if not self._is_muted:
                 await self.push_frame(frame, direction)
             else:
                 logger.trace(f"{frame.__class__.__name__} suppressed - STT currently muted")
@@ -224,5 +239,5 @@ class STTMuteFilter(FrameProcessor):
             await self.push_frame(frame, direction)
 
         # Finally handle mute state change if needed
-        if should_mute is not None and should_mute != self.is_muted:
+        if should_mute is not None and should_mute != self._is_muted:
             await self._handle_mute_state(should_mute)

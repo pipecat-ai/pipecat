@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -17,7 +17,7 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import httpx
 from loguru import logger
@@ -29,7 +29,6 @@ from pipecat.adapters.services.anthropic_adapter import (
     AnthropicLLMInvocationParams,
 )
 from pipecat.frames.frames import (
-    ErrorFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -40,6 +39,9 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
 )
@@ -74,11 +76,17 @@ class AnthropicContextAggregatorPair:
     Encapsulates both user and assistant context aggregators
     to manage conversation flow and message formatting.
 
+    .. deprecated:: 0.0.99
+        `AnthropicContextAggregatorPair` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         _user: The user context aggregator.
         _assistant: The assistant context aggregator.
     """
 
+    # Aggregators handle deprecation warnings
     _user: "AnthropicUserContextAggregator"
     _assistant: "AnthropicAssistantContextAggregator"
 
@@ -110,6 +118,24 @@ class AnthropicLLMService(LLMService):
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AnthropicLLMAdapter
 
+    class ThinkingConfig(BaseModel):
+        """Configuration for extended thinking.
+
+        Parameters:
+            type: Type of thinking mode (currently only "enabled" or "disabled").
+            budget_tokens: Maximum number of tokens for thinking.
+                With today's models, the minimum is 1024.
+                Only allowed if type is "enabled".
+        """
+
+        # Why `| str` here? To not break compatibility in case Anthropic adds
+        # more types in the future.
+        type: Literal["enabled", "disabled"] | str
+
+        # Why not enforce minimnum of 1024 here? To not break compatibility in
+        # case Anthropic changes this requirement in the future.
+        budget_tokens: int
+
     class InputParams(BaseModel):
         """Input parameters for Anthropic model inference.
 
@@ -124,6 +150,10 @@ class AnthropicLLMService(LLMService):
             temperature: Sampling temperature between 0.0 and 1.0.
             top_k: Top-k sampling parameter.
             top_p: Top-p sampling parameter between 0.0 and 1.0.
+            thinking: Extended thinking configuration.
+                Enabling extended thinking causes the model to spend more time "thinking" before responding.
+                It also causes this service to emit LLMThinking*Frames during response generation.
+                Extended thinking is disabled by default.
             extra: Additional parameters to pass to the API.
         """
 
@@ -133,6 +163,9 @@ class AnthropicLLMService(LLMService):
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
+            default_factory=lambda: NOT_GIVEN
+        )
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
         def model_post_init(self, __context):
@@ -191,6 +224,7 @@ class AnthropicLLMService(LLMService):
             "temperature": params.temperature,
             "top_k": params.top_k,
             "top_p": params.top_p,
+            "thinking": params.thinking,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -238,28 +272,43 @@ class AnthropicLLMService(LLMService):
         """
         messages = []
         system = NOT_GIVEN
+        tools = []
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
-            params = adapter.get_llm_invocation_params(
+            invocation_params = adapter.get_llm_invocation_params(
                 context, enable_prompt_caching=self._settings["enable_prompt_caching"]
             )
-            messages = params["messages"]
-            system = params["system"]
+            messages = invocation_params["messages"]
+            system = invocation_params["system"]
+            tools = invocation_params["tools"]
         else:
             context = AnthropicLLMContext.upgrade_to_anthropic(context)
             messages = context.messages
             system = getattr(context, "system", NOT_GIVEN)
+            tools = context.tools or []
+
+        # Build params using the same method as streaming completions
+        params = {
+            "model": self.model_name,
+            "max_tokens": self._settings["max_tokens"],
+            "stream": False,
+            "temperature": self._settings["temperature"],
+            "top_k": self._settings["top_k"],
+            "top_p": self._settings["top_p"],
+            "messages": messages,
+            "system": system,
+            "tools": tools,
+            "betas": ["interleaved-thinking-2025-05-14"],
+        }
+        if self._settings["thinking"]:
+            params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+
+        params.update(self._settings["extra"])
 
         # LLM completion
-        response = await self._client.messages.create(
-            model=self.model_name,
-            messages=messages,
-            system=system,
-            max_tokens=8192,
-            stream=False,
-        )
+        response = await self._client.beta.messages.create(**params)
 
-        return response.content[0].text
+        return next((block.text for block in response.content if hasattr(block, "text")), None)
 
     def create_context_aggregator(
         self,
@@ -281,13 +330,21 @@ class AnthropicLLMService(LLMService):
         Returns:
             A pair of context aggregators, one for the user and one for the assistant,
             encapsulated in an AnthropicContextAggregatorPair.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
         if isinstance(context, OpenAILLMContext):
             context = AnthropicLLMContext.from_openai_context(context)
+
+        # Aggregators handle deprecation warnings
         user = AnthropicUserContextAggregator(context, params=user_params)
         assistant = AnthropicAssistantContextAggregator(context, params=assistant_params)
+
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
     def _get_llm_invocation_params(
@@ -354,12 +411,21 @@ class AnthropicLLMService(LLMService):
                 "top_p": self._settings["top_p"],
             }
 
+            # Add thinking parameter if set
+            if self._settings["thinking"]:
+                params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+
             # Messages, system, tools
             params.update(params_from_context)
 
             params.update(self._settings["extra"])
 
-            response = await self._create_message_stream(self._client.messages.create, params)
+            # "Interleaved thinking" needed to allow thinking between sequences
+            # of function calls, when extended thinking is enabled.
+            # Note that this requires us to use `client.beta`, below.
+            params.update({"betas": ["interleaved-thinking-2025-05-14"]})
+
+            response = await self._create_message_stream(self._client.beta.messages.create, params)
 
             await self.stop_ttfb_metrics()
 
@@ -380,10 +446,21 @@ class AnthropicLLMService(LLMService):
                         completion_tokens_estimate += self._estimate_tokens(
                             event.delta.partial_json
                         )
+                    elif hasattr(event.delta, "thinking"):
+                        await self.push_frame(LLMThoughtTextFrame(text=event.delta.thinking))
+                    elif hasattr(event.delta, "signature"):
+                        await self.push_frame(LLMThoughtEndFrame(signature=event.delta.signature))
                 elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         tool_use_block = event.content_block
                         json_accumulator = ""
+                    elif event.content_block.type == "thinking":
+                        await self.push_frame(
+                            LLMThoughtStartFrame(
+                                append_to_context=True,
+                                llm=self.get_llm_adapter().id_for_llm_specific_messages,
+                            )
+                        )
                 elif (
                     event.type == "message_delta"
                     and hasattr(event.delta, "stop_reason")
@@ -458,8 +535,7 @@ class AnthropicLLMService(LLMService):
         except httpx.TimeoutException:
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
-            await self.push_error(ErrorFrame(f"{e}"))
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
@@ -493,6 +569,8 @@ class AnthropicLLMService(LLMService):
         elif isinstance(frame, LLMContextFrame):
             context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
+            # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
+            # LLMContext with it
             context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
@@ -537,6 +615,11 @@ class AnthropicLLMContext(OpenAILLMContext):
     Extends OpenAILLMContext to handle Anthropic-specific features like
     system messages, prompt caching, and message format conversions.
     Manages conversation state and message history formatting.
+
+    .. deprecated:: 0.0.99
+        `AnthropicLLMContext` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -555,6 +638,7 @@ class AnthropicLLMContext(OpenAILLMContext):
             tool_choice: Tool selection preference.
             system: System message content.
         """
+        # Super handles deprecation warning
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self.__setup_local()
         self.system = system
@@ -976,8 +1060,14 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
     Handles aggregation of user messages for Anthropic LLM services.
     Inherits all functionality from the base LLMUserContextAggregator.
+
+    .. deprecated:: 0.0.99
+        `AnthropicUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
+    # Super handles deprecation warning
     pass
 
 
@@ -996,7 +1086,14 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
 
     Handles function call lifecycle management including in-progress tracking,
     result handling, and cancellation for Anthropic's tool use format.
+
+    .. deprecated:: 0.0.99
+        `AnthropicAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
+
+    # Super handles deprecation warning
 
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         """Handle a function call that is starting.

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,7 +10,6 @@ This module provides integration with Amazon Polly for text-to-speech synthesis,
 supporting multiple languages, voices, and SSML features.
 """
 
-import asyncio
 import os
 from typing import AsyncGenerator, List, Optional
 
@@ -26,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -47,7 +46,7 @@ def language_to_aws_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding AWS Polly language code, or None if not supported.
     """
-    language_map = {
+    LANGUAGE_MAP = {
         # Arabic
         Language.AR: "arb",
         Language.AR_AE: "ar-AE",
@@ -119,7 +118,7 @@ def language_to_aws_language(language: Language) -> Optional[str]:
         Language.CY_GB: "cy-GB",
     }
 
-    return language_map.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class AWSPollyTTSService(TTSService):
@@ -312,7 +311,6 @@ class AWSPollyTTSService(TTSService):
 
                 yield TTSStoppedFrame()
         except (BotoCoreError, ClientError) as error:
-            logger.exception(f"{self} error generating TTS: {error}")
             error_message = f"AWS Polly TTS error: {str(error)}"
             yield ErrorFrame(error=error_message)
 

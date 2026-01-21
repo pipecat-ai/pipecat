@@ -1,11 +1,10 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 
-import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -13,16 +12,19 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -35,12 +37,10 @@ from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
-
-
-# Global variable to store the client ID
-client_id = ""
 
 
 async def get_weather(params: FunctionCallParams):
@@ -53,24 +53,35 @@ async def fetch_restaurant_recommendation(params: FunctionCallParams):
 
 
 async def get_image(params: FunctionCallParams):
+    """Fetch the user image and push it to the LLM.
+
+    When called, this function pushes a UserImageRequestFrame upstream to the
+    transport. As a result, the transport will request the user image and push a
+    UserImageRawFrame downstream which will be added to the context by the LLM
+    assistant aggregator.
+    """
+    user_id = params.arguments["user_id"]
     question = params.arguments["question"]
-    logger.debug(f"Requesting image with user_id={client_id}, question={question}")
+    logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
-    # Request the image frame
-    await params.llm.request_image_frame(
-        user_id=client_id,
-        function_name=params.function_name,
-        tool_call_id=params.tool_call_id,
-        text_content=question,
+    # Request a user image frame and indicate that it should be added to the
+    # context. Also associate it to the function call.
+    await params.llm.push_frame(
+        UserImageRequestFrame(
+            user_id=user_id,
+            text=question,
+            append_to_context=True,
+            function_name=params.function_name,
+            tool_call_id=params.tool_call_id,
+        ),
+        FrameDirection.UPSTREAM,
     )
 
-    # Wait a short time for the frame to be processed
-    await asyncio.sleep(0.5)
+    await params.result_callback(None)
 
-    # Return a result to complete the function call
-    await params.result_callback(
-        f"I've captured an image from your camera and I'm analyzing what you asked about: {question}"
-    )
+    # Instead of None, it's possible to also provide a tool call answer to
+    # tell the LLM that we are grabbing the image to analyze.
+    # await params.result_callback({"result": "Image is being captured."})
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -82,14 +93,12 @@ transport_params = {
         audio_out_enabled=True,
         video_in_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_in_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -104,7 +113,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
     llm.register_function("get_weather", get_weather)
     llm.register_function("get_image", get_image)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
@@ -142,14 +151,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     get_image_function = FunctionSchema(
         name="get_image",
-        description="Get an image from the video stream.",
+        description="Called when the user requests a description of their camera feed",
         properties={
+            "user_id": {
+                "type": "string",
+                "description": "The ID of the user to grab the image from",
+            },
             "question": {
                 "type": "string",
-                "description": "The question that the user is asking about the image.",
-            }
+                "description": "The question that the user is asking about the image",
+            },
         },
-        required=["question"],
+        required=["user_id", "question"],
     )
     tools = ToolsSchema(standard_tools=[weather_function, get_image_function, restaurant_function])
 
@@ -173,21 +186,27 @@ indicate you should use the get_image tool are:
 """
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "Say hello."},
     ]
 
     context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
+        ),
+    )
 
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             tts,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -206,10 +225,15 @@ indicate you should use the get_image tool are:
 
         await maybe_capture_participant_camera(transport, client)
 
-        global client_id
         client_id = get_transport_client_id(transport, client)
 
         # Kick off the conversation.
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
+            }
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

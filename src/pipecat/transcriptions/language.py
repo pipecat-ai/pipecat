@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,6 +13,8 @@ combinations for various speech and text processing services.
 
 import sys
 from enum import Enum
+
+from loguru import logger
 
 if sys.version_info < (3, 11):
 
@@ -62,7 +64,9 @@ class Language(StrEnum):
     AR_SA = "ar-SA"
     AR_SY = "ar-SY"
     AR_TN = "ar-TN"
+    AR_XA = "ar-XA"
     AR_YE = "ar-YE"
+    AR_001 = "ar-001"
 
     # Assamese
     AS = "as"
@@ -80,6 +84,7 @@ class Language(StrEnum):
 
     # Belarusian
     BE = "be"
+    BE_BY = "be-BY"
 
     # Bulgarian
     BG = "bg"
@@ -106,6 +111,7 @@ class Language(StrEnum):
 
     # Cebuano
     CEB = "ceb"
+    CEB_PH = "ceb-PH"
 
     # Mandarin Chinese
     CMN = "cmn"
@@ -178,6 +184,7 @@ class Language(StrEnum):
     ES_US = "es-US"
     ES_UY = "es-UY"
     ES_VE = "es-VE"
+    ES_419 = "es-419"
 
     # Estonian
     ET = "et"
@@ -247,6 +254,7 @@ class Language(StrEnum):
 
     # Haitian Creole
     HT = "ht"
+    HT_HT = "ht-HT"
 
     # Hungarian
     HU = "hu"
@@ -285,6 +293,7 @@ class Language(StrEnum):
     # Javanese
     JV = "jv"
     JV_ID = "jv-ID"
+    JV_JV = "jv-JV"
     JW = "jw"  # Fal requires for Javanese
 
     # Georgian
@@ -306,6 +315,10 @@ class Language(StrEnum):
     KN = "kn"
     KN_IN = "kn-IN"
 
+    # Konkani
+    KOK = "kok"
+    KOK_IN = "kok-IN"
+
     # Korean
     KO = "ko"
     KO_KR = "ko-KR"
@@ -319,9 +332,11 @@ class Language(StrEnum):
 
     # Latin
     LA = "la"
+    LA_VA = "la-VA"
 
     # Luxembourgish
     LB = "lb"
+    LB_LU = "lb-LU"
 
     # Lingala
     LN = "ln"
@@ -346,6 +361,7 @@ class Language(StrEnum):
 
     # Malagasy
     MG = "mg"
+    MG_MG = "mg-MG"
 
     # Maori
     MI = "mi"
@@ -353,6 +369,10 @@ class Language(StrEnum):
     # Macedonian
     MK = "mk"
     MK_MK = "mk-MK"
+
+    # Maithili
+    MAI = "mai"
+    MAI_IN = "mai-IN"
 
     # Malayalam
     ML = "ml"
@@ -384,6 +404,7 @@ class Language(StrEnum):
     NB_NO = "nb-NO"
     NO = "no"
     NN = "nn"  # Norwegian Nynorsk
+    NN_NO = "nn-NO"
 
     # Nepali
     NE = "ne"
@@ -437,6 +458,7 @@ class Language(StrEnum):
 
     # Sindhi
     SD = "sd"
+    SD_IN = "sd-IN"
 
     # Sinhala
     SI = "si"
@@ -569,3 +591,53 @@ class Language(StrEnum):
     # Zulu
     ZU = "zu"
     ZU_ZA = "zu-ZA"
+
+
+def resolve_language(
+    language: Language, language_map: dict[Language, str], use_base_code: bool = True
+) -> str:
+    """Resolve a Language enum to a service-specific language code.
+
+    Checks the language map first, then falls back to extracting the appropriate
+    code format with a warning if not found in the verified list.
+
+    Args:
+        language: The Language enum value to convert.
+        language_map: Dictionary mapping Language enums to service language codes.
+        use_base_code: If True, extracts base code (e.g., 'en' from 'en-US').
+                      If False, uses full language code as-is.
+
+    Returns:
+        The resolved language code for the service.
+
+    Examples::
+
+        # Service expecting base codes (e.g., Cartesia)
+        >>> LANGUAGE_MAP = {Language.EN: "en", Language.ES: "es"}
+        >>> resolve_language(Language.EN_US, LANGUAGE_MAP, use_base_code=True)
+        # Logs: "Language en-US not verified. Using base code 'en'."
+        "en"
+
+        # Service expecting full codes (e.g., AWS)
+        >>> LANGUAGE_MAP = {Language.EN_US: "en-US", Language.ES_ES: "es-ES"}
+        >>> resolve_language(Language.EN_GB, LANGUAGE_MAP, use_base_code=False)
+        # Logs: "Language en-GB not verified. Using 'en-GB'."
+        "en-GB"
+    """
+    # Check if language is in the verified map
+    result = language_map.get(language)
+
+    if result is not None:
+        return result
+
+    # Not in map - fall back with warning
+    lang_str = str(language.value)
+
+    if use_base_code:
+        # Extract base code (e.g., "en" from "en-US")
+        base_code = lang_str.split("-")[0].lower()
+        logger.warning(f"Language {language.value} not verified. Using base code '{base_code}'.")
+        return base_code
+    else:
+        logger.warning(f"Language {language.value} not verified. Using '{lang_str}'.")
+        return lang_str

@@ -10,7 +10,8 @@ from pipecat.frames.frames import Frame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -61,7 +62,7 @@ You should use Google Search for:
 
 Always be proactive about using search when the user asks about anything that could benefit from real-time information.
 
-Your output will be converted to audio so don't include special characters in your answers.
+Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
 
 Respond to what the user said in a creative and helpful way, always using search for current information.
 """
@@ -124,17 +125,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     # Set up conversation context and management
-    context = OpenAILLMContext(messages)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             grounding_processor,  # Add our grounding processor here
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

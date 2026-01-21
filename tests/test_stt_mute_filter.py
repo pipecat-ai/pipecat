@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,11 +9,11 @@ import unittest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    FunctionCallInProgressFrame,
+    FunctionCallFromLLM,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
-    STTMuteFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -49,9 +49,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
 
         expected_returned_frames = [
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
             BotStartedSpeakingFrame,
             VADUserStartedSpeakingFrame,  # Now passes through
             UserStartedSpeakingFrame,  # Now passes through
@@ -98,18 +96,14 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
 
         expected_returned_frames = [
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
             VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
             InputAudioRawFrame,
             VADUserStoppedSpeakingFrame,
             UserStoppedSpeakingFrame,
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
         ]
 
         await run_test(
@@ -144,9 +138,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
 
         expected_returned_frames = [
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
             InterimTranscriptionFrame,  # Only passes through after bot stops speaking
             TranscriptionFrame,  # Only passes through after bot stops speaking
         ]
@@ -157,56 +149,59 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_returned_frames,
         )
 
-    # TODO: Revisit once we figure out how to test SystemFrames and DataFrames
-    # async def test_function_call_strategy(self):
-    #     filter = STTMuteFilter(config=STTMuteConfig(strategies={STTMuteStrategy.FUNCTION_CALL}))
+    async def test_function_call_strategy(self):
+        filter = STTMuteFilter(config=STTMuteConfig(strategies={STTMuteStrategy.FUNCTION_CALL}))
 
-    #     frames_to_send = [
-    #         VADUserStartedSpeakingFrame(),  # Should pass through initially
-    #         UserStartedSpeakingFrame(),  # Should pass through initially
-    #         VADUserStoppedSpeakingFrame(),
-    #         UserStoppedSpeakingFrame(),
-    #         FunctionCallInProgressFrame(
-    #             function_name="get_weather",
-    #             tool_call_id="call_123",
-    #             arguments='{"location": "San Francisco"}',
-    #         ),  # Start function call
-    #         VADUserStartedSpeakingFrame(),  # Should be suppressed
-    #         UserStartedSpeakingFrame(),  # Should be suppressed
-    #         VADUserStoppedSpeakingFrame(),  # Should be suppressed
-    #         UserStoppedSpeakingFrame(),  # Should be suppressed
-    #         FunctionCallResultFrame(
-    #             function_name="get_weather",
-    #             tool_call_id="call_123",
-    #             arguments='{"location": "San Francisco"}',
-    #             result={"temperature": 22},
-    #         ),  # End function call
-    #         VADUserStartedSpeakingFrame(),  # Should pass through again
-    #         UserStartedSpeakingFrame(),  # Should pass through again
-    #         VADUserStoppedSpeakingFrame(),
-    #         UserStoppedSpeakingFrame(),
-    #     ]
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),  # Should pass through initially
+            UserStartedSpeakingFrame(),  # Should pass through initially
+            VADUserStoppedSpeakingFrame(),  # Should pass through initially
+            UserStoppedSpeakingFrame(),  # Should pass through initially
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="get_weather",
+                        tool_call_id="call_123",
+                        arguments='{"location": "San Francisco"}',
+                        context=None,
+                    )
+                ]
+            ),  # Start function call
+            VADUserStartedSpeakingFrame(),  # Should be suppressed
+            UserStartedSpeakingFrame(),  # Should be suppressed
+            VADUserStoppedSpeakingFrame(),  # Should be suppressed
+            UserStoppedSpeakingFrame(),  # Should be suppressed
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="call_123",
+                arguments='{"location": "San Francisco"}',
+                result={"temperature": 22},
+            ),  # End function call
+            SleepFrame(),
+            VADUserStartedSpeakingFrame(),  # Should pass through again
+            UserStartedSpeakingFrame(),  # Should pass through again
+            VADUserStoppedSpeakingFrame(),
+            UserStoppedSpeakingFrame(),
+        ]
 
-    #     expected_returned_frames = [
-    #         VADUserStartedSpeakingFrame,
-    #         UserStartedSpeakingFrame,
-    #         VADUserStoppedSpeakingFrame,
-    #         UserStoppedSpeakingFrame,
-    #         FunctionCallInProgressFrame,
-    #         STTMuteFrame,  # mute=True
-    #         FunctionCallResultFrame,
-    #         STTMuteFrame,  # mute=False
-    #         VADUserStartedSpeakingFrame,
-    #         UserStartedSpeakingFrame,
-    #         VADUserStoppedSpeakingFrame,
-    #         UserStoppedSpeakingFrame,
-    #     ]
+        expected_returned_frames = [
+            VADUserStartedSpeakingFrame,
+            UserStartedSpeakingFrame,
+            VADUserStoppedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+            FunctionCallsStartedFrame,
+            FunctionCallResultFrame,
+            VADUserStartedSpeakingFrame,
+            UserStartedSpeakingFrame,
+            VADUserStoppedSpeakingFrame,
+            UserStoppedSpeakingFrame,
+        ]
 
-    #     await run_test(
-    #         filter,
-    #         frames_to_send=frames_to_send,
-    #         expected_down_frames=expected_returned_frames,
-    #     )
+        await run_test(
+            filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
 
     async def test_mute_until_first_bot_complete_strategy(self):
         filter = STTMuteFilter(
@@ -245,10 +240,8 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
         ]
 
         expected_returned_frames = [
-            STTMuteFrame,  # mute=True after first speech
             BotStartedSpeakingFrame,
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False after first speech
             VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
             InputAudioRawFrame,
@@ -320,9 +313,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             VADUserStoppedSpeakingFrame,
             UserStoppedSpeakingFrame,
             BotStartedSpeakingFrame,
-            STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
-            STTMuteFrame,  # mute=False
             VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
             InputAudioRawFrame,

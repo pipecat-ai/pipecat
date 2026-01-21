@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.extensions.ivr.ivr_navigator import IVRProcessor
 from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
     LLMMessagesUpdateFrame,
     LLMTextFrame,
     OutputDTMFUrgentFrame,
@@ -334,10 +335,12 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             LLMTextFrame(text="Hello, I'm trying to reach billing."),
+            LLMFullResponseEndFrame(),
         ]
 
         expected_down_frames = [
             LLMTextFrame,  # Should pass through unchanged
+            LLMFullResponseEndFrame,
         ]
 
         expected_up_frames = [

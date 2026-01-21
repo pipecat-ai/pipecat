@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -133,6 +133,7 @@ class BaseOpenAILLMService(LLMService):
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         self.set_model_name(model)
+        self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,
             base_url=base_url,
@@ -184,6 +185,22 @@ class BaseOpenAILLMService(LLMService):
             True, as OpenAI service supports metrics generation.
         """
         return True
+
+    def set_full_model_name(self, full_model_name: str):
+        """Set the full AI model name.
+
+        Args:
+            full_model_name: The full name of the AI model to use.
+        """
+        self._full_model_name = full_model_name
+
+    def get_full_model_name(self):
+        """Get the current full model name.
+
+        Returns:
+            The full name of the AI model being used.
+        """
+        return self._full_model_name
 
     async def get_chat_completions(
         self, params_from_context: OpenAILLMInvocationParams
@@ -259,17 +276,23 @@ class BaseOpenAILLMService(LLMService):
         """
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
-            params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
-            messages = params["messages"]
+            invocation_params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(
+                context
+            )
         else:
-            messages = context.messages
+            invocation_params = OpenAILLMInvocationParams(
+                messages=context.messages, tools=context.tools, tool_choice=context.tool_choice
+            )
+
+        # Build params using the same method as streaming completions
+        params = self.build_chat_completion_params(invocation_params)
+
+        # Override for non-streaming
+        params["stream"] = False
+        params.pop("stream_options", None)
 
         # LLM completion
-        response = await self._client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            stream=False,
-        )
+        response = await self._client.chat.completions.create(**params)
 
         return response.choices[0].message.content
 
@@ -346,13 +369,22 @@ class BaseOpenAILLMService(LLMService):
                     if chunk.usage.prompt_tokens_details
                     else None
                 )
+                reasoning_tokens = (
+                    chunk.usage.completion_tokens_details.reasoning_tokens
+                    if chunk.usage.completion_tokens_details
+                    else None
+                )
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
                     completion_tokens=chunk.usage.completion_tokens,
                     total_tokens=chunk.usage.total_tokens,
                     cache_read_input_tokens=cached_tokens,
+                    reasoning_tokens=reasoning_tokens,
                 )
                 await self.start_llm_usage_metrics(tokens)
+
+            if chunk.model and self.get_full_model_name() != chunk.model:
+                self.set_full_model_name(chunk.model)
 
             if chunk.choices is None or len(chunk.choices) == 0:
                 continue
