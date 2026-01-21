@@ -427,6 +427,24 @@ class PipelineTask(BasePipelineTask):
             raise Exception(f"{self} RTVI is not enabled.")
         return self._rtvi
 
+    @property
+    def reached_upstream_types(self) -> Tuple[Type[Frame], ...]:
+        """Get the currently configured upstream frame type filters.
+
+        Returns:
+            Tuple of frame types that trigger the on_frame_reached_upstream event.
+        """
+        return self._reached_upstream_types
+
+    @property
+    def reached_downstream_types(self) -> Tuple[Type[Frame], ...]:
+        """Get the currently configured downstream frame type filters.
+
+        Returns:
+            Tuple of frame types that trigger the on_frame_reached_downstream event.
+        """
+        return self._reached_downstream_types
+
     def event_handler(self, event_name: str):
         """Decorator for registering event handlers.
 
@@ -479,6 +497,30 @@ class PipelineTask(BasePipelineTask):
             types: Tuple of frame types to monitor for downstream events.
         """
         self._reached_downstream_types = types
+
+    def add_reached_upstream_filter(self, types: Tuple[Type[Frame], ...]):
+        """Add frame types to trigger the on_frame_reached_upstream event.
+
+        Args:
+            types: Tuple of frame types to add to upstream monitoring.
+        """
+        if not types:
+            return
+        current = set(self._reached_upstream_types)
+        current.update(types)
+        self._reached_upstream_types = tuple(current)
+
+    def add_reached_downstream_filter(self, types: Tuple[Type[Frame], ...]):
+        """Add frame types to trigger the on_frame_reached_downstream event.
+
+        Args:
+            types: Tuple of frame types to add to downstream monitoring.
+        """
+        if not types:
+            return
+        current = set(self._reached_downstream_types)
+        current.update(types)
+        self._reached_downstream_types = tuple(current)
 
     def has_finished(self) -> bool:
         """Check if the pipeline task has finished execution.
