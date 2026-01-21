@@ -287,6 +287,7 @@ class SpeechmaticsSTTService(STTService):
         base_url: str | None = None,
         sample_rate: int | None = None,
         params: InputParams | None = None,
+        should_interrupt: bool = True,
         **kwargs,
     ):
         """Initialize the Speechmatics STT service.
@@ -298,6 +299,7 @@ class SpeechmaticsSTTService(STTService):
                 or defaults to `wss://eu2.rt.speechmatics.com/v2`.
             sample_rate: Optional audio sample rate in Hz.
             params: Optional[InputParams]: Input parameters for the service.
+            should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
             **kwargs: Additional arguments passed to STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -316,6 +318,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Default params
         params = params or SpeechmaticsSTTService.InputParams()
+        self._should_interrupt = should_interrupt
 
         # Deprecation check
         self._check_deprecated_args(kwargs, params)
@@ -366,17 +369,14 @@ class SpeechmaticsSTTService(STTService):
         """Called when the new session starts."""
         await super().start(frame)
         await self._connect()
-        self._stt_msg_task = self.create_task(self._process_stt_messages())
 
     async def stop(self, frame: EndFrame):
         """Called when the session ends."""
-        await self.cancel_task(self._stt_msg_task)
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         """Called when the session is cancelled."""
-        await self.cancel_task(self._stt_msg_task)
         await super().cancel(frame)
         await self._disconnect()
 
@@ -386,6 +386,7 @@ class SpeechmaticsSTTService(STTService):
         - Create STT client
         - Register handlers for messages
         - Connect to the client
+        - Start message processing task
         """
         # Log the event
         logger.debug(f"{self} connecting to Speechmatics STT service")
@@ -433,12 +434,22 @@ class SpeechmaticsSTTService(STTService):
             self._client = None
             await self.push_error(error_msg=f"Error connecting to STT service: {e}", exception=e)
 
+        # Start message processing task
+        if not self._stt_msg_task:
+            self._stt_msg_task = self.create_task(self._process_stt_messages())
+
     async def _disconnect(self) -> None:
         """Disconnect from the STT service.
 
+        - Cancel message processing task
         - Disconnect the client
         - Emit on_disconnected event handler for clients
         """
+        # Cancel the message processing task
+        if self._stt_msg_task:
+            await self.cancel_task(self._stt_msg_task)
+            self._stt_msg_task = None
+
         # Disconnect the client
         logger.debug(f"{self} disconnecting from Speechmatics STT service")
         try:
@@ -623,7 +634,8 @@ class SpeechmaticsSTTService(STTService):
         logger.debug(f"{self} StartOfTurn received")
         # await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
-        await self.push_interruption_task_frame_and_wait()
+        if self._should_interrupt:
+            await self.push_interruption_task_frame_and_wait()
 
     async def _handle_end_of_turn(self, message: dict[str, Any]) -> None:
         """Handle EndOfTurn events.

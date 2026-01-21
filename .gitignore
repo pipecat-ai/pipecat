@@ -52,3 +52,6 @@ docs/api/api
 
 # uv
 .python-version
+
+# Pipecat
+whisker_setup.py

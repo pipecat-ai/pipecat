@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
@@ -127,7 +127,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -144,7 +144,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),
             stt,
-            context_aggregator.user(),
+            user_aggregator,
             in_sound,
             fl2,
             llm,
@@ -152,7 +152,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             tts,
             out_sound,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

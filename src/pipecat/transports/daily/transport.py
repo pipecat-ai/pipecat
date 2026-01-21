@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     CancelFrame,
     ControlFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
@@ -760,7 +759,11 @@ class DailyTransportClient(EventHandler):
             # Increment leave counter if we successfully joined.
             self._leave_counter += 1
 
-            logger.info(f"Joined {self._room_url}")
+            participant_id = data.get("participants", {}).get("local", {}).get("id")
+            meeting_id = data.get("meetingSession", {}).get("id")
+            logger.info(
+                f"Joined {self._room_url}. Participant ID: {participant_id}, Meeting ID: {meeting_id}"
+            )
 
             await self._callbacks.on_joined(data)
 
@@ -1844,7 +1847,6 @@ class DailyInputTransport(BaseInputTransport):
                 format=video_frame.color_format,
                 text=request_frame.text if request_frame else None,
                 append_to_context=request_frame.append_to_context if request_frame else None,
-                # Deprecated fields below.
                 request=request_frame,
             )
             frame.transport_source = video_source

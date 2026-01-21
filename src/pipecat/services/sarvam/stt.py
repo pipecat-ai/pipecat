@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -125,7 +126,7 @@ class SarvamSTTService(STTService):
 
         self.set_model_name(model)
         self._api_key = api_key
-        self._language_code = params.language
+        self._language_code: Optional[Language] = params.language
         # For saarika models, default to "unknown" if language is not provided
         if params.language:
             self._language_string = language_to_sarvam_language(params.language)
@@ -141,7 +142,16 @@ class SarvamSTTService(STTService):
         self._input_audio_codec = input_audio_codec
 
         # Initialize Sarvam SDK client
+        self._sdk_headers = sdk_headers()
+        # NOTE: We avoid passing non-standard kwargs here because different sarvamai
+        # versions expose different constructor signatures (static type checkers
+        # complain otherwise). We instead inject headers best-effort below.
         self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key)
+        for attr in ("default_headers", "_default_headers", "headers", "_headers"):
+            d = getattr(self._sarvam_client, attr, None)
+            if isinstance(d, dict):
+                d.update(self._sdk_headers)
+                break
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
@@ -297,17 +307,28 @@ class SarvamSTTService(STTService):
                 "sample_rate": str(self.sample_rate),
             }
 
+            def _connect_with_sdk_headers(connect_fn, **kwargs):
+                # Different SDK versions may use different kwarg names.
+                for header_kw in ("headers", "additional_headers", "extra_headers"):
+                    try:
+                        return connect_fn(**kwargs, **{header_kw: self._sdk_headers})
+                    except TypeError:
+                        pass
+                return connect_fn(**kwargs)
+
             # Choose the appropriate service based on model
             if "saarika" in self.model_name.lower():
                 # STT service - requires language_code
                 connect_kwargs["language_code"] = self._language_string
-                self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
-                    **connect_kwargs
+                self._websocket_context = _connect_with_sdk_headers(
+                    self._sarvam_client.speech_to_text_streaming.connect,
+                    **connect_kwargs,
                 )
             else:
                 # STT-Translate service - auto-detects input language and returns translated text
-                self._websocket_context = (
-                    self._sarvam_client.speech_to_text_translate_streaming.connect(**connect_kwargs)
+                self._websocket_context = _connect_with_sdk_headers(
+                    self._sarvam_client.speech_to_text_translate_streaming.connect,
+                    **connect_kwargs,
                 )
 
             # Enter the async context manager
@@ -393,6 +414,10 @@ class SarvamSTTService(STTService):
                     await self.start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
+
+                elif signal == "END_SPEECH":
+                    logger.debug("User stopped speaking")
+                    await self._call_event_handler("on_speech_stopped")
 
             elif message.type == "data":
                 await self.stop_ttfb_metrics()

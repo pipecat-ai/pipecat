@@ -38,7 +38,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(should_start)
 
         await strategy.process_frame(
-            TranscriptionFrame(text=" there!", user_id="cat", timestamp="")
+            TranscriptionFrame(text="Hello there!", user_id="cat", timestamp="")
         )
         self.assertTrue(should_start)
 
@@ -54,6 +54,26 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
         )
         self.assertTrue(should_start)
+
+    async def test_bot_speaking_singlw_words(self):
+        strategy = MinWordsUserTurnStartStrategy(min_words=3)
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_started")
+        async def on_user_turn_started(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        await strategy.process_frame(BotStartedSpeakingFrame())
+        await strategy.process_frame(TranscriptionFrame(text="One", user_id="cat", timestamp=""))
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(TranscriptionFrame(text="Two", user_id="cat", timestamp=""))
+        self.assertFalse(should_start)
+
+        await strategy.process_frame(TranscriptionFrame(text="Three", user_id="cat", timestamp=""))
+        self.assertFalse(should_start)
 
     async def test_bot_speaking_interim_transcriptions(self):
         strategy = MinWordsUserTurnStartStrategy(min_words=2)

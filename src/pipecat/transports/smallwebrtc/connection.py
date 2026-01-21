@@ -14,6 +14,7 @@ for real-time communication applications.
 import asyncio
 import json
 import time
+import uuid
 from typing import Any, List, Literal, Optional, Union
 
 from loguru import logger
@@ -23,7 +24,6 @@ from pipecat.utils.base_object import BaseObject
 
 try:
     from aiortc import (
-        MediaStreamTrack,
         RTCConfiguration,
         RTCIceServer,
         RTCPeerConnection,
@@ -278,7 +278,7 @@ class SmallWebRTCConnection(BaseObject):
 
         self._answer: Optional[RTCSessionDescription] = None
         self._pc = RTCPeerConnection(rtc_config)
-        self._pc_id = self.name
+        self._pc_id = f"{self.name}-{uuid.uuid4().hex}"
         self._setup_listeners()
         self._data_channel = None
         self._renegotiation_in_progress = False

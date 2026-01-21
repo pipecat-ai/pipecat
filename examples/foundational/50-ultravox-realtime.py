@@ -170,15 +170,15 @@ There is also a secret menu that changes daily. If the user asks about it, use t
     llm.register_function("get_secret_menu", get_secret_menu)
 
     # Necessary to complete the function call lifecycle in Pipecat.
-    context_aggregator = LLMContextAggregatorPair(LLMContext([]))
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(LLMContext([]))
 
     # Build the pipeline
     pipeline = Pipeline(
         [
             transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             llm,
-            context_aggregator.assistant(),
+            assistant_aggregator,
             transport.output(),
         ]
     )

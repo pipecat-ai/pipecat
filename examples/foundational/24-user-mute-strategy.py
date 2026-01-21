@@ -34,7 +34,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.mute import (
+from pipecat.turns.user_mute import (
     FunctionCallUserMuteStrategy,
     MuteUntilFirstBotCompleteUserMuteStrategy,
 )
@@ -110,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     ]
 
     context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -127,11 +127,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             stt,  # STT
-            context_aggregator.user(),  # User responses
+            user_aggregator,  # User responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -160,6 +160,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @user_aggregator.event_handler("on_user_mute_started")
+    async def on_user_mute_started(aggregator):
+        logger.info(f"User mute started")
+
+    @user_aggregator.event_handler("on_user_mute_stopped")
+    async def on_user_mute_stopped(aggregator):
+        logger.info(f"User mute stopped")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

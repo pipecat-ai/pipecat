@@ -478,6 +478,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self.add_word_timestamps([("Reset", 0)])
 
     async def _connect(self):
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -487,6 +489,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None

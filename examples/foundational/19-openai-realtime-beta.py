@@ -143,7 +143,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     llm = OpenAIRealtimeBetaLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         session_properties=session_properties,
-        start_audio_paused=False,
     )
 
     # you can either register a single function for all function calls, or specific functions
