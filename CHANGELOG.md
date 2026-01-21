@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `ResembleAITTSService` for Resemble AI Text-to-Speech Websocket
+  integration.
+
 - Added Hathora service to support Hathora-hosted TTS and STT models (only
   non-streaming)
   (PR [#3169](https://github.com/pipecat-ai/pipecat/pull/3169))
@@ -34,10 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `on_user_mute_started` and `on_user_mute_stopped` event handlers to
   `LLMUserAggregator` for tracking user mute state changes.
   (PR [#3490](https://github.com/pipecat-ai/pipecat/pull/3490))
-
-### Added
-
-- Added `ResembleAITTSService` for Resemble AI Text-to-Speech Websocket integration.
 
 ### Changed
 

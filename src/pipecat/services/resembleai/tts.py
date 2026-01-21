@@ -1,14 +1,10 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024–2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""ResembleAI's text-to-speech service implementations.
-
-This module provides both WebSocket based text-to-speech services
-using ResembleAI's API for streaming and batch audio synthesis.
-"""
+"""ResembleAI's text-to-speech service implementations."""
 
 import base64
 import json
@@ -22,8 +18,8 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -44,8 +40,6 @@ class ResembleAITTSService(AudioContextWordTTSService):
     """ResembleAI TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using ResembleAI's streaming WebSocket API.
-    Supports word-level timestamps, audio context management, and various voice
-    customization options including speed and emotion controls.
     """
 
     def __init__(
@@ -89,11 +83,17 @@ class ResembleAITTSService(AudioContextWordTTSService):
         # there's an interruption or TTSStoppedFrame.
         self._started = False
 
-        # Buffer audio to smooth playback and handle ResembleAI's irregular chunk sizes
+        # Per-request audio buffers to handle concurrent TTS requests
         # ResembleAI may send odd-length data even for PCM_16, so buffering helps us
         # create properly aligned frames while maintaining smooth audio output
-        self._audio_buffer = bytearray()
-        self._buffer_threshold_bytes = 8640
+        self._audio_buffers: dict[str, bytearray] = {}
+        self._buffer_threshold_bytes = 2208
+
+        # Jitter buffer: accumulate audio before starting playback to absorb network latency
+        # ResembleAI sends audio in bursts with 300-450ms gaps between them
+        # We need to buffer enough to cover these gaps before starting playback
+        self._jitter_buffer_bytes = 44100  # ~1000ms at 22050Hz to handle 400ms+ network gaps
+        self._playback_started: dict[str, bool] = {}  # Track if we've started playback per request
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -105,8 +105,6 @@ class ResembleAITTSService(AudioContextWordTTSService):
 
     def _build_msg(self, text: str = "", context_id: Optional[int] = None) -> str:
         """Build message for ResembleAI WebSocket API."""
-        logger.debug(f"Text {text} and request_id: {context_id} ")
-
         msg = {
             "voice_uuid": self._voice_uuid,
             "data": text,
@@ -200,6 +198,8 @@ class ResembleAITTSService(AudioContextWordTTSService):
             self._websocket = None
             self._context_id = None
             self._started = False
+            self._audio_buffers.clear()
+            self._playback_started.clear()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -207,21 +207,15 @@ class ResembleAITTSService(AudioContextWordTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
-        self._started = False
-
         # ResembleAI doesn't support interruptions, so disconnect/reconnect
-        logger.debug("Interruption: handling by disconnect/reconnect")
-
-        if self._is_websocket_connected():
-            try:
-                await self._disconnect()
-                await self._connect()
-            except Exception as e:
-                logger.error(f"Error during interruption reconnection: {e}")
-        else:
-            logger.debug("Interruption: WebSocket already disconnected")
+        # _disconnect() handles cleanup of _started, _audio_buffers, _playback_started, _context_id
+        try:
+            await self._disconnect()
+            await self._connect()
+        except Exception as e:
+            logger.error(f"Error during interruption reconnection: {e}")
 
     async def flush_audio(self):
         """Flush any pending audio and finalize the current context."""
@@ -239,11 +233,10 @@ class ResembleAITTSService(AudioContextWordTTSService):
         """Push a frame and handle state changes."""
         await super().push_frame(frame, direction)
 
-        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
-            logger.debug(f"TTS stopped/interrupted, resetting _started flag")
 
-    async def _receive_messages(self):
+    async def _process_messages(self):
         """Process incoming WebSocket messages from ResembleAI."""
         async for message in self._get_websocket():
             try:
@@ -257,28 +250,47 @@ class ResembleAITTSService(AudioContextWordTTSService):
                 request_id = str(msg["request_id"])
 
                 if not self.audio_context_available(request_id):
-                    logger.debug(f"Ignoring message from unavailable context: {request_id}")
                     continue
 
                 if msg.get("type") == "audio":
                     await self.stop_ttfb_metrics()
 
-                    audio_bytes = base64.b64decode(msg["audio_content"])
+                    audio_content = msg.get("audio_content", "")
+                    if not audio_content:
+                        logger.warning(f"Empty audio_content received for request_id: {request_id}")
+                        continue
 
-                    # Store current context
-                    self._context_id = request_id
+                    audio_bytes = base64.b64decode(audio_content)
+                    if len(audio_bytes) == 0:
+                        continue
 
-                    # Add to buffer (handle odd bytes from ResembleAI)
-                    self._audio_buffer.extend(audio_bytes)
+                    # Get or create buffer for this request
+                    if request_id not in self._audio_buffers:
+                        self._audio_buffers[request_id] = bytearray()
+                        self._playback_started[request_id] = False
+                    buffer = self._audio_buffers[request_id]
+
+                    # Add to buffer
+                    buffer.extend(audio_bytes)
+
+                    # Wait for jitter buffer to fill before starting playback
+                    if not self._playback_started.get(request_id, False):
+                        if len(buffer) < self._jitter_buffer_bytes:
+                            continue
+                        self._playback_started[request_id] = True
 
                     # Send complete (even-byte chunks)
-                    while len(self._audio_buffer) >= self._buffer_threshold_bytes:
+                    while len(buffer) >= self._buffer_threshold_bytes:
                         chunk_size = self._buffer_threshold_bytes
                         if chunk_size % 2 != 0:
                             chunk_size -= 1
 
-                        chunk_to_send = bytes(self._audio_buffer[:chunk_size])
-                        self._audio_buffer = self._audio_buffer[chunk_size:]
+                        chunk_to_send = bytes(buffer[:chunk_size])
+                        self._audio_buffers[request_id] = buffer[chunk_size:]
+                        buffer = self._audio_buffers[request_id]
+
+                        if len(chunk_to_send) == 0:
+                            continue
 
                         frame = TTSAudioRawFrame(
                             audio=chunk_to_send,
@@ -289,17 +301,17 @@ class ResembleAITTSService(AudioContextWordTTSService):
 
                 elif msg.get("type") == "audio_end":
                     await self.stop_ttfb_metrics()
+                    buffer = self._audio_buffers.get(request_id, bytearray())
 
                     # Send remaining buffer, ensuring even length for PCM_16
-                    if self._audio_buffer and self._context_id == request_id:
-                        remaining = bytes(self._audio_buffer)
+                    if buffer:
+                        remaining = bytes(buffer)
 
                         # PCM_16 requires even number of bytes
                         if len(remaining) % 2 != 0:
-                            logger.debug(f"Trimming final odd byte from {len(remaining)} bytes")
                             remaining = remaining[:-1]
 
-                        if remaining:  # Only send if we have data after trimming
+                        if remaining:
                             frame = TTSAudioRawFrame(
                                 audio=remaining,
                                 sample_rate=self.sample_rate,
@@ -307,40 +319,50 @@ class ResembleAITTSService(AudioContextWordTTSService):
                             )
                             await self.append_to_audio_context(request_id, frame)
 
-                    # Clear buffer
-                    self._audio_buffer.clear()
-                    self._context_id = None
+                    # Clean up buffer and playback tracking for this request
+                    if request_id in self._audio_buffers:
+                        del self._audio_buffers[request_id]
+                    if request_id in self._playback_started:
+                        del self._playback_started[request_id]
 
                     await self.remove_audio_context(request_id)
-                    logger.debug(f"Removing request id: {request_id}")
 
                 elif msg.get("type") == "error":
-                    logger.error(f"{self} error: {msg}")
+                    error_name = msg.get("error_name", "Unknown")
+                    error_msg = msg.get("message", "Unknown error")
+                    status_code = msg.get("status_code", 0)
+                    logger.error(f"{self} error: {error_name} (status {status_code}): {error_msg}")
+
                     await self.remove_audio_context(request_id)
 
-                    # Only clear current context if it matches the errored one
-                    if self._context_id == request_id:
-                        self._audio_buffer.clear()
-                        self._context_id = None
-                        logger.debug(f"Cleared current context {request_id} due to error")
+                    # Clean up buffer and playback tracking for this request
+                    if request_id in self._audio_buffers:
+                        del self._audio_buffers[request_id]
+                    if request_id in self._playback_started:
+                        del self._playback_started[request_id]
 
-                        await self.push_frame(TTSStoppedFrame())
-                        await self.stop_all_metrics()
-                    else:
-                        logger.debug(
-                            f"Error was for context {request_id}, keeping current context {self._context_id}"
-                        )
+                    await self.push_error(ErrorFrame(f"{self} error: {error_name} - {error_msg}"))
 
-                    await self.push_error(
-                        ErrorFrame(f"{self} error: {msg.get('message', 'Unknown error')}")
-                    )
-
-                else:
-                    logger.debug(f"Unknown message type: {msg.get('type')}: {msg}")
+                    # Handle auth errors by reconnecting
+                    if status_code in [401, 403]:
+                        logger.warning(f"{self} auth error, reconnecting...")
+                        await self._disconnect_websocket()
+                        await self._connect_websocket()
 
             except Exception as e:
-                logger.error(f"Error processing message: {e}, message: {message}")
+                logger.error(f"Error processing message: {e}")
                 continue
+
+    async def _receive_messages(self):
+        """Main loop for receiving messages with auto-reconnect."""
+        while True:
+            try:
+                await self._process_messages()
+            except Exception as e:
+                logger.error(f"{self} error in receive loop: {e}")
+                # Try to reconnect
+                logger.debug(f"{self} connection lost, attempting to reconnect...")
+                await self._connect_websocket()
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -365,7 +387,6 @@ class ResembleAITTSService(AudioContextWordTTSService):
 
             # Create a NEW context_id for EACH sentence
             self._context_id = str(uuid.uuid4().int)
-            logger.debug(f"Creating new context with: {self._context_id}")
 
             await self.create_audio_context(self._context_id)
 
