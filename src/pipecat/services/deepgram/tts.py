@@ -85,6 +85,7 @@ class DeepgramTTSService(WebsocketTTSService):
             sample_rate=sample_rate,
             pause_frame_processing=True,
             push_stop_frames=True,
+            append_trailing_space=True,
             **kwargs,
         )
 
@@ -147,6 +148,8 @@ class DeepgramTTSService(WebsocketTTSService):
 
     async def _connect(self):
         """Connect to Deepgram WebSocket and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -154,6 +157,8 @@ class DeepgramTTSService(WebsocketTTSService):
 
     async def _disconnect(self):
         """Disconnect from Deepgram WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -287,9 +292,7 @@ class DeepgramTTSService(WebsocketTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
         """
-        # Append trailing space to prevent TTS from vocalizing trailing periods as "dot"
-        text_with_trailing_space = text + " "
-        logger.debug(f"{self}: Generating TTS [{text_with_trailing_space}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             # Reconnect if the websocket is closed
@@ -297,14 +300,14 @@ class DeepgramTTSService(WebsocketTTSService):
                 await self._connect()
 
             await self.start_ttfb_metrics()
-            await self.start_tts_usage_metrics(text_with_trailing_space)
+            await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
 
             # Send text message to Deepgram
             # Note: We don't send Flush here - that should only be sent when the
             # LLM finishes a complete response via flush_audio()
-            speak_msg = {"type": "Speak", "text": text_with_trailing_space}
+            speak_msg = {"type": "Speak", "text": text}
             await self._get_websocket().send(json.dumps(speak_msg))
 
             # The audio frames will be handled in _receive_messages

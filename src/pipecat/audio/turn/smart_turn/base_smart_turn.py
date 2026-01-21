@@ -25,7 +25,7 @@ from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
 
 # Default timing parameters
 STOP_SECS = 3
-PRE_SPEECH_MS = 0
+PRE_SPEECH_MS = 500
 MAX_DURATION_SECONDS = 8  # Max allowed segment duration
 
 
@@ -78,6 +78,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         # Thread executor that will run the model. We only need one thread per
         # analyzer because one analyzer just handles one audio stream.
         self._executor = ThreadPoolExecutor(max_workers=1)
+        self._vad_start_secs: float = 0.0
 
     @property
     def speech_triggered(self) -> bool:
@@ -161,6 +162,10 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         logger.debug(f"End of Turn result: {state}")
         return state, result
 
+    def update_vad_start_secs(self, vad_start_secs: float):
+        """Store the new vad_start_secs value."""
+        self._vad_start_secs = vad_start_secs
+
     def clear(self):
         """Reset the turn analyzer to its initial state."""
         self._clear(EndOfTurnState.COMPLETE)
@@ -181,7 +186,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             return state, None
 
         # Extract recent audio segment for prediction
-        start_time = self._speech_start_time - (self._params.pre_speech_ms / 1000)
+        effective_pre_speech_ms = self._params.pre_speech_ms + (self._vad_start_secs * 1000)
+        start_time = self._speech_start_time - (effective_pre_speech_ms / 1000)
         start_index = 0
         for i, (t, _) in enumerate(audio_buffer):
             if t >= start_time:

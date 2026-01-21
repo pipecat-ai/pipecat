@@ -403,7 +403,7 @@ class BaseOutputTransport(FrameProcessor):
             # Last time a BotSpeakingFrame was pushed.
             self._bot_speaking_frame_time = 0
             # How often a BotSpeakingFrame should be pushed (value should be
-            # lower than the audio chunks).
+            # greater than the audio chunks to have any effect).
             self._bot_speaking_frame_period = 0.2
             # Last time the bot actually spoke.
             self._bot_speech_last_time = 0
@@ -603,6 +603,8 @@ class BaseOutputTransport(FrameProcessor):
             if self._bot_speaking:
                 return
 
+            self._bot_speaking = True
+
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
             )
@@ -614,12 +616,16 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
-            self._bot_speaking = True
-
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if not self._bot_speaking:
                 return
+
+            self._bot_speaking = False
+
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
 
             logger.debug(
                 f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
@@ -632,20 +638,13 @@ class BaseOutputTransport(FrameProcessor):
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
-            self._bot_speaking = False
-
-            # Clean audio buffer (there could be tiny left overs if not multiple
-            # to our output chunk size).
-            self._audio_buffer = bytearray()
-
         async def _bot_currently_speaking(self):
             """Handle bot speaking event."""
             await self._bot_started_speaking()
 
             diff_time = time.time() - self._bot_speaking_frame_time
             if diff_time >= self._bot_speaking_frame_period:
-                await self._transport.push_frame(BotSpeakingFrame())
-                await self._transport.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                await self._transport.broadcast_frame(BotSpeakingFrame)
                 self._bot_speaking_frame_time = time.time()
 
             self._bot_speech_last_time = time.time()

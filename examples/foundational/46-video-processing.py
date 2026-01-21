@@ -116,7 +116,7 @@ async def run_bot(pipecat_transport):
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -131,7 +131,7 @@ async def run_bot(pipecat_transport):
     pipeline = Pipeline(
         [
             pipecat_transport.input(),
-            context_aggregator.user(),
+            user_aggregator,
             rtvi,
             llm,  # LLM
             EdgeDetectionProcessor(
@@ -139,7 +139,7 @@ async def run_bot(pipecat_transport):
                 pipecat_transport._params.video_out_height,
             ),  # Sending the video back to the user
             pipecat_transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 

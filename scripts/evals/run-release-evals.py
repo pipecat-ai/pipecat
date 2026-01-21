@@ -30,8 +30,13 @@ EVAL_SIMPLE_MATH = EvalConfig(
 )
 
 EVAL_WEATHER = EvalConfig(
-    prompt="What's the weather in San Francisco? Temperature should be in fahrenheits.",
+    prompt="What's the weather in San Francisco? Temperature should be in Fahrenheit.",
     eval="The user talks about the weather in San Francisco, including the degrees.",
+)
+
+EVAL_WEATHER_AND_RESTAURANT = EvalConfig(
+    prompt="What's the weather in San Francisco, and what's a good restaurant there? Temperature should be in Fahrenheit.",
+    eval="The user talks about the weather in San Francisco, including the degrees, and provides a restaurant recommendation.",
 )
 
 EVAL_ONLINE_SEARCH = EvalConfig(
@@ -92,20 +97,10 @@ TESTS_07 = [
     ("07-interruptible-cartesia-http.py", EVAL_SIMPLE_MATH),
     ("07a-interruptible-speechmatics.py", EVAL_SIMPLE_MATH),
     ("07a-interruptible-speechmatics-vad.py", EVAL_SIMPLE_MATH),
-    ("07aa-interruptible-soniox.py", EVAL_SIMPLE_MATH),
-    ("07ab-interruptible-inworld.py", EVAL_SIMPLE_MATH),
-    ("07ab-interruptible-inworld-http.py", EVAL_SIMPLE_MATH),
-    ("07ac-interruptible-asyncai.py", EVAL_SIMPLE_MATH),
-    ("07ac-interruptible-asyncai-http.py", EVAL_SIMPLE_MATH),
-    # Need license key to run
-    # ("07ad-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
-    ("07ae-interruptible-hume.py", EVAL_SIMPLE_MATH),
-    ("07af-interruptible-gradium.py", EVAL_SIMPLE_MATH),
     ("07b-interruptible-langchain.py", EVAL_SIMPLE_MATH),
     ("07c-interruptible-deepgram.py", EVAL_SIMPLE_MATH),
     ("07c-interruptible-deepgram-flux.py", EVAL_SIMPLE_MATH),
     ("07c-interruptible-deepgram-http.py", EVAL_SIMPLE_MATH),
-    ("07c-interruptible-deepgram-vad.py", EVAL_SIMPLE_MATH),
     ("07d-interruptible-elevenlabs.py", EVAL_SIMPLE_MATH),
     ("07d-interruptible-elevenlabs-http.py", EVAL_SIMPLE_MATH),
     ("07f-interruptible-azure.py", EVAL_SIMPLE_MATH),
@@ -113,6 +108,7 @@ TESTS_07 = [
     ("07g-interruptible-openai.py", EVAL_SIMPLE_MATH),
     ("07h-interruptible-openpipe.py", EVAL_SIMPLE_MATH),
     ("07j-interruptible-gladia.py", EVAL_SIMPLE_MATH),
+    ("07j-interruptible-gladia-vad.py", EVAL_SIMPLE_MATH),
     ("07k-interruptible-lmnt.py", EVAL_SIMPLE_MATH),
     ("07l-interruptible-groq.py", EVAL_SIMPLE_MATH),
     ("07m-interruptible-aws.py", EVAL_SIMPLE_MATH),
@@ -132,6 +128,17 @@ TESTS_07 = [
     ("07y-interruptible-minimax.py", EVAL_SIMPLE_MATH),
     ("07z-interruptible-sarvam.py", EVAL_SIMPLE_MATH),
     ("07z-interruptible-sarvam-http.py", EVAL_SIMPLE_MATH),
+    ("07za-interruptible-soniox.py", EVAL_SIMPLE_MATH),
+    ("07zb-interruptible-inworld.py", EVAL_SIMPLE_MATH),
+    ("07zb-interruptible-inworld-http.py", EVAL_SIMPLE_MATH),
+    ("07zc-interruptible-asyncai.py", EVAL_SIMPLE_MATH),
+    ("07zc-interruptible-asyncai-http.py", EVAL_SIMPLE_MATH),
+    # Need license key to run
+    # ("07zd-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
+    ("07ze-interruptible-hume.py", EVAL_SIMPLE_MATH),
+    ("07zf-interruptible-gradium.py", EVAL_SIMPLE_MATH),
+    ("07zg-interruptible-camb.py", EVAL_SIMPLE_MATH),
+    ("07zh-interruptible-hathora.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
     # Needs a Krisp license.
@@ -146,10 +153,16 @@ TESTS_12 = [
     ("12d-describe-image-moondream.py", EVAL_VISION_IMAGE()),
 ]
 
+# For a few major services, we also test parallel function calling.
+# (We don't bother doing this with every single service, as it's expensive and
+# most rely on the same OpenAI-compatible implementation.)
 TESTS_14 = [
     ("14-function-calling.py", EVAL_WEATHER),
+    ("14-function-calling.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14a-function-calling-anthropic.py", EVAL_WEATHER),
+    ("14a-function-calling-anthropic.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14e-function-calling-google.py", EVAL_WEATHER),
+    ("14e-function-calling-google.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14f-function-calling-groq.py", EVAL_WEATHER),
     ("14g-function-calling-grok.py", EVAL_WEATHER),
     ("14h-function-calling-azure.py", EVAL_WEATHER),
@@ -161,6 +174,7 @@ TESTS_14 = [
     ("14p-function-calling-gemini-vertex-ai.py", EVAL_WEATHER),
     ("14q-function-calling-qwen.py", EVAL_WEATHER),
     ("14r-function-calling-aws.py", EVAL_WEATHER),
+    ("14r-function-calling-aws.py", EVAL_WEATHER_AND_RESTAURANT),
     ("14v-function-calling-openai.py", EVAL_WEATHER),
     ("14w-function-calling-mistral.py", EVAL_WEATHER),
     ("14x-function-calling-openpipe.py", EVAL_WEATHER),
@@ -188,6 +202,7 @@ TESTS_19 = [
     ("19a-azure-realtime-beta.py", EVAL_WEATHER),
     ("19b-openai-realtime-text.py", EVAL_WEATHER),
     ("19b-openai-realtime-beta-text.py", EVAL_WEATHER),
+    ("19c-openai-realtime-live-video.py", EVAL_VISION_CAMERA),
 ]
 
 TESTS_21 = [
@@ -239,6 +254,10 @@ TESTS_51 = [
     ("51-grok-realtime.py", EVAL_WEATHER),
 ]
 
+TESTS_53 = [
+    ("53-concurrent-llm-evaluation.py", EVAL_SIMPLE_MATH),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -254,6 +273,7 @@ TESTS = [
     *TESTS_49,
     *TESTS_50,
     *TESTS_51,
+    *TESTS_53,
 ]
 
 
