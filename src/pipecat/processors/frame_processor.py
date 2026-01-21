@@ -954,7 +954,8 @@ class FrameProcessor(BaseObject):
         # Process current queue and keep UninterruptibleFrame frames.
         while not self.__process_queue.empty():
             item = self.__process_queue.get_nowait()
-            if isinstance(item, UninterruptibleFrame):
+            frame = item[0]
+            if isinstance(frame, UninterruptibleFrame):
                 new_queue.put_nowait(item)
             self.__process_queue.task_done()
 

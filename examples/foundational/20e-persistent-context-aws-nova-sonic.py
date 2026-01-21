@@ -113,6 +113,14 @@ async def load_conversation(params: FunctionCallParams):
                 #         "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
                 #     }
                 # )
+                # If the last message isn't from the user, add a message asking for a recap
+                if messages and messages[-1].get("role") != "user":
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "Can you catch me up on what we were talking about?",
+                        }
+                    )
                 params.context.set_messages(messages)
                 await params.llm.reset_conversation()
                 # await params.llm.trigger_assistant_response()
