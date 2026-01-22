@@ -811,6 +811,11 @@ class DailyTransportClient(EventHandler):
                     "camera": {
                         "sendSettings": {
                             "maxQuality": "low",
+                            **(
+                                {"preferredCodec": self._params.video_out_codec}
+                                if self._params.video_out_codec
+                                else {}
+                            ),
                             "encodings": {
                                 "low": {
                                     "maxBitrate": self._params.video_out_bitrate,
