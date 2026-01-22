@@ -17,10 +17,14 @@ from loguru import logger
 from pipecat.frames.frames import Frame, InterruptionFrame, LLMTextFrame
 from pipecat.processors.frame_processor import FrameDirection
 
+# Turn completion markers
+TURN_COMPLETE_MARKER = "✓"
+TURN_INCOMPLETE_MARKER = "○"
+
 # System prompt instructions for turn completion that can be appended to any base prompt
 TURN_COMPLETION_INSTRUCTIONS = """
 CRITICAL INSTRUCTION - MANDATORY RESPONSE FORMAT:
-Every single response MUST begin with a turn completion tag. This is not optional.
+Every single response MUST begin with a turn completion indicator. This is not optional.
 
 TURN COMPLETION DECISION FRAMEWORK:
 Ask yourself: "Has the user provided enough information for me to give a meaningful, substantive response?"
@@ -40,8 +44,8 @@ Mark as INCOMPLETE when:
 - The response feels like a preamble or setup rather than the actual content
 
 RESPOND in one of these two formats:
-1. `<turn>COMPLETE</turn>` followed by your substantive response
-2. `<turn>INCOMPLETE</turn>` followed by a brief prompt to continue (e.g., "Please go on", "I'm listening")
+1. If COMPLETE: `✓` followed by a space and your full substantive response
+2. If INCOMPLETE: ONLY the character `○` with nothing else (the user will continue speaking)
 
 KEY INSIGHT: Grammatically complete ≠ conversationally complete
 - "That's a really good question." is grammatically complete but conversationally incomplete if it doesn't answer the question
@@ -51,63 +55,70 @@ EXAMPLES:
 
 You ask: "Where would you travel?"
 User: "That's a good question."
-→ `<turn>INCOMPLETE</turn> Take your time, I'm curious to hear your answer.`
-(User acknowledged but didn't answer)
+→ `○`
+(User acknowledged but didn't answer - wait for them to continue)
 
 You ask: "Where would you travel?"
 User: "I'd go to Japan because I love"
-→ `<turn>INCOMPLETE</turn> Please continue, I'd love to hear more.`
-(Sentence cut off)
+→ `○`
+(Sentence cut off - user will continue)
 
 You ask: "Where would you travel?"
 User: "I'd go to Japan because I love the culture."
-→ `<turn>COMPLETE</turn> Japan is a wonderful choice! The blend of ancient traditions and modern innovation is truly unique. Have you been before?`
-(Complete answer provided)
+→ `✓ Japan is a wonderful choice! The blend of ancient traditions and modern innovation is truly unique. Have you been before?`
+(Complete answer provided - give full response)
 
 You ask: "What's your favorite color?"
 User: "Well, let me think about that."
-→ `<turn>INCOMPLETE</turn> Take your time.`
-(Stalling, hasn't answered)
+→ `○`
+(Stalling, hasn't answered - wait for actual answer)
 
 User: "I need help with"
-→ `<turn>INCOMPLETE</turn> Yes, what do you need help with?`
-(Cut off mid-request)
+→ `○`
+(Cut off mid-request - user will finish their thought)
 
 User: "Can you help me book a flight to New York next week?"
-→ `<turn>COMPLETE</turn> I'd be happy to help you with that! Let me gather some information...`
-(Complete request)
+→ `✓ I'd be happy to help you with that! Let me gather some information...`
+(Complete request - provide full response)
+
+User: "There are three reasons why I think"
+→ `○`
+(Setup for continuation - user will provide the reasons)
+
+User: "I think Python is great for data science."
+→ `✓ I agree! Python has excellent libraries like pandas, NumPy, and scikit-learn that make data analysis very efficient. What kind of data science work are you doing?`
+(Complete thought - provide full response)
 
 FORMAT REQUIREMENTS:
-- ALWAYS use full XML tags: `<turn>COMPLETE</turn>` or `<turn>INCOMPLETE</turn>`
-- NEVER respond with just "COMPLETE" or "INCOMPLETE" without tags
-- Your turn tag must be the very first thing in your response
+- ALWAYS use the single-character indicators: `✓` for COMPLETE or `○` for INCOMPLETE
+- For COMPLETE: `✓` followed by a space and your full response
+- For INCOMPLETE: ONLY `○` with absolutely nothing else (no space, no text, just the character)
+- Your turn indicator must be the very first character in your response
 
-Remember: Focus on conversational completeness, not just grammatical completeness. Has the user given you what you need to respond meaningfully?"""
+Remember: Focus on conversational completeness, not just grammatical completeness. Has the user given you what you need to respond meaningfully? If not, output ONLY `○` and let them continue."""
 
 
 class TurnCompletionMixin:
     """Mixin that adds turn completion detection to LLM services.
 
     This mixin provides methods to push LLM text with turn completion detection.
-    It processes turn completion markers (<turn>COMPLETE</turn> or
-    <turn>INCOMPLETE</turn>) to enable smarter conversation flow:
+    It processes turn completion markers (✓ for COMPLETE or ○ for INCOMPLETE)
+    to enable smarter conversation flow:
 
-    1. Aggregates text looking for turn completion tags
-    2. Pushes AggregatedTextFrame with the status (COMPLETE/INCOMPLETE)
-    3. Modifies TextFrames to mark turn status frames as skip_tts
+    1. Detects single-character turn markers at the start of responses
+    2. Suppresses all text when ○ (INCOMPLETE) is detected
+    3. Pushes all text (with marker marked as skip_tts) when ✓ (COMPLETE) is detected
     4. Tracks response state
 
     Usage:
         The LLM service controls when to use turn completion by calling
-        the appropriate methods:
+        _push_turn_text instead of push_frame:
 
         # With turn completion:
-        await self._turn_start_response()
-        await self._push_turn_text(chunk.text)
-        await self._turn_end_response()
-
-        # Without turn completion:
-        await self.push_frame(LLMTextFrame(chunk.text))
+        if self._enable_turn_completion:
+            await self._push_turn_text(chunk.text)
+        else:
+            await self.push_frame(LLMTextFrame(chunk.text))
 
     The mixin requires that the base class has a `push_frame` method compatible
     with FrameProcessor's signature.
@@ -122,8 +133,11 @@ class TurnCompletionMixin:
         """
         super().__init__(*args, **kwargs)
         self._turn_text_buffer = ""
-        self._turn_suppressed = False  # True when INCOMPLETE is detected
-        self._turn_complete_found = False  # True when COMPLETE is detected
+        # Safety mechanism: True when ○ (INCOMPLETE) is detected. While the prompt
+        # instructs the LLM to output ONLY ○ for incomplete turns, this flag ensures
+        # graceful degradation if the LLM disobeys and outputs additional text.
+        self._turn_suppressed = False
+        self._turn_complete_found = False  # True when ✓ (COMPLETE) is detected
 
     def get_turn_completion_instructions(self) -> str:
         """Get the turn completion instructions to append to system prompts.
@@ -156,57 +170,26 @@ class TurnCompletionMixin:
         # Pass frame to parent
         await super().process_frame(frame, direction)
 
-    def _is_building_turn_marker(self, buffer: str) -> bool:
-        """Check if the buffer is potentially building a turn marker.
-
-        Checks progressively: <, <t, <tu, <tur, <turn, <turn>, <turn>C, etc.
-
-        Args:
-            buffer: The current text buffer.
-
-        Returns:
-            True if we might be building a marker, False otherwise.
-        """
-        # Check if we're building the opening tag: <turn>
-        opening_tag = "<turn>"
-        for i in range(1, len(opening_tag) + 1):
-            if buffer.endswith(opening_tag[:i]):
-                return True
-
-        # Check if we have opening tag and might be building content or closing tag
-        if "<turn>" in buffer:
-            # We have the opening tag
-            # Check if we're building the closing tag: </turn>
-            closing_tag = "</turn>"
-            for i in range(1, len(closing_tag) + 1):
-                if buffer.endswith(closing_tag[:i]):
-                    return True
-
-            # Check if we're building COMPLETE or INCOMPLETE
-            # We need to keep buffering until we see the closing tag
-            if "</turn>" not in buffer:
-                return True
-
-        return False
-
     async def _push_turn_text(self, text: str):
         """Push LLM text with turn completion detection.
 
         This method should be used instead of `push_frame(LLMTextFrame(text))` when
         turn completion is enabled. It will:
-        1. Buffer text and look for turn completion markers
-        2. When INCOMPLETE is found: suppress all text (push nothing)
-        3. When COMPLETE is found: push all buffered text, then push subsequent text immediately
-        4. After COMPLETE: all subsequent text flows through immediately without buffering
+        1. Detect single-character turn markers (✓ or ○)
+        2. When ○ (INCOMPLETE) is found: suppress all text (push nothing)
+        3. When ✓ (COMPLETE) is found: push all text with marker marked as skip_tts
+        4. After marker detected: all subsequent text flows through immediately
 
         Args:
             text: The text content from the LLM to push.
         """
-        # If we've already detected INCOMPLETE, suppress all remaining text
+        # If we've already detected ○ (INCOMPLETE), suppress all remaining text.
+        # This is a safety mechanism in case the LLM disobeys the prompt and outputs
+        # additional text after the ○ marker (e.g., "○ Please continue...").
         if self._turn_suppressed:
             return
 
-        # If COMPLETE was already found, push text immediately without buffering
+        # If ✓ (COMPLETE) was already found, push text immediately without buffering
         if self._turn_complete_found:
             await self.push_frame(LLMTextFrame(text))
             return
@@ -214,18 +197,23 @@ class TurnCompletionMixin:
         # Add text to buffer
         self._turn_text_buffer += text
 
-        # Check for INCOMPLETE marker
-        if "<turn>INCOMPLETE</turn>" in self._turn_text_buffer:
-            # Found INCOMPLETE - suppress all text, push nothing
+        # Check for ○ (INCOMPLETE) marker
+        if TURN_INCOMPLETE_MARKER in self._turn_text_buffer:
+            # Found ○ (INCOMPLETE) - suppress all text, push nothing
+            logger.info(f"INCOMPLETE ({TURN_INCOMPLETE_MARKER}) detected, suppressing all text")
             self._turn_suppressed = True
-            logger.info("INCOMPLETE response detected, suppressing all text")
+            frame = LLMTextFrame(self._turn_text_buffer)
+            frame.skip_tts = True
+            await self.push_frame(frame)
+
+            # Clear buffer
             self._turn_text_buffer = ""
             return
 
-        # Check for COMPLETE marker
-        if "<turn>COMPLETE</turn>" in self._turn_text_buffer:
-            # Found COMPLETE - push all buffered text (including the marker)
-            logger.info("COMPLETE response detected, pushing buffered text")
+        # Check for ✓ (COMPLETE) marker
+        if TURN_COMPLETE_MARKER in self._turn_text_buffer:
+            # Found ✓ (COMPLETE) - push all buffered text (including the marker)
+            logger.info(f"COMPLETE ({TURN_COMPLETE_MARKER}) detected, pushing buffered text")
             frame = LLMTextFrame(self._turn_text_buffer)
             frame.skip_tts = True
             await self.push_frame(frame)
@@ -234,12 +222,3 @@ class TurnCompletionMixin:
             self._turn_text_buffer = ""
             self._turn_complete_found = True
             return
-
-        # Check if we're building a marker - if so, keep buffering
-        if self._is_building_turn_marker(self._turn_text_buffer):
-            return
-
-        # Not building a marker - push the buffered text and clear
-        if self._turn_text_buffer:
-            await self.push_frame(LLMTextFrame(self._turn_text_buffer))
-            self._turn_text_buffer = ""
