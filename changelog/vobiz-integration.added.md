@@ -1,0 +1,1 @@
+- Added support for Vobiz telephony with `VobizFrameSerializer`.
