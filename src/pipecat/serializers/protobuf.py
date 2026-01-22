@@ -126,7 +126,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-        # Special handling for MessageFrame -> OutputTransportMessageUrgentFrame
+        # Special handling for MessageFrame -> InputTransportMessageFrame
         if class_name == MessageFrame:
             try:
                 msg = json.loads(args_dict["data"])
