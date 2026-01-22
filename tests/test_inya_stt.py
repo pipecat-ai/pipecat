@@ -10,21 +10,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 
 from pipecat.frames.frames import ErrorFrame, TranscriptionFrame
-from pipecat.services.gnani.stt import GnaniSTTService
+from pipecat.services.inya.stt import InyaSTTService
 from pipecat.transcriptions.language import Language
 
 
-class TestGnaniSTTService(unittest.IsolatedAsyncioTestCase):
-    """Test cases for GnaniSTTService."""
+class TestInyaSTTService(unittest.IsolatedAsyncioTestCase):
+    """Test cases for InyaSTTService."""
 
     def setUp(self):
         """Set up test fixtures."""
         self.api_key = "test-api-key"
         self.organization_id = "test-org-id"
-        self.service = GnaniSTTService(
+        self.service = InyaSTTService(
             api_key=self.api_key,
             organization_id=self.organization_id,
-            params=GnaniSTTService.InputParams(
+            params=InyaSTTService.InputParams(
                 language=Language.HI_IN,
                 api_user_id="test-user",
             ),
