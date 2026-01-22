@@ -18,6 +18,7 @@ class InvalidEnvVarValueError(ValueError):
     """Raised when an environment variable value cannot be parsed."""
 
     def __init__(self, name: str, value: str, expected: str):
+        """Initialize an InvalidEnvVarValueError."""
         super().__init__(f"Invalid value for env var {name!r}: {value!r}. Expected {expected}.")
         self.name = name
         self.value = value
@@ -35,7 +36,6 @@ def env_truthy(name: str, default: bool = False) -> bool:
     - Truthy: "1", "true", "yes", "y", "on"
     - Falsy:  "0", "false", "no", "n", "off", ""
     """
-
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -49,6 +49,5 @@ def env_truthy(name: str, default: bool = False) -> bool:
     raise InvalidEnvVarValueError(
         name=name,
         value=raw,
-        expected='true or false',
+        expected="true or false",
     )
-

@@ -94,10 +94,10 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
             sample_rate: The sample rate of the audio data.
             suffix: Optional suffix to append to the filename (e.g., "_raw", "_padded").
         """
-        import wave
-        from datetime import datetime
         import os
         import threading
+        import wave
+        from datetime import datetime
 
         # Generate filename with current timestamp (millisecond precision)
         timestamp = datetime.now().strftime("%Y-%m-%d__%H:%M:%S.%f")[:-3]
