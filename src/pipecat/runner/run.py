@@ -104,7 +104,7 @@ except ImportError as e:
 load_dotenv(override=True)
 os.environ["ENV"] = "local"
 
-TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel"]
+TELEPHONY_TRANSPORTS = ["twilio", "telnyx", "plivo", "exotel", "vobiz"]
 
 RUNNER_DOWNLOADS_FOLDER: Optional[str] = None
 RUNNER_HOST: str = "localhost"
@@ -769,6 +769,10 @@ def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
   <Pause length="40"/>
 </Response>""",
         "plivo": f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{proxy}/ws</Stream>
+</Response>""",
+        "vobiz": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{proxy}/ws</Stream>
 </Response>""",

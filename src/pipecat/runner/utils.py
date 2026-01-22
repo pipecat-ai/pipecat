@@ -219,6 +219,13 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "custom_parameters": start_data.get("custom_parameters", ""),
             }
 
+        elif transport_type == "vobiz":
+            start_data = call_data_raw.get("start", {})
+            call_data = {
+                "stream_id": start_data.get("streamId"),
+                "call_id": start_data.get("callId"),
+            }
+
         else:
             call_data = {}
 
@@ -465,10 +472,19 @@ async def _create_telephony_transport(
             stream_sid=call_data["stream_id"],
             call_sid=call_data["call_id"],
         )
+    elif transport_type == "vobiz":
+        from pipecat.serializers.vobiz import VobizFrameSerializer
+
+        params.serializer = VobizFrameSerializer(
+            stream_id=call_data["stream_id"],
+            call_id=call_data["call_id"],
+            auth_id=os.getenv("VOBIZ_AUTH_ID", ""),
+            auth_token=os.getenv("VOBIZ_AUTH_TOKEN", ""),
+        )
     else:
         raise ValueError(
             f"Unsupported telephony provider: {transport_type}. "
-            f"Supported providers: twilio, telnyx, plivo, exotel"
+            f"Supported providers: twilio, telnyx, plivo, exotel, vobiz"
         )
 
     return FastAPIWebsocketTransport(websocket=websocket, params=params)
@@ -527,6 +543,12 @@ async def create_transport(
                 # add_wav_header and serializer will be set automatically
             ),
             "exotel": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                # add_wav_header and serializer will be set automatically
+            ),
+            "vobiz": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
