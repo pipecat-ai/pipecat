@@ -464,9 +464,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         self._settings = {"language": params.language_code}
 
-        # Track when commit has been sent to mark the next TranscriptionFrame as finalized
-        self._finalize_pending: bool = False
-
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
 
@@ -555,7 +552,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
             # Reset finalize state for new utterance
-            self._finalize_pending = False
+            self.set_finalize_pending(False)
             # Start metrics when user starts speaking
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
@@ -564,7 +561,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 if self._websocket and self._websocket.state is State.OPEN:
                     try:
                         # Mark that the next committed transcript should be finalized
-                        self._finalize_pending = True
+                        self.set_finalize_pending(True)
                         commit_message = {
                             "message_type": "input_audio_chunk",
                             "audio_base_64": "",
@@ -821,10 +818,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 time_now_iso8601(),
                 language,
                 result=data,
-                finalized=self._finalize_pending,
             )
         )
-        self._finalize_pending = False
 
     async def _on_committed_transcript_with_timestamps(self, data: dict):
         """Handle committed transcript with word-level timestamps.
@@ -866,7 +861,5 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 time_now_iso8601(),
                 language,
                 result=data,
-                finalized=self._finalize_pending,
             )
         )
-        self._finalize_pending = False

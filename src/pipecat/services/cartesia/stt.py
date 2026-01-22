@@ -172,9 +172,6 @@ class CartesiaSTTService(WebsocketSTTService):
         self._base_url = base_url or "api.cartesia.ai"
         self._receive_task = None
 
-        # Track when finalize has been sent to mark the next TranscriptionFrame
-        self._finalize_pending: bool = False
-
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
 
@@ -225,12 +222,12 @@ class CartesiaSTTService(WebsocketSTTService):
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
             # Reset finalize state for new utterance
-            self._finalize_pending = False
+            self.set_finalize_pending(False)
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize command to flush the transcription session
             if self._websocket and self._websocket.state is State.OPEN:
-                self._finalize_pending = True
+                self.set_finalize_pending(True)
                 await self._websocket.send("finalize")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -355,10 +352,8 @@ class CartesiaSTTService(WebsocketSTTService):
                         time_now_iso8601(),
                         language,
                         result=data,
-                        finalized=self._finalize_pending,
                     )
                 )
-                self._finalize_pending = False
                 await self._handle_transcription(transcript, is_final, language)
                 await self.stop_processing_metrics()
             else:

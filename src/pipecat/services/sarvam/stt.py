@@ -163,9 +163,6 @@ class SarvamSTTService(STTService):
         self._receive_task = None
         logger.info(f"Sarvam STT initialized with SDK headers: {self._sdk_headers}")
 
-        # Track pending finalize for TTFB measurement
-        self._finalize_pending: bool = False
-
     def language_to_service_language(self, language: Language) -> str:
         """Convert pipecat Language enum to Sarvam's language code.
 
@@ -196,11 +193,11 @@ class SarvamSTTService(STTService):
         # Only handle VAD frames when not using Sarvam's VAD signals
         if not self._vad_signals:
             if isinstance(frame, VADUserStartedSpeakingFrame):
-                self._finalize_pending = False
+                self.set_finalize_pending(False)
                 await self._start_metrics()
             elif isinstance(frame, VADUserStoppedSpeakingFrame):
                 if self._socket_client:
-                    self._finalize_pending = True
+                    self.set_finalize_pending(True)
                     await self._socket_client.flush()
 
     async def set_language(self, language: Language):
@@ -474,10 +471,8 @@ class SarvamSTTService(STTService):
                             time_now_iso8601(),
                             language,
                             result=(message.dict() if hasattr(message, "dict") else str(message)),
-                            finalized=self._finalize_pending,
                         )
                     )
-                    self._finalize_pending = False
 
                 await self.stop_processing_metrics()
 
