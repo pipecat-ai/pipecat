@@ -260,7 +260,7 @@ class OjinVideoService(FrameProcessor):
             frame.audio, frame.sample_rate, OJIN_PERSONA_SAMPLE_RATE
         )
         await self._client.send_message(
-            OjinSTVInteractionInputMessage(
+            OjinAudioInputMessage(
                 audio_int16_bytes=resampled_audio,
                 params={
                     "client_frame_index": self._compute_frame_index_for_server(),
