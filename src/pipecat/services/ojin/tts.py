@@ -11,14 +11,14 @@ from typing import Any, AsyncGenerator, Dict, Optional
 
 from loguru import logger
 from ojin.entities.interaction_messages import ErrorResponseMessage
-from ojin.ojin_tts_client import OjinTTSClient
-from ojin.ojin_tts_messages import (
-    IOjinTTSClient,
-    OjinTTSCancelInteractionMessage,
-    OjinTTSEndInteractionMessage,
-    OjinTTSInteractionResponseMessage,
-    OjinTTSSessionReadyMessage,
-    OjinTTSTextInputMessage,
+from ojin.ojin_client import OjinClient
+from ojin.ojin_client_messages import (
+    IOjinClient,
+    OjinCancelInteractionMessage,
+    OjinEndInteractionMessage,
+    OjinInteractionResponseMessage,
+    OjinSessionReadyMessage,
+    OjinTextInputMessage,
 )
 from pydantic import BaseModel
 
@@ -69,7 +69,7 @@ class OjinTTSService(TTSService):
     def __init__(
         self,
         settings: OjinTTSServiceSettings,
-        client: IOjinTTSClient | None = None,
+        client: IOjinClient | None = None,
         **kwargs,
     ) -> None:
         super().__init__(sample_rate=settings.sample_rate, **kwargs)
@@ -77,7 +77,7 @@ class OjinTTSService(TTSService):
 
         self._settings = settings
         if client is None:
-            self._client = OjinTTSClient(
+            self._client = OjinClient(
                 ws_url=settings.ws_url,
                 api_key=settings.api_key,
                 config_id=settings.config_id,
@@ -90,7 +90,7 @@ class OjinTTSService(TTSService):
 
         self._session_data: Optional[Dict[str, Any]] = None
         self._receive_msg_task: Optional[asyncio.Task] = None
-        self._audio_queue: asyncio.Queue[OjinTTSInteractionResponseMessage | None] = asyncio.Queue()
+        self._audio_queue: asyncio.Queue[OjinInteractionResponseMessage | None] = asyncio.Queue()
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -124,7 +124,7 @@ class OjinTTSService(TTSService):
 
     async def _handle_ojin_message(self, message: BaseModel):
         """Process incoming messages from the TTS server."""
-        if isinstance(message, OjinTTSSessionReadyMessage):
+        if isinstance(message, OjinSessionReadyMessage):
             if message.parameters is not None:
                 self._session_data = message.parameters
 
@@ -132,7 +132,7 @@ class OjinTTSService(TTSService):
             if self._session_data and self._session_data.get("server_id"):
                 logger.info(f"Connected to server: {self._session_data.get('server_id')}")
 
-        elif isinstance(message, OjinTTSInteractionResponseMessage):
+        elif isinstance(message, OjinInteractionResponseMessage):
             # Queue audio response for consumption
             await self._audio_queue.put(message)
             logger.debug(
@@ -151,9 +151,7 @@ class OjinTTSService(TTSService):
         try:
             while self._client.is_connected():
                 try:
-                    message = await asyncio.wait_for(
-                        self._client.receive_message(), timeout=1.0
-                    )
+                    message = await asyncio.wait_for(self._client.receive_message(), timeout=1.0)
                     if message:
                         await self._handle_ojin_message(message)
                 except asyncio.TimeoutError:
@@ -192,13 +190,11 @@ class OjinTTSService(TTSService):
 
         # Send text input
         try:
-            await self._client.send_message(
-                OjinTTSTextInputMessage(text=text, params=None)
-            )
+            await self._client.send_message(OjinTextInputMessage(text=text, params=None))
             logger.debug(f"Sent TTS text input: {text[:50]}...")
 
             # Send end interaction to signal we're done with input
-            await self._client.send_message(OjinTTSEndInteractionMessage())
+            await self._client.send_message(OjinEndInteractionMessage())
             logger.debug("Sent TTS end interaction")
 
         except Exception as e:
@@ -269,7 +265,7 @@ class OjinTTSService(TTSService):
 
     async def start(self, frame: StartFrame) -> None:
         """Start the TTS service.
-        
+
         Args:
             frame: The StartFrame from the pipeline (can be None for standalone use).
         """
@@ -280,7 +276,7 @@ class OjinTTSService(TTSService):
 
     async def stop(self, frame: EndFrame) -> None:
         """Stop the TTS service.
-        
+
         Args:
             frame: The EndFrame from the pipeline (can be None for standalone use).
         """
@@ -290,13 +286,13 @@ class OjinTTSService(TTSService):
 
     async def cancel(self, frame: CancelFrame = None) -> None:
         """Cancel the current TTS interaction.
-        
+
         Args:
             frame: The CancelFrame from the pipeline (can be None for standalone use).
         """
         if self._client.is_connected():
             try:
-                await self._client.send_message(OjinTTSCancelInteractionMessage())
+                await self._client.send_message(OjinCancelInteractionMessage())
                 logger.debug("Sent TTS cancel interaction")
             except Exception as e:
                 logger.warning(f"Failed to send TTS cancel: {e}")
