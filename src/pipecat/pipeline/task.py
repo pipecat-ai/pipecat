@@ -15,7 +15,7 @@ import asyncio
 import importlib.util
 import os
 from pathlib import Path
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -366,8 +366,8 @@ class PipelineTask(BasePipelineTask):
         # in. This is mainly for efficiency reason because each event handler
         # creates a task and most likely you only care about one or two frame
         # types.
-        self._reached_upstream_types: Tuple[Type[Frame], ...] = ()
-        self._reached_downstream_types: Tuple[Type[Frame], ...] = ()
+        self._reached_upstream_types: Set[Type[Frame]] = set()
+        self._reached_downstream_types: Set[Type[Frame]] = set()
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
         self._register_event_handler("on_idle_timeout")
@@ -434,7 +434,7 @@ class PipelineTask(BasePipelineTask):
         Returns:
             Tuple of frame types that trigger the on_frame_reached_upstream event.
         """
-        return self._reached_upstream_types
+        return tuple(self._reached_upstream_types)
 
     @property
     def reached_downstream_types(self) -> Tuple[Type[Frame], ...]:
@@ -443,7 +443,7 @@ class PipelineTask(BasePipelineTask):
         Returns:
             Tuple of frame types that trigger the on_frame_reached_downstream event.
         """
-        return self._reached_downstream_types
+        return tuple(self._reached_downstream_types)
 
     def event_handler(self, event_name: str):
         """Decorator for registering event handlers.
@@ -488,7 +488,7 @@ class PipelineTask(BasePipelineTask):
         Args:
             types: Tuple of frame types to monitor for upstream events.
         """
-        self._reached_upstream_types = types
+        self._reached_upstream_types = set(types)
 
     def set_reached_downstream_filter(self, types: Tuple[Type[Frame], ...]):
         """Set which frame types trigger the on_frame_reached_downstream event.
@@ -496,7 +496,7 @@ class PipelineTask(BasePipelineTask):
         Args:
             types: Tuple of frame types to monitor for downstream events.
         """
-        self._reached_downstream_types = types
+        self._reached_downstream_types = set(types)
 
     def add_reached_upstream_filter(self, types: Tuple[Type[Frame], ...]):
         """Add frame types to trigger the on_frame_reached_upstream event.
@@ -504,11 +504,7 @@ class PipelineTask(BasePipelineTask):
         Args:
             types: Tuple of frame types to add to upstream monitoring.
         """
-        if not types:
-            return
-        current = set(self._reached_upstream_types)
-        current.update(types)
-        self._reached_upstream_types = tuple(current)
+        self._reached_upstream_types.update(types)
 
     def add_reached_downstream_filter(self, types: Tuple[Type[Frame], ...]):
         """Add frame types to trigger the on_frame_reached_downstream event.
@@ -516,11 +512,7 @@ class PipelineTask(BasePipelineTask):
         Args:
             types: Tuple of frame types to add to downstream monitoring.
         """
-        if not types:
-            return
-        current = set(self._reached_downstream_types)
-        current.update(types)
-        self._reached_downstream_types = tuple(current)
+        self._reached_downstream_types.update(types)
 
     def has_finished(self) -> bool:
         """Check if the pipeline task has finished execution.
@@ -820,7 +812,7 @@ class PipelineTask(BasePipelineTask):
         pipeline to be stopped (e.g. EndTaskFrame) in which case we would send
         an EndFrame down the pipeline.
         """
-        if isinstance(frame, self._reached_upstream_types):
+        if isinstance(frame, tuple(self._reached_upstream_types)):
             await self._call_event_handler("on_frame_reached_upstream", frame)
 
         if isinstance(frame, EndTaskFrame):
@@ -859,7 +851,7 @@ class PipelineTask(BasePipelineTask):
         processors have handled the EndFrame and therefore we can exit the task
         cleanly.
         """
-        if isinstance(frame, self._reached_downstream_types):
+        if isinstance(frame, tuple(self._reached_downstream_types)):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
         if isinstance(frame, StartFrame):
