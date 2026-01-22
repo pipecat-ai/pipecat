@@ -298,7 +298,7 @@ def _setup_webrtc_routes(
 
         # Store session info immediately in memory, replicate the behavior expected on Pipecat Cloud
         session_id = str(uuid.uuid4())
-        active_sessions[session_id] = request_data
+        active_sessions[session_id] = request_data.get("body", {})
 
         result: StartBotResult = {"sessionId": session_id}
         if request_data.get("enableDefaultIceServers"):
@@ -331,7 +331,8 @@ def _setup_webrtc_routes(
                         pc_id=request_data.get("pc_id"),
                         restart_pc=request_data.get("restart_pc"),
                         request_data=request_data.get("request_data")
-                        or request_data.get("requestData"),
+                        or request_data.get("requestData")
+                        or active_session,
                     )
                     return await offer(webrtc_request, background_tasks)
                 elif request.method == HTTPMethod.PATCH.value:
