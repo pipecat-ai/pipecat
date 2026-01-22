@@ -226,6 +226,7 @@ class HumeSTSService(LLMService):
             )
 
         elif msg_type == "assistant_end":
+            logger.info(f"Assistant end for conversation id: {self.active_conversation_id}")
             self.active_conversation = False
             await self.push_frame(LLMFullResponseEndFrame())
             await self.push_frame(TTSStoppedFrame())
