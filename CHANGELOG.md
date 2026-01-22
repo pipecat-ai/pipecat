@@ -81,6 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an approximation of TTFB for Ultravox.
   (PR [#3268](https://github.com/pipecat-ai/pipecat/pull/3268))
 
+- Added `video_out_codec` parameter to `TransportParams` allowing configuration
+  of the preferred video codec (e.g., `"VP8"`, `"H264"`, `"H265"`) for video
+  output in `DailyTransport`.
+
 - Added a new `AudioContextTTSService` to the TTS service base classes. The
   `AudioContextWordTTSService` now inherits from `AudioContextTTSService` and
   `WebsocketWordTTSService`.
