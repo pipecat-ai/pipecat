@@ -5,9 +5,9 @@
 #
 
 """
-Example demonstrating Gnani STT service integration with Pipecat.
+Example demonstrating Inya STT service integration with Pipecat.
 
-This example shows how to use Gnani's multilingual speech-to-text service
+This example shows how to use Inya's multilingual speech-to-text service
 in a conversational AI pipeline with interruption support.
 """
 
@@ -28,7 +28,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.gnani.stt import GnaniSTTService
+from pipecat.services.inya.stt import InyaSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -66,18 +66,18 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info("Starting bot with Gnani STT")
+    logger.info("Starting bot with Inya STT")
 
-    # Initialize Gnani STT service with API credentials
+    # Initialize Inya STT service with API credentials
     # You can set the language to any supported Indian language
     from pipecat.transcriptions.language import Language
 
-    stt = GnaniSTTService(
-        api_key=os.getenv("GNANI_API_KEY"),
-        organization_id=os.getenv("GNANI_ORGANIZATION_ID"),
-        params=GnaniSTTService.InputParams(
+    stt = InyaSTTService(
+        api_key=os.getenv("INYA_API_KEY"),
+        organization_id=os.getenv("INYA_ORGANIZATION_ID"),
+        params=InyaSTTService.InputParams(
             language=Language.HI_IN,  # Hindi by default, change as needed
-            api_user_id=os.getenv("GNANI_USER_ID", "pipecat-user"),
+            api_user_id=os.getenv("INYA_USER_ID", "pipecat-user"),
         ),
     )
 
@@ -114,7 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # Gnani STT
+            stt,  # Inya STT
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
@@ -133,7 +133,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info("Client connected")
         # You can greet the user when they connect
-        # await task.queue_frames([TTSSpeakFrame("Hello! I'm using Gnani STT service. How can I help you?")])
+        # await task.queue_frames([TTSSpeakFrame("Hello! I'm using Inya STT service. How can I help you?")])
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

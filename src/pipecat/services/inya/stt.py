@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Gnani Speech-to-Text service implementation.
+"""Inya Speech-to-Text service implementation.
 
-This module provides integration with Gnani's multilingual STT API for speech-to-text
+This module provides integration with Inya's multilingual STT API for speech-to-text
 transcription using segmented audio processing.
 """
 
@@ -25,18 +25,18 @@ try:
     import aiohttp
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Gnani STT, you need to `pip install aiohttp`.")
+    logger.error("In order to use Inya STT, you need to `pip install aiohttp`.")
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_gnani_language(language: Language) -> Optional[str]:
-    """Convert a Language enum to Gnani's language code format.
+def language_to_inya_language(language: Language) -> Optional[str]:
+    """Convert a Language enum to Inya's language code format.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Gnani language code (e.g., 'en-IN', 'hi-IN'), or None if not supported.
+        The corresponding Inya language code (e.g., 'en-IN', 'hi-IN'), or None if not supported.
     """
     LANGUAGE_MAP = {
         # English (India)
@@ -74,10 +74,10 @@ def language_to_gnani_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
-class GnaniSTTService(SegmentedSTTService):
-    """Speech-to-text service using Gnani's multilingual STT API.
+class InyaSTTService(SegmentedSTTService):
+    """Speech-to-text service using Inya's multilingual STT API.
 
-    This service uses Gnani's REST API to perform speech-to-text transcription on audio
+    This service uses Inya's REST API to perform speech-to-text transcription on audio
     segments. It supports multiple Indian languages and inherits from SegmentedSTTService
     to handle audio buffering and speech detection.
 
@@ -96,7 +96,7 @@ class GnaniSTTService(SegmentedSTTService):
     """
 
     class InputParams(BaseModel):
-        """Configuration parameters for Gnani STT service.
+        """Configuration parameters for Inya STT service.
 
         Parameters:
             language: Language of the audio input. Defaults to Hindi (hi-IN).
@@ -118,12 +118,12 @@ class GnaniSTTService(SegmentedSTTService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
-        """Initialize the GnaniSTTService with API credentials and parameters.
+        """Initialize the InyaSTTService with API credentials and parameters.
 
         Args:
-            api_key: Gnani API key for authentication (X-API-Key-ID).
+            api_key: Inya API key for authentication (X-API-Key-ID).
             organization_id: Organization identifier (X-Organization-ID).
-            base_url: Base URL for the Gnani STT API. Defaults to production endpoint.
+            base_url: Base URL for the Inya STT API. Defaults to production endpoint.
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
             **kwargs: Additional arguments passed to SegmentedSTTService.
@@ -133,7 +133,7 @@ class GnaniSTTService(SegmentedSTTService):
             **kwargs,
         )
 
-        params = params or GnaniSTTService.InputParams()
+        params = params or InyaSTTService.InputParams()
 
         self._api_key = api_key
         self._organization_id = organization_id
@@ -152,20 +152,20 @@ class GnaniSTTService(SegmentedSTTService):
         """Check if the service can generate processing metrics.
 
         Returns:
-            True, as Gnani STT service supports metrics generation.
+            True, as Inya STT service supports metrics generation.
         """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert a Language enum to Gnani's service-specific language code.
+        """Convert a Language enum to Inya's service-specific language code.
 
         Args:
             language: The language to convert.
 
         Returns:
-            The Gnani-specific language code, or None if not supported.
+            The Inya-specific language code, or None if not supported.
         """
-        return language_to_gnani_language(language)
+        return language_to_inya_language(language)
 
     async def set_language(self, language: Language):
         """Set the transcription language.
@@ -174,11 +174,11 @@ class GnaniSTTService(SegmentedSTTService):
             language: The language to use for speech-to-text transcription.
         """
         logger.info(f"Switching STT language to: [{language}]")
-        gnani_language = self.language_to_service_language(language)
-        if gnani_language:
-            self._settings["language"] = gnani_language
+        inya_language = self.language_to_service_language(language)
+        if inya_language:
+            self._settings["language"] = inya_language
         else:
-            logger.warning(f"Language {language} not supported by Gnani STT, keeping current language")
+            logger.warning(f"Language {language} not supported by Inya STT, keeping current language")
 
     @traced_stt
     async def _handle_transcription(
@@ -189,7 +189,7 @@ class GnaniSTTService(SegmentedSTTService):
         await self.stop_processing_metrics()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribe an audio segment using Gnani's STT API.
+        """Transcribe an audio segment using Inya's STT API.
 
         Args:
             audio: Raw audio bytes in WAV format (already converted by base class).
@@ -244,7 +244,7 @@ class GnaniSTTService(SegmentedSTTService):
                                 await self._handle_transcription(
                                     transcript, True, self._settings["language"]
                                 )
-                                logger.debug(f"Gnani transcription: [{transcript}]")
+                                logger.debug(f"Inya transcription: [{transcript}]")
 
                                 # Try to convert language code to Language enum
                                 try:
@@ -268,19 +268,19 @@ class GnaniSTTService(SegmentedSTTService):
                                     result=result,
                                 )
                             else:
-                                logger.debug("Gnani returned empty transcript")
+                                logger.debug("Inya returned empty transcript")
                         else:
-                            error_msg = f"Gnani API returned success=false: {result}"
+                            error_msg = f"Inya API returned success=false: {result}"
                             logger.error(error_msg)
                             yield ErrorFrame(error=error_msg)
                     else:
                         error_text = await response.text()
-                        error_msg = f"Gnani API error (status {response.status}): {error_text}"
+                        error_msg = f"Inya API error (status {response.status}): {error_text}"
                         logger.error(error_msg)
                         yield ErrorFrame(error=error_msg)
 
         except aiohttp.ClientError as e:
-            error_msg = f"Network error calling Gnani API: {e}"
+            error_msg = f"Network error calling Inya API: {e}"
             logger.error(error_msg)
             yield ErrorFrame(error=error_msg)
         except Exception as e:

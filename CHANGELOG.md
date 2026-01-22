@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `GnaniSTTService` for speech-to-text transcription using Gnani's multilingual AI-powered transcription API. Gnani specializes in Indian languages and provides high-quality transcription for 10+ regional languages including Hindi, Tamil, Telugu, Kannada, Gujarati, Marathi, Bengali, Malayalam, and Punjabi. The service extends `SegmentedSTTService` for REST API-based audio processing with VAD support, includes dynamic language switching, metrics support, and proper error handling.
+- Added `InyaSTTService` for speech-to-text transcription using Inya's multilingual AI-powered transcription API. Inya specializes in Indian languages and provides high-quality transcription for 10+ regional languages including Hindi, Tamil, Telugu, Kannada, Gujarati, Marathi, Bengali, Malayalam, and Punjabi. The service extends `SegmentedSTTService` for REST API-based audio processing with VAD support, includes dynamic language switching, metrics support, and proper error handling.
 
 ## [0.0.100] - 2026-01-20
 
