@@ -1,6 +1,6 @@
-# Gnani STT Service
+# Inya STT Service
 
-Speech-to-Text (STT) service integration for Gnani's multilingual transcription API, specializing in Indian languages.
+Speech-to-Text (STT) service integration for Inya's multilingual transcription API, specializing in Indian languages.
 
 ## Features
 
@@ -31,28 +31,28 @@ pip install aiohttp
 
 ## Setup
 
-Get your API credentials from Gnani and set environment variables:
+Get your API credentials from Inya and set environment variables:
 
 ```bash
-export GNANI_API_KEY="your-api-key"
-export GNANI_ORGANIZATION_ID="your-org-id"
-export GNANI_USER_ID="your-user-id"  # Optional
+export INYA_API_KEY="your-api-key"
+export INYA_ORGANIZATION_ID="your-org-id"
+export INYA_USER_ID="your-user-id"  # Optional
 ```
 
 ## Usage with Pipecat Pipeline
 
 ```python
 import os
-from pipecat.services.gnani import GnaniSTTService
+from pipecat.services.inya import InyaSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.pipeline.pipeline import Pipeline
 
-stt = GnaniSTTService(
-    api_key=os.getenv("GNANI_API_KEY"),
-    organization_id=os.getenv("GNANI_ORGANIZATION_ID"),
-    params=GnaniSTTService.InputParams(
+stt = InyaSTTService(
+    api_key=os.getenv("INYA_API_KEY"),
+    organization_id=os.getenv("INYA_ORGANIZATION_ID"),
+    params=InyaSTTService.InputParams(
         language=Language.HI_IN,  # Hindi
-        api_user_id=os.getenv("GNANI_USER_ID", "pipecat-user"),
+        api_user_id=os.getenv("INYA_USER_ID", "pipecat-user"),
     ),
 )
 
@@ -74,14 +74,14 @@ See the foundational example for a complete working bot:
 ```bash
 # Set up environment
 cd examples/foundational
-cp env.gnani.example .env
+cp env.inya.example .env
 # Edit .env with your credentials
 
 # Install dependencies
 pip install pipecat-ai[daily,openai,cartesia]
 
 # Run the bot with Daily transport
-python 07x-interruptible-gnani.py --transport daily
+python 07x-interruptible-inya.py --transport daily
 ```
 
 ## Dynamic Language Switching
