@@ -7,6 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- towncrier release notes start -->
 
+## [0.0.100] - 2026-01-20
+
+### Added
+
+- Added Hathora service to support Hathora-hosted TTS and STT models (only
+  non-streaming)
+  (PR [#3169](https://github.com/pipecat-ai/pipecat/pull/3169))
+
+- Added `CambTTSService`, using Camb.ai's TTS integration with MARS models
+  (mars-flash, mars-pro, mars-instruct) for high-quality text-to-speech
+  synthesis.
+  (PR [#3349](https://github.com/pipecat-ai/pipecat/pull/3349))
+
+- Added the `additional_headers` param to `WebsocketClientParams`, allowing
+  `WebsocketClientTransport` to send custom headers on connect, for cases such
+  as authentication.
+  (PR [#3461](https://github.com/pipecat-ai/pipecat/pull/3461))
+
+- Added `UserIdleController` for detecting user idle state, integrated into
+  `LLMUserAggregator` and `UserTurnProcessor` via optional `user_idle_timeout`
+  parameter. Emits `on_user_turn_idle` event for application-level handling.
+  Deprecated `UserIdleProcessor` in favor of the new compositional approach.
+  (PR [#3482](https://github.com/pipecat-ai/pipecat/pull/3482))
+
+- Added `on_user_mute_started` and `on_user_mute_stopped` event handlers to
+  `LLMUserAggregator` for tracking user mute state changes.
+  (PR [#3490](https://github.com/pipecat-ai/pipecat/pull/3490))
+
+### Changed
+
+- Enhanced interruption handling in `AsyncAITTSService` by supporting
+  multi-context WebSocket sessions for more robust context management.
+  (PR [#3287](https://github.com/pipecat-ai/pipecat/pull/3287))
+
+- Throttle `UserSpeakingFrame` to broadcast at most every 200ms instead of on
+  every audio chunk, reducing frame processing overhead during user speech.
+  (PR [#3483](https://github.com/pipecat-ai/pipecat/pull/3483))
+
+### Deprecated
+
+- For consistency with other package names, we just deprecated
+  `pipecat.turns.mute` (introduced in Pipecat 0.0.99) in favor of
+  `pipecat.turns.user_mute`.
+  (PR [#3479](https://github.com/pipecat-ai/pipecat/pull/3479))
+
+### Fixed
+
+- Corrected TTFB metric calculation in `AsyncAIHttpTTSService`.
+  (PR [#3287](https://github.com/pipecat-ai/pipecat/pull/3287))
+
+- Fixed an issue where the "bot-llm-text" RTVI event would not fire for
+  realtime (speech-to-speech) services:
+
+    - `AWSNovaSonicLLMService`
+    - `GeminiLiveLLMService`
+    - `OpenAIRealtimeLLMService`
+    - `GrokRealtimeLLMService`
+
+  The issue was that these services weren't pushing `LLMTextFrame`s. Now
+  they  do.
+  (PR [#3446](https://github.com/pipecat-ai/pipecat/pull/3446))
+
+- Fixed an issue where `on_user_turn_stop_timeout` could fire while a user is
+  talking when using `ExternalUserTurnStrategies`.
+  (PR [#3454](https://github.com/pipecat-ai/pipecat/pull/3454))
+
+- Fixed an issue where user turn start strategies were not being reset after a
+  user turn started, causing incorrect strategy behavior.
+  (PR [#3455](https://github.com/pipecat-ai/pipecat/pull/3455))
+
+- Fixed `MinWordsUserTurnStartStrategy` to not aggregate transcriptions,
+  preventing incorrect turn starts when words are spoken with pauses between
+  them.
+  (PR [#3462](https://github.com/pipecat-ai/pipecat/pull/3462))
+
+- Fixed an issue where Grok Realtime would error out when running with
+  SmallWebRTC transport.
+  (PR [#3480](https://github.com/pipecat-ai/pipecat/pull/3480))
+
+- Fixed a `Mem0MemoryService` issue where passing `async_mode: true` was
+  causing an error. See
+  https://docs.mem0.ai/platform/features/async-mode-default-change.
+  (PR [#3484](https://github.com/pipecat-ai/pipecat/pull/3484))
+
+- Fixed `AWSNovaSonicLLMService.reset_conversation()`, which would previously
+  error out. Now it successfully reconnects and "rehydrates" from the context
+  object.
+  (PR [#3486](https://github.com/pipecat-ai/pipecat/pull/3486))
+
+- Fixed `AzureTTSService` transcript formatting issues:
+    - Punctuation now appears without extra spaces (e.g., "Hello!" instead of
+      "Hello !")
+    - CJK languages (Chinese, Japanese, Korean) no longer have unwanted spaces
+      between characters
+  (PR [#3489](https://github.com/pipecat-ai/pipecat/pull/3489))
+
+- Fixed an issue where `UninterruptibleFrame` frames would not be preserved in
+  some cases.
+  (PR [#3494](https://github.com/pipecat-ai/pipecat/pull/3494))
+
+- Fixed memory leak in `LiveKitTransport` when `video_in_enabled` is `False`.
+  (PR [#3499](https://github.com/pipecat-ai/pipecat/pull/3499))
+
+- Fixed an issue in `AIService` where unhandled exceptions in `start()`,
+  `stop()`, or `cancel()` implementations would prevent `process_frame()` to
+  continue and therefore `StartFrame`, `EndFrame`, or `CancelFrame` from being
+  pushed downstream, causing the pipeline to not start or stop properly.
+  (PR [#3503](https://github.com/pipecat-ai/pipecat/pull/3503))
+
+- Moved `NVIDIATTSService` and `NVIDIASTTService` client initialization from
+  constructor to `start()` for better error handling.
+  (PR [#3504](https://github.com/pipecat-ai/pipecat/pull/3504))
+
+- Optimized `NVIDIATTSService` to process incoming audio frames immediately.
+  (PR [#3509](https://github.com/pipecat-ai/pipecat/pull/3509))
+
+- Optimized `NVIDIASTTService` by removing unnecessary queue and task.
+  (PR [#3509](https://github.com/pipecat-ai/pipecat/pull/3509))
+
+- Fixed a `CambTTSService` issue where client was being initialized in the
+  constructor which wouldn't allow for proper Pipeline error handling.
+  (PR [#3511](https://github.com/pipecat-ai/pipecat/pull/3511))
+
 ## [0.0.99] - 2026-01-13
 
 ### Added
@@ -80,10 +203,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added an approximation of TTFB for Ultravox.
   (PR [#3268](https://github.com/pipecat-ai/pipecat/pull/3268))
-
-- Added `video_out_codec` parameter to `TransportParams` allowing configuration
-  of the preferred video codec (e.g., `"VP8"`, `"H264"`, `"H265"`) for video
-  output in `DailyTransport`.
 
 - Added a new `AudioContextTTSService` to the TTS service base classes. The
   `AudioContextWordTTSService` now inherits from `AudioContextTTSService` and
