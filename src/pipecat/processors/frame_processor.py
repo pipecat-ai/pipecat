@@ -781,14 +781,14 @@ class FrameProcessor(BaseObject):
             frame_cls: The class of the frame to be broadcasted.
             **kwargs: Keyword arguments to be passed to the frame's constructor.
         """
-        await self.push_frame(frame_cls(**kwargs))
-        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
+        await self.push_frame(frame_cls(**deepcopy(kwargs)))
+        await self.push_frame(frame_cls(**deepcopy(kwargs)), FrameDirection.UPSTREAM)
 
     async def broadcast_frame_instance(self, frame: Frame):
         """Broadcasts a frame instance upstream and downstream.
 
-        This method extracts the class and init fields from the given frame
-        instance and creates two new instances to push upstream and downstream.
+        This method creates two new frame instances copying all fields from the
+        original frame except `id` and `name`, which get fresh values.
 
         Args:
             frame: The frame instance to broadcast.
