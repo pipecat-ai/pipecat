@@ -325,14 +325,12 @@ def _setup_webrtc_routes(
             try:
                 request_data = await request.json()
                 if request.method == HTTPMethod.POST.value:
-                    webrtc_request = SmallWebRTCRequest(
-                        sdp=request_data["sdp"],
-                        type=request_data["type"],
-                        pc_id=request_data.get("pc_id"),
-                        restart_pc=request_data.get("restart_pc"),
-                        request_data=request_data.get("request_data")
-                        or request_data.get("requestData"),
-                    )
+                    request_data = await request.json()
+                    webrtc_request = SmallWebRTCRequest.model_validate(request_data)
+                    
+                    if webrtc_request.request_data is None:
+                        webrtc_request.request_data = active_session
+                    
                     return await offer(webrtc_request, background_tasks)
                 elif request.method == HTTPMethod.PATCH.value:
                     patch_request = SmallWebRTCPatchRequest(
