@@ -149,13 +149,19 @@ class AICVADAnalyzer(VADAnalyzer):
         return int(self.sample_rate * 0.01) if self.sample_rate > 0 else 160
 
     def voice_confidence(self, buffer: bytes) -> float:
-        """Calculate voice activity confidence for the given audio buffer.
+        """Return voice activity detection result for the given audio buffer.
+
+        Note:
+            The AIC SDK provides binary speech detection (not a probability score).
+            This method returns 1.0 when speech is detected and 0.0 otherwise,
+            rather than a true confidence value.
 
         Args:
-            buffer: Audio buffer to analyze.
+            buffer: Audio buffer (unused - AIC VAD state is updated internally
+                by the enhancement pipeline).
 
         Returns:
-            Voice confidence score is 0.0 or 1.0.
+            1.0 if speech is detected, 0.0 otherwise.
         """
         # Ensure VAD context exists (filter might have started since last call)
         self._ensure_vad_context_initialized()
