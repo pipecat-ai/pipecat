@@ -1674,7 +1674,7 @@ class GeminiLiveLLMService(LLMService):
         # start a timeout task to flush it later
         if self._user_transcription_buffer:
             self._transcription_timeout_task = self.create_task(
-                self._transcription_timeout_handler()
+                await self._transcription_timeout_handler()
             )
 
     async def _handle_msg_output_transcription(self, message: LiveServerMessage):
