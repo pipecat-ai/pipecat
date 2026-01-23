@@ -1757,7 +1757,7 @@ class BotInterruptionFrame(InterruptionTaskFrame):
 
 
 @dataclass
-class EndFrame(ControlFrame):
+class EndFrame(ControlFrame, UninterruptibleFrame):
     """Frame indicating pipeline has ended and should shut down.
 
     Indicates that a pipeline has ended and frame processors and pipelines

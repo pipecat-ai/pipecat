@@ -89,20 +89,14 @@ class MockOutputTransport(FrameProcessor):
 
         if isinstance(frame, TTSStartedFrame):
             await self.push_frame(BotStartedSpeakingFrame())
-            await self.push_frame(
-                BotStartedSpeakingFrame(), direction=FrameDirection.UPSTREAM
-            )
+            await self.push_frame(BotStartedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
         elif isinstance(frame, TTSAudioRawFrame):
             if self._emit_bot_speaking:
                 await self.push_frame(BotSpeakingFrame())
-                await self.push_frame(
-                    BotSpeakingFrame(), direction=FrameDirection.UPSTREAM
-                )
+                await self.push_frame(BotSpeakingFrame(), direction=FrameDirection.UPSTREAM)
         elif isinstance(frame, TTSStoppedFrame):
             await self.push_frame(BotStoppedSpeakingFrame())
-            await self.push_frame(
-                BotStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM
-            )
+            await self.push_frame(BotStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
 
         await self.push_frame(frame, direction)
 

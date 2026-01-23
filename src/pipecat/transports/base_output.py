@@ -785,11 +785,9 @@ class BaseOutputTransport(FrameProcessor):
                     # Break out if we've failed too many times consecutively
                     if consecutive_failures >= max_consecutive_failures:
                         logger.warning(
-                            f"{self} Breaking out of audio task handler after {consecutive_failures} consecutive failures"
+                            f"{self} Cancelling task after {consecutive_failures} consecutive failures"
                         )
-                        await self._transport.push_frame(
-                            CancelTaskFrame(), FrameDirection.UPSTREAM
-                        )
+                        await self._transport.push_frame(CancelTaskFrame(), FrameDirection.UPSTREAM)
                         break
 
                     # Sleep before retrying
