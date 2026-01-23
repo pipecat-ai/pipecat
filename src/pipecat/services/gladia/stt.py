@@ -385,7 +385,6 @@ class GladiaSTTService(WebsocketSTTService):
         Yields:
             None (processing is handled asynchronously via WebSocket).
         """
-        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
         # Add audio to buffer
@@ -513,7 +512,6 @@ class GladiaSTTService(WebsocketSTTService):
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[str] = None
     ):
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
     async def _on_speech_started(self):

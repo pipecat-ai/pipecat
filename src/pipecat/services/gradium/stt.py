@@ -122,7 +122,6 @@ class GradiumSTTService(WebsocketSTTService):
             None (processing handled via WebSocket messages).
         """
         self._audio_buffer.extend(audio)
-        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
         while len(self._audio_buffer) >= self._chunk_size_bytes:
