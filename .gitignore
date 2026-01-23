@@ -62,3 +62,8 @@ docs/api/api
 
 # Pipecat
 whisker_setup.py
+
+# Claude Code - exclude temporary files but keep configuration
+.claude/.claude-cache/
+.claude/**/*.tmp
+.claude/**/*.log

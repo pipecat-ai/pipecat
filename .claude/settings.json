@@ -1,0 +1,81 @@
+{
+  "description": "Pipecat - Open-source Python framework for real-time voice and multimodal AI agents",
+  "conventions": {
+    "language": "Python",
+    "version": ">=3.10",
+    "package_manager": "uv",
+    "code_style": "Google docstrings, Ruff formatting",
+    "test_framework": "pytest",
+    "async": true
+  },
+  "project_info": {
+    "type": "python_library",
+    "framework": "pipecat",
+    "main_source": "src/pipecat",
+    "examples": "examples/",
+    "tests": "tests/",
+    "docs": "docs/"
+  },
+  "commands": {
+    "install": "uv sync --group dev --all-extras --no-extra gstreamer --no-extra krisp --no-extra local",
+    "test": "uv run pytest",
+    "test_file": "uv run pytest {file}",
+    "lint": "uv run ruff check .",
+    "lint_fix": "uv run ruff check --fix .",
+    "format": "uv run ruff format .",
+    "format_check": "uv run ruff format --check .",
+    "type_check": "uv run pyright",
+    "pre_commit": "uv run pre-commit run --all-files",
+    "build": "uv build",
+    "changelog": "uv run towncrier build --version {version}"
+  },
+  "coding_standards": [
+    "Use Google-style docstrings for all public classes and methods",
+    "Follow Ruff linting rules (see pyproject.toml)",
+    "Maintain type hints for all function signatures",
+    "Use async/await patterns consistently",
+    "Keep line length at 100 characters maximum",
+    "Use dataclasses with type annotations for configuration classes",
+    "Prefer composition over inheritance where appropriate",
+    "Write comprehensive pytest tests with asyncio support",
+    "Document event handlers in class docstrings with Example:: sections"
+  ],
+  "file_patterns": {
+    "source_files": "src/pipecat/**/*.py",
+    "test_files": "tests/**/*.py",
+    "example_files": "examples/**/*.py",
+    "config_files": "pyproject.toml"
+  },
+  "important_files": [
+    "pyproject.toml - Project configuration and dependencies",
+    "CONTRIBUTING.md - Contributing guidelines",
+    "README.md - Project overview and quick start",
+    "src/pipecat/__init__.py - Main package exports",
+    "src/pipecat/frames/frames.py - Core frame definitions",
+    "src/pipecat/processors/frame_processor.py - Base processor class"
+  ],
+  "documentation": {
+    "style": "Google",
+    "build_command": "cd docs && make html",
+    "skip_private_methods": true,
+    "skip_simple_dunders": true,
+    "require_module_docstrings": true,
+    "require_class_docstrings": true,
+    "require_init_docstrings": true
+  },
+  "git": {
+    "main_branch": "main",
+    "commit_style": "Conventional Commits",
+    "pre_commit_hooks": true
+  },
+  "ai_assistance_notes": [
+    "This project is a real-time voice and multimodal AI framework",
+    "Core concepts: Frames (data units), Processors (processing units), Pipelines (chains of processors)",
+    "Heavy use of async/await for real-time processing",
+    "WebRTC and WebSocket transports for audio/video streaming",
+    "Integration with many AI services (OpenAI, Anthropic, Deepgram, ElevenLabs, etc.)",
+    "Frame-based architecture allows composable, modular pipeline construction",
+    "Tests use pytest-asyncio for async test support",
+    "Pre-commit hooks enforce code quality (run 'uv run pre-commit install')"
+  ]
+}
