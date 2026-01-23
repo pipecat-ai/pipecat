@@ -13,7 +13,7 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional
-
+from pydantic import BaseModel, Field
 from aiortc.sdp import candidate_from_sdp
 from fastapi import HTTPException
 from loguru import logger
@@ -22,7 +22,7 @@ from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConn
 
 
 @dataclass
-class SmallWebRTCRequest:
+class SmallWebRTCRequest(BaseModel):
     """Small WebRTC transport session arguments for the runner.
 
     Parameters:
@@ -37,7 +37,10 @@ class SmallWebRTCRequest:
     type: str
     pc_id: Optional[str] = None
     restart_pc: Optional[bool] = None
-    request_data: Optional[Any] = None
+    request_data: Optional[Any] = Field(None, alias="requestData")
+
+    class Config:
+        populate_by_name = True
 
     @classmethod
     def from_dict(cls, data: dict):
