@@ -20,8 +20,8 @@ class AICVADAnalyzer(VADAnalyzer):
 
     The analyzer can be constructed before the AIC Processor exists. Once the filter has
     started and the Processor is available, the provided factory will succeed and the
-    VadContext will be obtained. We then use the context's is_speech_detected() state
-    to derive confidence values.
+    VadContext will be obtained. The context's is_speech_detected() boolean state is
+    then mapped to 1.0 (speech) or 0.0 (no speech) to satisfy the VADAnalyzer interface.
 
     AIC VAD runtime parameters:
       - speech_hold_duration:
