@@ -467,10 +467,15 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                     try:
                                         # Get LLM invocation params which includes system_instruction
                                         params = adapter.get_llm_invocation_params(context)
-                                        if isinstance(params, dict) and "system_instruction" in params:
+                                        if (
+                                            isinstance(params, dict)
+                                            and "system_instruction" in params
+                                        ):
                                             system_message = params["system_instruction"]
                                     except Exception as e:
-                                        logging.debug(f"Could not extract system instruction from adapter: {e}")
+                                        logging.debug(
+                                            f"Could not extract system instruction from adapter: {e}"
+                                        )
                             elif hasattr(context, "system"):
                                 system_message = context.system
                             elif hasattr(context, "system_message"):
