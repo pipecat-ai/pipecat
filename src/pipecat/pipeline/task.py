@@ -15,7 +15,7 @@ import asyncio
 import importlib.util
 import os
 from pathlib import Path
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,6 +49,7 @@ from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.processors.frameworks.rtvi import RTVIObserverParams, RTVIProcessor
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
@@ -225,9 +226,12 @@ class PipelineTask(BasePipelineTask):
         conversation_id: Optional[str] = None,
         enable_tracing: bool = False,
         enable_turn_tracking: bool = True,
+        enable_rtvi: bool = True,
         idle_timeout_frames: Tuple[Type[Frame], ...] = (BotSpeakingFrame, UserSpeakingFrame),
         idle_timeout_secs: Optional[float] = IDLE_TIMEOUT_SECS,
         observers: Optional[List[BaseObserver]] = None,
+        rtvi_processor: Optional[RTVIProcessor] = None,
+        rtvi_observer_params: Optional[RTVIObserverParams] = None,
         task_manager: Optional[BaseTaskManager] = None,
     ):
         """Initialize the PipelineTask.
@@ -244,6 +248,7 @@ class PipelineTask(BasePipelineTask):
             check_dangling_tasks: Whether to check for processors' tasks finishing properly.
             clock: Clock implementation for timing operations.
             conversation_id: Optional custom ID for the conversation.
+            enable_rtvi: Whether to automatically add RTVI support to the pipeline.
             enable_tracing: Whether to enable tracing.
             enable_turn_tracking: Whether to enable turn tracking.
             idle_timeout_frames: A tuple with the frames that should trigger an idle
@@ -252,6 +257,8 @@ class PipelineTask(BasePipelineTask):
                 None. If a pipeline is idle the pipeline task will be cancelled
                 automatically.
             observers: List of observers for monitoring pipeline execution.
+            rtvi_observer_params: The RTVI observer parameter to use if RTVI is enabled.
+            rtvi_processor: The RTVI processor to add if RTVI is enabled.
             task_manager: Optional task manager for handling asyncio tasks.
         """
         super().__init__()
@@ -306,6 +313,16 @@ class PipelineTask(BasePipelineTask):
         self._heartbeat_push_task: Optional[asyncio.Task] = None
         self._heartbeat_monitor_task: Optional[asyncio.Task] = None
 
+        # RTVI support
+        self._rtvi = None
+        if enable_rtvi:
+            self._rtvi = rtvi_processor or RTVIProcessor()
+            observers.append(self._rtvi.create_rtvi_observer(params=rtvi_observer_params))
+
+            @self.rtvi.event_handler("on_client_ready")
+            async def on_client_ready(rtvi: RTVIProcessor):
+                await rtvi.set_bot_ready()
+
         # This is the idle event. When selected frames are pushed from any
         # processor we consider the pipeline is not idle. We use an observer
         # which will be listening any part of the pipeline.
@@ -335,7 +352,8 @@ class PipelineTask(BasePipelineTask):
         # allows us to receive and react to downstream frames.
         source = PipelineSource(self._source_push_frame, name=f"{self}::Source")
         sink = PipelineSink(self._sink_push_frame, name=f"{self}::Sink")
-        self._pipeline = Pipeline([pipeline], source=source, sink=sink)
+        processors = [self._rtvi, pipeline] if self._rtvi else [pipeline]
+        self._pipeline = Pipeline(processors, source=source, sink=sink)
 
         # The task observer acts as a proxy to the provided observers. This way,
         # we only need to pass a single observer (using the StartFrame) which
@@ -348,8 +366,8 @@ class PipelineTask(BasePipelineTask):
         # in. This is mainly for efficiency reason because each event handler
         # creates a task and most likely you only care about one or two frame
         # types.
-        self._reached_upstream_types: Tuple[Type[Frame], ...] = ()
-        self._reached_downstream_types: Tuple[Type[Frame], ...] = ()
+        self._reached_upstream_types: Set[Type[Frame]] = set()
+        self._reached_downstream_types: Set[Type[Frame]] = set()
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
         self._register_event_handler("on_idle_timeout")
@@ -398,6 +416,35 @@ class PipelineTask(BasePipelineTask):
         """
         return self._turn_trace_observer
 
+    @property
+    def rtvi(self) -> RTVIProcessor:
+        """Get the RTVI processor if RTVI is enabled.
+
+        Returns:
+            The RTVI processor added to the pipeline when RTVI is enabled.
+        """
+        if not self._rtvi:
+            raise Exception(f"{self} RTVI is not enabled.")
+        return self._rtvi
+
+    @property
+    def reached_upstream_types(self) -> Tuple[Type[Frame], ...]:
+        """Get the currently configured upstream frame type filters.
+
+        Returns:
+            Tuple of frame types that trigger the on_frame_reached_upstream event.
+        """
+        return tuple(self._reached_upstream_types)
+
+    @property
+    def reached_downstream_types(self) -> Tuple[Type[Frame], ...]:
+        """Get the currently configured downstream frame type filters.
+
+        Returns:
+            Tuple of frame types that trigger the on_frame_reached_downstream event.
+        """
+        return tuple(self._reached_downstream_types)
+
     def event_handler(self, event_name: str):
         """Decorator for registering event handlers.
 
@@ -441,7 +488,7 @@ class PipelineTask(BasePipelineTask):
         Args:
             types: Tuple of frame types to monitor for upstream events.
         """
-        self._reached_upstream_types = types
+        self._reached_upstream_types = set(types)
 
     def set_reached_downstream_filter(self, types: Tuple[Type[Frame], ...]):
         """Set which frame types trigger the on_frame_reached_downstream event.
@@ -449,7 +496,23 @@ class PipelineTask(BasePipelineTask):
         Args:
             types: Tuple of frame types to monitor for downstream events.
         """
-        self._reached_downstream_types = types
+        self._reached_downstream_types = set(types)
+
+    def add_reached_upstream_filter(self, types: Tuple[Type[Frame], ...]):
+        """Add frame types to trigger the on_frame_reached_upstream event.
+
+        Args:
+            types: Tuple of frame types to add to upstream monitoring.
+        """
+        self._reached_upstream_types.update(types)
+
+    def add_reached_downstream_filter(self, types: Tuple[Type[Frame], ...]):
+        """Add frame types to trigger the on_frame_reached_downstream event.
+
+        Args:
+            types: Tuple of frame types to add to downstream monitoring.
+        """
+        self._reached_downstream_types.update(types)
 
     def has_finished(self) -> bool:
         """Check if the pipeline task has finished execution.
@@ -749,7 +812,7 @@ class PipelineTask(BasePipelineTask):
         pipeline to be stopped (e.g. EndTaskFrame) in which case we would send
         an EndFrame down the pipeline.
         """
-        if isinstance(frame, self._reached_upstream_types):
+        if isinstance(frame, tuple(self._reached_upstream_types)):
             await self._call_event_handler("on_frame_reached_upstream", frame)
 
         if isinstance(frame, EndTaskFrame):
@@ -788,7 +851,7 @@ class PipelineTask(BasePipelineTask):
         processors have handled the EndFrame and therefore we can exit the task
         cleanly.
         """
-        if isinstance(frame, self._reached_downstream_types):
+        if isinstance(frame, tuple(self._reached_downstream_types)):
             await self._call_event_handler("on_frame_reached_downstream", frame)
 
         if isinstance(frame, StartFrame):

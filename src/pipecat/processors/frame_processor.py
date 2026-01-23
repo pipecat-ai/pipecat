@@ -12,7 +12,9 @@ management, and frame flow control mechanisms.
 """
 
 import asyncio
+import dataclasses
 import traceback
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
@@ -783,8 +785,40 @@ class FrameProcessor(BaseObject):
             frame_cls: The class of the frame to be broadcasted.
             **kwargs: Keyword arguments to be passed to the frame's constructor.
         """
-        await self.push_frame(frame_cls(**kwargs))
-        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
+        await self.push_frame(frame_cls(**deepcopy(kwargs)))
+        await self.push_frame(frame_cls(**deepcopy(kwargs)), FrameDirection.UPSTREAM)
+
+    async def broadcast_frame_instance(self, frame: Frame):
+        """Broadcasts a frame instance upstream and downstream.
+
+        This method creates two new frame instances copying all fields from the
+        original frame except `id` and `name`, which get fresh values.
+
+        Args:
+            frame: The frame instance to broadcast.
+
+        Note:
+            Prefer using `broadcast_frame()` when possible, as it is more
+            efficient. This method should only be used when you are not the
+            creator of the frame and need to broadcast an existing instance.
+        """
+        frame_cls = type(frame)
+        init_fields = {f.name: getattr(frame, f.name) for f in dataclasses.fields(frame) if f.init}
+        extra_fields = {
+            f.name: getattr(frame, f.name)
+            for f in dataclasses.fields(frame)
+            if not f.init and f.name not in ("id", "name")
+        }
+
+        new_frame = frame_cls(**deepcopy(init_fields))
+        for k, v in deepcopy(extra_fields).items():
+            setattr(new_frame, k, v)
+        await self.push_frame(new_frame)
+
+        new_frame = frame_cls(**deepcopy(init_fields))
+        for k, v in deepcopy(extra_fields).items():
+            setattr(new_frame, k, v)
+        await self.push_frame(new_frame, FrameDirection.UPSTREAM)
 
     async def __start(self, frame: StartFrame):
         """Handle the start frame to initialize processor state.
