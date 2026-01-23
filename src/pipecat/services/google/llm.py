@@ -828,21 +828,24 @@ class GoogleLLMService(LLMService):
         messages = []
         system = []
         tools = []
+        tool_config = None
         if isinstance(context, LLMContext):
             adapter = self.get_llm_adapter()
             params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
             messages = params["messages"]
             system = params["system_instruction"]
             tools = params["tools"]
+            tool_config = params["tool_config"]
         else:
             context = GoogleLLMContext.upgrade_to_google(context)
             messages = context.messages
             system = getattr(context, "system_message", None)
             tools = context.tools or []
+            tool_config = context.tool_config
 
         # Build generation config using the same method as streaming
         generation_params = self._build_generation_params(
-            system_instruction=system, tools=tools if tools else None
+            system_instruction=system, tools=tools if tools else None, tool_config=tool_config
         )
 
         generation_config = GenerateContentConfig(**generation_params)
@@ -938,7 +941,9 @@ class GoogleLLMService(LLMService):
         elif self._tools:
             tools = self._tools
         tool_config = None
-        if self._tool_config:
+        if params_from_context["tool_config"]:
+            tool_config = params_from_context["tool_config"]
+        elif self._tool_config:
             tool_config = self._tool_config
 
         # Build generation parameters
@@ -969,6 +974,7 @@ class GoogleLLMService(LLMService):
             messages=context.messages,
             system_instruction=context.system_message,
             tools=context.tools,
+            tool_config=context.tool_config,
         )
 
         return await self._stream_content(params)
