@@ -348,7 +348,7 @@ class OutputGate(FrameProcessor):
         await super().process_frame(frame, direction)
 
         # We must not block system frames.
-        if isinstance(frame, SystemFrame):
+        if isinstance(frame, (SystemFrame, EndFrame)):
             if isinstance(frame, StartFrame):
                 await self._start()
             if isinstance(frame, (EndFrame, CancelFrame)):
