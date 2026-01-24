@@ -551,8 +551,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            # Reset finalize state for new utterance
-            self.set_finalize_pending(False)
             # Start metrics when user starts speaking
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
@@ -560,8 +558,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             if self._params.commit_strategy == CommitStrategy.MANUAL:
                 if self._websocket and self._websocket.state is State.OPEN:
                     try:
-                        # Mark that the next committed transcript should be finalized
-                        self.set_finalize_pending(True)
                         commit_message = {
                             "message_type": "input_audio_chunk",
                             "audio_base_64": "",
