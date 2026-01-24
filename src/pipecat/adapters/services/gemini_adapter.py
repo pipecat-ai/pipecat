@@ -143,7 +143,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
     def to_provider_tool_choice_format(
         self, tool_choice: LLMContextToolChoice | NotGiven
-    ) -> Optional[Any]:
+    ) -> ToolConfig | NotGiven:
         """Convert standard tool choice to Gemini tool config.
 
         Args:
