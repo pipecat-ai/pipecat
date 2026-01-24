@@ -49,7 +49,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         """
         super().__init__(**kwargs)
 
-        self._log_data = env_truthy("SMART_TURN_LOG_DATA", default=False)
+        self._log_data = env_truthy("PIPECAT_SMART_TURN_LOG_DATA", default=False)
 
         if not smart_turn_model_path:
             # Load bundled model
