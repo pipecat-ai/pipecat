@@ -1,15 +1,15 @@
 """
-Genesys AudioHook WebSocket protocol serializer for Pipecat.
+Use with Genesys Audio Connector to connect Genesys Cloud Contact Center with Pipecat pipelines.
 
-This serializer implements the Genesys AudioHook protocol for bidirectional
-audio streaming between Pipecat pipelines and Genesys Cloud contact center.
+This connector implements the Genesys AudioHook protocol for bidirectional
+audio streaming between Genesys Cloud contact center and Pipecat pipelines.
 
 Protocol Reference:
 - https://developer.genesys.cloud/devapps/audiohook
 
 Audio Format:
 - PCMU (μ-law) at 8kHz sample rate (preferred)
-- L16 (16-bit linear PCM) at 8kHz also supported
+- L16 (16-bit linear PCM) at 8kHz also supported    
 - Mono or Stereo (external on left, internal on right)
 """
 
@@ -17,7 +17,7 @@ import json
 import uuid
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -32,7 +32,8 @@ from pipecat.frames.frames import (
     InputDTMFFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
-    StartFrame
+    StartFrame,
+    InterruptionFrame
 )
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
@@ -116,7 +117,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
             media_format: Audio format (PCMU or L16).
             process_external: Whether to process external (customer) audio.
             process_internal: Whether to process internal (agent) audio.
-            enable_interruption_events: Send interruption events to Genesys.
         """
 
         genesys_sample_rate: int = 8000
@@ -125,30 +125,25 @@ class GenesysAudioHookSerializer(FrameSerializer):
         media_format: AudioHookMediaFormat = AudioHookMediaFormat.PCMU
         process_external: bool = True
         process_internal: bool = False
-        enable_interruption_events: bool = True
 
     def __init__(
         self,
         session_id: Optional[str] = None,
         params: Optional[InputParams] = None,
-        send_message_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ):
         """Initialize the GenesysAudioHookSerializer.
 
         Args:
             session_id: The AudioHook session ID (received in open message).
             params: Configuration parameters.
-            send_message_callback: Optional async callback to send messages directly
-                                   (bypassing the pipeline). Used for urgent messages like pong.
         """
         self._params = params or GenesysAudioHookSerializer.InputParams()
         self._session_id = session_id or ""
-        self._send_message_callback = send_message_callback
         
         self._genesys_sample_rate = self._params.genesys_sample_rate
         self._sample_rate = 0  # Pipeline input rate, set in setup()
         
-        # Use Pipecat's official SOXR resampler
+        # Use Pipecat's official resampler if needed (SOXR)
         # Only used for TTS output (16kHz → 8kHz), input goes without resampling
         self._input_resampler = SOXRStreamAudioResampler()
         self._output_resampler = SOXRStreamAudioResampler()
@@ -160,23 +155,13 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._is_paused = False
         self._position = timedelta(0)
         
-        # TTS output state
-        self._tts_chunk_count = 0 
-        
         # Session metadata
         self._conversation_id: Optional[str] = None
         self._participant: Optional[Dict[str, Any]] = None
         self._custom_config: Optional[Dict[str, Any]] = None
         self._media_info: Optional[List[Dict[str, Any]]] = None
         self._input_variables: Optional[Dict[str, Any]] = None  # Custom input from Genesys
-
-    def set_send_message_callback(self, callback: Callable[[str], Awaitable[None]]):
-        """Set the callback for sending urgent messages directly.
         
-        Args:
-            callback: An async function that takes a string message and sends it.
-        """
-        self._send_message_callback = callback
 
     @property
     def session_id(self) -> str:
@@ -216,14 +201,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """
         self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
         logger.debug(f"GenesysAudioHookSerializer setup with sample_rate={self._sample_rate}")
-    
-    def reset_tts_state(self):
-        """Reset TTS state for a new utterance.
-        
-        NOTE: We don't reset the resampler because that causes artifacts.
-        The resampler maintains its state between utterances for cleaner audio.
-        """
-        self._tts_chunk_count = 0
     
     def _format_position(self, position: timedelta) -> str:
         """Format a timedelta as ISO 8601 duration string.
@@ -316,7 +293,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             JSON string of the opened response message.
         """
         # Build channels list based on configuration
-        channels = []
+        channels: list[str] = []
         if self._params.channel == AudioHookChannel.EXTERNAL:
             channels = ["external"]
         elif self._params.channel == AudioHookChannel.INTERNAL:
@@ -393,35 +370,25 @@ class GenesysAudioHookSerializer(FrameSerializer):
         
         return json.dumps(msg)
 
-    def create_event_message(
-        self,
-        entity_type: str,
-        entity_data: Dict[str, Any],
-    ) -> str:
-        """Create an 'event' message to send data back to Genesys.
+    def create_barge_in_event(self) -> str:
+        """Create a barge-in event message.
         
-        This can be used for transcriptions, agent assist, or other events.
+        This notifies Genesys Cloud that the user has interrupted the bot's
+        audio output. Genesys will stop any queued audio playback.
         
-        Args:
-            entity_type: The type of entity (e.g., "transcript").
-            entity_data: The entity data.
-            
         Returns:
-            JSON string of the event message.
+            JSON string of the barge-in event message.
         """
-        parameters = {
-            "entities": [
-                {
-                    "type": entity_type,
-                    **entity_data,
-                }
-            ]
-        }
-        
         msg = self._create_message(
             AudioHookMessageType.EVENT,
-            parameters=parameters,
+            parameters={
+                "entities": [
+                    {"type": "barge_in", "data": {}}
+                ]
+            },
         )
+        
+        logger.debug("🔇 Barge-in event sent to Genesys")
         
         return json.dumps(msg)
 
@@ -492,88 +459,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
         logger.error(f"AudioHook error: {code} - {message}")
         return json.dumps(msg)
 
-    def create_barge_in_event(self) -> str:
-        """Create a barge-in event message.
-        
-        This notifies Genesys Cloud that the user has interrupted the bot's
-        audio output. Genesys will stop any queued audio playback.
-        
-        Returns:
-            JSON string of the barge-in event message.
-        """
-        msg = self._create_message(
-            AudioHookMessageType.EVENT,
-            parameters={
-                "entities": [
-                    {"type": "barge_in", "data": {}}
-                ]
-            },
-        )
-        
-        logger.debug("🔇 Barge-in event sent to Genesys")
-        
-        return json.dumps(msg)
-
-    def create_resume_event(self) -> str:
-        """Create a resume event message.
-        
-        This notifies Genesys that the bot is ready to resume after a barge-in.
-        Should be called after the user stops speaking following a barge-in.
-        
-        Returns:
-            JSON string of the resume event message.
-        """
-        self._barge_in = False
-        
-        # Note: 'resume' might not be a standard AudioHook message type,
-        # but it's used in some implementations
-        msg = {
-            "version": self.PROTOCOL_VERSION,
-            "type": "resume",
-            "seq": self._next_server_seq(),
-            "clientseq": self._client_seq,
-            "id": self._session_id,
-            "parameters": {},
-        }
-        
-        logger.debug("Resume event sent")
-        return json.dumps(msg)
-
-    def create_interruption_event(
-        self,
-        reason: str = "user_speaking",
-        discarded_bytes: Optional[int] = None,
-    ) -> str:
-        """Create a generic interruption event message.
-        
-        This is an alternative to create_barge_in_event() that includes
-        more detailed information about the interruption.
-        
-        Args:
-            reason: Reason for interruption (e.g., "user_speaking", "dtmf").
-            discarded_bytes: Number of audio bytes discarded due to interruption.
-            
-        Returns:
-            JSON string of the interruption event message.
-        """
-        entity_data: Dict[str, Any] = {
-            "reason": reason,
-            "timestamp": self._format_position(self._position),
-        }
-        
-        if discarded_bytes is not None:
-            entity_data["discardedAudioBytes"] = discarded_bytes
-            
-        logger.info(
-            f"AudioHook interruption: reason={reason}, "
-            f"discarded={discarded_bytes or 0} bytes"
-        )
-        
-        return self.create_event_message(
-            entity_type="interruption",
-            entity_data=entity_data,
-        )
-
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Genesys AudioHook format.
 
@@ -597,8 +482,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
                 
             data = frame.audio
             
-            self._tts_chunk_count += 1
-            
             # Convert PCM to μ-law at 8kHz for Genesys
             if self._params.media_format == AudioHookMediaFormat.PCMU:
                 serialized_data = await pcm_to_ulaw(
@@ -616,6 +499,9 @@ class GenesysAudioHookSerializer(FrameSerializer):
                 return None
             
             return bytes(serialized_data)
+
+        elif isinstance(frame, InterruptionFrame):
+            return self.create_barge_in_event()
             
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             # Pass through custom JSON messages
@@ -671,7 +557,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         original_len = len(data)
         
         # If Genesys sends stereo audio (BOTH channels), extract only the external channel (left)
-        # Stereo audio is interleaved: [L0, R0, L1, R1, ...]
+        # Stereo audio comes interleaved: [L0, R0, L1, R1, ...]
         if self._params.channel == AudioHookChannel.BOTH and len(data) > 0:
             # For PCMU, each sample is 1 byte
             # Extract only bytes at even positions (left channel = external)
@@ -694,7 +580,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         if deserialized_data is None or len(deserialized_data) == 0:
             return None
             
-        # Always use mono for STT 
+        # Always use mono for STT - ElevenLabs expects single channel
         num_channels = 1
             
         audio_frame = InputAudioRawFrame(
@@ -704,6 +590,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         )
         
         return audio_frame
+        
 
     async def _handle_control_message(self, message: Dict[str, Any]) -> Frame | None:
         """Handle a JSON control message from Genesys.
@@ -735,7 +622,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             
         elif msg_type == AudioHookMessageType.UPDATE.value:
             return await self._handle_update(message)
-            
+
         elif msg_type == AudioHookMessageType.ERROR.value:
             return await self._handle_error(message)
         
@@ -743,15 +630,12 @@ class GenesysAudioHookSerializer(FrameSerializer):
             return await self._handle_dtmf(message)
         
         elif msg_type == "playback_started":
-            self._is_playing = True
             logger.debug("Playback started (from Genesys)")
             return None
         
         elif msg_type == "playback_completed":
-            self._is_playing = False
             logger.debug("Playback completed (from Genesys)")
             return None
-            
         else:
             logger.warning(f"Unknown AudioHook message type: {msg_type}")
             return None
@@ -812,7 +696,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
             message: The close message.
             
         Returns:
-            EndFrame to signal the pipeline to close.
+            OutputTransportMessageUrgentFrame with the closed response,
+            or None if no response should be sent.
         """
         params = message.get("parameters", {})
         reason = params.get("reason", "unknown")
@@ -820,17 +705,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
         logger.info(f"🔴 Genesys closed the connection: {reason}")
         
         self._is_open = False
+
+        logger.info(f"Sending closed response to Genesys...")
         
-        # Send closed response via callback if available
-        if self._send_message_callback:
-            try:
-                closed_response = self.create_closed_response()
-                await self._send_message_callback(closed_response)
-            except Exception as e:
-                logger.error(f"Failed to send closed response: {e}")
-        
-        # Return EndFrame to close the pipeline and WebSocket
-        return EndFrame()
+        # Return as urgent frame to be sent through pipeline immediately
+        return OutputTransportMessageUrgentFrame(message=json.loads(self.create_closed_response()))
 
     async def _handle_ping(self, message: Dict[str, Any]) -> Frame | None:
         """Handle a 'ping' message from Genesys.
@@ -842,20 +721,10 @@ class GenesysAudioHookSerializer(FrameSerializer):
             None if pong was sent directly via callback, otherwise
             OutputTransportMessageUrgentFrame with pong response.
         """
-        # Create pong response
-        pong_response = self.create_pong_response()
         
-        # If we have a direct callback, use it for immediate response
-        if self._send_message_callback:
-            try:
-                await self._send_message_callback(pong_response)
-                logger.debug("Pong sent directly via callback")
-                return None
-            except Exception as e:
-                logger.error(f"Failed to send pong via callback: {e}")
-        
-        # Fallback: return as urgent frame to be sent through pipeline
-        return OutputTransportMessageUrgentFrame(message=json.loads(pong_response))
+        logger.info(f"Sending pong response to Genesys...")
+        # Return as urgent frame to be sent through pipeline immediately
+        return OutputTransportMessageUrgentFrame(message=json.loads(self.create_pong_response()))
 
     async def _handle_pause(self, message: Dict[str, Any]) -> Frame | None:
         """Handle a 'pause' message from Genesys.
