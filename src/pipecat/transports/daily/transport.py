@@ -1733,7 +1733,7 @@ class DailyInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        await self.broadcast_frame_class(
+        await self.broadcast_frame(
             DailyInputTransportMessageFrame, message=message, participant_id=sender
         )
 
