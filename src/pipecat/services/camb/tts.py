@@ -199,9 +199,10 @@ class CambTTSService(TTSService):
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        params = params or CambTTSService.InputParams()
+        self._api_key = api_key
+        self._timeout = timeout
 
-        self._client = AsyncCambAI(api_key=api_key, timeout=timeout)
+        params = params or CambTTSService.InputParams()
 
         # Warn if sample rate doesn't match model's supported rate
         if sample_rate and sample_rate != MODEL_SAMPLE_RATES.get(model):
@@ -221,6 +222,8 @@ class CambTTSService(TTSService):
         self.set_model_name(model)
         self.set_voice(str(voice_id))
         self._voice_id = voice_id
+
+        self._client = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -248,6 +251,8 @@ class CambTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
+
+        self._client = AsyncCambAI(api_key=self._api_key, timeout=self._timeout)
 
         # Use model-specific sample rate if not explicitly specified
         if not self._init_sample_rate:
@@ -288,6 +293,8 @@ class CambTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
             yield TTSStartedFrame()
+
+            assert self._client is not None, "Camb.ai TTS service not initialized"
 
             # Buffer for aligning chunks to 2-byte boundaries (16-bit PCM)
             audio_buffer = b""

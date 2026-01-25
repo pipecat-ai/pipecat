@@ -59,7 +59,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -255,12 +254,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
-    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
     pipeline = Pipeline(
         [
             transport.input(),
-            rtvi,
             stt,
             user_aggregator,
             memory,
@@ -278,12 +275,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        observers=[RTVIObserver(rtvi)],
     )
 
-    @rtvi.event_handler("on_client_ready")
+    @task.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
-        await rtvi.set_bot_ready()
         # Get personalized greeting based on user memories. Can pass agent_id and run_id as per requirement of the application to manage short term memory or agent specific memory.
         greeting = await get_initial_greeting(
             memory_client=memory.memory_client, user_id=USER_ID, agent_id=None, run_id=None

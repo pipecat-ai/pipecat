@@ -823,7 +823,6 @@ class GoogleSTTService(STTService):
         """
         if self._streaming_task:
             # Queue the audio data
-            await self.start_ttfb_metrics()
             await self.start_processing_metrics()
             await self._request_queue.put(audio)
         yield None
@@ -875,7 +874,6 @@ class GoogleSTTService(STTService):
                         )
                     else:
                         self._last_transcript_was_final = False
-                        await self.stop_ttfb_metrics()
                         await self.push_frame(
                             InterimTranscriptionFrame(
                                 transcript,
