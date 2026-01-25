@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.api_key_validator import validate_api_key
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -88,6 +89,9 @@ class DeepgramSTTService(STTService):
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        # Validate API key (required for Deepgram)
+        validate_api_key(api_key, "Deepgram", allow_none=False, env_var_name="DEEPGRAM_API_KEY")
 
         if url:
             import warnings

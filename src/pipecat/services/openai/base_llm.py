@@ -41,6 +41,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.utils.api_key_validator import validate_api_key
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -116,6 +117,9 @@ class BaseOpenAILLMService(LLMService):
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         super().__init__(**kwargs)
+
+        # Validate API key (allow None since OpenAI SDK uses OPENAI_API_KEY env var)
+        validate_api_key(api_key, "OpenAI", allow_none=True, env_var_name="OPENAI_API_KEY")
 
         params = params or BaseOpenAILLMService.InputParams()
 
