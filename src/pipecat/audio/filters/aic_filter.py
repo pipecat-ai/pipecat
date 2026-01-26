@@ -38,9 +38,6 @@ class AICFilter(BaseAudioFilter):
 
     Buffers incoming audio to the model's preferred block size and processes
     frames using float32 samples normalized to the range -1 to +1.
-
-    .. note::
-        This class requires aic-sdk ~= 2.0.0 (uses 'aic_sdk' module).
     """
 
     def __init__(

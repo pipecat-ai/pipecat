@@ -41,9 +41,6 @@ class AICVADAnalyzer(VADAnalyzer):
           Range: 1.0 to 15.0
           Formula: Energy threshold = 10 ** (-sensitivity)
           Default (SDK): 6.0
-
-    .. note::
-        This class requires aic-sdk ~= 2.0.0 (uses 'aic_sdk' module).
     """
 
     def __init__(
