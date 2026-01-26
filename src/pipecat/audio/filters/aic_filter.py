@@ -127,7 +127,7 @@ class AICFilter(BaseAudioFilter):
         AIC VAD parameters:
           - speech_hold_duration:
               How long VAD continues detecting after speech ends (in seconds).
-              Range: 0.0 to 20x model window length, Default (SDK): 0.05s
+              Range: 0.0 to 100x model window length, Default (SDK): 0.05s
           - minimum_speech_duration:
               Minimum duration of speech required before VAD reports speech detected
               (in seconds). Range: 0.0 to 1.0, Default (SDK): 0.0s
