@@ -63,7 +63,7 @@ class AICVADAnalyzer(VADAnalyzer):
                 will retry on set_sample_rate/first use.
             speech_hold_duration:
                 Optional override for AIC VAD speech hold duration (in seconds).
-                Range: 0.0 to 20x model window length.
+                Range: 0.0 to 100x model window length.
                 If None, the SDK default (0.05s) is used.
             minimum_speech_duration:
                 Optional override for minimum speech duration before VAD reports
