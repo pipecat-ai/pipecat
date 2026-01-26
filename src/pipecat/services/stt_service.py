@@ -119,28 +119,15 @@ class STTService(AIService):
         """
         return self._muted
 
-    def set_finalize_pending(self, value: bool):
-        """Set whether the next TranscriptionFrame should be marked as finalized.
-
-        When True, the next TranscriptionFrame pushed will have its `finalized`
-        field set to True, and this flag will automatically reset to False.
-        This is used to signal that a transcript is the final result for an
-        utterance, enabling immediate TTFB reporting.
-
-        Args:
-            value: True to mark the next transcription as finalized.
-        """
-        self._finalize_pending = value
-
     def request_finalize(self):
         """Mark that a finalize request has been sent, awaiting server confirmation.
 
-        For providers that require server confirmation before marking transcripts
-        as finalized (e.g., Deepgram's from_finalize field), call this when sending
-        the finalize request. Then call confirm_finalize() when the server confirms.
+        For providers that have explicit server confirmation of finalization
+        (e.g., Deepgram's from_finalize field), call this when sending the finalize
+        request. Then call confirm_finalize() when the server confirms.
 
-        This is an alternative to set_finalize_pending() for providers that need
-        two-step finalization.
+        For providers without server confirmation, don't call this method - just
+        send the finalize/flush/commit command and rely on the TTFB timeout.
         """
         self._finalize_requested = True
 
@@ -298,7 +285,7 @@ class STTService(AIService):
         """Push a frame downstream, tracking TranscriptionFrame timestamps for TTFB.
 
         Stores the timestamp of each TranscriptionFrame for TTFB calculation.
-        If the frame is marked as finalized (either directly or via set_finalize_pending),
+        If the frame is marked as finalized (via request_finalize/confirm_finalize),
         reports TTFB immediately and cancels any pending timeout. Otherwise, TTFB is
         reported after a timeout.
 
@@ -361,6 +348,7 @@ class STTService(AIService):
         """Handle VAD user started speaking frame to start tracking transcriptions.
 
         Cancels any pending TTFB timeout, resets TTFB tracking state, and marks user as speaking.
+        Also resets finalization state to prevent stale finalization from a previous utterance.
 
         Args:
             frame: The VAD user started speaking frame.
@@ -368,6 +356,7 @@ class STTService(AIService):
         await self._reset_stt_ttfb_state()
         self._user_speaking = True
         self._finalize_requested = False
+        self._finalize_pending = False
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle VAD user stopped speaking frame.
