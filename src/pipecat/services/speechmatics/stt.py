@@ -694,7 +694,6 @@ class SpeechmaticsSTTService(STTService):
                 )
             elif not self._enable_vad and self._client is not None:
                 self._client.finalize()
-                # self.confirm_finalize()
 
     async def _send_frames(self, segments: list[dict[str, Any]], finalized: bool = False) -> None:
         """Send frames to the pipeline.
