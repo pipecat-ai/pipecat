@@ -134,12 +134,16 @@ class OjinTTSService(TTSService):
 
         elif isinstance(message, OjinInteractionResponseMessage):
             # Queue audio response for consumption
-            await self._audio_queue.put(message)
-            logger.debug(
-                f"Received TTS audio chunk {message.index}, "
-                f"is_final={message.is_final_response}, "
-                f"size={len(message.audio_bytes)}"
-            )
+            try:
+                await self._audio_queue.put(message)
+                logger.debug(
+                    f"Received TTS audio chunk {message.index}, "
+                    f"is_final={message.is_final_response}, "
+                    f"size={len(message.audio_frame_bytes)}"
+                )
+            except Exception as e:
+                logger.error(f"Error processing TTS audio response: {e}")
+                await self._audio_queue.put(None)
 
         elif isinstance(message, ErrorResponseMessage):
             logger.error(f"TTS Error: {message.payload.code}")
@@ -215,9 +219,9 @@ class OjinTTSService(TTSService):
                     break
 
                 # Yield audio frame only if it has data
-                if response.audio_bytes:
+                if response.audio_frame_bytes:
                     yield TTSAudioRawFrame(
-                        audio=response.audio_bytes,
+                        audio=response.audio_frame_bytes,
                         sample_rate=self._settings.sample_rate,
                         num_channels=1,
                     )

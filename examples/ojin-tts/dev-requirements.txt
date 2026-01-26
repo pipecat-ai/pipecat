@@ -1,0 +1,6 @@
+# Development dependencies
+-e ../../[ojin,silero,whisper]
+-e ../../../ojin/services
+python-dotenv
+pyaudio~=0.2.14
+openai>=1.74.0,<2

@@ -75,6 +75,7 @@ async def main():
     openai_api_key = os.getenv("OPENAI_API_KEY")
     ojin_api_key = os.getenv("OJIN_API_KEY")
     ojin_config_id = os.getenv("OJIN_TTS_CONFIG_ID")
+    ws_url = os.getenv("OJIN_WS_URL")
     
     if not openai_api_key:
         logger.error("OPENAI_API_KEY not set in environment")
@@ -113,6 +114,7 @@ async def main():
     # Text-to-Speech using Ojin
     tts = OjinTTSService(
         OjinTTSServiceSettings(
+            ws_url=ws_url,
             api_key=ojin_api_key,
             config_id=ojin_config_id,
             sample_rate=24000,
