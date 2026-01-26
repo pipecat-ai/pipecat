@@ -738,9 +738,16 @@ class SpeechmaticsSTTService(STTService):
 
         # If final, then re-parse into TranscriptionFrame
         if finalized:
-            frames += [TranscriptionFrame(**attr_from_segment(segment)) for segment in segments]
+            frames += [
+                TranscriptionFrame(
+                    **attr_from_segment(segment), finalized=segment.get("is_eou", False)
+                )
+                for segment in segments
+            ]
             finalized_text = "|".join([s["text"] for s in segments])
-            await self._handle_transcription(finalized_text, True, segments[0]["language"])
+            await self._handle_transcription(
+                finalized_text, is_final=True, language=segments[0]["language"]
+            )
             logger.debug(f"{self} finalized transcript: {[f.text for f in frames]}")
 
         # Return as interim results (unformatted)
