@@ -27,7 +27,7 @@ class AICVADAnalyzer(VADAnalyzer):
       - speech_hold_duration:
           Controls for how long the VAD continues to detect speech after the audio signal
           no longer contains speech (in seconds).
-          Range: 0.0 to 20x model window length
+          Range: 0.0 to 100x model window length
           Default (SDK): 0.05s (50ms)
       - minimum_speech_duration:
           Controls for how long speech needs to be present in the audio signal before the
