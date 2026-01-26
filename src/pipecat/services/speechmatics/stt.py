@@ -201,6 +201,7 @@ class SpeechmaticsSTTService(STTService):
             extra_params: Extra parameters to pass to the STT engine. This is a dictionary of
                 additional parameters that can be used to configure the STT engine.
                 Default to None.
+
         """
 
         # Service configuration
@@ -346,7 +347,7 @@ class SpeechmaticsSTTService(STTService):
             params.speaker_passive_format or params.speaker_active_format
         )
 
-        # Metrics
+        # Model + metrics
         self.set_model_name(self._config.operating_point.value)
 
         # Message queue
@@ -693,6 +694,7 @@ class SpeechmaticsSTTService(STTService):
                 )
             elif not self._enable_vad and self._client is not None:
                 self._client.finalize()
+                # self.confirm_finalize()
 
     async def _send_frames(self, segments: list[dict[str, Any]], finalized: bool = False) -> None:
         """Send frames to the pipeline.
