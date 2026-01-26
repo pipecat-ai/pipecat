@@ -598,9 +598,6 @@ class SpeechmaticsSTTService(STTService):
         if segments:
             await self._send_frames(segments)
 
-        # Update metrics
-        await self._emit_metrics(message.get("metadata", {}).get("processing_time", 0.0))
-
     async def _handle_segment(self, message: dict[str, Any]) -> None:
         """Handle AddSegment events.
 
@@ -738,23 +735,33 @@ class SpeechmaticsSTTService(STTService):
 
         # If final, then re-parse into TranscriptionFrame
         if finalized:
-            frames += [
-                TranscriptionFrame(
-                    **attr_from_segment(segment), finalized=segment.get("is_eou", False)
-                )
-                for segment in segments
-            ]
+            # Do any segments have `is_eou` set to True?
+            if (
+                any(segment.get("is_eou", False) for segment in segments)
+                and self._finalize_requested
+            ):
+                self.confirm_finalize()
+
+            # Add the finalized frames
+            frames += [TranscriptionFrame(**attr_from_segment(segment)) for segment in segments]
+
+            # Handle the text (for metrics reporting)
             finalized_text = "|".join([s["text"] for s in segments])
             await self._handle_transcription(
                 finalized_text, is_final=True, language=segments[0]["language"]
             )
+
+            # Log the frames
             logger.debug(f"{self} finalized transcript: {[f.text for f in frames]}")
 
         # Return as interim results (unformatted)
         else:
+            # Add the interim frames
             frames += [
                 InterimTranscriptionFrame(**attr_from_segment(segment)) for segment in segments
             ]
+
+            # Log the frames
             logger.debug(f"{self} interim transcript: {[f.text for f in frames]}")
 
         # Send the frames
@@ -810,28 +817,6 @@ class SpeechmaticsSTTService(STTService):
         except Exception as e:
             yield ErrorFrame(f"Speechmatics error: {e}")
             await self._disconnect()
-
-    async def _emit_metrics(self, processing_time: float) -> None:
-        """Create TTFB metrics.
-
-        The TTFB is the seconds between the person speaking and the STT
-        engine emitting the first partial. This is only calculated at the
-        start of an utterance.
-        """
-        # Skip if metrics not available
-        if not self._metrics or processing_time == 0.0:
-            return
-
-        # Calculate time as time.time() - ttfb (which is seconds)
-        start_time = time.time() - processing_time
-
-        # Update internal metrics
-        self._metrics._start_ttfb_time = start_time
-        self._metrics._start_processing_time = start_time
-
-        # Stop TTFB metrics
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
 
     # ============================================================================
     # HELPERS
