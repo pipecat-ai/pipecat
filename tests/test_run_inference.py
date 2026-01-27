@@ -281,7 +281,10 @@ async def test_google_run_inference_with_llm_context():
     test_messages = [{"role": "user", "content": "Hello, world!"}]
     test_system = "You are a helpful assistant"
     mock_adapter.get_llm_invocation_params.return_value = GeminiLLMInvocationParams(
-        messages=test_messages, system_instruction=test_system, tools=NotGiven(), tool_config=NotGiven()
+        messages=test_messages,
+        system_instruction=test_system,
+        tools=NotGiven(),
+        tool_config=NotGiven(),
     )
     service.get_llm_adapter = MagicMock(return_value=mock_adapter)
 
