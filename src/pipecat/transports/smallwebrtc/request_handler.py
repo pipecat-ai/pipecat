@@ -13,10 +13,11 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional
-from pydantic import BaseModel, Field
+
 from aiortc.sdp import candidate_from_sdp
 from fastapi import HTTPException
 from loguru import logger
+from pydantic import BaseModel, Field
 
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 
@@ -40,6 +41,12 @@ class SmallWebRTCRequest(BaseModel):
     request_data: Optional[Any] = Field(None, alias="requestData")
 
     class Config:
+        """Pydantic configuration for the model.
+
+        `populate_by_name` allows population of fields by their Python
+        attribute names as well as any aliases (e.g. camelCase).
+        """
+
         populate_by_name = True
 
     @classmethod

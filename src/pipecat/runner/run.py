@@ -327,10 +327,10 @@ def _setup_webrtc_routes(
                 if request.method == HTTPMethod.POST.value:
                     request_data = await request.json()
                     webrtc_request = SmallWebRTCRequest.model_validate(request_data)
-                    
+
                     if webrtc_request.request_data is None:
                         webrtc_request.request_data = active_session
-                    
+
                     return await offer(webrtc_request, background_tasks)
                 elif request.method == HTTPMethod.PATCH.value:
                     patch_request = SmallWebRTCPatchRequest(
