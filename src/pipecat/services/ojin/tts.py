@@ -134,16 +134,12 @@ class OjinTTSService(TTSService):
 
         elif isinstance(message, OjinInteractionResponseMessage):
             # Queue audio response for consumption
-            try:
-                await self._audio_queue.put(message)
-                logger.debug(
-                    f"Received TTS audio chunk {message.index}, "
-                    f"is_final={message.is_final_response}, "
-                    f"size={len(message.audio_frame_bytes)}"
-                )
-            except Exception as e:
-                logger.error(f"Error processing TTS audio response: {e}")
-                await self._audio_queue.put(None)
+            await self._audio_queue.put(message)
+            logger.debug(
+                f"Received TTS audio chunk {message.index}, "
+                f"is_final={message.is_final_response}, "
+                f"size={len(message.audio_frame_bytes)}"
+            )
 
         elif isinstance(message, ErrorResponseMessage):
             logger.error(f"TTS Error: {message.payload.code}")
@@ -247,12 +243,9 @@ class OjinTTSService(TTSService):
         self._receive_msg_task = asyncio.create_task(self._receive_messages_loop())
 
         # Wait for session ready
-        try:
-            message = await asyncio.wait_for(self._client.receive_message(), timeout=10.0)
-            if message:
-                await self._handle_ojin_message(message)
-        except asyncio.TimeoutError:
-            logger.warning("Timeout waiting for TTS session ready")
+        message = await self._client.receive_message()
+        if message:
+            await self._handle_ojin_message(message)
 
     async def _stop(self) -> None:
         """Internal stop method to disconnect and cleanup."""
