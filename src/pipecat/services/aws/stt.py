@@ -158,7 +158,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 await self._websocket.send(event_message)
                 # Start metrics after first chunk sent
                 await self.start_processing_metrics()
-                await self.start_ttfb_metrics()
             except Exception as e:
                 yield ErrorFrame(error=f"Error sending audio: {e}")
 
@@ -470,7 +469,6 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                             is_final = not result.get("IsPartial", True)
 
                             if transcript:
-                                await self.stop_ttfb_metrics()
                                 if is_final:
                                     await self.push_frame(
                                         TranscriptionFrame(

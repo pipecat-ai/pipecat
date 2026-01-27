@@ -10,7 +10,7 @@ This module provides an OpenAI-compatible interface for interacting with OpenRou
 extending the base OpenAI LLM service functionality.
 """
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
@@ -61,3 +61,35 @@ class OpenRouterLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating OpenRouter client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
+
+    def build_chat_completion_params(self, params_from_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Builds chat parameters, handling model-specific constraints.
+
+        Args:
+            params_from_context: Parameters from the LLM context.
+
+        Returns:
+            Transformed parameters ready for the API call.
+        """
+        params = super().build_chat_completion_params(params_from_context)
+        model = getattr(self, "model_name", getattr(self, "model", "")).lower()
+        if "gemini" in model:
+            messages = params.get("messages", [])
+            if not messages:
+                return params
+            transformed_messages = []
+            system_message_seen = False
+            for msg in messages:
+                if msg.get("role") == "system":
+                    if not system_message_seen:
+                        transformed_messages.append(msg)
+                        system_message_seen = True
+                    else:
+                        new_msg = msg.copy()
+                        new_msg["role"] = "user"
+                        transformed_messages.append(new_msg)
+                else:
+                    transformed_messages.append(msg)
+            params["messages"] = transformed_messages
+
+        return params

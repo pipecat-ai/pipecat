@@ -426,12 +426,15 @@ class TranscriptionFrame(TextFrame):
         timestamp: When the transcription occurred.
         language: Detected or specified language of the speech.
         result: Raw result from the STT service.
+        finalized: Whether this is the final transcription for an utterance.
+            Set by STT services that support commit/finalize signals.
     """
 
     user_id: str
     timestamp: str
     language: Optional[Language] = None
     result: Optional[Any] = None
+    finalized: bool = False
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"

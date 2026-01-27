@@ -363,9 +363,6 @@ class DeepgramSageMakerSTTService(STTService):
         if not transcript.strip():
             return
 
-        # Stop TTFB metrics on first transcript
-        await self.stop_ttfb_metrics()
-
         is_final = parsed.get("is_final", False)
         speech_final = parsed.get("speech_final", False)
 
@@ -417,9 +414,8 @@ class DeepgramSageMakerSTTService(STTService):
         """
         pass
 
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        await self.start_ttfb_metrics()
+    async def _start_metrics(self):
+        """Start processing metrics collection."""
         await self.start_processing_metrics()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -433,7 +429,7 @@ class DeepgramSageMakerSTTService(STTService):
 
         # Start metrics when user starts speaking (if VAD is not provided by Deepgram)
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_metrics()
+            await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize message to Deepgram when user stops speaking
             # This tells Deepgram to flush any remaining audio and return final results

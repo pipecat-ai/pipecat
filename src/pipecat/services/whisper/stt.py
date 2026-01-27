@@ -289,7 +289,6 @@ class WhisperSTTService(SegmentedSTTService):
             return
 
         await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
 
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
@@ -303,7 +302,6 @@ class WhisperSTTService(SegmentedSTTService):
             if segment.no_speech_prob < self._no_speech_prob:
                 text += f"{segment.text} "
 
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
         if text:
@@ -388,7 +386,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             import mlx_whisper
 
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
             # Divide by 32768 because we have signed 16-bit data.
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
@@ -413,7 +410,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             if len(text.strip()) == 0:
                 text = None
 
-            await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
 
             if text:
