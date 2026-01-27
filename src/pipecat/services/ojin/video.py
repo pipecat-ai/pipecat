@@ -458,7 +458,6 @@ class OjinVideoService(FrameProcessor):
             while time.perf_counter() < next_frame_time:
                 pass
 
-            self._current_frame_idx += 1
             next_frame_time += frame_duration
 
             # Determine which frame to play
@@ -466,9 +465,13 @@ class OjinVideoService(FrameProcessor):
             audio_bytes = silence_audio_for_one_frame
 
             # Check if we have a ready speech frame
+            if len(self._speech_frames) > 0:
+                logger.debug(
+                    f"Checking for speech frame: {self._speech_frames[0].frame_idx} <= {self._played_frame_idx + 1}"
+                )
             if (
                 len(self._speech_frames) > 0
-                and self._speech_frames[0].frame_idx <= self._current_frame_idx
+                and self._speech_frames[0].frame_idx <= self._played_frame_idx + 1
             ):
                 # Play speech frame
                 video_frame = self._speech_frames.popleft()
@@ -524,7 +527,7 @@ class OjinVideoService(FrameProcessor):
                     image_bytes = idle_frame.image_bytes
                     # audio_bytes is already set to silence
 
-                    if self._played_frame_idx % 150 == 0:
+                    if self._played_frame_idx % 1 == 0:
                         logger.debug(f"Playing idle frame (%150) {self._played_frame_idx}")
                 # if self._state == OjinVideoServiceState.IDLE:
                 #     if self._played_frame_idx % 25 == 0:
