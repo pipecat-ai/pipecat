@@ -75,7 +75,7 @@ async def main():
     openai_api_key = os.getenv("OPENAI_API_KEY")
     ojin_api_key = os.getenv("OJIN_API_KEY")
     ojin_config_id = os.getenv("OJIN_TTS_CONFIG_ID")
-    ws_url = os.getenv("OJIN_WS_URL")
+    ws_url = os.getenv("OJIN_WS_URL", "wss://models.ojin.ai/realtime")
     
     if not openai_api_key:
         logger.error("OPENAI_API_KEY not set in environment")
