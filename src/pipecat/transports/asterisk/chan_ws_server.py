@@ -183,7 +183,7 @@ class AsteriskWSServerInputTransport(BaseInputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._terminate(self, gracefully=True)
+        await self._terminate(gracefully=True)
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the WebSocket server and stop all processing.
@@ -192,7 +192,7 @@ class AsteriskWSServerInputTransport(BaseInputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._terminate(self)
+        await self._terminate()
 
     async def cleanup(self):
         """Cleanup resources and parent transport."""
@@ -359,7 +359,7 @@ class AsteriskWSServerOutputTransport(BaseOutputTransport):
             frame: The end frame signaling transport shutdown.
         """
         await super().stop(frame)
-        await self._terminate(self, gracefully=True)
+        await self._terminate(gracefully=True)
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the output transport and send cancellation frame.
@@ -368,12 +368,12 @@ class AsteriskWSServerOutputTransport(BaseOutputTransport):
             frame: The cancel frame signaling immediate cancellation.
         """
         await super().cancel(frame)
-        await self._terminate(self)
+        await self._terminate()
 
     async def cleanup(self):
         """Cleanup resources and parent transport."""
         await super().cleanup()
-        await self._terminate(self)
+        await self._terminate()
         await self._transport.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -638,10 +638,12 @@ class AsteriskWSServerOutputTransport(BaseOutputTransport):
         else:
             # stop the buffers immediately
             await self._flush_buffers()
-
-        await self.cancel_task(self._buffer_consumer_task)
-        await self.cancel_task(self._buffer_state_monitor_task)
-
+        if self._buffer_consumer_task:
+            await self.cancel_task(self._buffer_consumer_task)
+            self._buffer_consumer_task = None
+        if self._buffer_state_monitor_task:
+            await self.cancel_task(self._buffer_state_monitor_task)
+            self._buffer_state_monitor_task = None
 
 class AsteriskWSServerTransport(BaseTransport):
     """WebSocket server transport for bidirectional real-time communication.
