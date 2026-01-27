@@ -23,7 +23,6 @@ from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
@@ -150,6 +149,7 @@ class OjinVideoService(FrameProcessor):
         # Playback state
         self.fps = 25
         self._num_speech_frames_played = 0
+        self._current_frame_idx = -1
         self._played_frame_idx = -1
         self._last_queued_frame_idx = -1
         self._last_played_image_bytes: Optional[bytes] = None  # For frame repetition fallback
@@ -374,10 +374,6 @@ class OjinVideoService(FrameProcessor):
                 logger.error("Ojin couldn't load the configuration from the supplied persona ID.")
 
             if is_fatal:
-                error_frame = ErrorFrame(error=message.payload.code, fatal=True)
-                await self.push_frame(error_frame, FrameDirection.UPSTREAM)
-                await self.push_frame(error_frame, FrameDirection.DOWNSTREAM)
-
                 await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
                 await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
 
@@ -427,64 +423,49 @@ class OjinVideoService(FrameProcessor):
             return size - res - 1
 
     async def _run_loop(self):
-        """Main playback loop running at fixed 25 FPS.
+        """Main playback loop - runs continuously after initialization.
 
-        This loop is responsible for outputting video and audio frames at a consistent rate.
-        It handles three scenarios:
-        1. IDLE: Play cached idle animation frames in a loop (with optional mirroring)
-        2. SPEAKING: Play speech frames received from the server (video + bundled audio)
-        3. BUFFER UNDERRUN: Repeat last speech frame with silence to avoid visual stutter
-
-        The loop uses a hybrid sleep + spin-lock approach for precise frame timing.
+        Handles both idle and speech playback seamlessly.
         """
         logger.info("Starting playback loop")
 
-        # ===== INITIALIZATION =====
-        # Block until idle frames are cached (INITIALIZING -> IDLE transition)
+        # Wait for initialization to complete
         while self._state == OjinVideoServiceState.INITIALIZING:
             await asyncio.sleep(0.1)
 
-        # Pre-compute silence audio buffer for idle frames and buffer underruns
-        # Each frame at 25fps = 40ms = 640 samples at 16kHz, 2 bytes per sample (int16)
         silence_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
         silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
 
-        # ===== TIMING SETUP =====
-        # Use wall-clock scheduling to maintain consistent frame rate
         start_ts = time.perf_counter()
-        frame_duration = 1.0 / self.fps  # 40ms per frame at 25fps
+        frame_duration = 1.0 / self.fps
         next_frame_time = start_ts + frame_duration
-        self._played_frame_idx = -1  # Will be 0 on first frame output
+        self._played_frame_idx = -1
 
         while True:
-            # ===== PRECISE FRAME TIMING =====
-            # Hybrid approach: async sleep for most of the wait (saves CPU),
-            # then spin-lock for final 10ms to hit exact timing
+            # Sleep for most of the wait time
             now = time.perf_counter()
-            sleep_time = next_frame_time - now - 0.01  # Wake up 10ms early
+            sleep_time = next_frame_time - now - 0.01
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
 
-            # Spin-lock for sub-millisecond precision (async sleep is ~1-10ms granularity)
+            # Spin lock for precise timing until target time
             while time.perf_counter() < next_frame_time:
                 pass
 
-            # Schedule next frame immediately to avoid timing drift
+            self._current_frame_idx += 1
             next_frame_time += frame_duration
 
-            # ===== FRAME SELECTION =====
-            # Default to no video and silence audio; will be overwritten below
+            # Determine which frame to play
             image_bytes = None
             audio_bytes = silence_audio_for_one_frame
 
-            # ===== CASE 1: SPEECH FRAME READY =====
-            # Check if the next speech frame in queue is due (frame_idx <= expected)
-            # Server sends frames with frame_idx indicating when they should be played           
+            # Check if we have a ready speech frame
             if (
                 len(self._speech_frames) > 0
-                and self._speech_frames[0].frame_idx <= self._played_frame_idx + 1
+                and self._speech_frames[0].frame_idx <= self._current_frame_idx
             ):
+                # Play speech frame
                 video_frame = self._speech_frames.popleft()
                 image_bytes = video_frame.image_bytes
                 audio_bytes = (
@@ -496,9 +477,8 @@ class OjinVideoService(FrameProcessor):
 
                 logger.debug(f"Playing speech frame {video_frame.frame_idx}")
                 self._num_speech_frames_played += 1
-                self._last_played_image_bytes = image_bytes  # Cache for buffer underrun fallback
+                self._last_played_image_bytes = image_bytes  # Store for fallback
 
-                # Track latency: time from TTS start to first video frame displayed
                 if self._first_frame_played_timestamp is None:
                     self._first_frame_played_timestamp = time.perf_counter()
                     logger.info(
@@ -507,50 +487,48 @@ class OjinVideoService(FrameProcessor):
                     await self.push_frame(OjinFirstFramePlayedFrame(), FrameDirection.UPSTREAM)
                     await self.push_frame(OjinFirstFramePlayedFrame(), FrameDirection.DOWNSTREAM)
 
-                # Transition to IDLE when speech ends (final frame or interrupted)
+                # Check if this was the last speech frame
                 if (
                     video_frame.is_final or self._state == OjinVideoServiceState.INTERRUPTING
                 ) and len(self._speech_frames) == 0:
                     logger.info("Last speech frame played, transitioning to IDLE")
                     await self.set_state(OjinVideoServiceState.IDLE)
-                    # Process any TTS audio that arrived during interruption
                     await self._process_pending_tts_audio()
 
-            # ===== CASE 2: NO SPEECH FRAME READY =====
             else:
-                # CASE 2a: BUFFER UNDERRUN during speech
-                # We're in speech mode but next frame hasn't arrived yet (network lag)
-                # Repeat last frame with silence to maintain visual continuity
                 if self._num_speech_frames_played > 0:
+                    # Frame not ready - repeat last frame to avoid stutter
                     if self._last_played_image_bytes is not None:
                         logger.debug(
                             f"frame missed: {self._played_frame_idx + 1}, repeating last frame"
                         )
+
+                        # Filling a frame with last frame + silence audio
                         image_bytes = self._last_played_image_bytes
-                        # Keep _played_frame_idx unchanged - we're holding, not advancing
-                        # Audio remains silence to avoid artifacts
+                        # Don't increment _played_frame_idx - we're repeating, not advancing
                     else:
-                        # Edge case: no fallback frame available, skip this tick
                         logger.debug(
                             f"frame missed: {self._played_frame_idx + 1}, no fallback available"
                         )
                         await asyncio.sleep(0.005)
                         continue
-
-                # CASE 2b: IDLE MODE
-                # No speech in progress - play from cached idle animation loop
                 else:
+                    # Play idle frame (only when not in speech mode)
                     self._played_frame_idx += 1
                     idle_frame = self._get_idle_frame_for_index(self._played_frame_idx)
                     image_bytes = idle_frame.image_bytes
-                    # audio_bytes remains silence (set above)
+                    # audio_bytes is already set to silence
 
                     if self._played_frame_idx % 150 == 0:
-                        logger.debug(f"Playing idle frame {self._played_frame_idx}")
+                        logger.debug(f"Playing idle frame (%150) {self._played_frame_idx}")
+                # if self._state == OjinVideoServiceState.IDLE:
+                #     if self._played_frame_idx % 25 == 0:
+                #         logger.debug(f"Playing idle frame (%25) {self._played_frame_idx}")
+                # else:
+                #     logger.debug(f"Playing idle frame {self._played_frame_idx}")
 
-            # ===== OUTPUT FRAMES TO PIPELINE =====
-            # Calculate PTS (Presentation Timestamp) in nanoseconds for A/V sync
-            # Both video and audio get the same PTS to ensure they're played together
+            # Output frame and audio with synchronized PTS
+            # PTS in nanoseconds based on frame index and fps
             frame_pts = int((self._played_frame_idx / self.fps) * 1_000_000_000)
 
             image_frame = OutputImageRawFrame(
@@ -563,9 +541,8 @@ class OjinVideoService(FrameProcessor):
                 sample_rate=OJIN_PERSONA_SAMPLE_RATE,
                 num_channels=1,
             )
-            audio_frame.pts = frame_pts
+            audio_frame.pts = frame_pts  # Same PTS ensures sync
 
-            # Push both frames downstream for rendering/encoding
             await self.push_frame(image_frame)
             await self.push_frame(audio_frame)
 

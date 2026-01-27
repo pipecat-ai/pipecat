@@ -22,6 +22,7 @@ from loguru import logger
 from websockets import ConnectionClosed
 
 from pipecat.frames.frames import (
+    AggregationType,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -234,7 +235,7 @@ class HumeSTSService(LLMService):
             logger.info(message)
             content: str = message.message.content
             await self.push_frame(LLMTextFrame(text=content))
-            await self.push_frame(TTSTextFrame(text=content))
+            await self.push_frame(TTSTextFrame(text=content, aggregated_by=AggregationType.SENTENCE))
         elif msg_type == "user_message":
             content: str = message.message.content
             logger.info(message)
