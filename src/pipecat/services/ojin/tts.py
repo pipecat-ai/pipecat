@@ -239,13 +239,13 @@ class OjinTTSService(TTSService):
             logger.error("Failed to start TTS service - connection failed")
             return
 
-        # Start background task to receive messages
-        self._receive_msg_task = asyncio.create_task(self._receive_messages_loop())
-
-        # Wait for session ready
+        # Wait for session ready BEFORE starting background task to avoid race condition
         message = await self._client.receive_message()
         if message:
             await self._handle_ojin_message(message)
+
+        # Start background task to receive messages (after session ready)
+        self._receive_msg_task = asyncio.create_task(self._receive_messages_loop())
 
     async def _stop_tts(self) -> None:
         """Internal stop method to disconnect and cleanup."""
