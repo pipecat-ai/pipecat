@@ -1,8 +1,15 @@
-"""
-Use with Genesys Audio Connector to connect Genesys Cloud Contact Center with Pipecat pipelines.
+"""Genesys AudioHook Serializer for Pipecat.
 
-This connector implements the Genesys AudioHook protocol for bidirectional
-audio streaming between Genesys Cloud contact center and Pipecat pipelines.
+This module provides a serializer for integrating Pipecat pipelines with
+Genesys Cloud Contact Center via the AudioHook protocol.
+
+Features:
+- Bidirectional audio streaming (PCMU μ-law at 8kHz)
+- Automatic protocol handshake handling (open/opened, close/closed, ping/pong)
+- Input/output variables for Architect flow integration
+- DTMF event support
+- Barge-in (interruption) events
+- Pause/resume support for hold scenarios
 
 Protocol Reference:
 - https://developer.genesys.cloud/devapps/audiohook
@@ -10,7 +17,7 @@ Protocol Reference:
 Audio Format:
 - PCMU (μ-law) at 8kHz sample rate (preferred)
 - L16 (16-bit linear PCM) at 8kHz also supported    
-- Mono or Stereo (external on left, internal on right)
+- Mono (external channel) or Stereo (external on left, internal on right)
 """
 
 import json
@@ -76,10 +83,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
     AudioHook protocol messages. It supports:
     
     - Bidirectional audio streaming (PCMU at 8kHz)
-    - Session lifecycle management (open, close, pause)
-    - Probe mode for health checks
-    - Custom configuration passthrough
-    - Event messaging back to Genesys Cloud
+    - Automatic protocol handshake (open/opened, close/closed, ping/pong)
+    - Session lifecycle management with pause/resume support
+    - Custom input/output variables for Architect flow integration
+    - DTMF event handling
+    - Barge-in events for interruption support
 
     The AudioHook protocol uses:
     - Text WebSocket frames for JSON control messages
@@ -88,17 +96,30 @@ class GenesysAudioHookSerializer(FrameSerializer):
     Example usage:
         ```python
         serializer = GenesysAudioHookSerializer(
-            session_id="abc-123",
             params=GenesysAudioHookSerializer.InputParams(
-                channel=AudioHookChannel.BOTH,
+                channel=AudioHookChannel.EXTERNAL,
+                supported_languages=["en-US", "es-ES"],
+                selected_language="en-US",
             )
         )
         
-        # Use with WebSocket transport
-        transport = WebsocketServerTransport(
-            serializer=serializer,
-            ...
+        # Use with FastAPI WebSocket transport
+        transport = FastAPIWebsocketTransport(
+            websocket=websocket,
+            params=FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                serializer=serializer,
+                audio_out_fixed_packet_size=1600,  # Important: prevents 429 rate limiting from Genesys
+            ),
         )
+        
+        # Access call information after connection
+        participant = serializer.participant  # ani, dnis, etc.
+        input_vars = serializer.input_variables  # Custom vars from Architect
+        
+        # Set output variables to return to Architect
+        serializer.set_output_variables({"intent": "billing", "resolved": True})
         ```
 
     Attributes:
@@ -110,13 +131,16 @@ class GenesysAudioHookSerializer(FrameSerializer):
     class InputParams(BaseModel):
         """Configuration parameters for GenesysAudioHookSerializer.
 
-        Parameters:
-            genesys_sample_rate: Sample rate used by Genesys (8000 Hz).
+        Attributes:
+            genesys_sample_rate: Sample rate used by Genesys (default: 8000 Hz).
             sample_rate: Optional override for pipeline input sample rate.
             channel: Which audio channels to process (external, internal, both).
             media_format: Audio format (PCMU or L16).
             process_external: Whether to process external (customer) audio.
             process_internal: Whether to process internal (agent) audio.
+            supported_languages: List of language codes the bot supports (e.g., ["en-US", "es-ES"]).
+            selected_language: Default language code to use.
+            start_paused: Whether to start the session in paused state.
         """
 
         genesys_sample_rate: int = 8000
@@ -125,23 +149,24 @@ class GenesysAudioHookSerializer(FrameSerializer):
         media_format: AudioHookMediaFormat = AudioHookMediaFormat.PCMU
         process_external: bool = True
         process_internal: bool = False
+        supported_languages: Optional[List[str]] = None
+        selected_language: Optional[str] = None
+        start_paused: bool = False
 
     def __init__(
         self,
-        session_id: Optional[str] = None,
         params: Optional[InputParams] = None,
     ):
         """Initialize the GenesysAudioHookSerializer.
 
         Args:
-            session_id: The AudioHook session ID (received in open message).
             params: Configuration parameters.
         """
         self._params = params or GenesysAudioHookSerializer.InputParams()
-        self._session_id = session_id or ""
         
         self._genesys_sample_rate = self._params.genesys_sample_rate
         self._sample_rate = 0  # Pipeline input rate, set in setup()
+        self._session_id = str(uuid.uuid4())
         
         # Use Pipecat's official resampler if needed (SOXR)
         # Only used for TTS output (16kHz → 8kHz), input goes without resampling
@@ -161,11 +186,12 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._custom_config: Optional[Dict[str, Any]] = None
         self._media_info: Optional[List[Dict[str, Any]]] = None
         self._input_variables: Optional[Dict[str, Any]] = None  # Custom input from Genesys
+        self._output_variables: Optional[Dict[str, Any]] = None  # Custom output to Genesys
         
 
     @property
     def session_id(self) -> str:
-        """Get the current session ID."""
+        """Get the Genesys AudioHook session ID generated by the serializer."""
         return self._session_id
 
     @property
@@ -192,6 +218,34 @@ class GenesysAudioHookSerializer(FrameSerializer):
     def input_variables(self) -> Optional[Dict[str, Any]]:
         """Get custom input variables from the open message."""
         return self._input_variables
+
+    @property
+    def output_variables(self) -> Optional[Dict[str, Any]]:
+        """Get custom output variables to send back to Genesys."""
+        return self._output_variables
+
+    def set_output_variables(self, variables: Dict[str, Any]) -> None:
+        """Set custom output variables to send back to Genesys on close.
+        
+        These variables will be included in the 'closed' response when Genesys
+        closes the connection, making them available in the Architect flow.
+        
+        Args:
+            variables: Dictionary of custom variables to send to Genesys.
+            
+        Example:
+            ```python
+            # During the conversation, collect data and set it
+            serializer.set_output_variables({
+                "intent": "billing_inquiry",
+                "customer_verified": True,
+                "summary": "Customer asked about their bill",
+                "transfer_to": "billing_queue"
+            })
+            ```
+        """
+        self._output_variables = variables
+        logger.debug(f"Output variables set: {variables}")
 
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
@@ -279,7 +333,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         start_paused: bool = False,
         supported_languages: Optional[List[str]] = None,
         selected_language: Optional[str] = None,
-    ) -> str:
+    ) -> Dict[str, Any]:
         """Create an 'opened' response message for the client.
         
         This should be sent in response to an 'open' message from Genesys.
@@ -290,10 +344,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
             selected_language: The selected language code.
             
         Returns:
-            JSON string of the opened response message.
+            Dictionary of the opened response message.
         """
         # Build channels list based on configuration
         channels: list[str] = []
+        
         if self._params.channel == AudioHookChannel.EXTERNAL:
             channels = ["external"]
         elif self._params.channel == AudioHookChannel.INTERNAL:
@@ -325,59 +380,88 @@ class GenesysAudioHookSerializer(FrameSerializer):
         )
         
         self._is_open = True
+
         logger.debug(f"AudioHook session opened: {self._session_id}")
         
-        return json.dumps(msg)
+        return msg
 
-    def create_closed_response(self) -> str:
+    def create_closed_response(
+        self,
+        output_variables: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Create a 'closed' response message.
         
         This should be sent in response to a 'close' message from Genesys.
         
+        Args:
+            output_variables: Optional custom variables to pass back to Genesys.
+                These will be available in the Architect flow after the AudioHook
+                action completes.
+            
         Returns:
-            JSON string of the closed response message.
+            Dictionary of the closed response message.
+            
+        Example:
+            ```python
+            # Pass custom data back to Genesys
+            serializer.create_closed_response(
+                output_variables={
+                    "intent": "billing_inquiry",
+                    "customer_verified": True,
+                    "summary": "Customer asked about their bill"
+                }
+            )
+            ```
         """
-        msg = self._create_message(AudioHookMessageType.CLOSED)
+        parameters: Optional[Dict[str, Any]] = None
+        
+        if output_variables:
+            parameters = {"outputVariables": output_variables}
+        
+        msg = self._create_message(
+            AudioHookMessageType.CLOSED,
+            parameters=parameters,
+        )
         
         self._is_open = False
         logger.debug(f"AudioHook session closed: {self._session_id}")
         
-        return json.dumps(msg)
+        return msg
 
-    def create_pong_response(self) -> str:
+    def create_pong_response(self) -> Dict[str, Any]:
         """Create a 'pong' response message.
         
         This should be sent in response to a 'ping' message from Genesys.
         
         Returns:
-            JSON string of the pong response message.
+            Dictionary of the pong response message.
         """
         msg = self._create_message(AudioHookMessageType.PONG)
-        return json.dumps(msg)
+        return msg
 
-    def create_resumed_response(self) -> str:
+    def create_resumed_response(self) -> Dict[str, Any]:
         """Create a 'resumed' response message.
         
         This should be sent in response to a 'pause' message when ready to resume.
         
         Returns:
-            JSON string of the resumed response message.
+            Dictionary of the resumed response message.
         """
         msg = self._create_message(AudioHookMessageType.RESUMED)
         
         self._is_paused = False
         logger.debug(f"AudioHook session resumed: {self._session_id}")
         
-        return json.dumps(msg)
+        return msg
 
-    def create_barge_in_event(self) -> str:
+    def create_barge_in_event(self) -> Dict[str, Any]:
         """Create a barge-in event message.
         
         This notifies Genesys Cloud that the user has interrupted the bot's
         audio output. Genesys will stop any queued audio playback.
         
         Returns:
-            JSON string of the barge-in event message.
+            Dictionary of the barge-in event message.
         """
         msg = self._create_message(
             AudioHookMessageType.EVENT,
@@ -390,7 +474,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         
         logger.debug("🔇 Barge-in event sent to Genesys")
         
-        return json.dumps(msg)
+        return msg
 
     def create_disconnect_message(
         self,
@@ -398,7 +482,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         action: str = "transfer",
         output_variables: Optional[Dict[str, Any]] = None,
         info: Optional[str] = None,
-    ) -> str:
+    ) -> Dict[str, Any]:
         """Create a 'disconnect' message to initiate session termination.
         
         Args:
@@ -408,7 +492,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             info: Optional additional information.
             
         Returns:
-            JSON string of the disconnect message.
+            Dictionary of the disconnect message.
         """
         parameters: Dict[str, Any] = {"reason": reason}
         
@@ -427,14 +511,14 @@ class GenesysAudioHookSerializer(FrameSerializer):
         )
         
         logger.debug(f"AudioHook disconnect: reason={reason}, action={action}")
-        return json.dumps(msg)
+        return msg
 
     def create_error_message(
         self,
         code: int,
         message: str,
         retryable: bool = False,
-    ) -> str:
+    ) -> Dict[str, Any]:
         """Create an 'error' message.
         
         Args:
@@ -443,7 +527,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             retryable: Whether the operation can be retried.
             
         Returns:
-            JSON string of the error message.
+            Dictionary of the error message.
         """
         parameters = {
             "code": code,
@@ -457,24 +541,26 @@ class GenesysAudioHookSerializer(FrameSerializer):
         )
         
         logger.error(f"AudioHook error: {code} - {message}")
-        return json.dumps(msg)
+        return msg
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serializes a Pipecat frame to Genesys AudioHook format.
 
         Handles conversion of various frame types to AudioHook messages:
-        - AudioRawFrame -> Binary audio data
-        - EndFrame/CancelFrame -> Disconnect message
+        - AudioRawFrame -> Binary PCMU audio data (resampled to 8kHz)
+        - EndFrame/CancelFrame -> Disconnect message (JSON)
+        - InterruptionFrame -> Barge-in event (JSON)
         - OutputTransportMessageFrame -> Pass-through JSON
 
         Args:
             frame: The Pipecat frame to serialize.
 
         Returns:
-            Serialized data as string (JSON) or bytes (audio), or None.
+            Serialized data as string (JSON) or bytes (audio), or None if
+            the frame type is not handled or session is not open.
         """
         if isinstance(frame, (EndFrame, CancelFrame)):
-            return self.create_disconnect_message(reason="completed")
+            return json.dumps(self.create_disconnect_message(reason="completed"))
             
         elif isinstance(frame, AudioRawFrame):
             if not self._is_open or self._is_paused:
@@ -501,7 +587,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             return bytes(serialized_data)
 
         elif isinstance(frame, InterruptionFrame):
-            return self.create_barge_in_event()
+            return json.dumps(self.create_barge_in_event())
             
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             # Pass through custom JSON messages
@@ -514,18 +600,23 @@ class GenesysAudioHookSerializer(FrameSerializer):
         """Deserializes Genesys AudioHook data to Pipecat frames.
 
         Handles:
-        - Binary data -> InputAudioRawFrame
-        - JSON text -> Protocol messages (open, close, ping, pause, etc.)
+        - Binary data -> InputAudioRawFrame (converted from PCMU to PCM)
+        - JSON 'open' -> OutputTransportMessageUrgentFrame with 'opened' response
+        - JSON 'close' -> OutputTransportMessageUrgentFrame with 'closed' response
+        - JSON 'ping' -> OutputTransportMessageUrgentFrame with 'pong' response
+        - JSON 'pause' -> Sets is_paused=True, returns None
+        - JSON 'dtmf' -> InputDTMFFrame
+        - JSON 'update' -> Updates participant info, returns None
+        - JSON 'error' -> Logs error, returns None
 
-        For control messages (open, close, ping, pause), this method handles
-        the protocol response internally and logs the events. The application
-        should monitor session state via the is_open and is_paused properties.
+        Protocol responses (opened, closed, pong) are returned as urgent frames
+        to be sent immediately through the transport.
 
         Args:
-            data: The raw WebSocket data from Genesys.
+            data: The raw WebSocket data from Genesys (binary audio or JSON text).
 
         Returns:
-            A Pipecat frame corresponding to the data, or None if handled internally.
+            A Pipecat frame to process, or None if handled internally.
         """
         # Binary data = audio
         if isinstance(data, bytes):
@@ -643,13 +734,22 @@ class GenesysAudioHookSerializer(FrameSerializer):
     async def _handle_open(self, message: Dict[str, Any]) -> Frame | None:
         """Handle an 'open' message from Genesys.
         
-        This initializes the session with metadata from Genesys Cloud.
+        This initializes the session with metadata from Genesys Cloud and
+        automatically responds with an 'opened' message using the configured
+        InputParams (supported_languages, selected_language, start_paused).
+        
+        Extracts and stores:
+        - session_id: The AudioHook session identifier
+        - conversation_id: The Genesys conversation ID
+        - participant: Caller info (ani, dnis, etc.)
+        - input_variables: Custom variables from Architect flow
+        - media_info: Audio configuration from Genesys
         
         Args:
-            message: The open message.
+            message: The open message from Genesys.
             
         Returns:
-            None (response should be sent via create_opened_response()).
+            OutputTransportMessageUrgentFrame with the 'opened' response.
         """
         self._session_id = message.get("id", str(uuid.uuid4()))
         
@@ -686,18 +786,25 @@ class GenesysAudioHookSerializer(FrameSerializer):
             f"conversation={self._conversation_id}, ani={ani}"
         )
         
-        # Note: Application should call create_opened_response() to respond
-        return None
+        return OutputTransportMessageUrgentFrame(message=self.create_opened_response(
+            start_paused=self._params.start_paused,
+            supported_languages=self._params.supported_languages,
+            selected_language=self._params.selected_language
+        ))
 
     async def _handle_close(self, message: Dict[str, Any]) -> Frame | None:
         """Handle a 'close' message from Genesys.
         
+        Automatically responds with a 'closed' message. If output_variables
+        were set via set_output_variables(), they will be included in the
+        response and made available in the Architect flow.
+        
         Args:
-            message: The close message.
+            message: The close message from Genesys.
             
         Returns:
-            OutputTransportMessageUrgentFrame with the closed response,
-            or None if no response should be sent.
+            OutputTransportMessageUrgentFrame with the closed response
+            (includes outputVariables if set).
         """
         params = message.get("parameters", {})
         reason = params.get("reason", "unknown")
@@ -709,22 +816,26 @@ class GenesysAudioHookSerializer(FrameSerializer):
         logger.info(f"Sending closed response to Genesys...")
         
         # Return as urgent frame to be sent through pipeline immediately
-        return OutputTransportMessageUrgentFrame(message=json.loads(self.create_closed_response()))
+        # Include any output variables that were set during the session
+        return OutputTransportMessageUrgentFrame(
+            message=self.create_closed_response(output_variables=self._output_variables)
+        )
 
     async def _handle_ping(self, message: Dict[str, Any]) -> Frame | None:
         """Handle a 'ping' message from Genesys.
         
+        Automatically responds with a 'pong' message to maintain the connection.
+        
         Args:
-            message: The ping message.
+            message: The ping message from Genesys.
             
         Returns:
-            None if pong was sent directly via callback, otherwise
             OutputTransportMessageUrgentFrame with pong response.
         """
         
         logger.info(f"Sending pong response to Genesys...")
         # Return as urgent frame to be sent through pipeline immediately
-        return OutputTransportMessageUrgentFrame(message=json.loads(self.create_pong_response()))
+        return OutputTransportMessageUrgentFrame(message=self.create_pong_response())
 
     async def _handle_pause(self, message: Dict[str, Any]) -> Frame | None:
         """Handle a 'pause' message from Genesys.
