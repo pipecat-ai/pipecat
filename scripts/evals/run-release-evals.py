@@ -133,8 +133,7 @@ TESTS_07 = [
     ("07zb-interruptible-inworld-http.py", EVAL_SIMPLE_MATH),
     ("07zc-interruptible-asyncai.py", EVAL_SIMPLE_MATH),
     ("07zc-interruptible-asyncai-http.py", EVAL_SIMPLE_MATH),
-    # Need license key to run
-    # ("07zd-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
+    ("07zd-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
     ("07ze-interruptible-hume.py", EVAL_SIMPLE_MATH),
     ("07zf-interruptible-gradium.py", EVAL_SIMPLE_MATH),
     ("07zg-interruptible-camb.py", EVAL_SIMPLE_MATH),
