@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,7 +11,6 @@ of audio from both user input and bot output sources, with support for various a
 configurations and event-driven processing.
 """
 
-import time
 from typing import Optional
 
 from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
@@ -104,10 +103,6 @@ class AudioBufferProcessor(FrameProcessor):
         self._user_turn_audio_buffer = bytearray()
         self._bot_turn_audio_buffer = bytearray()
 
-        # Intermittent (non continous user stream variables)
-        self._last_user_frame_at = 0
-        self._last_bot_frame_at = 0
-
         self._recording = False
 
         self._input_resampler = create_stream_resampler()
@@ -137,12 +132,12 @@ class AudioBufferProcessor(FrameProcessor):
         return self._num_channels
 
     def has_audio(self) -> bool:
-        """Check if both user and bot audio buffers contain data.
+        """Check if either user or bot audio buffers contain data.
 
         Returns:
-            True if both buffers contain audio data.
+            True if either buffer contains audio data.
         """
-        return self._buffer_has_audio(self._user_audio_buffer) and self._buffer_has_audio(
+        return self._buffer_has_audio(self._user_audio_buffer) or self._buffer_has_audio(
             self._bot_audio_buffer
         )
 
@@ -178,6 +173,7 @@ class AudioBufferProcessor(FrameProcessor):
         Calls audio handlers with any remaining buffered audio before stopping.
         """
         await self._call_on_audio_data_handler()
+        self._reset_recording()
         self._recording = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -195,8 +191,6 @@ class AudioBufferProcessor(FrameProcessor):
 
         if self._recording:
             await self._process_recording(frame)
-            if self._enable_turn_audio:
-                await self._process_turn_recording(frame)
 
         if isinstance(frame, (CancelFrame, EndFrame)):
             await self.stop_recording()
@@ -210,29 +204,61 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def _process_recording(self, frame: Frame):
         """Process audio frames for recording."""
+        resampled = None
         if isinstance(frame, InputAudioRawFrame):
-            # Add silence if we need to.
-            silence = self._compute_silence(self._last_user_frame_at)
-            self._user_audio_buffer.extend(silence)
-            # Add user audio.
             resampled = await self._resample_input_audio(frame)
-            self._user_audio_buffer.extend(resampled)
-            # Save time of frame so we can compute silence.
-            self._last_user_frame_at = time.time()
+            # Ignoring in case we don't have audio
+            if len(resampled) > 0:
+                # Sync bot buffer to current user position before adding user audio.
+                # We sync BEFORE extending to align both buffers at the same starting timestamp.
+                # For example, user buffer is at 100 bytes, and you receive 20 bytes of new audio
+                #  - Bot buffer sees User is at 100. Bot pads itself to 100.
+                #  - User buffer adds 20. User is now at 120.
+                #  - Outcome: At index 100-120, we have User Audio and (potentially) Bot Audio or silence. They are aligned
+                # This gives the opportunity to the bot to send audio.
+                #
+                # If we synced AFTER, we'd pad the bot buffer with silence for the same
+                # window we just gave to the user, effectively "overwriting" that time slot
+                # with silence and causing the bot's audio to flicker or cut out.
+                self._sync_buffer_to_position(self._bot_audio_buffer, len(self._user_audio_buffer))
+                # Add user audio.
+                self._user_audio_buffer.extend(resampled)
         elif self._recording and isinstance(frame, OutputAudioRawFrame):
-            # Add silence if we need to.
-            silence = self._compute_silence(self._last_bot_frame_at)
-            self._bot_audio_buffer.extend(silence)
-            # Add bot audio.
             resampled = await self._resample_output_audio(frame)
-            self._bot_audio_buffer.extend(resampled)
-            # Save time of frame so we can compute silence.
-            self._last_bot_frame_at = time.time()
+            # Ignoring in case we don't have audio
+            if len(resampled) > 0:
+                # Sync user buffer to current bot position before adding bot audio
+                self._sync_buffer_to_position(self._user_audio_buffer, len(self._bot_audio_buffer))
+                # Add bot audio.
+                self._bot_audio_buffer.extend(resampled)
 
-        if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
+        if self._buffer_size > 0 and (
+            len(self._user_audio_buffer) >= self._buffer_size
+            or len(self._bot_audio_buffer) >= self._buffer_size
+        ):
             await self._call_on_audio_data_handler()
+            self._reset_primary_audio_buffers()
 
-    async def _process_turn_recording(self, frame: Frame):
+        # Process turn recording with preprocessed data.
+        if self._enable_turn_audio:
+            await self._process_turn_recording(frame, resampled)
+
+    def _sync_buffer_to_position(self, buffer: bytearray, target_position: int):
+        """Pad buffer with silence if it's behind the target position.
+
+        This ensures both buffers stay synchronized by padding the lagging
+        buffer before new audio is added to the other buffer.
+
+        Args:
+            buffer: The buffer to potentially pad.
+            target_position: The position (in bytes) the buffer should reach.
+        """
+        current_len = len(buffer)
+        if current_len < target_position:
+            silence_needed = target_position - current_len
+            buffer.extend(b"\x00" * silence_needed)
+
+    async def _process_turn_recording(self, frame: Frame, resampled_audio: Optional[bytes] = None):
         """Process frames for turn-based audio recording."""
         if isinstance(frame, UserStartedSpeakingFrame):
             self._user_speaking = True
@@ -251,9 +277,8 @@ class AudioBufferProcessor(FrameProcessor):
             self._bot_speaking = False
             self._bot_turn_audio_buffer = bytearray()
 
-        if isinstance(frame, InputAudioRawFrame):
-            resampled = await self._resample_input_audio(frame)
-            self._user_turn_audio_buffer += resampled
+        if isinstance(frame, InputAudioRawFrame) and resampled_audio:
+            self._user_turn_audio_buffer.extend(resampled_audio)
             # In the case of the user, we need to keep a short buffer of audio
             # since VAD notification of when the user starts speaking comes
             # later.
@@ -263,14 +288,19 @@ class AudioBufferProcessor(FrameProcessor):
             ):
                 discarded = len(self._user_turn_audio_buffer) - self._audio_buffer_size_1s
                 self._user_turn_audio_buffer = self._user_turn_audio_buffer[discarded:]
-        elif self._bot_speaking and isinstance(frame, OutputAudioRawFrame):
-            resampled = await self._resample_output_audio(frame)
-            self._bot_turn_audio_buffer += resampled
+        elif self._bot_speaking and isinstance(frame, OutputAudioRawFrame) and resampled_audio:
+            self._bot_turn_audio_buffer.extend(resampled_audio)
 
     async def _call_on_audio_data_handler(self):
         """Call the audio data event handlers with buffered audio."""
-        if not self.has_audio() or not self._recording:
+        if not self._recording:
             return
+
+        if len(self._user_audio_buffer) == 0 and len(self._bot_audio_buffer) == 0:
+            return
+
+        # Final alignment before we send the audio
+        self._align_track_buffers()
 
         # Call original handler with merged audio
         merged_audio = self.merge_audio_buffers()
@@ -287,24 +317,41 @@ class AudioBufferProcessor(FrameProcessor):
             self._num_channels,
         )
 
-        self._reset_audio_buffers()
-
     def _buffer_has_audio(self, buffer: bytearray) -> bool:
         """Check if a buffer contains audio data."""
         return buffer is not None and len(buffer) > 0
 
     def _reset_recording(self):
         """Reset recording state and buffers."""
-        self._reset_audio_buffers()
-        self._last_user_frame_at = time.time()
-        self._last_bot_frame_at = time.time()
+        self._reset_all_audio_buffers()
 
-    def _reset_audio_buffers(self):
+    def _reset_all_audio_buffers(self):
         """Reset all audio buffers to empty state."""
+        self._reset_primary_audio_buffers()
+        self._reset_turn_audio_buffers()
+
+    def _reset_primary_audio_buffers(self):
+        """Clear user and bot buffers while preserving turn buffers and timestamps."""
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+
+    def _reset_turn_audio_buffers(self):
+        """Clear user and bot turn buffers while preserving primary buffers and timestamps."""
         self._user_turn_audio_buffer = bytearray()
         self._bot_turn_audio_buffer = bytearray()
+
+    def _align_track_buffers(self):
+        """Pad the shorter track with silence so both tracks stay in sync."""
+        user_len = len(self._user_audio_buffer)
+        bot_len = len(self._bot_audio_buffer)
+        if user_len == bot_len:
+            return
+
+        target_len = max(user_len, bot_len)
+        if user_len < target_len:
+            self._sync_buffer_to_position(self._user_audio_buffer, target_len)
+        if bot_len < target_len:
+            self._sync_buffer_to_position(self._bot_audio_buffer, target_len)
 
     async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
         """Resample audio frame to the target sample rate."""
@@ -317,14 +364,3 @@ class AudioBufferProcessor(FrameProcessor):
         return await self._output_resampler.resample(
             frame.audio, frame.sample_rate, self._sample_rate
         )
-
-    def _compute_silence(self, from_time: float) -> bytes:
-        """Compute silence to insert based on time gap."""
-        quiet_time = time.time() - from_time
-        # We should get audio frames very frequently. We introduce silence only
-        # if there's a big enough gap of 1s.
-        if from_time == 0 or quiet_time < 1.0:
-            return b""
-        num_bytes = int(quiet_time * self._sample_rate) * 2
-        silence = b"\x00" * num_bytes
-        return silence

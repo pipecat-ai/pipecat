@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,18 +12,19 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
     TextFrame,
 )
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
     from langchain_core.messages import AIMessageChunk
     from langchain_core.runnables import Runnable
 except ModuleNotFoundError as e:
-    logger.exception("In order to use Langchain, you need to `pip install pipecat-ai[langchain]`. ")
+    logger.error("In order to use Langchain, you need to `pip install pipecat-ai[langchain]`. ")
     raise Exception(f"Missing module: {e}")
 
 
@@ -64,11 +65,16 @@ class LangchainProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMMessagesFrame):
+        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
             # Messages are accumulated on the context as a list of messages.
             # The last one by the human is the one we want to send to the LLM.
             logger.debug(f"Got transcription frame {frame}")
-            text: str = frame.messages[-1]["content"]
+            messages = (
+                frame.context.messages
+                if isinstance(frame, OpenAILLMContextFrame)
+                else frame.context.get_messages()
+            )
+            text: str = messages[-1]["content"]
 
             await self._ainvoke(text.strip())
         else:
@@ -101,10 +107,12 @@ class LangchainProcessor(FrameProcessor):
                 {self._transcript_key: text},
                 config={"configurable": {"session_id": self._participant_id}},
             ):
-                await self.push_frame(TextFrame(self.__get_token_value(token)))
+                frame = TextFrame(self.__get_token_value(token))
+                frame.includes_inter_frame_spaces = True
+                await self.push_frame(frame)
         except GeneratorExit:
             logger.warning(f"{self} generator was closed prematurely")
         except Exception as e:
-            logger.exception(f"{self} an unknown error occurred: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.push_frame(LLMFullResponseEndFrame())

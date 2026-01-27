@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,6 +8,7 @@
 
 import asyncio
 import inspect
+import warnings
 from typing import Awaitable, Callable, Union
 
 from pipecat.frames.frames import (
@@ -17,16 +18,18 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
 
 
 class UserIdleProcessor(FrameProcessor):
     """Monitors user inactivity and triggers callbacks after timeout periods.
+
+    .. deprecated::
+        UserIdleProcessor is deprecated in 0.0.100 and will be removed in a future version.
+        Use LLMUserAggregator with user_idle_timeout parameter instead.
 
     This processor tracks user activity and triggers configurable callbacks when
     users become idle. It starts monitoring only after the first conversation
@@ -72,13 +75,21 @@ class UserIdleProcessor(FrameProcessor):
             **kwargs: Additional arguments passed to FrameProcessor.
         """
         super().__init__(**kwargs)
+
+        warnings.warn(
+            "UserIdleProcessor is deprecated in 0.0.100 and will be removed in a "
+            "future version. Use LLMUserAggregator with user_idle_timeout parameter "
+            "instead.",
+            DeprecationWarning,
+        )
+
         self._callback = self._wrap_callback(callback)
         self._timeout = timeout
         self._retry_count = 0
         self._interrupted = False
         self._conversation_started = False
         self._idle_task = None
-        self._idle_event = None
+        self._idle_event = asyncio.Event()
 
     def _wrap_callback(
         self,
@@ -138,9 +149,6 @@ class UserIdleProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            self._idle_event = WatchdogEvent(self.task_manager)
-
         # Check for end frames before processing
         if isinstance(frame, (EndFrame, CancelFrame)):
             # Stop the idle task, if it exists
@@ -189,15 +197,13 @@ class UserIdleProcessor(FrameProcessor):
 
         Runs in a loop until cancelled or callback indicates completion.
         """
-        while True:
+        running = True
+        while running:
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 if not self._interrupted:
                     self._retry_count += 1
-                    should_continue = await self._callback(self, self._retry_count)
-                    if not should_continue:
-                        await self._stop()
-                        break
+                    running = await self._callback(self, self._retry_count)
             finally:
                 self._idle_event.clear()

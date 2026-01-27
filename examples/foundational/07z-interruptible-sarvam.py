@@ -1,28 +1,36 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import os
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
-from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -34,84 +42,101 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    # Create an HTTP session
-    async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = SarvamSTTService(
+        api_key=os.getenv("SARVAM_API_KEY"),
+        model="saarika:v2.5",
+    )
 
-        tts = SarvamTTSService(
-            api_key=os.getenv("SARVAM_API_KEY"),
-            aiohttp_session=session,
-            params=SarvamTTSService.InputParams(language=Language.EN),
-        )
+    tts = SarvamTTSService(
+        api_key=os.getenv("SARVAM_API_KEY"),
+        model="bulbul:v2",
+        voice_id="manisha",
+    )
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-            },
-        ]
-
-        context = OpenAILLMContext(messages)
-        context_aggregator = llm.create_context_aggregator(context)
-
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                stt,
-                context_aggregator.user(),  # User responses
-                llm,  # LLM
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
-            ]
-        )
-
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
+    context = LLMContext(messages)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
             ),
-        )
+        ),
+    )
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected")
-            # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
+        ]
+    )
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await task.cancel()
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
-        runner = PipelineRunner(handle_sigint=handle_sigint)
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
 
-        await runner.run(task)
+        # Optionally, you can wait for 30 seconds and then change the voice.
+        # await asyncio.sleep(30)
+        # await task.queue_frame(TTSUpdateSettingsFrame(settings={"voice": "anushka"}))
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await task.cancel()
+
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.run(task)
+
+
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
 
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.run import main
 
-    main(run_example, transport_params=transport_params)
+    main()

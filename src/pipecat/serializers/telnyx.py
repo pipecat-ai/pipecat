@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,6 +14,7 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import (
     alaw_to_pcm,
     create_stream_resampler,
@@ -28,11 +29,10 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
-    KeypadEntry,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 class TelnyxFrameSerializer(FrameSerializer):
@@ -97,15 +97,6 @@ class TelnyxFrameSerializer(FrameSerializer):
         self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
 
-    @property
-    def type(self) -> FrameSerializerType:
-        """Gets the serializer type.
-
-        Returns:
-            The serializer type, either TEXT or BINARY.
-        """
-        return FrameSerializerType.TEXT
-
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
 
@@ -137,7 +128,7 @@ class TelnyxFrameSerializer(FrameSerializer):
             self._hangup_attempted = True
             await self._hang_up_call()
             return None
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clear"}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -225,7 +216,7 @@ class TelnyxFrameSerializer(FrameSerializer):
                         )
 
         except Exception as e:
-            logger.exception(f"Failed to hang up Telnyx call: {e}")
+            logger.error(f"Failed to hang up Telnyx call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Telnyx WebSocket data to Pipecat frames.

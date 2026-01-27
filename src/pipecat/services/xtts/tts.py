@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # The server below can connect to XTTS through a local running docker
@@ -45,7 +45,7 @@ def language_to_xtts_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding XTTS language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.CS: "cs",
         Language.DE: "de",
         Language.EN: "en",
@@ -65,22 +65,7 @@ def language_to_xtts_language(language: Language) -> Optional[str]:
         Language.ZH: "zh-cn",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-
-        # Special handling for Chinese variants
-        if base_code == "zh":
-            result = "zh-cn"
-        else:
-            # Look up the base code in our supported languages
-            result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class XTTSService(TTSService):
@@ -156,13 +141,8 @@ class XTTSService(TTSService):
         async with self._aiohttp_session.get(self._settings["base_url"] + "/studio_speakers") as r:
             if r.status != 200:
                 text = await r.text()
-                logger.error(
-                    f"{self} error getting studio speakers (status: {r.status}, error: {text})"
-                )
                 await self.push_error(
-                    ErrorFrame(
-                        f"Error error getting studio speakers (status: {r.status}, error: {text})"
-                    )
+                    error_msg=f"Error getting studio speakers (status: {r.status}, error: {text})"
                 )
                 return
             self._studio_speakers = await r.json()
@@ -201,8 +181,7 @@ class XTTSService(TTSService):
         async with self._aiohttp_session.post(url, json=payload) as r:
             if r.status != 200:
                 text = await r.text()
-                logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
-                yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
+                yield ErrorFrame(error=f"Error getting audio (status: {r.status}, error: {text})")
                 return
 
             await self.start_tts_usage_metrics(text)

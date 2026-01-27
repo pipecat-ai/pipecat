@@ -1,7 +1,0 @@
-agent_name = "pcc-smart-turn"
-image = "your-username/pcc-smart-turn:0.1"
-secret_set = "pcc-smart-turn-secrets"
-enable_krisp = true
-
-[scaling]
-	min_instances = 0

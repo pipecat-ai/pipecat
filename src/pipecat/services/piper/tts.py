@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,7 +14,6 @@ from loguru import logger
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -22,7 +21,7 @@ from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-# This assumes a running TTS service running: https://github.com/rhasspy/piper/blob/master/src/python_run/README_http.md
+# This assumes a running TTS service running: https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_HTTP.md
 class PiperTTSService(TTSService):
     """Piper TTS service implementation.
 
@@ -79,37 +78,35 @@ class PiperTTSService(TTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
         headers = {
-            "Content-Type": "text/plain",
+            "Content-Type": "application/json",
         }
         try:
             await self.start_ttfb_metrics()
 
-            async with self._session.post(self._base_url, data=text, headers=headers) as response:
+            async with self._session.post(
+                self._base_url, json={"text": text}, headers=headers
+            ) as response:
                 if response.status != 200:
                     error = await response.text()
-                    logger.error(
-                        f"{self} error getting audio (status: {response.status}, error: {error})"
-                    )
                     yield ErrorFrame(
-                        f"Error getting audio (status: {response.status}, error: {error})"
+                        error=f"Error getting audio (status: {response.status}, error: {error})"
                     )
                     return
 
                 await self.start_tts_usage_metrics(text)
 
+                yield TTSStartedFrame()
+
                 CHUNK_SIZE = self.chunk_size
 
-                yield TTSStartedFrame()
-                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
-                    # remove wav header if present
-                    if chunk.startswith(b"RIFF"):
-                        chunk = chunk[44:]
-                    if len(chunk) > 0:
-                        await self.stop_ttfb_metrics()
-                        yield TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                async for frame in self._stream_audio_frames_from_iterator(
+                    response.content.iter_chunked(CHUNK_SIZE), strip_wav_header=True
+                ):
+                    await self.stop_ttfb_metrics()
+                    yield frame
         except Exception as e:
-            logger.error(f"Error in run_tts: {e}")
-            yield ErrorFrame(error=str(e))
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             logger.debug(f"{self}: Finished TTS [{text}]")
             await self.stop_ttfb_metrics()

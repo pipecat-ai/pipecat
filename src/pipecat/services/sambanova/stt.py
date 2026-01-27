@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,6 +7,8 @@
 """SambaNova's Speech-to-Text service implementation for real-time transcription."""
 
 from typing import Any, Optional
+
+from loguru import logger
 
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
 from pipecat.transcriptions.language import Language
@@ -53,6 +55,14 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
 
     async def _transcribe(self, audio: bytes) -> Transcription:
         assert self._language is not None  # Assigned in the BaseWhisperSTTService class
+
+        if self._include_prob_metrics:
+            # https://docs.sambanova.ai/docs/en/features/audio#request-parameters
+            logger.warning(
+                "SambaNova STT does not support probability metrics "
+                "(include_prob_metrics parameter has no effect). "
+                "Check their docs: https://docs.sambanova.ai/docs/en/features/audio#request-parameters for more details."
+            )
 
         # Build kwargs dict with only set parameters
         kwargs = {

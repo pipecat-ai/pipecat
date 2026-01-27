@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,17 +11,24 @@ for image analysis and description generation.
 """
 
 import asyncio
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from PIL import Image
 
-from pipecat.frames.frames import ErrorFrame, Frame, TextFrame, VisionImageRawFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    UserImageRawFrame,
+    VisionFullResponseEndFrame,
+    VisionFullResponseStartFrame,
+    VisionTextFrame,
+)
 from pipecat.services.vision_service import VisionService
 
 try:
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Moondream, you need to `pip install pipecat-ai[moondream]`.")
@@ -39,7 +46,7 @@ def detect_device():
                and dtype is the recommended torch data type for that device.
     """
     try:
-        import intel_extension_for_pytorch
+        import intel_extension_for_pytorch  # noqa: F401
 
         if torch.xpu.is_available():
             return torch.device("xpu"), torch.float32
@@ -62,7 +69,7 @@ class MoondreamService(VisionService):
     """
 
     def __init__(
-        self, *, model="vikhyatk/moondream2", revision="2024-08-26", use_cpu=False, **kwargs
+        self, *, model="vikhyatk/moondream2", revision="2025-01-09", use_cpu=False, **kwargs
     ):
         """Initialize the Moondream service.
 
@@ -82,50 +89,38 @@ class MoondreamService(VisionService):
             device = torch.device("cpu")
             dtype = torch.float32
 
-        self._tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
-
         logger.debug("Loading Moondream model...")
 
         self._model = AutoModelForCausalLM.from_pretrained(
-            model, trust_remote_code=True, revision=revision
-        ).to(device=device, dtype=dtype)
-        self._model.eval()
+            model,
+            trust_remote_code=True,
+            revision=revision,
+            device_map={"": device},
+            dtype=dtype,
+        ).eval()
 
         logger.debug("Loaded Moondream model")
 
-    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+    async def run_vision(self, frame: UserImageRawFrame) -> AsyncGenerator[Frame, None]:
         """Analyze an image and generate a description.
 
         Args:
-            frame: Vision frame containing the image data and optional question text.
-
-        Yields:
-            Frame: TextFrame containing the generated image description, or ErrorFrame
-                  if analysis fails.
+            frame: The image frame to process.
         """
         if not self._model:
-            logger.error(f"{self} error: Moondream model not available ({self.model_name})")
             yield ErrorFrame("Moondream model not available")
             return
 
-        logger.debug(f"Analyzing image: {frame}")
+        logger.debug(f"Analyzing image (bytes length: {len(frame.image)})")
 
-        def get_image_description(frame: VisionImageRawFrame):
-            """Generate description for the given image frame.
-
-            Args:
-                frame: Vision frame containing image data and question.
-
-            Returns:
-                str: Generated description of the image.
-            """
-            image = Image.frombytes(frame.format, frame.size, frame.image)
+        def get_image_description(image_bytes: bytes, text: Optional[str]) -> str:
+            image = Image.frombytes(frame.format, frame.size, image_bytes)
             image_embeds = self._model.encode_image(image)
-            description = self._model.answer_question(
-                image_embeds=image_embeds, question=frame.text, tokenizer=self._tokenizer
-            )
+            description = self._model.query(image_embeds, text)["answer"]
             return description
 
-        description = await asyncio.to_thread(get_image_description, frame)
+        description = await asyncio.to_thread(get_image_description, frame.image, frame.text)
 
-        yield TextFrame(text=description)
+        yield VisionFullResponseStartFrame()
+        yield VisionTextFrame(text=description)
+        yield VisionFullResponseEndFrame()

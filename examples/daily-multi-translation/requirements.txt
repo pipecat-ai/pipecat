@@ -1,5 +1,0 @@
-aiofiles
-python-dotenv
-fastapi[all]
-uvicorn
-pipecat-ai[daily,deepgram,openai,silero,cartesia,soundfile]

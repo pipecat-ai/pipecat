@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -17,29 +17,36 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import httpx
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.services.anthropic_adapter import (
+    AnthropicLLMAdapter,
+    AnthropicLLMInvocationParams,
+)
 from pipecat.frames.frames import (
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMContextFrame,
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
-    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
@@ -52,11 +59,10 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
-    from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
+    from anthropic import NOT_GIVEN, APITimeoutError, AsyncAnthropic, NotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")
@@ -70,11 +76,17 @@ class AnthropicContextAggregatorPair:
     Encapsulates both user and assistant context aggregators
     to manage conversation flow and message formatting.
 
+    .. deprecated:: 0.0.99
+        `AnthropicContextAggregatorPair` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         _user: The user context aggregator.
         _assistant: The assistant context aggregator.
     """
 
+    # Aggregators handle deprecation warnings
     _user: "AnthropicUserContextAggregator"
     _assistant: "AnthropicAssistantContextAggregator"
 
@@ -106,41 +118,88 @@ class AnthropicLLMService(LLMService):
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AnthropicLLMAdapter
 
+    class ThinkingConfig(BaseModel):
+        """Configuration for extended thinking.
+
+        Parameters:
+            type: Type of thinking mode (currently only "enabled" or "disabled").
+            budget_tokens: Maximum number of tokens for thinking.
+                With today's models, the minimum is 1024.
+                Only allowed if type is "enabled".
+        """
+
+        # Why `| str` here? To not break compatibility in case Anthropic adds
+        # more types in the future.
+        type: Literal["enabled", "disabled"] | str
+
+        # Why not enforce minimnum of 1024 here? To not break compatibility in
+        # case Anthropic changes this requirement in the future.
+        budget_tokens: int
+
     class InputParams(BaseModel):
         """Input parameters for Anthropic model inference.
 
         Parameters:
-            enable_prompt_caching_beta: Whether to enable beta prompt caching feature.
+            enable_prompt_caching: Whether to enable the prompt caching feature.
+            enable_prompt_caching_beta (deprecated): Whether to enable the beta prompt caching feature.
+
+                .. deprecated:: 0.0.84
+                    Use the `enable_prompt_caching` parameter instead.
+
             max_tokens: Maximum tokens to generate. Must be at least 1.
             temperature: Sampling temperature between 0.0 and 1.0.
             top_k: Top-k sampling parameter.
             top_p: Top-p sampling parameter between 0.0 and 1.0.
+            thinking: Extended thinking configuration.
+                Enabling extended thinking causes the model to spend more time "thinking" before responding.
+                It also causes this service to emit LLMThinking*Frames during response generation.
+                Extended thinking is disabled by default.
             extra: Additional parameters to pass to the API.
         """
 
-        enable_prompt_caching_beta: Optional[bool] = False
+        enable_prompt_caching: Optional[bool] = None
+        enable_prompt_caching_beta: Optional[bool] = None
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
+            default_factory=lambda: NOT_GIVEN
+        )
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+        def model_post_init(self, __context):
+            """Post-initialization to handle deprecated parameters."""
+            if self.enable_prompt_caching_beta is not None:
+                import warnings
+
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "enable_prompt_caching_beta is deprecated. Use enable_prompt_caching instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-5-20250929",
         params: Optional[InputParams] = None,
         client=None,
+        retry_timeout_secs: Optional[float] = 5.0,
+        retry_on_timeout: Optional[bool] = False,
         **kwargs,
     ):
         """Initialize the Anthropic LLM service.
 
         Args:
             api_key: Anthropic API key for authentication.
-            model: Model name to use. Defaults to "claude-sonnet-4-20250514".
+            model: Model name to use. Defaults to "claude-sonnet-4-5-20250929".
             params: Optional model parameters for inference.
             client: Optional custom Anthropic client instance.
+            retry_timeout_secs: Request timeout in seconds for retry logic.
+            retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         super().__init__(**kwargs)
@@ -149,12 +208,23 @@ class AnthropicLLMService(LLMService):
             api_key=api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one
         self.set_model_name(model)
+        self._retry_timeout_secs = retry_timeout_secs
+        self._retry_on_timeout = retry_on_timeout
         self._settings = {
             "max_tokens": params.max_tokens,
-            "enable_prompt_caching_beta": params.enable_prompt_caching_beta or False,
+            "enable_prompt_caching": (
+                params.enable_prompt_caching
+                if params.enable_prompt_caching is not None
+                else (
+                    params.enable_prompt_caching_beta
+                    if params.enable_prompt_caching_beta is not None
+                    else False
+                )
+            ),
             "temperature": params.temperature,
             "top_k": params.top_k,
             "top_p": params.top_p,
+            "thinking": params.thinking,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -166,14 +236,79 @@ class AnthropicLLMService(LLMService):
         """
         return True
 
-    @property
-    def enable_prompt_caching_beta(self) -> bool:
-        """Check if prompt caching beta feature is enabled.
+    async def _create_message_stream(self, api_call, params):
+        """Create message stream with optional timeout and retry.
+
+        Args:
+            api_call: The Anthropic API method to call.
+            params: Parameters for the API call.
 
         Returns:
-            True if prompt caching is enabled.
+            Async stream of message events.
         """
-        return self._enable_prompt_caching_beta
+        if self._retry_on_timeout:
+            try:
+                response = await asyncio.wait_for(
+                    api_call(**params), timeout=self._retry_timeout_secs
+                )
+                return response
+            except (APITimeoutError, asyncio.TimeoutError):
+                # Retry, this time without a timeout so we get a response
+                logger.debug(f"{self}: Retrying message creation due to timeout")
+                response = await api_call(**params)
+                return response
+        else:
+            response = await api_call(**params)
+            return response
+
+    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Args:
+            context: The LLM context containing conversation history.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        messages = []
+        system = NOT_GIVEN
+        tools = []
+        if isinstance(context, LLMContext):
+            adapter: AnthropicLLMAdapter = self.get_llm_adapter()
+            invocation_params = adapter.get_llm_invocation_params(
+                context, enable_prompt_caching=self._settings["enable_prompt_caching"]
+            )
+            messages = invocation_params["messages"]
+            system = invocation_params["system"]
+            tools = invocation_params["tools"]
+        else:
+            context = AnthropicLLMContext.upgrade_to_anthropic(context)
+            messages = context.messages
+            system = getattr(context, "system", NOT_GIVEN)
+            tools = context.tools or []
+
+        # Build params using the same method as streaming completions
+        params = {
+            "model": self.model_name,
+            "max_tokens": self._settings["max_tokens"],
+            "stream": False,
+            "temperature": self._settings["temperature"],
+            "top_k": self._settings["top_k"],
+            "top_p": self._settings["top_p"],
+            "messages": messages,
+            "system": system,
+            "tools": tools,
+            "betas": ["interleaved-thinking-2025-05-14"],
+        }
+        if self._settings["thinking"]:
+            params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+
+        params.update(self._settings["extra"])
+
+        # LLM completion
+        response = await self._client.beta.messages.create(**params)
+
+        return next((block.text for block in response.content if hasattr(block, "text")), None)
 
     def create_context_aggregator(
         self,
@@ -195,17 +330,48 @@ class AnthropicLLMService(LLMService):
         Returns:
             A pair of context aggregators, one for the user and one for the assistant,
             encapsulated in an AnthropicContextAggregatorPair.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
         if isinstance(context, OpenAILLMContext):
             context = AnthropicLLMContext.from_openai_context(context)
+
+        # Aggregators handle deprecation warnings
         user = AnthropicUserContextAggregator(context, params=user_params)
         assistant = AnthropicAssistantContextAggregator(context, params=assistant_params)
+
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
+    def _get_llm_invocation_params(
+        self, context: OpenAILLMContext | LLMContext
+    ) -> AnthropicLLMInvocationParams:
+        # Universal LLMContext
+        if isinstance(context, LLMContext):
+            adapter: AnthropicLLMAdapter = self.get_llm_adapter()
+            params = adapter.get_llm_invocation_params(
+                context, enable_prompt_caching=self._settings["enable_prompt_caching"]
+            )
+            return params
+
+        # Anthropic-specific context
+        messages = (
+            context.get_messages_with_cache_control_markers()
+            if self._settings["enable_prompt_caching"]
+            else context.messages
+        )
+        return AnthropicLLMInvocationParams(
+            system=context.system,
+            messages=messages,
+            tools=context.tools or [],
+        )
+
     @traced_llm
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: OpenAILLMContext | LLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
         # completion_tokens. We also estimate the completion tokens from output text
         # and use that estimate if we are interrupted, because we almost certainly won't
@@ -221,24 +387,22 @@ class AnthropicLLMService(LLMService):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
+            params_from_context = self._get_llm_invocation_params(context)
+
+            if isinstance(context, LLMContext):
+                adapter = self.get_llm_adapter()
+                context_type_for_logging = "universal"
+                messages_for_logging = adapter.get_messages_for_logging(context)
+            else:
+                context_type_for_logging = "LLM-specific"
+                messages_for_logging = context.get_messages_for_logging()
             logger.debug(
-                f"{self}: Generating chat [{context.system}] | [{context.get_messages_for_logging()}]"
+                f"{self}: Generating chat from {context_type_for_logging} context [{params_from_context['system']}] | {messages_for_logging}"
             )
-
-            messages = context.messages
-            if self._settings["enable_prompt_caching_beta"]:
-                messages = context.get_messages_with_cache_control_markers()
-
-            api_call = self._client.messages.create
-            if self._settings["enable_prompt_caching_beta"]:
-                api_call = self._client.beta.prompt_caching.messages.create
 
             await self.start_ttfb_metrics()
 
             params = {
-                "tools": context.tools or [],
-                "system": context.system,
-                "messages": messages,
                 "model": self.model_name,
                 "max_tokens": self._settings["max_tokens"],
                 "stream": True,
@@ -247,9 +411,21 @@ class AnthropicLLMService(LLMService):
                 "top_p": self._settings["top_p"],
             }
 
+            # Add thinking parameter if set
+            if self._settings["thinking"]:
+                params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+
+            # Messages, system, tools
+            params.update(params_from_context)
+
             params.update(self._settings["extra"])
 
-            response = await api_call(**params)
+            # "Interleaved thinking" needed to allow thinking between sequences
+            # of function calls, when extended thinking is enabled.
+            # Note that this requires us to use `client.beta`, below.
+            params.update({"betas": ["interleaved-thinking-2025-05-14"]})
+
+            response = await self._create_message_stream(self._client.beta.messages.create, params)
 
             await self.stop_ttfb_metrics()
 
@@ -258,7 +434,7 @@ class AnthropicLLMService(LLMService):
             json_accumulator = ""
 
             function_calls = []
-            async for event in WatchdogAsyncIterator(response, manager=self.task_manager):
+            async for event in response:
                 # Aggregate streaming content, create frames, trigger events
 
                 if event.type == "content_block_delta":
@@ -270,10 +446,21 @@ class AnthropicLLMService(LLMService):
                         completion_tokens_estimate += self._estimate_tokens(
                             event.delta.partial_json
                         )
+                    elif hasattr(event.delta, "thinking"):
+                        await self.push_frame(LLMThoughtTextFrame(text=event.delta.thinking))
+                    elif hasattr(event.delta, "signature"):
+                        await self.push_frame(LLMThoughtEndFrame(signature=event.delta.signature))
                 elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         tool_use_block = event.content_block
                         json_accumulator = ""
+                    elif event.content_block.type == "thinking":
+                        await self.push_frame(
+                            LLMThoughtStartFrame(
+                                append_to_context=True,
+                                llm=self.get_llm_adapter().id_for_llm_specific_messages,
+                            )
+                        )
                 elif (
                     event.type == "message_delta"
                     and hasattr(event.delta, "stop_reason")
@@ -332,7 +519,10 @@ class AnthropicLLMService(LLMService):
                         prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
                     )
                     if total_input_tokens >= 1024:
-                        context.turns_above_cache_threshold += 1
+                        if hasattr(
+                            context, "turns_above_cache_threshold"
+                        ):  # LLMContext doesn't have this attribute
+                            context.turns_above_cache_threshold += 1
 
             await self.run_function_calls(function_calls)
 
@@ -345,7 +535,7 @@ class AnthropicLLMService(LLMService):
         except httpx.TimeoutException:
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
@@ -376,19 +566,17 @@ class AnthropicLLMService(LLMService):
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context: "AnthropicLLMContext" = AnthropicLLMContext.upgrade_to_anthropic(frame.context)
+        elif isinstance(frame, LLMContextFrame):
+            context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
+            # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
+            # LLMContext with it
             context = AnthropicLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, VisionImageRawFrame):
-            # This is only useful in very simple pipelines because it creates
-            # a new context. Generally we want a context manager to catch
-            # UserImageRawFrames coming through the pipeline and add them
-            # to the context.
-            context = AnthropicLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
-            self._settings["enable_prompt_caching_beta"] = frame.enable
+            self._settings["enable_prompt_caching"] = frame.enable
         else:
             await self.push_frame(frame, direction)
 
@@ -427,6 +615,11 @@ class AnthropicLLMContext(OpenAILLMContext):
     Extends OpenAILLMContext to handle Anthropic-specific features like
     system messages, prompt caching, and message format conversions.
     Manages conversation state and message history formatting.
+
+    .. deprecated:: 0.0.99
+        `AnthropicLLMContext` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -445,15 +638,18 @@ class AnthropicLLMContext(OpenAILLMContext):
             tool_choice: Tool selection preference.
             system: System message content.
         """
+        # Super handles deprecation warning
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
+        self.__setup_local()
+        self.system = system
 
+    def __setup_local(self):
         # For beta prompt caching. This is a counter that tracks the number of turns
         # we've seen above the cache threshold. We reset this when we reset the
         # messages list. We only care about this number being 0, 1, or 2. But
         # it's easiest just to treat it as a counter.
         self.turns_above_cache_threshold = 0
-
-        self.system = system
+        return
 
     @staticmethod
     def upgrade_to_anthropic(obj: OpenAILLMContext) -> "AnthropicLLMContext":
@@ -470,6 +666,7 @@ class AnthropicLLMContext(OpenAILLMContext):
         logger.debug(f"Upgrading to Anthropic: {obj}")
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AnthropicLLMContext):
             obj.__class__ = AnthropicLLMContext
+            obj.__setup_local()
             obj._restructure_from_openai_messages()
         return obj
 
@@ -505,22 +702,6 @@ class AnthropicLLMContext(OpenAILLMContext):
         self = cls(messages=messages)
         self._restructure_from_openai_messages()
         return self
-
-    @classmethod
-    def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":
-        """Create context from a vision image frame.
-
-        Args:
-            frame: The vision image frame to process.
-
-        Returns:
-            New Anthropic context with the image message.
-        """
-        context = cls()
-        context.add_image_frame_message(
-            format=frame.format, size=frame.size, image=frame.image, text=frame.text
-        )
-        return context
 
     def set_messages(self, messages: List):
         """Set the messages list and reset cache tracking.
@@ -854,13 +1035,13 @@ class AnthropicLLMContext(OpenAILLMContext):
             messages.insert(0, {"role": "system", "content": self.system})
         return messages
 
-    def get_messages_for_logging(self) -> str:
+    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
         """Get messages formatted for logging with sensitive data redacted.
 
         Replaces image data with placeholder text for cleaner logs.
 
         Returns:
-            JSON string representation of messages for logging.
+            List of messages in a format ready for logging.
         """
         msgs = []
         for message in self.messages:
@@ -871,7 +1052,7 @@ class AnthropicLLMContext(OpenAILLMContext):
                         if item["type"] == "image":
                             item["source"]["data"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs)
+        return msgs
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):
@@ -879,8 +1060,14 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
     Handles aggregation of user messages for Anthropic LLM services.
     Inherits all functionality from the base LLMUserContextAggregator.
+
+    .. deprecated:: 0.0.99
+        `AnthropicUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
+    # Super handles deprecation warning
     pass
 
 
@@ -899,7 +1086,14 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
 
     Handles function call lifecycle management including in-progress tracking,
     result handling, and cancellation for Anthropic's tool use format.
+
+    .. deprecated:: 0.0.99
+        `AnthropicAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
+
+    # Super handles deprecation warning
 
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         """Handle a function call that is starting.

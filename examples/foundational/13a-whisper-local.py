@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -31,6 +31,9 @@ class TranscriptionLogger(FrameProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             print(f"Transcription: {frame.text}")
+
+        # Push all frames through
+        await self.push_frame(frame, direction)
 
 
 async def main():

@@ -1,10 +1,12 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Azure OpenAI Realtime Beta LLM service implementation."""
+
+import warnings
 
 from loguru import logger
 
@@ -22,6 +24,10 @@ except ModuleNotFoundError as e:
 
 class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
     """Azure OpenAI Realtime Beta LLM service with Azure-specific authentication.
+
+    .. deprecated:: 0.0.84
+        `AzureRealtimeBetaLLMService` is deprecated, use `AzureRealtimeLLMService` instead.
+        This class will be removed in version 1.0.0.
 
     Extends the OpenAI Realtime service to work with Azure OpenAI endpoints,
     using Azure's authentication headers and endpoint format. Provides the same
@@ -44,6 +50,16 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
             **kwargs: Additional arguments passed to parent OpenAIRealtimeBetaLLMService.
         """
         super().__init__(base_url=base_url, api_key=api_key, **kwargs)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "AzureRealtimeBetaLLMService is deprecated and will be removed in version 1.0.0. "
+                "Use AzureRealtimeLLMService instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self.api_key = api_key
         self.base_url = base_url
 
@@ -54,7 +70,7 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
                 # handle disconnections in the send/recv code paths.
                 return
 
-            logger.info(f"Connecting to {self.base_url}, api key: {self.api_key}")
+            logger.info(f"Connecting to {self.base_url}")
             self._websocket = await websocket_connect(
                 uri=self.base_url,
                 additional_headers={
@@ -63,5 +79,5 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
             )
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None

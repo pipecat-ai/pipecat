@@ -32,7 +32,7 @@ also explains why it thinks the answer is valid or invalid.
 To run the release evals:
 
 ```sh
-python run-release-evals.py -a -v
+uv run run-release-evals.py -a -v
 ```
 
 This runs all the evals and stores logs and audio (`-a`) for each test.
@@ -41,7 +41,7 @@ You can also specify which tests to run. For example, to run all `07` series
 tests:
 
 ```sh
-python run-release-evals.py -p 07 -a -v
+uv run run-release-evals.py -p 07 -a -v
 ```
 
 ## Script Evals
@@ -49,7 +49,7 @@ python run-release-evals.py -p 07 -a -v
 You can also run evals for a single example (not part of the release set):
 
 ```sh
-python run-eval.py -p "A simple math addition" -a -v YOUR_EXAMPLE_SCRIPT
+uv run run-eval.py -p "A simple math addition" -a -v YOUR_EXAMPLE_SCRIPT
 ```
 
 Your script needs to follow any of the foundation examples pattern.

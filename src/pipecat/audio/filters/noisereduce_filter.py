@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -33,12 +33,27 @@ class NoisereduceFilter(BaseAudioFilter):
     Applies spectral gating noise reduction algorithms to suppress background
     noise in audio streams. Uses the noisereduce library's default noise
     reduction parameters.
+
+    .. deprecated:: 0.0.85
+        `NoisereduceFilter` is deprecated and will be removed in a future version.
+        We recommend using other real-time audio filters like `KrispFilter` or `AICFilter`.
     """
 
     def __init__(self) -> None:
         """Initialize the noisereduce filter."""
         self._filtering = True
         self._sample_rate = 0
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`NoisereduceFilter` is deprecated. "
+                "Use other real-time audio filters like `KrispFilter` or `AICFilter`.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.

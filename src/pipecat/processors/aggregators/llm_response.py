@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,6 +12,7 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 """
 
 import asyncio
+import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Set
@@ -22,7 +23,6 @@ from pipecat.audio.interruptions.base_interruption_strategy import BaseInterrupt
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -36,18 +36,19 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMMessagesFrame,
     LLMMessagesUpdateFrame,
+    LLMRunFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     OpenAILLMContextAssistantTimestampFrame,
     SpeechControlParamsFrame,
     StartFrame,
-    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserImageRawFrame,
@@ -66,6 +67,10 @@ from pipecat.utils.time import time_now_iso8601
 class LLMUserAggregatorParams:
     """Parameters for configuring LLM user aggregation behavior.
 
+    .. deprecated:: 0.0.99
+        This class is deprecated, use the new universal `LLMContext` and
+        `LLMContextAggregatorPair`.
+
     Parameters:
         aggregation_timeout: Maximum time in seconds to wait for additional
             transcription content before pushing aggregated result. This
@@ -73,19 +78,29 @@ class LLMUserAggregatorParams:
         turn_emulated_vad_timeout: Maximum time in seconds to wait for emulated
             VAD when using turn-based analysis. Applied when transcription is
             received but VAD didn't detect speech (e.g., whispered utterances).
+        enable_emulated_vad_interruptions: When True, allows emulated VAD events
+            to interrupt the bot when it's speaking. When False, emulated speech
+            is ignored while the bot is speaking.
     """
 
     aggregation_timeout: float = 0.5
     turn_emulated_vad_timeout: float = 0.8
+    enable_emulated_vad_interruptions: bool = False
 
 
 @dataclass
 class LLMAssistantAggregatorParams:
     """Parameters for configuring LLM assistant aggregation behavior.
 
+    .. deprecated:: 0.0.99
+        This class is deprecated, use the new universal `LLMContext` and
+        `LLMContextAggregatorPair`.
+
     Parameters:
         expect_stripped_words: Whether to expect and handle stripped words
-            in text frames by adding spaces between tokens.
+            in text frames by adding spaces between tokens. This parameter is
+            ignored when used with the newer LLMAssistantAggregator, which
+            handles word spacing automatically.
     """
 
     expect_stripped_words: bool = True
@@ -133,7 +148,7 @@ class LLMFullResponseAggregator(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await self._call_event_handler("on_completion", self._aggregation, False)
             self._aggregation = ""
             self._started = False
@@ -169,6 +184,11 @@ class BaseLLMResponseAggregator(FrameProcessor):
 
     The aggregators keep a store (e.g. message list or LLM context) of the current
     conversation, storing messages from both users and the bot.
+
+    .. deprecated:: 0.0.99
+        `BaseLLMResponseAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(self, **kwargs):
@@ -176,7 +196,21 @@ class BaseLLMResponseAggregator(FrameProcessor):
 
         Args:
             **kwargs: Additional arguments passed to parent FrameProcessor.
+
+        .. deprecated:: 0.0.99
+            `BaseLLMResponseAggregator` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                f"{self.__class__.__name__} (likely created with create_context_aggregator()) is deprecated and will be removed in a future version. "
+                "Use the universal LLMContext and LLMContextAggregatorPair instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         super().__init__(**kwargs)
 
     @property
@@ -268,6 +302,11 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     This aggregator maintains conversation state using an OpenAILLMContext and
     pushes OpenAILLMContextFrame objects as aggregation frames. It provides
     common functionality for context-based conversation management.
+
+    .. deprecated:: 0.0.99
+        `LLMContextResponseAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(self, *, context: OpenAILLMContext, role: str, **kwargs):
@@ -277,7 +316,13 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
             context: The OpenAI LLM context to use for conversation storage.
             role: The role this aggregator represents (e.g. "user", "assistant").
             **kwargs: Additional arguments passed to parent class.
+
+        .. deprecated:: 0.0.99
+            `LLMContextResponseAggregator` is deprecated and will be removed in a future version.
+            Use the universal `LLMUserAggregator` and `LLMAssistantAggregator` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # Super handles deprecation warning
         super().__init__(**kwargs)
         self._context = context
         self._role = role
@@ -314,9 +359,22 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     def get_context_frame(self) -> OpenAILLMContextFrame:
         """Create a context frame with the current context.
 
+        .. deprecated:: 0.0.82
+            This method is deprecated and will be removed in a future version.
+
         Returns:
-            OpenAILLMContextFrame containing the current context.
+            LLMContextFrame containing the current context.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "get_context_frame() is deprecated and will be removed in a future version. To trigger an LLM response, use LLMRunFrame instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return self._get_context_frame()
+
+    def _get_context_frame(self) -> OpenAILLMContextFrame:
         return OpenAILLMContextFrame(context=self._context)
 
     async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -325,7 +383,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         Args:
             direction: The direction to push the frame (upstream or downstream).
         """
-        frame = self.get_context_frame()
+        frame = self._get_context_frame()
         await self.push_frame(frame, direction)
 
     def add_messages(self, messages):
@@ -379,6 +437,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     The aggregator uses timeouts to handle cases where transcriptions arrive
     after VAD events or when no VAD is available.
+
+    .. deprecated:: 0.0.99
+        `LLMUserContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -394,15 +457,19 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             context: The OpenAI LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments. Supports deprecated 'aggregation_timeout'.
+
+        .. deprecated:: 0.0.99
+            `LLMUserContextAggregator` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # Super handles deprecation warning
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
         self._vad_params: Optional[VADParams] = None
         self._turn_params: Optional[SmartTurnParams] = None
 
         if "aggregation_timeout" in kwargs:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -479,6 +546,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self._handle_transcription(frame)
         elif isinstance(frame, InterimTranscriptionFrame):
             await self._handle_interim_transcription(frame)
+        elif isinstance(frame, LLMRunFrame):
+            await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_llm_messages_append(frame)
         elif isinstance(frame, LLMMessagesUpdateFrame):
@@ -510,9 +579,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
                 if should_interrupt:
                     logger.debug(
-                        "Interruption conditions met - pushing BotInterruptionFrame and aggregation"
+                        "Interruption conditions met - pushing interruption and aggregation"
                     )
-                    await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+                    await self.push_interruption_task_frame_and_wait()
                     await self._process_aggregation()
                 else:
                     logger.debug("Interruption conditions not met - not pushing aggregation")
@@ -557,6 +626,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _cancel(self, frame: CancelFrame):
         await self._cancel_aggregation_task()
+
+    async def _handle_llm_run(self, frame: LLMRunFrame):
+        await self.push_context_frame()
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
@@ -665,7 +737,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                         if self._vad_params
                         else self._params.turn_emulated_vad_timeout
                     )
-                await asyncio.wait_for(self._aggregation_event.wait(), timeout)
+                await asyncio.wait_for(self._aggregation_event.wait(), timeout=timeout)
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
@@ -679,33 +751,30 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                     )
                     self._emulating_vad = False
             finally:
-                self.reset_watchdog()
                 self._aggregation_event.clear()
 
     async def _maybe_emulate_user_speaking(self):
         """Maybe emulate user speaking based on transcription.
 
         Emulate user speaking if we got a transcription but it was not
-        detected by VAD. Only do that if the bot is not speaking.
+        detected by VAD. Behavior when bot is speaking depends on the
+        enable_emulated_vad_interruptions parameter.
         """
         # Check if we received a transcription but VAD was not able to detect
         # voice (e.g. when you whisper a short utterance). In that case, we need
-        # to emulate VAD (i.e. user start/stopped speaking), but we do it only
-        # if the bot is not speaking. If the bot is speaking and we really have
-        # a short utterance we don't really want to interrupt the bot.
+        # to emulate VAD (i.e. user start/stopped speaking).
         if (
             not self._user_speaking
             and not self._waiting_for_aggregation
             and len(self._aggregation) > 0
         ):
-            if self._bot_speaking:
-                # If we reached this case and the bot is speaking, let's ignore
-                # what the user said.
+            if self._bot_speaking and not self._params.enable_emulated_vad_interruptions:
+                # If emulated VAD interruptions are disabled and bot is speaking, ignore
                 logger.debug("Ignoring user speaking emulation, bot is speaking.")
                 await self.reset()
             else:
-                # The bot is not speaking so, let's trigger user speaking
-                # emulation.
+                # Either bot is not speaking, or emulated VAD interruptions are enabled
+                # - trigger user speaking emulation.
                 await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
                 self._emulating_vad = True
 
@@ -723,6 +792,11 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
     The aggregator manages function calls in progress and coordinates between
     text generation and tool execution phases of LLM responses.
+
+    .. deprecated:: 0.0.99
+        `LLMAssistantContextAggregator` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
     """
 
     def __init__(
@@ -738,13 +812,17 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             context: The OpenAI LLM context for conversation storage.
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments. Supports deprecated 'expect_stripped_words'.
+
+        .. deprecated:: 0.0.99
+            `LLMAssistantContextAggregator` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        # Super handles deprecation warning
         super().__init__(context=context, role="assistant", **kwargs)
         self._params = params or LLMAssistantAggregatorParams()
 
         if "expect_stripped_words" in kwargs:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -816,7 +894,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
@@ -825,6 +903,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             await self._handle_llm_end(frame)
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
+        elif isinstance(frame, LLMRunFrame):
+            await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_llm_messages_append(frame)
         elif isinstance(frame, LLMMessagesUpdateFrame):
@@ -867,6 +947,9 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
         await self.push_frame(timestamp_frame)
 
+    async def _handle_llm_run(self, frame: LLMRunFrame):
+        await self.push_context_frame(FrameDirection.UPSTREAM)
+
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
         if frame.run_llm:
@@ -877,7 +960,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         if frame.run_llm:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
-    async def _handle_interruptions(self, frame: StartInterruptionFrame):
+    async def _handle_interruptions(self, frame: InterruptionFrame):
         await self.push_aggregation()
         self._started = 0
         await self.reset()
@@ -941,10 +1024,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         logger.debug(
             f"{self} FunctionCallCancelFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
-        if frame.tool_call_id not in self._function_calls_in_progress:
-            return
-
-        if self._function_calls_in_progress[frame.tool_call_id].cancel_on_interruption:
+        function_call = self._function_calls_in_progress.get(frame.tool_call_id)
+        if function_call and function_call.cancel_on_interruption:
             await self.handle_function_call_cancel(frame)
             del self._function_calls_in_progress[frame.tool_call_id]
 
@@ -973,7 +1054,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started:
+        if not self._started or not frame.append_to_context:
             return
 
         if self._params.expect_stripped_words:
@@ -983,14 +1064,14 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
     def _context_updated_task_finished(self, task: asyncio.Task):
         self._context_updated_tasks.discard(task)
-        # The task is finished so this should exit immediately. We need to do
-        # this because otherwise the task manager would report a dangling task
-        # if we don't remove it.
-        asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
 
 
 class LLMUserResponseAggregator(LLMUserContextAggregator):
     """User response aggregator that outputs LLMMessagesFrame instead of context frames.
+
+    .. deprecated:: 0.0.79
+        This class is deprecated and will be removed in a future version.
+        Use `LLMUserContextAggregator` or another LLM-specific subclass instead.
 
     This aggregator extends LLMUserContextAggregator but pushes LLMMessagesFrame
     objects downstream instead of OpenAILLMContextFrame objects. This is useful
@@ -1011,23 +1092,31 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments passed to parent class.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LLMUserResponseAggregator is deprecated and will be removed in a future version. "
+                "Use LLMUserContextAggregator or another LLM-specific subclass instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
-    async def push_aggregation(self):
-        """Push the aggregated user input as an LLMMessagesFrame."""
-        if len(self._aggregation) > 0:
-            await self.handle_aggregation(self._aggregation)
-
-            # Reset the aggregation. Reset it before pushing it down, otherwise
-            # if the tasks gets cancelled we won't be able to clear things up.
-            await self.reset()
-
-            frame = LLMMessagesFrame(self._context.messages)
-            await self.push_frame(frame)
+    async def _process_aggregation(self):
+        """Process the current aggregation and push it downstream."""
+        aggregation = self._aggregation
+        await self.reset()
+        await self.handle_aggregation(aggregation)
+        frame = LLMMessagesFrame(self._context.messages)
+        await self.push_frame(frame)
 
 
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
     """Assistant response aggregator that outputs LLMMessagesFrame instead of context frames.
+
+    .. deprecated:: 0.0.79
+        This class is deprecated and will be removed in a future version.
+        Use `LLMAssistantContextAggregator` or another LLM-specific subclass instead.
 
     This aggregator extends LLMAssistantContextAggregator but pushes LLMMessagesFrame
     objects downstream instead of OpenAILLMContextFrame objects. This is useful
@@ -1048,6 +1137,14 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments passed to parent class.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LLMAssistantResponseAggregator is deprecated and will be removed in a future version. "
+                "Use LLMAssistantContextAggregator or another LLM-specific subclass instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
     async def push_aggregation(self):

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -18,7 +18,9 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
 )
@@ -60,6 +62,7 @@ class AzureSTTService(STTService):
         region: str,
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
+        endpoint_id: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the Azure STT service.
@@ -69,6 +72,7 @@ class AzureSTTService(STTService):
             region: Azure region for the Speech service (e.g., 'eastus').
             language: Language for speech recognition. Defaults to English (US).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
+            endpoint_id: Custom model endpoint id.
             **kwargs: Additional arguments passed to parent STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -78,6 +82,9 @@ class AzureSTTService(STTService):
             region=region,
             speech_recognition_language=language_to_azure_language(language),
         )
+
+        if endpoint_id:
+            self._speech_config.endpoint_id = endpoint_id
 
         self._audio_stream = None
         self._speech_recognizer = None
@@ -105,13 +112,15 @@ class AzureSTTService(STTService):
             audio: Raw audio bytes to process.
 
         Yields:
-            None - actual transcription frames are pushed via callbacks.
+            Frame: Either None for successful processing or ErrorFrame on failure.
         """
-        await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
-        if self._audio_stream:
-            self._audio_stream.write(audio)
-        yield None
+        try:
+            await self.start_processing_metrics()
+            if self._audio_stream:
+                self._audio_stream.write(audio)
+            yield None
+        except Exception as e:
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
     async def start(self, frame: StartFrame):
         """Start the speech recognition service.
@@ -127,16 +136,22 @@ class AzureSTTService(STTService):
         if self._audio_stream:
             return
 
-        stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
-        self._audio_stream = PushAudioInputStream(stream_format)
+        try:
+            stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
+            self._audio_stream = PushAudioInputStream(stream_format)
 
-        audio_config = AudioConfig(stream=self._audio_stream)
+            audio_config = AudioConfig(stream=self._audio_stream)
 
-        self._speech_recognizer = SpeechRecognizer(
-            speech_config=self._speech_config, audio_config=audio_config
-        )
-        self._speech_recognizer.recognized.connect(self._on_handle_recognized)
-        self._speech_recognizer.start_continuous_recognition_async()
+            self._speech_recognizer = SpeechRecognizer(
+                speech_config=self._speech_config, audio_config=audio_config
+            )
+            self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
+            self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+            self._speech_recognizer.start_continuous_recognition_async()
+        except Exception as e:
+            await self.push_error(
+                error_msg=f"Uncaught exception during initialization: {e}", exception=e
+            )
 
     async def stop(self, frame: EndFrame):
         """Stop the speech recognition service.
@@ -175,7 +190,6 @@ class AzureSTTService(STTService):
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
     def _on_handle_recognized(self, event):
@@ -190,5 +204,17 @@ class AzureSTTService(STTService):
             )
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()
+            )
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_recognizing(self, event):
+        if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
+            language = getattr(event.result, "language", None) or self._settings.get("language")
+            frame = InterimTranscriptionFrame(
+                event.result.text,
+                self._user_id,
+                time_now_iso8601(),
+                language,
+                result=event,
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())

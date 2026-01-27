@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,40 +7,17 @@
 """Frame serialization interfaces for Pipecat."""
 
 from abc import ABC, abstractmethod
-from enum import Enum
 
 from pipecat.frames.frames import Frame, StartFrame
-
-
-class FrameSerializerType(Enum):
-    """Enumeration of supported frame serialization formats.
-
-    Parameters:
-        BINARY: Binary serialization format for compact representation.
-        TEXT: Text-based serialization format for human-readable output.
-    """
-
-    BINARY = "binary"
-    TEXT = "text"
 
 
 class FrameSerializer(ABC):
     """Abstract base class for frame serialization implementations.
 
     Defines the interface for converting frames to/from serialized formats
-    for transmission or storage. Subclasses must implement serialization
-    type detection and the core serialize/deserialize methods.
+    for transmission or storage. Subclasses must implement the core
+    serialize/deserialize methods.
     """
-
-    @property
-    @abstractmethod
-    def type(self) -> FrameSerializerType:
-        """Get the serialization type supported by this serializer.
-
-        Returns:
-            The FrameSerializerType indicating binary or text format.
-        """
-        pass
 
     async def setup(self, frame: StartFrame):
         """Initialize the serializer with startup configuration.

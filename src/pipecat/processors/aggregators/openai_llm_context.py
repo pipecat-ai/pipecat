@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,14 +8,20 @@
 
 This module provides classes for managing OpenAI-specific conversation contexts,
 including message handling, tool management, and image/audio processing capabilities.
+
+.. deprecated:: 0.0.99
+    This module is deprecated.
+    Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+    See `OpenAILLMContext` docstring for migration guide.
 """
 
 import base64
 import copy
 import io
 import json
+import warnings
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from openai._types import NOT_GIVEN, NotGiven
 from openai.types.chat import (
@@ -28,7 +34,6 @@ from PIL import Image
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame, Frame
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 # JSON custom encoder to handle bytes arrays so that we can log contexts
 # with images to the console.
@@ -62,6 +67,20 @@ class OpenAILLMContext:
     Handles message history, tool definitions, tool choices, and multimedia content
     for OpenAI API conversations. Provides methods for message manipulation,
     content formatting, and integration with various LLM adapters.
+
+    .. deprecated:: 0.0.99
+        `OpenAILLMContext` is deprecated and will be removed in a future version.
+        Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+
+        **Before:**
+
+            context = OpenAILLMContext(messages, tools)
+            context_aggregator = llm.create_context_aggregator(context)
+
+        **After:**
+
+            context = LLMContext(messages, tools)
+            context_aggregator = LLMContextAggregatorPair(context)
     """
 
     def __init__(
@@ -76,7 +95,21 @@ class OpenAILLMContext:
             messages: Initial list of conversation messages.
             tools: Available tools for the LLM to use.
             tool_choice: Tool selection strategy for the LLM.
+
+        .. deprecated:: 0.0.99
+            `OpenAILLMContext` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "OpenAILLMContext is deprecated and will be removed in a future version. "
+                "Use the universal LLMContext and LLMContextAggregatorPair instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._messages: List[ChatCompletionMessageParam] = messages if messages else []
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
         self._tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = tools
@@ -111,8 +144,6 @@ class OpenAILLMContext:
         context = OpenAILLMContext()
 
         for message in messages:
-            if "name" not in message:
-                message["name"] = message["role"]
             context.add_message(message)
         return context
 
@@ -185,13 +216,13 @@ class OpenAILLMContext:
         """
         return json.dumps(self._messages, cls=CustomEncoder, ensure_ascii=False, indent=2)
 
-    def get_messages_for_logging(self) -> str:
+    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
         """Get sanitized messages suitable for logging.
 
         Removes or truncates sensitive data like image content for safe logging.
 
         Returns:
-            JSON string with sanitized message content for logging.
+            List of messages in a format ready for logging.
         """
         msgs = []
         for message in self.messages:
@@ -205,7 +236,7 @@ class OpenAILLMContext:
             if "mime_type" in msg and msg["mime_type"].startswith("image/"):
                 msg["data"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs, ensure_ascii=False)
+        return msgs
 
     def from_standard_message(self, message):
         """Convert from OpenAI message format to OpenAI message format (passthrough).
@@ -358,8 +389,25 @@ class OpenAILLMContextFrame(Frame):
     API. The context in this message is also mutable, and will be changed by the
     OpenAIContextAggregator frame processor.
 
+    .. deprecated:: 0.0.99
+        `OpenAILLMContextFrame` is deprecated and will be removed in a future version.
+        Use `LLMContextFrame` with the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+        See `OpenAILLMContext` docstring for migration guide.
+
     Parameters:
         context: The OpenAI LLM context containing messages, tools, and configuration.
     """
 
     context: OpenAILLMContext
+
+    def __post_init__(self):
+        super().__post_init__()
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "OpenAILLMContextFrame is deprecated and will be removed in a future version. "
+                "Use LLMContextFrame with the universal `LLMContext` and `LLMContextAggregatorPair` instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -97,9 +97,7 @@ class AIService(FrameProcessor):
         pass
 
     async def _update_settings(self, settings: Mapping[str, Any]):
-        from pipecat.services.openai_realtime_beta.events import (
-            SessionProperties,
-        )
+        from pipecat.services.openai.realtime.events import SessionProperties
 
         for key, value in settings.items():
             logger.debug("Update request for:", key, value)
@@ -111,9 +109,7 @@ class AIService(FrameProcessor):
                 logger.debug("Attempting to update", key, value)
 
                 try:
-                    from pipecat.services.openai_realtime_beta.events import (
-                        TurnDetection,
-                    )
+                    from pipecat.services.openai.realtime.events import TurnDetection
 
                     if isinstance(self._session_properties, SessionProperties):
                         current_properties = self._session_properties
@@ -152,11 +148,11 @@ class AIService(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            await self.start(frame)
-        elif isinstance(frame, CancelFrame):
-            await self.cancel(frame)
+            await self._start(frame)
         elif isinstance(frame, EndFrame):
-            await self.stop(frame)
+            await self._stop(frame)
+        elif isinstance(frame, CancelFrame):
+            await self._cancel(frame)
 
     async def process_generator(self, generator: AsyncGenerator[Frame | None, None]):
         """Process frames from an async generator.
@@ -170,6 +166,24 @@ class AIService(FrameProcessor):
         async for f in generator:
             if f:
                 if isinstance(f, ErrorFrame):
-                    await self.push_error(f)
+                    await self.push_error_frame(f)
                 else:
                     await self.push_frame(f)
+
+    async def _start(self, frame: StartFrame):
+        try:
+            await self.start(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")
+
+    async def _stop(self, frame: EndFrame):
+        try:
+            await self.stop(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")
+
+    async def _cancel(self, frame: CancelFrame):
+        try:
+            await self.cancel(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,19 +13,19 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
-    KeypadEntry,
+    InterruptionFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    StartInterruptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 class ExotelFrameSerializer(FrameSerializer):
@@ -70,15 +70,6 @@ class ExotelFrameSerializer(FrameSerializer):
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
 
-    @property
-    def type(self) -> FrameSerializerType:
-        """Gets the serializer type.
-
-        Returns:
-            The serializer type, either TEXT or BINARY.
-        """
-        return FrameSerializerType.TEXT
-
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
 
@@ -98,7 +89,7 @@ class ExotelFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -121,7 +112,7 @@ class ExotelFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
-        elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             return json.dumps(frame.message)
 
         return None
