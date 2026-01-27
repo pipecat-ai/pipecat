@@ -189,10 +189,15 @@ class AICFilter(BaseAudioFilter):
         # Create async processor
         try:
             self._processor = ProcessorAsync(self._model, self._license_key, config)
-            self._aic_ready = True
         except Exception as e:  # noqa: BLE001 - surfacing SDK initialization errors
             logger.error(f"AIC model initialization failed: {e}")
-            self._aic_ready = False
+            self._processor = None
+
+        self._aic_ready = self._processor is not None
+
+        if not self._aic_ready:
+            logger.debug(f"ai-coustics filter is not ready.")
+            return
 
         # Get contexts for parameter control and VAD
         self._processor_ctx = self._processor.get_processor_context()
