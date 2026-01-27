@@ -464,9 +464,11 @@ class LLMUserAggregator(LLMContextAggregator):
             await s.setup(self.task_manager)
 
     async def _stop(self, frame: EndFrame):
+        await self._maybe_emit_user_turn_stopped(on_session_end=True)
         await self._cleanup()
 
     async def _cancel(self, frame: CancelFrame):
+        await self._maybe_emit_user_turn_stopped(on_session_end=True)
         await self._cleanup()
 
     async def _cleanup(self):
@@ -602,20 +604,33 @@ class LLMUserAggregator(LLMContextAggregator):
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
-        # Always push context frame.
-        aggregation = await self.push_aggregation()
-
-        message = UserTurnStoppedMessage(
-            content=aggregation, timestamp=self._user_turn_start_timestamp
-        )
-        await self._call_event_handler("on_user_turn_stopped", strategy, message)
-        self._user_turn_start_timestamp = ""
+        await self._maybe_emit_user_turn_stopped(strategy)
 
     async def _on_user_turn_stop_timeout(self, controller):
         await self._call_event_handler("on_user_turn_stop_timeout")
 
     async def _on_user_turn_idle(self, controller):
         await self._call_event_handler("on_user_turn_idle")
+
+    async def _maybe_emit_user_turn_stopped(
+        self,
+        strategy: Optional[BaseUserTurnStopStrategy] = None,
+        on_session_end: bool = False,
+    ):
+        """Maybe emit user turn stopped event.
+
+        Args:
+            strategy: The strategy that triggered the turn stop.
+            on_session_end: If True, only emit if there's unemitted content
+                (avoids duplicate events when session ends).
+        """
+        aggregation = await self.push_aggregation()
+        if not on_session_end or aggregation:
+            message = UserTurnStoppedMessage(
+                content=aggregation, timestamp=self._user_turn_start_timestamp
+            )
+            await self._call_event_handler("on_user_turn_stopped", strategy, message)
+            self._user_turn_start_timestamp = ""
 
 
 class LLMAssistantAggregator(LLMContextAggregator):
@@ -739,6 +754,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            await self._handle_end_or_cancel(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -812,6 +830,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self._trigger_assistant_turn_stopped()
         self._started = 0
         await self.reset()
+
+    async def _handle_end_or_cancel(self, frame: Frame):
+        await self._trigger_assistant_turn_stopped()
+        self._started = 0
 
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
