@@ -1,36 +1,42 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import asyncio
 import json
 import os
 import sys
 
-from deepgram import LiveOptions
 from dotenv import load_dotenv
-from livekit import api
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
-    TextFrame,
+    InterruptionFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.livekit import configure
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
+from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -38,72 +44,8 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-def generate_token(room_name: str, participant_name: str, api_key: str, api_secret: str) -> str:
-    token = api.AccessToken(api_key, api_secret)
-    token.with_identity(participant_name).with_name(participant_name).with_grants(
-        api.VideoGrants(
-            room_join=True,
-            room=room_name,
-        )
-    )
-
-    return token.to_jwt()
-
-
-def generate_token_with_agent(
-    room_name: str, participant_name: str, api_key: str, api_secret: str
-) -> str:
-    token = api.AccessToken(api_key, api_secret)
-    token.with_identity(participant_name).with_name(participant_name).with_grants(
-        api.VideoGrants(
-            room_join=True,
-            room=room_name,
-            agent=True,  # This is the only difference, this makes livekit client know agent has joined
-        )
-    )
-
-    return token.to_jwt()
-
-
-async def configure_livekit():
-    parser = argparse.ArgumentParser(description="LiveKit AI SDK Bot Sample")
-    parser.add_argument(
-        "-r", "--room", type=str, required=False, help="Name of the LiveKit room to join"
-    )
-    parser.add_argument("-u", "--url", type=str, required=False, help="URL of the LiveKit server")
-
-    args, unknown = parser.parse_known_args()
-
-    room_name = args.room or os.getenv("LIVEKIT_ROOM_NAME")
-    url = args.url or os.getenv("LIVEKIT_URL")
-    api_key = os.getenv("LIVEKIT_API_KEY")
-    api_secret = os.getenv("LIVEKIT_API_SECRET")
-
-    if not room_name:
-        raise Exception(
-            "No LiveKit room specified. Use the -r/--room option from the command line, or set LIVEKIT_ROOM_NAME in your environment."
-        )
-
-    if not url:
-        raise Exception(
-            "No LiveKit server URL specified. Use the -u/--url option from the command line, or set LIVEKIT_URL in your environment."
-        )
-
-    if not api_key or not api_secret:
-        raise Exception(
-            "LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set in environment variables."
-        )
-
-    token = generate_token_with_agent(room_name, "Say One Thing", api_key, api_secret)
-
-    user_token = generate_token(room_name, "User", api_key, api_secret)
-    logger.info(f"User token: {user_token}")
-
-    return url, token, room_name
-
-
 async def main():
-    (url, token, room_name) = await configure_livekit()
+    (url, token, room_name) = await configure()
 
     transport = LiveKitTransport(
         url=url,
@@ -112,16 +54,11 @@ async def main():
         params=LiveKitParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         ),
     )
 
-    stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(
-            vad_events=True,
-        ),
-    )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -135,28 +72,35 @@ async def main():
             "role": "system",
             "content": "You are a helpful LLM in a WebRTC call. "
             "Your goal is to demonstrate your capabilities in a succinct way. "
-            "Your output will be converted to audio so don't include special characters in your answers. "
+            "Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. "
             "Respond to what the user said in a creative and helpful way.",
         },
     ]
 
-    context = OpenAILLMContext(messages)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
+        ),
+    )
 
-    runner = PipelineRunner()
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            user_aggregator,  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            assistant_aggregator,  # Assistant spoken responses
+        ]
+    )
 
     task = PipelineTask(
-        Pipeline(
-            [
-                transport.input(),
-                stt,
-                context_aggregator.user(),
-                llm,
-                tts,
-                transport.output(),
-                context_aggregator.assistant(),
-            ],
-        ),
+        pipeline,
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
@@ -169,7 +113,7 @@ async def main():
     async def on_first_participant_joined(transport, participant_id):
         await asyncio.sleep(1)
         await task.queue_frame(
-            TextFrame(
+            TTSSpeakFrame(
                 "Hello there! How are you doing today? Would you like to talk about the weather?"
             )
         )
@@ -186,7 +130,7 @@ async def main():
 
         await task.queue_frames(
             [
-                BotInterruptionFrame(),
+                InterruptionFrame(),
                 UserStartedSpeakingFrame(),
                 TranscriptionFrame(
                     user_id=participant_id,
@@ -196,6 +140,8 @@ async def main():
                 UserStoppedSpeakingFrame(),
             ],
         )
+
+    runner = PipelineRunner()
 
     await runner.run(task)
 

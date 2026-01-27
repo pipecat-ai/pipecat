@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -76,7 +76,6 @@ class OpenAIImageGenService(ImageGenService):
         image_url = image.data[0].url
 
         if not image_url:
-            logger.error(f"{self} No image provided in response: {image}")
             yield ErrorFrame("Image generation failed")
             return
 
@@ -84,5 +83,10 @@ class OpenAIImageGenService(ImageGenService):
         async with self._aiohttp_session.get(image_url) as response:
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
-            frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
+            frame = URLImageRawFrame(
+                image=image.tobytes(),
+                size=image.size,
+                format=image.format,
+                url=image_url,
+            )
             yield frame

@@ -1,0 +1,5 @@
+pipecat-ai[ojin,silero,whisper] @ git+https://github.com/journee-live/pipecat-ojin.git@main
+ojin-client @ git+https://github.com/journee-live/ojin.git@main#subdirectory=services
+python-dotenv
+pyaudio~=0.2.14
+openai>=1.74.0,<2

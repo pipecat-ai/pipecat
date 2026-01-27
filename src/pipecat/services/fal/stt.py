@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -41,7 +41,7 @@ def language_to_fal_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding Fal Wizper language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AF: "af",
         Language.AM: "am",
         Language.AR: "ar",
@@ -142,15 +142,7 @@ def language_to_fal_language(language: Language) -> Optional[str]:
         Language.ZH: "zh",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
 class FalSTTService(SegmentedSTTService):
@@ -257,7 +249,6 @@ class FalSTTService(SegmentedSTTService):
         self, transcript: str, is_final: bool, language: Optional[str] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -275,7 +266,6 @@ class FalSTTService(SegmentedSTTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
             # Send to Fal directly (audio is already in WAV format from base class)
             data_uri = fal_client.encode(audio, "audio/x-wav")
@@ -298,5 +288,4 @@ class FalSTTService(SegmentedSTTService):
                     )
 
         except Exception as e:
-            logger.error(f"Fal Wizper error: {e}")
-            yield ErrorFrame(f"Fal Wizper error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")

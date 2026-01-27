@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,6 +14,7 @@ Note: To learn more about the smart-turn model, visit:
     - https://github.com/pipecat-ai/smart-turn
 """
 
+import warnings
 from typing import Optional
 
 import aiohttp
@@ -26,6 +27,10 @@ class FalSmartTurnAnalyzer(HttpSmartTurnAnalyzer):
 
     Extends HttpSmartTurnAnalyzer to provide integration with Fal.ai's
     smart turn detection API endpoint with proper authentication.
+
+    .. deprecated:: 0.98.0
+        FalSmartTurnAnalyzer is deprecated and will be removed in a future version.
+        Use LocalSmartTurnAnalyzerV3 instead.
     """
 
     def __init__(
@@ -48,3 +53,12 @@ class FalSmartTurnAnalyzer(HttpSmartTurnAnalyzer):
         if api_key:
             headers = {"Authorization": f"Key {api_key}"}
         super().__init__(url=url, aiohttp_session=aiohttp_session, headers=headers, **kwargs)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "FalSmartTurnAnalyzer is deprecated and will be removed in a future version. "
+                "Use LocalSmartTurnAnalyzerV3 instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )

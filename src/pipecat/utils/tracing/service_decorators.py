@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from opentelemetry import context as context_api
     from opentelemetry import trace
 
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -90,12 +92,43 @@ def _add_token_usage_to_span(span, token_usage):
             span.set_attribute("gen_ai.usage.input_tokens", token_usage["prompt_tokens"])
         if "completion_tokens" in token_usage:
             span.set_attribute("gen_ai.usage.output_tokens", token_usage["completion_tokens"])
+        # Add cached token metrics for dictionary
+        if (
+            "cache_read_input_tokens" in token_usage
+            and token_usage["cache_read_input_tokens"] is not None
+        ):
+            span.set_attribute(
+                "gen_ai.usage.cache_read_input_tokens", token_usage["cache_read_input_tokens"]
+            )
+        if (
+            "cache_creation_input_tokens" in token_usage
+            and token_usage["cache_creation_input_tokens"] is not None
+        ):
+            span.set_attribute(
+                "gen_ai.usage.cache_creation_input_tokens",
+                token_usage["cache_creation_input_tokens"],
+            )
+        if "reasoning_tokens" in token_usage and token_usage["reasoning_tokens"] is not None:
+            span.set_attribute("gen_ai.usage.reasoning_tokens", token_usage["reasoning_tokens"])
     else:
         # Handle LLMTokenUsage object
         span.set_attribute("gen_ai.usage.input_tokens", getattr(token_usage, "prompt_tokens", 0))
         span.set_attribute(
             "gen_ai.usage.output_tokens", getattr(token_usage, "completion_tokens", 0)
         )
+
+        # Add cached token metrics for LLMTokenUsage object
+        cache_read_tokens = getattr(token_usage, "cache_read_input_tokens", None)
+        if cache_read_tokens is not None:
+            span.set_attribute("gen_ai.usage.cache_read_input_tokens", cache_read_tokens)
+
+        cache_creation_tokens = getattr(token_usage, "cache_creation_input_tokens", None)
+        if cache_creation_tokens is not None:
+            span.set_attribute("gen_ai.usage.cache_creation_input_tokens", cache_creation_tokens)
+
+        reasoning_tokens = getattr(token_usage, "reasoning_tokens", None)
+        if reasoning_tokens is not None:
+            span.set_attribute("gen_ai.usage.reasoning_tokens", reasoning_tokens)
 
 
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
@@ -153,7 +186,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     add_tts_span_attributes(
                         span=span,
                         service_name=service_class_name,
-                        model=getattr(self, "model_name", "unknown"),
+                        model=getattr(self, "model_name") or "unknown",
                         voice_id=getattr(self, "_voice_id", "unknown"),
                         text=text,
                         settings=getattr(self, "_settings", {}),
@@ -270,7 +303,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         add_stt_span_attributes(
                             span=current_span,
                             service_name=service_class_name,
-                            model=getattr(self, "model_name", settings.get("model", "unknown")),
+                            model=getattr(self, "model_name") or settings.get("model", "unknown"),
                             transcript=transcript,
                             is_final=is_final,
                             language=str(language) if language else None,
@@ -382,43 +415,47 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Replace push_frame to capture output
                             self.push_frame = traced_push_frame
 
-                            # Detect if we're using Google's service
-                            is_google_service = "google" in service_class_name.lower()
-
-                            # Try to get messages based on service type
+                            # Get messages for logging
+                            # For OpenAILLMContext: use context's own get_messages_for_logging() method
+                            # For LLMContext: use adapter's get_messages_for_logging() which returns
+                            # messages in provider's native format with sensitive data sanitized
                             messages = None
                             serialized_messages = None
 
-                            # TODO: Revisit once we unify the messages across services
-                            if is_google_service:
-                                # Handle Google service specifically
-                                if hasattr(context, "get_messages_for_logging"):
-                                    messages = context.get_messages_for_logging()
-                            else:
-                                # Handle other services like OpenAI
-                                if hasattr(context, "get_messages"):
-                                    messages = context.get_messages()
-                                elif hasattr(context, "messages"):
-                                    messages = context.messages
+                            if isinstance(context, OpenAILLMContext):
+                                # OpenAILLMContext and subclasses have their own method
+                                messages = context.get_messages_for_logging()
+                            elif isinstance(context, LLMContext):
+                                # Universal LLMContext - use adapter for provider-native format
+                                if hasattr(self, "get_llm_adapter"):
+                                    adapter = self.get_llm_adapter()
+                                    messages = adapter.get_messages_for_logging(context)
 
                             # Serialize messages if available
                             if messages:
-                                try:
-                                    serialized_messages = json.dumps(messages)
-                                except Exception as e:
-                                    serialized_messages = f"Error serializing messages: {str(e)}"
+                                serialized_messages = json.dumps(messages)
 
-                            # Get tools, system message, etc. based on the service type
-                            tools = getattr(context, "tools", None)
+                            # Get tools
+                            # For OpenAILLMContext: tools may need adapter conversion if set
+                            # For LLMContext: use adapter's from_standard_tools() to convert ToolsSchema
+                            tools = None
                             serialized_tools = None
                             tool_count = 0
 
-                            if tools:
-                                try:
-                                    serialized_tools = json.dumps(tools)
-                                    tool_count = len(tools) if isinstance(tools, list) else 1
-                                except Exception as e:
-                                    serialized_tools = f"Error serializing tools: {str(e)}"
+                            if isinstance(context, OpenAILLMContext):
+                                # OpenAILLMContext: tools property handles adapter conversion internally
+                                tools = context.tools
+                            elif isinstance(context, LLMContext):
+                                # Universal LLMContext - use adapter to convert ToolsSchema
+                                if hasattr(self, "get_llm_adapter") and hasattr(context, "tools"):
+                                    adapter = self.get_llm_adapter()
+                                    tools = adapter.from_standard_tools(context.tools)
+
+                            # Serialize and count tools if available
+                            # Check if tools is not None and not NOT_GIVEN
+                            if tools is not None and tools is not NOT_GIVEN:
+                                serialized_tools = json.dumps(tools)
+                                tool_count = len(tools) if isinstance(tools, list) else 1
 
                             # Handle system message for different services
                             system_message = None
@@ -446,7 +483,10 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Add all available attributes to the span
                             attribute_kwargs = {
                                 "service_name": service_class_name,
-                                "model": getattr(self, "model_name", "unknown"),
+                                "model": getattr(self, "_full_model_name", None)
+                                or getattr(self, "model_name", None)
+                                or params.get("model")
+                                or "unknown",
                                 "stream": True,  # Most LLM services use streaming
                                 "parameters": params,
                             }
@@ -545,8 +585,10 @@ def traced_gemini_live(operation: str) -> Callable:
                 ) as current_span:
                     try:
                         # Base service attributes
-                        model_name = getattr(
-                            self, "model_name", getattr(self, "_model_name", "unknown")
+                        model_name = (
+                            getattr(self, "model_name", None)
+                            or getattr(self, "_model_name", None)
+                            or "unknown"
                         )
                         voice_id = getattr(self, "_voice_id", None)
                         language_code = getattr(self, "_language_code", None)
@@ -651,9 +693,9 @@ def traced_gemini_live(operation: str) -> Callable:
 
                         elif operation == "llm_tool_call" and args:
                             # Extract tool call information
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "toolCall") and evt.toolCall.functionCalls:
-                                function_calls = evt.toolCall.functionCalls
+                            msg = args[0] if args else None
+                            if msg and hasattr(msg, "tool_call") and msg.tool_call.function_calls:
+                                function_calls = msg.tool_call.function_calls
                                 if function_calls:
                                     # Add information about the first function call
                                     call = function_calls[0]
@@ -709,7 +751,7 @@ def traced_gemini_live(operation: str) -> Callable:
                                             else:
                                                 operation_attrs["tool.result_status"] = "completed"
 
-                                    except json.JSONDecodeError as e:
+                                    except json.JSONDecodeError:
                                         operation_attrs["tool.result"] = (
                                             f"Invalid JSON: {str(result_content)[:500]}"
                                         )
@@ -722,19 +764,19 @@ def traced_gemini_live(operation: str) -> Callable:
 
                         elif operation == "llm_response" and args:
                             # Extract usage and response metadata from turn complete event
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "usageMetadata") and evt.usageMetadata:
-                                usage = evt.usageMetadata
+                            msg = args[0] if args else None
+                            if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                                usage = msg.usage_metadata
 
                                 # Token usage - basic attributes for span visibility
-                                if hasattr(usage, "promptTokenCount"):
-                                    operation_attrs["tokens.prompt"] = usage.promptTokenCount or 0
-                                if hasattr(usage, "responseTokenCount"):
+                                if hasattr(usage, "prompt_token_count"):
+                                    operation_attrs["tokens.prompt"] = usage.prompt_token_count or 0
+                                if hasattr(usage, "response_token_count"):
                                     operation_attrs["tokens.completion"] = (
-                                        usage.responseTokenCount or 0
+                                        usage.response_token_count or 0
                                     )
-                                if hasattr(usage, "totalTokenCount"):
-                                    operation_attrs["tokens.total"] = usage.totalTokenCount or 0
+                                if hasattr(usage, "total_token_count"):
+                                    operation_attrs["tokens.total"] = usage.total_token_count or 0
 
                             # Get output text and modality from service state
                             text = getattr(self, "_bot_text_buffer", "")
@@ -751,9 +793,9 @@ def traced_gemini_live(operation: str) -> Callable:
 
                             # Add turn completion status
                             if (
-                                evt
-                                and hasattr(evt, "serverContent")
-                                and evt.serverContent.turnComplete
+                                msg
+                                and hasattr(msg, "server_content")
+                                and msg.server_content.turn_complete
                             ):
                                 operation_attrs["turn_complete"] = True
 
@@ -772,16 +814,16 @@ def traced_gemini_live(operation: str) -> Callable:
 
                         # For llm_response operation, also handle token usage metrics
                         if operation == "llm_response" and hasattr(self, "start_llm_usage_metrics"):
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "usageMetadata") and evt.usageMetadata:
-                                usage = evt.usageMetadata
+                            msg = args[0] if args else None
+                            if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                                usage = msg.usage_metadata
                                 # Create LLMTokenUsage object
                                 from pipecat.metrics.metrics import LLMTokenUsage
 
                                 tokens = LLMTokenUsage(
-                                    prompt_tokens=usage.promptTokenCount or 0,
-                                    completion_tokens=usage.responseTokenCount or 0,
-                                    total_tokens=usage.totalTokenCount or 0,
+                                    prompt_tokens=usage.prompt_token_count or 0,
+                                    completion_tokens=usage.response_token_count or 0,
+                                    total_tokens=usage.total_token_count or 0,
                                 )
                                 _add_token_usage_to_span(current_span, tokens)
 
@@ -850,8 +892,10 @@ def traced_openai_realtime(operation: str) -> Callable:
                 ) as current_span:
                     try:
                         # Base service attributes
-                        model_name = getattr(
-                            self, "model_name", getattr(self, "_model_name", "unknown")
+                        model_name = (
+                            getattr(self, "model_name", None)
+                            or getattr(self, "_model_name", None)
+                            or "unknown"
                         )
 
                         # Operation-specific attribute collection
@@ -905,7 +949,9 @@ def traced_openai_realtime(operation: str) -> Callable:
                             # Capture context messages being sent
                             if hasattr(self, "_context") and self._context:
                                 try:
-                                    messages = self._context.get_messages_for_logging()
+                                    messages = self.get_llm_adapter().get_messages_for_logging(
+                                        self._context
+                                    )
                                     if messages:
                                         operation_attrs["context_messages"] = json.dumps(messages)
                                 except Exception as e:

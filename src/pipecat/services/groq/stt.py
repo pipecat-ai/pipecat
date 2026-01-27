@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -58,7 +58,8 @@ class GroqSTTService(BaseWhisperSTTService):
         kwargs = {
             "file": ("audio.wav", audio, "audio/wav"),
             "model": self.model_name,
-            "response_format": "json",
+            # Use verbose_json to get probability metrics
+            "response_format": "verbose_json" if self._include_prob_metrics else "json",
             "language": self._language,
         }
 

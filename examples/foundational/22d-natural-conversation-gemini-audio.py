@@ -1,18 +1,17 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import asyncio
 import os
 import time
 
 from dotenv import load_dotenv
-from google.genai.types import Content, Part
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     CancelFrame,
@@ -21,9 +20,10 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InterruptionFrame,
+    LLMContextFrame,
     LLMFullResponseStartFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -34,23 +34,30 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantResponseAggregator,
 )
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
 )
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.google.llm import GoogleLLMContext, GoogleLLMService
-from pipecat.sync.base_notifier import BaseNotifier
-from pipecat.sync.event_notifier import EventNotifier
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import LLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.utils.sync.base_notifier import BaseNotifier
+from pipecat.utils.sync.event_notifier import EventNotifier
+from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
 
@@ -338,7 +345,7 @@ Output: NO
 
 conversation_system_instruction = """You are a helpful assistant participating in a voice converation.
 
-Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.
+Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.
 
 If you know that a number string is a phone number from the context of the conversation, write it as a phone number. For example 210-333-4567.
 
@@ -371,7 +378,7 @@ class AudioAccumulator(FrameProcessor):
         await super().process_frame(frame, direction)
 
         # ignore context frame
-        if isinstance(frame, OpenAILLMContextFrame):
+        if isinstance(frame, LLMContextFrame):
             return
 
         if isinstance(frame, TranscriptionFrame):
@@ -388,9 +395,9 @@ class AudioAccumulator(FrameProcessor):
                 f"Processing audio buffer seconds: ({len(self._audio_frames)}) ({len(data)}) {len(data) / 2 / 16000}"
             )
             self._user_speaking = False
-            context = GoogleLLMContext()
-            context.add_audio_frames_message(audio_frames=self._audio_frames)
-            await self.push_frame(OpenAILLMContextFrame(context=context))
+            context = LLMContext()
+            await context.add_audio_frames_message(audio_frames=self._audio_frames)
+            await self.push_frame(LLMContextFrame(context=context))
         elif isinstance(frame, InputAudioRawFrame):
             # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest
             # frames as necessary.
@@ -436,6 +443,7 @@ class CompletenessCheck(FrameProcessor):
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
                 self._idle_task = None
+            await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
@@ -443,7 +451,7 @@ class CompletenessCheck(FrameProcessor):
             logger.debug("Completeness check YES")
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
-            await self.push_frame(UserStoppedSpeakingFrame())
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
             await self._audio_accumulator.reset()
             await self._notifier.notify()
         elif isinstance(frame, TextFrame):
@@ -509,7 +517,7 @@ class LLMAggregatorBuffer(LLMAssistantResponseAggregator):
 class ConversationAudioContextAssembler(FrameProcessor):
     """Takes the single-message context generated by the AudioAccumulator and adds it to the conversation LLM's context."""
 
-    def __init__(self, context: OpenAILLMContext, **kwargs):
+    def __init__(self, context: LLMContext, **kwargs):
         super().__init__(**kwargs)
         self._context = context
 
@@ -521,11 +529,10 @@ class ConversationAudioContextAssembler(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        if isinstance(frame, OpenAILLMContextFrame):
-            GoogleLLMContext.upgrade_to_google(self._context)
-            last_message = frame.context.messages[-1]
+        if isinstance(frame, LLMContextFrame):
+            last_message = frame.context.get_messages()[-1]
             self._context._messages.append(last_message)
-            await self.push_frame(OpenAILLMContextFrame(context=self._context))
+            await self.push_frame(LLMContextFrame(context=self._context))
 
 
 class OutputGate(FrameProcessor):
@@ -539,7 +546,7 @@ class OutputGate(FrameProcessor):
     def __init__(
         self,
         notifier: BaseNotifier,
-        context: OpenAILLMContext,
+        context: LLMContext,
         llm_transcription_buffer: LLMAggregatorBuffer,
         **kwargs,
     ):
@@ -566,7 +573,7 @@ class OutputGate(FrameProcessor):
                 await self._start()
             if isinstance(frame, (EndFrame, CancelFrame)):
                 await self._stop()
-            if isinstance(frame, StartInterruptionFrame):
+            if isinstance(frame, InterruptionFrame):
                 self._frames_buffer = []
                 self.close_gate()
             await self.push_frame(frame, direction)
@@ -611,7 +618,7 @@ class OutputGate(FrameProcessor):
                 await self._notifier.wait()
 
                 transcription = await self._transcription_buffer.wait_for_transcription() or "-"
-                self._context.add_message(Content(role="user", parts=[Part(text=transcription)]))
+                self._context.add_message({"role": "user", "content": transcription})
 
                 self.open_gate()
                 for frame, direction in self._frames_buffer:
@@ -619,10 +626,81 @@ class OutputGate(FrameProcessor):
                 self._frames_buffer = []
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"OutputGate error: {e}")
-                raise e
-                break
+
+
+class TurnDetectionLLM(Pipeline):
+    def __init__(self, llm: LLMService, context: LLMContext):
+        # This is the LLM that will transcribe user speech.
+        tx_llm = GoogleLLMService(
+            name="Transcriber",
+            model=TRANSCRIBER_MODEL,
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            temperature=0.0,
+            system_instruction=transcriber_system_instruction,
+        )
+
+        # This is the LLM that will classify user speech as complete or incomplete.
+        classifier_llm = GoogleLLMService(
+            name="Classifier",
+            model=CLASSIFIER_MODEL,
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            temperature=0.0,
+            system_instruction=classifier_system_instruction,
+        )
+
+        # This is a notifier that we use to synchronize the two LLMs.
+        notifier = EventNotifier()
+
+        # This turns the LLM context into an inference request to classify the user's speech
+        # as complete or incomplete.
+        # statement_judge_context_filter = StatementJudgeAudioContextAccumulator(notifier=notifier)
+
+        audio_accumulator = AudioAccumulator()
+        # This sends a UserStoppedSpeakingFrame and triggers the notifier event
+        completeness_check = CompletenessCheck(
+            notifier=notifier, audio_accumulator=audio_accumulator
+        )
+
+        async def block_user_stopped_speaking(frame):
+            return not isinstance(frame, UserStoppedSpeakingFrame)
+
+        conversation_audio_context_assembler = ConversationAudioContextAssembler(context=context)
+
+        llm_aggregator_buffer = LLMAggregatorBuffer()
+
+        bot_output_gate = OutputGate(
+            notifier=notifier, context=context, llm_transcription_buffer=llm_aggregator_buffer
+        )
+
+        super().__init__(
+            [
+                audio_accumulator,
+                ParallelPipeline(
+                    [
+                        # Pass everything except UserStoppedSpeaking to the elements after
+                        # this ParallelPipeline
+                        FunctionFilter(filter=block_user_stopped_speaking),
+                    ],
+                    [
+                        ParallelPipeline(
+                            [
+                                classifier_llm,
+                                completeness_check,
+                            ],
+                            [
+                                tx_llm,
+                                llm_aggregator_buffer,
+                            ],
+                        )
+                    ],
+                    [
+                        conversation_audio_context_assembler,
+                        llm,
+                        bot_output_gate,  # buffer output until notified, then flush frames and update context
+                    ],
+                ),
+            ]
+        )
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -647,30 +725,12 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-    )
-
-    # This is the LLM that will transcribe user speech.
-    tx_llm = GoogleLLMService(
-        name="Transcriber",
-        model=TRANSCRIBER_MODEL,
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        temperature=0.0,
-        system_instruction=transcriber_system_instruction,
-    )
-
-    # This is the LLM that will classify user speech as complete or incomplete.
-    classifier_llm = GoogleLLMService(
-        name="Classifier",
-        model=CLASSIFIER_MODEL,
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        temperature=0.0,
-        system_instruction=classifier_system_instruction,
     )
 
     # This is the regular LLM that responds conversationally.
@@ -681,63 +741,26 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         system_instruction=conversation_system_instruction,
     )
 
-    context = OpenAILLMContext()
-    context_aggregator = conversation_llm.create_context_aggregator(context)
-
-    # This is a notifier that we use to synchronize the two LLMs.
-    notifier = EventNotifier()
-
-    # This turns the LLM context into an inference request to classify the user's speech
-    # as complete or incomplete.
-    # statement_judge_context_filter = StatementJudgeAudioContextAccumulator(notifier=notifier)
-
-    audio_accumulater = AudioAccumulator()
-    # This sends a UserStoppedSpeakingFrame and triggers the notifier event
-    completeness_check = CompletenessCheck(notifier=notifier, audio_accumulator=audio_accumulater)
-
-    async def block_user_stopped_speaking(frame):
-        return not isinstance(frame, UserStoppedSpeakingFrame)
-
-    conversation_audio_context_assembler = ConversationAudioContextAssembler(context=context)
-
-    llm_aggregator_buffer = LLMAggregatorBuffer()
-
-    bot_output_gate = OutputGate(
-        notifier=notifier, context=context, llm_transcription_buffer=llm_aggregator_buffer
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
+        ),
     )
+
+    llm = TurnDetectionLLM(conversation_llm, context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            audio_accumulater,
-            ParallelPipeline(
-                [
-                    # Pass everything except UserStoppedSpeaking to the elements after
-                    # this ParallelPipeline
-                    FunctionFilter(filter=block_user_stopped_speaking),
-                ],
-                [
-                    ParallelPipeline(
-                        [
-                            classifier_llm,
-                            completeness_check,
-                        ],
-                        [
-                            tx_llm,
-                            llm_aggregator_buffer,
-                        ],
-                    )
-                ],
-                [
-                    conversation_audio_context_assembler,
-                    conversation_llm,
-                    bot_output_gate,  # buffer output until notified, then flush frames and update context
-                    # TempPrinter(),
-                ],
-            ),
+            user_aggregator,
+            llm,
             tts,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ],
     )
 
@@ -747,24 +770,25 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_app_message")
-    async def on_app_message(transport, message):
-        logger.debug(f"Received app message: {message}")
+    async def on_app_message(transport, message, sender):
+        logger.debug(f"Received app message: {message}, sender: {sender}")  # TODO: revert
         if "message" not in message:
             return
 
         await task.queue_frames(
             [
                 UserStartedSpeakingFrame(),
-                TranscriptionFrame(user_id="", timestamp=time.time(), text=message["message"]),
+                TranscriptionFrame(
+                    user_id="", timestamp=time_now_iso8601(), text=message["message"]
+                ),
                 UserStoppedSpeakingFrame(),
             ]
         )
@@ -774,12 +798,18 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

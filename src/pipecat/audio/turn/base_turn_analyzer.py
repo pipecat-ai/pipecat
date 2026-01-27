@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,6 +14,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Tuple
 
+from pydantic import BaseModel
+
 from pipecat.metrics.metrics import MetricsData
 
 
@@ -27,6 +29,12 @@ class EndOfTurnState(Enum):
 
     COMPLETE = 1
     INCOMPLETE = 2
+
+
+class BaseTurnParams(BaseModel):
+    """Base class for turn analyzer parameters."""
+
+    pass
 
 
 class BaseTurnAnalyzer(ABC):
@@ -78,7 +86,7 @@ class BaseTurnAnalyzer(ABC):
 
     @property
     @abstractmethod
-    def params(self):
+    def params(self) -> BaseTurnParams:
         """Get the current turn analyzer parameters.
 
         Returns:
@@ -108,7 +116,23 @@ class BaseTurnAnalyzer(ABC):
         """
         pass
 
+    def update_vad_start_secs(self, vad_start_secs: float):
+        """Update the VAD start trigger time.
+
+        The turn analyzer may choose to change its buffer size depending
+        on this value.
+
+        Args:
+            vad_start_secs (float): The number of seconds of voice activity
+                before triggering the user speaking event.
+        """
+        pass
+
     @abstractmethod
     def clear(self):
         """Reset the turn analyzer to its initial state."""
+        pass
+
+    async def cleanup(self):
+        """Cleanup the turn analyzer."""
         pass

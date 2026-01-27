@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,13 +7,16 @@
 """Observer for measuring user-to-bot response latency."""
 
 import time
+from statistics import mean
 
 from loguru import logger
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
@@ -33,8 +36,9 @@ class UserBotLatencyLogObserver(BaseObserver):
         to calculate response latencies.
         """
         super().__init__()
-        self._processed_frames = set()
+        self._user_bot_latency_processed_frames = set()
         self._user_stopped_time = 0
+        self._latencies = []
 
     async def on_push_frame(self, data: FramePushed):
         """Process frames to track speech timing and calculate latency.
@@ -47,15 +51,39 @@ class UserBotLatencyLogObserver(BaseObserver):
             return
 
         # Skip already processed frames
-        if data.frame.id in self._processed_frames:
+        if data.frame.id in self._user_bot_latency_processed_frames:
             return
 
-        self._processed_frames.add(data.frame.id)
+        self._user_bot_latency_processed_frames.add(data.frame.id)
 
-        if isinstance(data.frame, UserStartedSpeakingFrame):
+        if isinstance(data.frame, VADUserStartedSpeakingFrame):
             self._user_stopped_time = 0
-        elif isinstance(data.frame, UserStoppedSpeakingFrame):
+        elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
             self._user_stopped_time = time.time()
+        elif isinstance(data.frame, (EndFrame, CancelFrame)):
+            self._log_summary()
         elif isinstance(data.frame, BotStartedSpeakingFrame) and self._user_stopped_time:
             latency = time.time() - self._user_stopped_time
-            logger.debug(f"⏱️ LATENCY FROM USER STOPPED SPEAKING TO BOT STARTED SPEAKING: {latency}")
+            self._user_stopped_time = 0
+            self._latencies.append(latency)
+            self._log_latency(latency)
+
+    def _log_summary(self):
+        if not self._latencies:
+            return
+        avg_latency = mean(self._latencies)
+        min_latency = min(self._latencies)
+        max_latency = max(self._latencies)
+        logger.info(
+            f"⏱️ LATENCY FROM USER STOPPED SPEAKING TO BOT STARTED SPEAKING - Avg: {avg_latency:.3f}s, Min: {min_latency:.3f}s, Max: {max_latency:.3f}s"
+        )
+
+    def _log_latency(self, latency: float):
+        """Log the latency.
+
+        Args:
+            latency: The latency to log.
+        """
+        logger.debug(
+            f"⏱️ LATENCY FROM USER STOPPED SPEAKING TO BOT STARTED SPEAKING: {latency:.3f}s"
+        )

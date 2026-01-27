@@ -1,0 +1,174 @@
+name: Generate Changelog for Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 0.0.97)"
+        required: true
+        type: string
+      date:
+        description: "Release date (YYYY-MM-DD format, defaults to today)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --group dev
+
+      - name: Set release date
+        id: set_date
+        run: |
+          if [ -z "${{ inputs.date }}" ]; then
+            RELEASE_DATE=$(date +%Y-%m-%d)
+            echo "Using today's date: $RELEASE_DATE"
+          else
+            RELEASE_DATE="${{ inputs.date }}"
+            echo "Using provided date: $RELEASE_DATE"
+          fi
+          echo "release_date=$RELEASE_DATE" >> $GITHUB_OUTPUT
+
+      - name: Validate inputs
+        run: |
+          # Validate version format (basic check)
+          if ! [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "Error: Version must be in format X.Y.Z (e.g., 0.0.97)"
+            exit 1
+          fi
+
+          # Validate date format if provided
+          if [ -n "${{ inputs.date }}" ]; then
+            if ! date -d "${{ inputs.date }}" >/dev/null 2>&1; then
+              # Try macOS date format
+              if ! date -j -f "%Y-%m-%d" "${{ inputs.date }}" >/dev/null 2>&1; then
+                echo "Error: Date must be in YYYY-MM-DD format (e.g., 2025-12-04)"
+                exit 1
+              fi
+            fi
+          fi
+
+      - name: Check for changelog fragments
+        id: check_fragments
+        run: |
+          FRAGMENT_COUNT=$(find changelog -name "*.md" ! -name "_template.md.j2" | wc -l | tr -d ' ')
+          echo "fragment_count=$FRAGMENT_COUNT" >> $GITHUB_OUTPUT
+
+          if [ "$FRAGMENT_COUNT" -eq "0" ]; then
+            echo "❌ Error: No changelog fragments found in changelog/"
+            echo ""
+            echo "Cannot create a release without changelog entries."
+            echo "Add changelog fragments to the changelog/ directory (e.g., 1234.added.md) and try again."
+            exit 1
+          fi
+
+          # Validate fragment types
+          VALID_TYPES="added changed deprecated removed fixed security other"
+          INVALID_FRAGMENTS=""
+
+          for file in changelog/*.md; do
+            # Skip template
+            if [[ "$file" == "changelog/_template.md.j2" ]]; then
+              continue
+            fi
+            
+            # Extract type from filename (e.g., 1234.added.md -> added)
+            filename=$(basename "$file")
+            # Handle both 1234.added.md and 1234.added.2.md patterns
+            type=$(echo "$filename" | sed -E 's/^[0-9]+\.([a-z]+)(\.[0-9]+)?\.md$/\1/')
+            
+            # Check if type is valid
+            if ! echo "$VALID_TYPES" | grep -wq "$type"; then
+              INVALID_FRAGMENTS="$INVALID_FRAGMENTS\n  - $filename (type: '$type')"
+            fi
+          done
+
+          if [ -n "$INVALID_FRAGMENTS" ]; then
+            echo "❌ Error: Invalid changelog fragment types found:"
+            echo -e "$INVALID_FRAGMENTS"
+            echo ""
+            echo "Valid types are: $VALID_TYPES"
+            echo "Example: 1234.added.md, 5678.fixed.md"
+            exit 1
+          fi
+
+          echo "✓ Found $FRAGMENT_COUNT changelog fragment(s)"
+          echo "has_fragments=true" >> $GITHUB_OUTPUT
+
+      - name: Preview changelog
+        run: |
+          echo "## Preview of changelog for version ${{ inputs.version }}"
+          echo ""
+          uv run towncrier build --draft --version "${{ inputs.version }}" --date "${{ steps.set_date.outputs.release_date }}"
+
+      - name: Build changelog
+        run: |
+          uv run towncrier build --version "${{ inputs.version }}" --date "${{ steps.set_date.outputs.release_date }}" --yes
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Update changelog for version ${{ inputs.version }}"
+          title: "Release ${{ inputs.version }} - Changelog Update"
+          body: |
+            ## Changelog Update for Release ${{ inputs.version }}
+
+            This PR updates the CHANGELOG.md with all changes for version **${{ inputs.version }}**.
+
+            ### Summary
+            - **Version:** ${{ inputs.version }}
+            - **Date:** ${{ steps.set_date.outputs.release_date }}
+            - **Fragments processed:** ${{ steps.check_fragments.outputs.fragment_count }}
+
+            ### What this PR does
+            - ✅ Adds new release section to CHANGELOG.md
+            - ✅ Removes processed changelog fragments
+            - ✅ Ready to merge for release
+
+            ### Next Steps
+            1. Review the changelog entries below
+            2. Make any necessary edits to CHANGELOG.md if needed
+            3. Merge this PR
+            4. Continue with your release process
+
+            ---
+
+            <details>
+            <summary>📋 Preview of changes</summary>
+
+            The changelog has been updated with entries from the following fragments:
+
+            ```bash
+            ${{ steps.check_fragments.outputs.fragment_count }} fragments processed
+            ```
+
+            </details>
+          branch: changelog-${{ inputs.version }}
+          delete-branch: true
+          labels: |
+            changelog
+            release

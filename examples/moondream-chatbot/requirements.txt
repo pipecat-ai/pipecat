@@ -1,4 +1,0 @@
-python-dotenv
-fastapi[all]
-uvicorn
-pipecat-ai[daily,cartesia,moondream,openai,silero]

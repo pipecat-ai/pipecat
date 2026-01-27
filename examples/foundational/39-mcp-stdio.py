@@ -1,16 +1,15 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import asyncio
 import io
+import json
 import os
 import re
 import shutil
-import sys
 
 import aiohttp
 from dotenv import load_dotenv
@@ -18,23 +17,34 @@ from loguru import logger
 from mcp import StdioServerParameters
 from PIL import Image
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
+    LLMRunFrame,
     URLImageRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -58,10 +68,15 @@ class UrlToImageProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     def extract_url(self, text: str):
-        pattern = r"!\[[^\]]*\]\((https?://[^)]+\.(png|jpg|jpeg|PNG|JPG|JPEG))\)"
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
+        try:
+            data = json.loads(text)
+            if "artObject" in data:
+                return data["artObject"]["webImage"]["url"]
+            if "artworks" in data and len(data["artworks"]):
+                return data["artworks"][0]["webImage"]["url"]
+        except:
+            pass
+
         return None
 
     async def run_image_process(self, image_url: str):
@@ -80,6 +95,23 @@ class UrlToImageProcessor(FrameProcessor):
             logger.error(error_msg)
 
 
+# full list of tools available from rijksmuseum MCP:
+# - get_artwork_details
+# - get_artwork_image
+# - get_user_sets
+# - get_user_set_details
+# - open_image_in_browser
+# - get_artist_timeline
+
+mcp_tools_filter = ["get_artwork_details", "get_artwork_image", "open_image_in_browser"]
+
+
+def open_image_output_filter(output: str):
+    pattern = r"Successfully opened image in browser: "
+    text_to_print = re.sub(pattern, "", output)
+    print(f"🖼️ link to high resolution artwork: {text_to_print}")
+
+
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
 # selected.
@@ -90,7 +122,7 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -98,12 +130,12 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     # Create an HTTP session for API calls
@@ -123,10 +155,13 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             mcp = MCPClient(
                 server_params=StdioServerParameters(
                     command=shutil.which("npx"),
-                    args=["-y", "@programcomputer/nasa-mcp-server@latest"],
-                    # https://api.nasa.gov
-                    env={"NASA_API_KEY": os.getenv("NASA_API_KEY")},
-                )
+                    # https://github.com/r-huijts/rijksmuseum-mcp
+                    args=["-y", "mcp-server-rijksmuseum"],
+                    env={"RIJKSMUSEUM_API_KEY": os.getenv("RIJKSMUSEUM_API_KEY")},
+                ),
+                # Optional
+                tools_filter=mcp_tools_filter,  # Optional
+                tools_output_filters={"open_image_in_browser": open_image_output_filter},
             )
         except Exception as e:
             logger.error(f"error setting up mcp")
@@ -134,16 +169,21 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
         mcp_image = UrlToImageProcessor(aiohttp_session=session)
 
-        tools = await mcp.register_tools(llm)
+        tools = {}
+        try:
+            tools = await mcp.register_tools(llm)
+        except Exception as e:
+            logger.error(f"error registering tools")
+            logger.exception("error trace:")
 
         system = f"""
         You are a helpful LLM in a WebRTC call.
         Your goal is to demonstrate your capabilities in a succinct way.
-        You have access to a number of tools provided by NASA MCP. Use any and all tools to help users.
-        When asked for the astronomy picture of the day, PASS in NO date to the API.
-        This ensures we get the latest picture available. If as specific date is asked for, you
-        can pass in that date to the API.
-        Your output will be converted to audio so don't include special characters in your answers.
+        You have access to tools to search the Rijksmuseum collection.
+        Offer, for example, to show a floral still life, use the `search_artwork` tool.
+        The tool may respond with a JSON object with an `artworks` array. Choose the art from that array.
+        Once the tool has responded, tell the user the title and use the `open_image_in_browser` tool.
+        Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points.
         Respond to what the user said in a creative and helpful way.
         Don't overexplain what you are doing.
         Just respond with short sentences when you are carrying out tool calls.
@@ -151,19 +191,28 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
         messages = [{"role": "system", "content": system}]
 
-        context = OpenAILLMContext(messages, tools)
-        context_aggregator = llm.create_context_aggregator(context)
+        context = LLMContext(messages, tools)
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
+                    ]
+                ),
+            ),
+        )
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 stt,
-                context_aggregator.user(),  # User spoken responses
+                user_aggregator,  # User spoken responses
                 llm,  # LLM
                 tts,  # TTS
                 mcp_image,  # URL image -> output
                 transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses and tool context
+                assistant_aggregator,  # Assistant spoken responses and tool context
             ]
         )
 
@@ -173,25 +222,39 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 enable_metrics=True,
                 enable_usage_metrics=True,
             ),
+            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         )
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info(f"Client connected: {client}")
             # Kick off the conversation.
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            await task.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
             logger.info(f"Client disconnected")
             await task.cancel()
 
-        runner = PipelineRunner(handle_sigint=handle_sigint)
+        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
         await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    if not os.getenv("RIJKSMUSEUM_API_KEY"):
+        logger.error(
+            f"Please set RIJKSMUSEUM_API_KEY environment variable for this example. See https://github.com/r-huijts/rijksmuseum-mcp and https://www.rijksmuseum.nl/en/register?redirectUrl=https://www.https://www.rijksmuseum.nl/en/rijksstudio/my/profile"
+        )
+        import sys
+
+        sys.exit(1)
+    from pipecat.runner.run import main
+
+    main()

@@ -1,0 +1,11 @@
+agent_name = "quickstart-test"
+image = "markatdaily/quickstart-test:latest"
+secret_set = "quickstart-test-secrets"
+agent_profile = "agent-1x"
+
+# RECOMMENDED: Set an image pull secret:
+# https://docs.pipecat.ai/deployment/pipecat-cloud/fundamentals/secrets#image-pull-secrets
+image_credentials = "dockerhub-access"
+
+[scaling]
+	min_agents = 1

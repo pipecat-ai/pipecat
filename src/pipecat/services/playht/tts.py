@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,6 +14,7 @@ import io
 import json
 import struct
 import uuid
+import warnings
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -25,26 +26,23 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
-    from pyht.async_client import AsyncClient
-    from pyht.client import Format, TTSOptions
-    from pyht.client import Language as PlayHTLanguage
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use PlayHT, you need to `pip install pipecat-ai[playht]`.")
+    logger.error("In order to use PlayHTTTSService, you need to `pip install pipecat-ai[playht]`.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -57,7 +55,7 @@ def language_to_playht_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding PlayHT language code, or None if not supported.
     """
-    BASE_LANGUAGES = {
+    LANGUAGE_MAP = {
         Language.AF: "afrikans",
         Language.AM: "amharic",
         Language.AR: "arabic",
@@ -97,21 +95,16 @@ def language_to_playht_language(language: Language) -> Optional[str]:
         Language.ZH: "mandarin",
     }
 
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
 class PlayHTTTSService(InterruptibleTTSService):
     """PlayHT WebSocket-based text-to-speech service.
+
+    .. deprecated:: 0.0.88
+
+        This class is deprecated and will be removed in a future version.
+        PlayHT is shutting down their API on December 31st, 2025.
 
     Provides real-time text-to-speech synthesis using PlayHT's WebSocket API.
     Supports streaming audio generation with configurable voice engines and
@@ -160,6 +153,15 @@ class PlayHTTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "PlayHT is shutting down their API on December 31st, 2025. "
+                "'PlayHTTTSService' is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         params = params or PlayHTTTSService.InputParams()
 
@@ -229,6 +231,8 @@ class PlayHTTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         """Connect to PlayHT WebSocket and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -236,6 +240,8 @@ class PlayHTTTSService(InterruptibleTTSService):
 
     async def _disconnect(self):
         """Disconnect from PlayHT WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -257,12 +263,14 @@ class PlayHTTTSService(InterruptibleTTSService):
                 raise ValueError("WebSocket URL is not a string")
 
             self._websocket = await websocket_connect(self._websocket_url)
+
+            await self._call_event_handler("on_connected")
         except ValueError as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
+            await self.push_error(error_msg=f"Error connecting: {e}", exception=e)
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -275,10 +283,11 @@ class PlayHTTTSService(InterruptibleTTSService):
                 logger.debug("Disconnecting from PlayHT")
                 await self._websocket.close()
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
             self._request_id = None
             self._websocket = None
+            await self._call_event_handler("on_disconnected")
 
     async def _get_websocket_url(self):
         """Retrieve WebSocket URL from PlayHT API."""
@@ -315,7 +324,7 @@ class PlayHTTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle interruption by stopping metrics and clearing request ID."""
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
@@ -344,8 +353,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                             await self.push_frame(TTSStoppedFrame())
                             self._request_id = None
                     elif "error" in msg:
-                        logger.error(f"{self} error: {msg}")
-                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
+                        await self.push_error(error_msg=f"Error: {msg['error']}")
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
@@ -387,7 +395,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(json.dumps(tts_command))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
+                yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
@@ -397,12 +405,16 @@ class PlayHTTTSService(InterruptibleTTSService):
             yield None
 
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
-            yield ErrorFrame(f"{self} error: {str(e)}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
 class PlayHTHttpTTSService(TTSService):
     """PlayHT HTTP-based text-to-speech service.
+
+    .. deprecated:: 0.0.88
+
+        This class is deprecated and will be removed in a future version.
+        PlayHT is shutting down their API on December 31st, 2025.
 
     Provides text-to-speech synthesis using PlayHT's HTTP API for simpler,
     non-streaming synthesis. Suitable for use cases where streaming is not
@@ -429,7 +441,8 @@ class PlayHTHttpTTSService(TTSService):
         user_id: str,
         voice_url: str,
         voice_engine: str = "Play3.0-mini",
-        protocol: str = "http",  # Options: http, ws
+        protocol: Optional[str] = None,
+        output_format: str = "wav",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         **kwargs,
@@ -441,40 +454,57 @@ class PlayHTHttpTTSService(TTSService):
             user_id: PlayHT user ID for authentication.
             voice_url: URL of the voice to use for synthesis.
             voice_engine: Voice engine to use. Defaults to "Play3.0-mini".
-            protocol: Protocol to use ("http" or "ws"). Defaults to "http".
+            protocol: Protocol to use ("http" or "ws").
+
+                .. deprecated:: 0.0.80
+                    This parameter no longer has any effect and will be removed in a future version.
+                    Use PlayHTTTSService for WebSocket or PlayHTHttpTTSService for HTTP.
+
+            output_format: Audio output format. Defaults to "wav".
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        # Warn about deprecated protocol parameter if explicitly provided
+        if protocol:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'protocol' parameter is deprecated and will be removed in a future version.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "PlayHT is shutting down their API on December 31st, 2025. "
+                "'PlayHTHttpTTSService' is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         params = params or PlayHTHttpTTSService.InputParams()
 
         self._user_id = user_id
         self._api_key = api_key
 
-        self._client = AsyncClient(
-            user_id=self._user_id,
-            api_key=self._api_key,
-        )
-
         # Check if voice_engine contains protocol information (backward compatibility)
         if "-http" in voice_engine:
             # Extract the base engine name
             voice_engine = voice_engine.replace("-http", "")
-            protocol = "http"
         elif "-ws" in voice_engine:
             # Extract the base engine name
             voice_engine = voice_engine.replace("-ws", "")
-            protocol = "ws"
 
         self._settings = {
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
-            "format": Format.FORMAT_WAV,
+            "output_format": output_format,
             "voice_engine": voice_engine,
-            "protocol": protocol,
             "speed": params.speed,
             "seed": params.seed,
         }
@@ -489,26 +519,6 @@ class PlayHTHttpTTSService(TTSService):
         """
         await super().start(frame)
         self._settings["sample_rate"] = self.sample_rate
-
-    def _create_options(self) -> TTSOptions:
-        """Create TTSOptions object from current settings."""
-        language_str = self._settings["language"]
-        playht_language = None
-        if language_str:
-            # Convert string to PlayHT Language enum
-            for lang in PlayHTLanguage:
-                if lang.value == language_str:
-                    playht_language = lang
-                    break
-
-        return TTSOptions(
-            voice=self._voice_id,
-            language=playht_language,
-            sample_rate=self.sample_rate,
-            format=self._settings["format"],
-            speed=self._settings["speed"],
-            seed=self._settings["seed"],
-        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -542,43 +552,80 @@ class PlayHTHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            options = self._create_options()
-
             await self.start_ttfb_metrics()
 
-            playht_gen = self._client.tts(
-                text,
-                voice_engine=self._settings["voice_engine"],
-                protocol=self._settings["protocol"],
-                options=options,
-            )
+            # Prepare the request payload
+            payload = {
+                "text": text,
+                "voice": self._voice_id,
+                "voice_engine": self._settings["voice_engine"],
+                "output_format": self._settings["output_format"],
+                "sample_rate": self.sample_rate,
+                "language": self._settings["language"],
+            }
+
+            # Add optional parameters if they exist
+            if self._settings["speed"] is not None:
+                payload["speed"] = self._settings["speed"]
+            if self._settings["seed"] is not None:
+                payload["seed"] = self._settings["seed"]
+
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "X-User-Id": self._user_id,
+                "Content-Type": "application/json",
+                "Accept": "*/*",
+            }
 
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
 
-            b = bytearray()
-            in_header = True
-            async for chunk in playht_gen:
-                # skip the RIFF header.
-                if in_header:
-                    b.extend(chunk)
-                    if len(b) <= 36:
-                        continue
-                    else:
-                        fh = io.BytesIO(b)
-                        fh.seek(36)
-                        (data, size) = struct.unpack("<4sI", fh.read(8))
-                        while data != b"data":
-                            fh.read(size)
-                            (data, size) = struct.unpack("<4sI", fh.read(8))
-                        in_header = False
-                elif len(chunk) > 0:
-                    await self.stop_ttfb_metrics()
-                    frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
-                    yield frame
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.play.ht/api/v2/tts/stream",
+                    headers=headers,
+                    json=payload,
+                ) as response:
+                    if response.status not in (200, 201):
+                        error_text = await response.text()
+                        raise Exception(f"PlayHT API error {response.status}: {error_text}")
+
+                    in_header = True
+                    buffer = b""
+
+                    CHUNK_SIZE = self.chunk_size
+
+                    async for chunk in response.content.iter_chunked(CHUNK_SIZE):
+                        if len(chunk) == 0:
+                            continue
+
+                        # Skip the RIFF header
+                        if in_header:
+                            buffer += chunk
+                            if len(buffer) <= 36:
+                                continue
+                            else:
+                                fh = io.BytesIO(buffer)
+                                fh.seek(36)
+                                (data, size) = struct.unpack("<4sI", fh.read(8))
+                                while data != b"data":
+                                    fh.read(size)
+                                    (data, size) = struct.unpack("<4sI", fh.read(8))
+                                # Extract audio data after header
+                                audio_data = buffer[fh.tell() :]
+                                if len(audio_data) > 0:
+                                    await self.stop_ttfb_metrics()
+                                    frame = TTSAudioRawFrame(audio_data, self.sample_rate, 1)
+                                    yield frame
+                                in_header = False
+                        elif len(chunk) > 0:
+                            await self.stop_ttfb_metrics()
+                            frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                            yield frame
+
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

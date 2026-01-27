@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -60,6 +60,15 @@ class OpenAISTTService(BaseWhisperSTTService):
             "model": self.model_name,
             "language": self._language,
         }
+
+        if self._include_prob_metrics:
+            # GPT-4o-transcribe models only support logprobs (not verbose_json)
+            if self.model_name in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
+                kwargs["response_format"] = "json"
+                kwargs["include"] = ["logprobs"]
+            else:
+                # Whisper models support verbose_json
+                kwargs["response_format"] = "verbose_json"
 
         if self._prompt is not None:
             kwargs["prompt"] = self._prompt

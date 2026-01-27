@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,7 +8,7 @@
 
 from typing import Optional
 
-from pipecat.transcriptions.language import Language
+from pipecat.transcriptions.language import Language, resolve_language
 
 
 def language_to_azure_language(language: Language) -> Optional[str]:
@@ -20,7 +20,7 @@ def language_to_azure_language(language: Language) -> Optional[str]:
     Returns:
         The corresponding Azure language code, or None if not supported.
     """
-    language_map = {
+    LANGUAGE_MAP = {
         # Afrikaans
         Language.AF: "af-ZA",
         Language.AF_ZA: "af-ZA",
@@ -341,4 +341,4 @@ def language_to_azure_language(language: Language) -> Optional[str]:
         Language.ZU: "zu-ZA",
         Language.ZU_ZA: "zu-ZA",
     }
-    return language_map.get(language)
+    return resolve_language(language, LANGUAGE_MAP, use_base_code=False)

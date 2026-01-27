@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -44,7 +44,7 @@ class DirectFunction(Protocol):
 
     "Direct" functions' metadata is automatically extracted from their function signature and
     docstrings, allowing them to be used without accompanying function configurations (as
-    `FunctionSchema`s or in provider-specific formats).
+    FunctionSchemas or in provider-specific formats).
     """
 
     async def __call__(self, params: "FunctionCallParams", **kwargs: Any) -> None:

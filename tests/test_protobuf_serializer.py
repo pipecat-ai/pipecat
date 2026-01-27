@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -21,7 +21,7 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
     async def test_roundtrip(self):
         text_frame = TextFrame(text="hello world")
         frame = await self.serializer.deserialize(await self.serializer.serialize(text_frame))
-        self.assertEqual(text_frame, frame)
+        self.assertEqual(frame.text, text_frame.text)
 
         transcription_frame = TranscriptionFrame(
             text="Hello there!", user_id="123", timestamp="2021-01-01"
@@ -29,7 +29,9 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
         frame = await self.serializer.deserialize(
             await self.serializer.serialize(transcription_frame)
         )
-        self.assertEqual(frame, transcription_frame)
+        self.assertEqual(frame.text, transcription_frame.text)
+        self.assertEqual(frame.user_id, transcription_frame.user_id)
+        self.assertEqual(frame.timestamp, transcription_frame.timestamp)
 
         audio_frame = OutputAudioRawFrame(audio=b"1234567890", sample_rate=16000, num_channels=1)
         frame = await self.serializer.deserialize(await self.serializer.serialize(audio_frame))

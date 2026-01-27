@@ -1,3 +1,0 @@
-pipecatcloud
-pipecat-ai[google,daily,deepgram,cartesia,silero]
-python-dotenv

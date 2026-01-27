@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,13 +15,14 @@ import pipecat.frames.protobufs.frames_pb2 as frame_protos
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     TextFrame,
     TranscriptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 @dataclasses.dataclass
@@ -63,15 +64,6 @@ class ProtobufFrameSerializer(FrameSerializer):
         """Initialize the Protobuf frame serializer."""
         pass
 
-    @property
-    def type(self) -> FrameSerializerType:
-        """Get the serializer type.
-
-        Returns:
-            FrameSerializerType.BINARY indicating binary serialization format.
-        """
-        return FrameSerializerType.BINARY
-
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize a frame to Protocol Buffer binary format.
 
@@ -82,7 +74,7 @@ class ProtobufFrameSerializer(FrameSerializer):
             Serialized frame as bytes, or None if frame type is not serializable.
         """
         # Wrapping this messages as a JSONFrame to send
-        if isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+        if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             frame = MessageFrame(
                 data=json.dumps(frame.message),
             )
@@ -134,11 +126,11 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-        # Special handling for MessageFrame -> TransportMessageUrgentFrame
+        # Special handling for MessageFrame -> InputTransportMessageFrame
         if class_name == MessageFrame:
             try:
                 msg = json.loads(args_dict["data"])
-                instance = TransportMessageUrgentFrame(message=msg)
+                instance = InputTransportMessageFrame(message=msg)
                 logger.debug(f"ProtobufFrameSerializer: Transport message {instance}")
             except Exception as e:
                 logger.error(f"Error parsing MessageFrame data: {e}")

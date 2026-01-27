@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,6 +13,7 @@ import pytest
 from aiohttp import web
 
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     ErrorFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -74,6 +75,7 @@ async def test_run_piper_tts_success(aiohttp_client):
         ]
 
         expected_returned_frames = [
+            AggregatedTextFrame,
             TTSStartedFrame,
             TTSAudioRawFrame,
             TTSAudioRawFrame,
@@ -121,7 +123,7 @@ async def test_run_piper_tts_error(aiohttp_client):
             TTSSpeakFrame(text="Error case."),
         ]
 
-        expected_down_frames = [TTSStoppedFrame, TTSTextFrame]
+        expected_down_frames = [AggregatedTextFrame, TTSStoppedFrame, TTSTextFrame]
 
         expected_up_frames = [ErrorFrame]
 

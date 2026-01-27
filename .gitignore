@@ -4,7 +4,14 @@ __pycache__/
 *~
 venv
 .venv
-/.idea
+.idea
+.gradle
+.next
+next-env.d.ts
+local.properties
+*.log
+*.lock
+smart_turn_audio_log
 #*#
 
 # Distribution / Packaging
@@ -27,12 +34,10 @@ share/python-wheels/
 *.egg
 MANIFEST
 .DS_Store
-.env
+.env*
 fly.toml
 
 # Examples
-examples/telnyx-chatbot/templates/streams.xml
-examples/twilio-chatbot/templates/streams.xml
 examples/**/node_modules/
 examples/**/.expo/
 examples/**/dist/
@@ -51,3 +56,9 @@ examples/**/web-build/
 # Documentation
 docs/api/_build/
 docs/api/api
+
+# uv
+.python-version
+
+# Pipecat
+whisker_setup.py

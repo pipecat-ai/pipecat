@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,7 +15,6 @@ import io
 from typing import AsyncGenerator
 
 import aiohttp
-from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
@@ -91,7 +90,6 @@ class AzureImageGenServiceREST(ImageGenService):
             while status != "succeeded":
                 attempts_left -= 1
                 if attempts_left == 0:
-                    logger.error(f"{self} error: image generation timed out")
                     yield ErrorFrame("Image generation timed out")
                     return
 
@@ -104,7 +102,6 @@ class AzureImageGenServiceREST(ImageGenService):
 
             image_url = json_response["result"]["data"][0]["url"] if json_response else None
             if not image_url:
-                logger.error(f"{self} error: image generation failed")
                 yield ErrorFrame("Image generation failed")
                 return
 

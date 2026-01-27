@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,6 +13,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -21,13 +22,12 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
-    KeypadEntry,
+    InterruptionFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    StartInterruptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 class PlivoFrameSerializer(FrameSerializer):
@@ -85,15 +85,6 @@ class PlivoFrameSerializer(FrameSerializer):
         self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
 
-    @property
-    def type(self) -> FrameSerializerType:
-        """Gets the serializer type.
-
-        Returns:
-            The serializer type, either TEXT or BINARY.
-        """
-        return FrameSerializerType.TEXT
-
     async def setup(self, frame: StartFrame):
         """Sets up the serializer with pipeline configuration.
 
@@ -122,7 +113,7 @@ class PlivoFrameSerializer(FrameSerializer):
             self._hangup_attempted = True
             await self._hang_up_call()
             return None
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             answer = {"event": "clearAudio", "streamId": self._stream_id}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -148,7 +139,7 @@ class PlivoFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
-        elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+        elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             return json.dumps(frame.message)
 
         # Return None for unhandled frames
@@ -199,7 +190,7 @@ class PlivoFrameSerializer(FrameSerializer):
                         )
 
         except Exception as e:
-            logger.exception(f"Failed to hang up Plivo call: {e}")
+            logger.error(f"Failed to hang up Plivo call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Plivo WebSocket data to Pipecat frames.

@@ -8,13 +8,13 @@ from typing import Optional, Tuple
 
 from loguru import logger
 from ojin.entities.interaction_messages import ErrorResponseMessage
-from ojin.ojin_stv_client import OjinSTVClient
-from ojin.ojin_stv_messages import (
-    IOjinSTVClient,
-    OjinSTVCancelInteractionMessage,
-    OjinSTVInteractionInputMessage,
-    OjinSTVInteractionResponseMessage,
-    OjinSTVSessionReadyMessage,
+from ojin.ojin_client import OjinClient
+from ojin.ojin_client_messages import (
+    IOjinClient,
+    OjinAudioInputMessage,
+    OjinCancelInteractionMessage,
+    OjinInteractionResponseMessage,
+    OjinSessionReadyMessage,
 )
 from ojin.profiling_utils import FPSTracker
 from pydantic import BaseModel
@@ -119,14 +119,14 @@ class OjinVideoService(FrameProcessor):
     def __init__(
         self,
         settings: OjinVideoServiceSettings,
-        client: IOjinSTVClient | None = None,
+        client: IOjinClient | None = None,
     ) -> None:
         super().__init__()
         logger.debug(f"OjinVideoService initialized with settings {settings}")
 
         self._settings = settings
         if client is None:
-            self._client = OjinSTVClient(
+            self._client = OjinClient(
                 ws_url=settings.ws_url,
                 api_key=settings.api_key,
                 config_id=settings.config_id,
@@ -214,7 +214,6 @@ class OjinVideoService(FrameProcessor):
                 # Clear speech frames buffer
                 # Track timestamp for debugging time to first video frame
                 self._tts_started_timestamp = time.perf_counter()
-                self._speech_frames.clear()
                 self._first_frame_received_timestamp = None
                 self._first_frame_played_timestamp = None
                 await self.set_state(OjinVideoServiceState.IDLE)
@@ -246,6 +245,7 @@ class OjinVideoService(FrameProcessor):
 
     async def _process_pending_tts_audio(self):
         logger.debug(f"Processing pending TTS audio: {len(self._pending_tts_audio)} frames")
+        self._speech_frames.clear()
         self._tts_started_timestamp = time.perf_counter()
         self._first_frame_received_timestamp = None
         self._first_frame_played_timestamp = None
@@ -260,7 +260,7 @@ class OjinVideoService(FrameProcessor):
             frame.audio, frame.sample_rate, OJIN_PERSONA_SAMPLE_RATE
         )
         await self._client.send_message(
-            OjinSTVInteractionInputMessage(
+            OjinAudioInputMessage(
                 audio_int16_bytes=resampled_audio,
                 params={
                     "client_frame_index": self._compute_frame_index_for_server(),
@@ -275,7 +275,7 @@ class OjinVideoService(FrameProcessor):
 
     async def _handle_ojin_message(self, message: BaseModel):
         """Process incoming messages from the server."""
-        if isinstance(message, OjinSTVSessionReadyMessage):
+        if isinstance(message, OjinSessionReadyMessage):
             if message.parameters is not None:
                 self._is_mirrored_loop = message.parameters.get("is_mirrored_loop", True)
                 self._session_data = message.parameters
@@ -290,7 +290,7 @@ class OjinVideoService(FrameProcessor):
             # Request idle frames from server
             await self._client.start_interaction()
             await self._client.send_message(
-                OjinSTVInteractionInputMessage(
+                OjinAudioInputMessage(
                     audio_int16_bytes=bytes(),
                     params={
                         "filter_amount": IDLE_FILTER_AMOUNT,
@@ -300,7 +300,7 @@ class OjinVideoService(FrameProcessor):
                 )
             )
 
-        elif isinstance(message, OjinSTVInteractionResponseMessage):
+        elif isinstance(message, OjinInteractionResponseMessage):
             frame_idx = message.index
 
             if self._state == OjinVideoServiceState.INITIALIZING:
@@ -401,7 +401,6 @@ class OjinVideoService(FrameProcessor):
             message = await self._client.receive_message()
             if message is not None:
                 await self._handle_ojin_message(message)
-            await asyncio.sleep(0.001)
 
     def _compute_frame_index_for_server(self) -> int:
         """Compute the frame index to send to server for proper synchronization."""
@@ -587,6 +586,6 @@ class OjinVideoService(FrameProcessor):
 
         # Send cancel to server
         if self._client is not None:
-            await self._client.send_message(OjinSTVCancelInteractionMessage())
+            await self._client.send_message(OjinCancelInteractionMessage())
 
         await self.set_state(OjinVideoServiceState.INTERRUPTING)

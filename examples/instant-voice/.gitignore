@@ -1,7 +1,0 @@
-venv
-.idea
-server/.env
-client/javascript/node_modules
-client/javascript/.vite
-bkp
-

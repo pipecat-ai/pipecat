@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,10 +7,10 @@
 import unittest
 
 from pipecat.frames.frames import (
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
-    StartInterruptionFrame,
 )
 from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
 from pipecat.tests.utils import SleepFrame, run_test
@@ -113,7 +113,7 @@ class TestLLMFullResponseAggregator(unittest.IsolatedAsyncioTestCase):
             LLMFullResponseStartFrame(),
             LLMTextFrame("Hello "),
             SleepFrame(),
-            StartInterruptionFrame(),
+            InterruptionFrame(),
             LLMFullResponseStartFrame(),
             LLMTextFrame("Hello "),
             LLMTextFrame("there!"),
@@ -122,7 +122,7 @@ class TestLLMFullResponseAggregator(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             LLMFullResponseStartFrame,
             LLMTextFrame,
-            StartInterruptionFrame,
+            InterruptionFrame,
             LLMFullResponseStartFrame,
             LLMTextFrame,
             LLMTextFrame,

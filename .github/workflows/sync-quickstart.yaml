@@ -1,0 +1,51 @@
+name: Sync Quickstart to pipecat-quickstart repo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/quickstart/**'
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  sync-quickstart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout quickstart repo
+        uses: actions/checkout@v4
+        with:
+          repository: pipecat-ai/pipecat-quickstart
+          token: ${{ secrets.QUICKSTART_SYNC_TOKEN }}
+          path: quickstart-repo
+
+      - name: Sync files (excluding uv.lock and README.md)
+        run: |
+          # Copy all files except uv.lock and README.md
+          find examples/quickstart -type f \
+            -not -name "README.md" \
+            -not -name "uv.lock" \
+            -exec cp {} quickstart-repo/ \;
+
+      - name: Commit and push changes
+        run: |
+          cd quickstart-repo
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add .
+
+          # Only commit if there are changes
+          if ! git diff --staged --quiet; then
+            git commit -m "Sync from pipecat main repo
+            
+            Updated files from examples/quickstart/
+            Commit: ${{ github.sha }}
+            "
+            git push
+          else
+            echo "No changes to sync"
+          fi

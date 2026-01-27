@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,7 +11,6 @@ from typing import Awaitable, Callable, List
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 async def identity_transformer(frame: Frame):
@@ -64,7 +63,7 @@ class ProducerProcessor(FrameProcessor):
         Returns:
             asyncio.Queue: The queue for the newly added consumer.
         """
-        queue = WatchdogQueue(self.task_manager)
+        queue = asyncio.Queue()
         self._consumers.append(queue)
         return queue
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -29,9 +29,11 @@ class PreProcessingConfig(BaseModel):
     """Configuration for audio pre-processing options.
 
     Parameters:
+        audio_enhancer: Apply pre-processing to the audio stream to enhance quality
         speech_threshold: Sensitivity for speech detection (0-1)
     """
 
+    audio_enhancer: Optional[bool] = None
     speech_threshold: Optional[float] = None
 
 
@@ -41,10 +43,14 @@ class CustomVocabularyItem(BaseModel):
     Parameters:
         value: The vocabulary word or phrase
         intensity: The bias intensity for this vocabulary item (0-1)
+        pronunciations: The pronunciations used in the transcription.
+        language: Specify the language in which it will be pronounced when sound comparison occurs. Default to transcription language.
     """
 
     value: str
     intensity: float
+    pronunciations: Optional[List[str]] = None
+    language: Optional[str] = None
 
 
 class CustomVocabularyConfig(BaseModel):
@@ -163,6 +169,9 @@ class GladiaInputParams(BaseModel):
         pre_processing: Audio pre-processing options
         realtime_processing: Real-time processing features
         messages_config: WebSocket message filtering options
+        enable_vad: Enable VAD to trigger end of utterance detection. This should be used
+            without any other VAD enabled in the agent and will emit the speaker started
+            and stopped frames. Defaults to False.
     """
 
     encoding: Optional[str] = "wav/pcm"
@@ -170,9 +179,10 @@ class GladiaInputParams(BaseModel):
     channels: Optional[int] = 1
     custom_metadata: Optional[Dict[str, Any]] = None
     endpointing: Optional[float] = None
-    maximum_duration_without_endpointing: Optional[int] = 10
+    maximum_duration_without_endpointing: Optional[int] = 5
     language: Optional[Language] = None  # Deprecated
     language_config: Optional[LanguageConfig] = None
     pre_processing: Optional[PreProcessingConfig] = None
     realtime_processing: Optional[RealtimeProcessingConfig] = None
     messages_config: Optional[MessagesConfig] = None
+    enable_vad: bool = False

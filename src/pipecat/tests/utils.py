@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,7 +8,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Awaitable, Callable, List, Optional, Sequence, Tuple
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -36,7 +36,7 @@ class SleepFrame(SystemFrame):
         sleep: Duration to sleep in seconds before processing the next frame.
     """
 
-    sleep: float = 0.1
+    sleep: float = 0.2
 
 
 class HeartbeatsObserver(BaseObserver):
@@ -100,7 +100,7 @@ class QueuedFrameProcessor(FrameProcessor):
             queue_direction: The direction of frames to capture (UPSTREAM or DOWNSTREAM).
             ignore_start: Whether to ignore StartFrames when capturing.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
         self._queue = queue
         self._queue_direction = queue_direction
         self._ignore_start = ignore_start
@@ -123,12 +123,13 @@ class QueuedFrameProcessor(FrameProcessor):
 async def run_test(
     processor: FrameProcessor,
     *,
-    frames_to_send: Sequence[Frame],
+    enable_rtvi: bool = False,
     expected_down_frames: Optional[Sequence[type]] = None,
     expected_up_frames: Optional[Sequence[type]] = None,
+    frames_to_send: Sequence[Frame],
     ignore_start: bool = True,
     observers: Optional[List[BaseObserver]] = None,
-    start_metadata: Optional[Dict[str, Any]] = None,
+    pipeline_params: Optional[PipelineParams] = None,
     send_end_frame: bool = True,
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
     """Run a test pipeline with the specified processor and validate frame flow.
@@ -139,12 +140,13 @@ async def run_test(
 
     Args:
         processor: The frame processor to test.
-        frames_to_send: Sequence of frames to send through the processor.
+        enable_rtvi: Whether RTVI should be enabled in this test.
         expected_down_frames: Expected frame types flowing downstream (optional).
         expected_up_frames: Expected frame types flowing upstream (optional).
+        frames_to_send: Sequence of frames to send through the processor.
         ignore_start: Whether to ignore StartFrames in frame validation.
         observers: Optional list of observers to attach to the pipeline.
-        start_metadata: Optional metadata to include with the StartFrame.
+        pipeline_params: Optional pipeline parameters.
         send_end_frame: Whether to send an EndFrame at the end of the test.
 
     Returns:
@@ -154,7 +156,7 @@ async def run_test(
         AssertionError: If the received frames don't match the expected frame types.
     """
     observers = observers or []
-    start_metadata = start_metadata or {}
+    pipeline_params = pipeline_params or PipelineParams()
 
     received_up = asyncio.Queue()
     received_down = asyncio.Queue()
@@ -173,9 +175,10 @@ async def run_test(
 
     task = PipelineTask(
         pipeline,
-        params=PipelineParams(start_metadata=start_metadata),
-        observers=observers,
         cancel_on_idle_timeout=False,
+        enable_rtvi=enable_rtvi,
+        observers=observers,
+        params=pipeline_params,
     )
 
     async def push_frames():
@@ -203,8 +206,16 @@ async def run_test(
             if not isinstance(frame, EndFrame) or not send_end_frame:
                 received_down_frames.append(frame)
 
-        print("received DOWN frames =", received_down_frames)
-        print("expected DOWN frames =", expected_down_frames)
+        down_frames_printed = "["
+        for frame in received_down_frames:
+            down_frames_printed += f"{frame.__class__.__name__}, "
+        down_frames_printed += "]"
+        expected_frames_printed = "["
+        for frame in expected_down_frames:
+            expected_frames_printed += f"{frame.__name__}, "
+        expected_frames_printed += "]"
+        print("received DOWN frames =", down_frames_printed)
+        print("expected DOWN frames =", expected_frames_printed)
 
         assert len(received_down_frames) == len(expected_down_frames)
 
