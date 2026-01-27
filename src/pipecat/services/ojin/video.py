@@ -150,7 +150,6 @@ class OjinVideoService(FrameProcessor):
         # Playback state
         self.fps = 25
         self._num_speech_frames_played = 0
-        self._current_frame_idx = -1
         self._played_frame_idx = -1
         self._last_queued_frame_idx = -1
         self._last_played_image_bytes: Optional[bytes] = None  # For frame repetition fallback
