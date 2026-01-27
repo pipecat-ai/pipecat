@@ -841,11 +841,12 @@ class GoogleLLMService(LLMService):
             messages = context.messages
             system = getattr(context, "system_message", None)
             tools = context.tools or []
-            tool_config = context.tool_config
+            if hasattr(context, "tool_choice") and context.tool_choice:
+                logger.warning(f"Tool choice for Google LLM service is only supported for LLMContext")
 
         # Build generation config using the same method as streaming
         generation_params = self._build_generation_params(
-            system_instruction=system, tools=tools if tools else None, tool_config=tool_config
+            system_instruction=system, tools=tools if tools else None
         )
 
         generation_config = GenerateContentConfig(**generation_params)
