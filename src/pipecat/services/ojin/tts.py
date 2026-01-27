@@ -233,7 +233,7 @@ class OjinTTSService(TTSService):
         # Yield TTSStoppedFrame
         yield TTSStoppedFrame()
 
-    async def _start(self) -> None:
+    async def _start_tts(self) -> None:
         """Internal start method to connect and begin receiving messages."""
         if not await self.connect_with_retry():
             logger.error("Failed to start TTS service - connection failed")
@@ -247,7 +247,7 @@ class OjinTTSService(TTSService):
         if message:
             await self._handle_ojin_message(message)
 
-    async def _stop(self) -> None:
+    async def _stop_tts(self) -> None:
         """Internal stop method to disconnect and cleanup."""
         if self._receive_msg_task:
             self._receive_msg_task.cancel()
@@ -269,7 +269,7 @@ class OjinTTSService(TTSService):
         if frame:
             await super().start(frame)
         if not self._client.is_connected():
-            await self._start()
+            await self._start_tts()
 
     async def stop(self, frame: EndFrame) -> None:
         """Stop the TTS service.
@@ -277,7 +277,7 @@ class OjinTTSService(TTSService):
         Args:
             frame: The EndFrame from the pipeline (can be None for standalone use).
         """
-        await self._stop()
+        await self._stop_tts()
         if frame:
             await super().stop(frame)
 
