@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TypedDict
 
 from loguru import logger
-from openai import NotGiven
+from openai import NOT_GIVEN, NotGiven
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -154,9 +154,16 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             ToolConfig instance configured for Gemini's function calling mode, or
             NOT_GIVEN if the tool_choice is not recognized or is NotGiven.
         """
-        def _create_tool_config(mode: FunctionCallingConfigMode, allowed_function_names: List[str] = []) -> ToolConfig:
-            return ToolConfig(function_calling_config=FunctionCallingConfig(mode=mode, allowed_function_names=allowed_function_names or None))
-        
+
+        def _create_tool_config(
+            mode: FunctionCallingConfigMode, allowed_function_names: List[str] = []
+        ) -> ToolConfig:
+            return ToolConfig(
+                function_calling_config=FunctionCallingConfig(
+                    mode=mode, allowed_function_names=allowed_function_names or None
+                )
+            )
+
         if tool_choice is NOT_GIVEN:
             return NOT_GIVEN
 
@@ -169,8 +176,14 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         if tool_choice == "required":
             return _create_tool_config(FunctionCallingConfigMode.ANY)
 
-        if (isinstance(tool_choice, dict) and isinstance(tool_choice.get("function"), dict) and tool_choice["function"].get("name")):
-            return _create_tool_config(FunctionCallingConfigMode.ANY, [tool_choice["function"]["name"]])
+        if (
+            isinstance(tool_choice, dict)
+            and isinstance(tool_choice.get("function"), dict)
+            and tool_choice["function"].get("name")
+        ):
+            return _create_tool_config(
+                FunctionCallingConfigMode.ANY, [tool_choice["function"]["name"]]
+            )
 
         logger.warning(f"Unsupported tool choice format: {tool_choice}. Returning NOT_GIVEN.")
         return NOT_GIVEN

@@ -530,7 +530,6 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(params["tool_config"], NOT_GIVEN)
 
 
-
 class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
     def setUp(self) -> None:
         """Sets up a common adapter instance for all tests."""
