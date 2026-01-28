@@ -94,8 +94,9 @@ class LLMUserAggregatorParams:
             When enabled, the LLM is required to output a turn completion status
             (✓ for complete, ○ for incomplete) at the start of each response.
             If the turn is incomplete, the LLM's response is suppressed (not spoken).
-            The LLM should be prompted with turn completion instructions
-            (see TurnCompletionMixin.TURN_COMPLETION_INSTRUCTIONS).
+        turn_completion_instructions: Optional custom instructions for turn completion.
+            If not provided, uses default instructions from TurnCompletionMixin.
+            Only used when filter_incomplete_turns is True.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
@@ -104,6 +105,7 @@ class LLMUserAggregatorParams:
     user_idle_timeout: Optional[float] = None
     vad_analyzer: Optional[VADAnalyzer] = None
     filter_incomplete_turns: bool = False
+    turn_completion_instructions: Optional[str] = None
 
 
 @dataclass
@@ -503,9 +505,13 @@ class LLMUserAggregator(LLMContextAggregator):
                 LLMUpdateSettingsFrame(settings={"filter_incomplete_turns": True})
             )
             # Auto-inject turn completion instructions into context
-            from pipecat.services.mixins.turn_completion import TURN_COMPLETION_INSTRUCTIONS
+            if self._params.turn_completion_instructions:
+                instructions = self._params.turn_completion_instructions
+            else:
+                from pipecat.services.mixins.turn_completion import TURN_COMPLETION_INSTRUCTIONS
 
-            self._context.add_message({"role": "system", "content": TURN_COMPLETION_INSTRUCTIONS})
+                instructions = TURN_COMPLETION_INSTRUCTIONS
+            self._context.add_message({"role": "system", "content": instructions})
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
