@@ -156,12 +156,15 @@ class GenesysAudioHookSerializer(FrameSerializer):
     def __init__(
         self,
         params: Optional[InputParams] = None,
+        **kwargs,
     ):
         """Initialize the GenesysAudioHookSerializer.
 
         Args:
             params: Configuration parameters.
+            **kwargs: Additional arguments passed to BaseObject (e.g., name).
         """
+        super().__init__(**kwargs)
         self._params = params or GenesysAudioHookSerializer.InputParams()
         
         self._genesys_sample_rate = self._params.genesys_sample_rate
@@ -599,8 +602,13 @@ class GenesysAudioHookSerializer(FrameSerializer):
             return json.dumps(self.create_barge_in_event())
             
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
-            # Pass through custom JSON messages
-            return json.dumps(frame.message)
+            # Only pass through AudioHook protocol messages (those with "version" field)
+            # Filter out RTVI and other non-AudioHook messages
+            if isinstance(frame.message, dict) and "version" in frame.message:
+                return json.dumps(frame.message)
+            else:
+                # Not an AudioHook message, ignore
+                return None
             
         # Ignore other frames - we don't need to process them here
         return None
