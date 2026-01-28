@@ -187,7 +187,16 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._media_info: Optional[List[Dict[str, Any]]] = None
         self._input_variables: Optional[Dict[str, Any]] = None  # Custom input from Genesys
         self._output_variables: Optional[Dict[str, Any]] = None  # Custom output to Genesys
-        
+
+        # Event handlers
+        self._register_event_handler("on_open")
+        self._register_event_handler("on_close")
+        self._register_event_handler("on_ping")
+        self._register_event_handler("on_pause")
+        self._register_event_handler("on_update")
+        self._register_event_handler("on_error")
+        self._register_event_handler("on_dtmf")
+
 
     @property
     def session_id(self) -> str:
@@ -786,6 +795,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
             f"conversation={self._conversation_id}, ani={ani}"
         )
         
+        await self._call_event_handler("on_open", message)
+
         return OutputTransportMessageUrgentFrame(message=self.create_opened_response(
             start_paused=self._params.start_paused,
             supported_languages=self._params.supported_languages,
@@ -814,6 +825,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._is_open = False
 
         logger.info(f"Sending closed response to Genesys...")
+
+        await self._call_event_handler("on_close", message)
         
         # Return as urgent frame to be sent through pipeline immediately
         # Include any output variables that were set during the session
@@ -833,6 +846,9 @@ class GenesysAudioHookSerializer(FrameSerializer):
             OutputTransportMessageUrgentFrame with pong response.
         """
         logger.info(f"Sending pong response to Genesys...")
+
+        await self._call_event_handler("on_ping", message)
+
         # Return as urgent frame to be sent through pipeline immediately
         return OutputTransportMessageUrgentFrame(message=self.create_pong_response())
 
@@ -854,6 +870,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         logger.info(f"AudioHook pause request: reason={reason}")
         
         self._is_paused = True
+
+        await self._call_event_handler("on_pause", message)
         
         # Note: Application should call create_resumed_response() when ready
         return None
@@ -875,6 +893,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
             self._participant = params["participant"]
             
         logger.debug(f"AudioHook update received: {params}")
+
+        await self._call_event_handler("on_update", message)
         
         return None
 
@@ -892,6 +912,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
         error_msg = params.get("message", "Unknown error")
         
         logger.error(f"AudioHook error from Genesys: {code} - {error_msg}")
+
+        await self._call_event_handler("on_error", message)
         
         return None
 
@@ -915,6 +937,8 @@ class GenesysAudioHookSerializer(FrameSerializer):
             return None
         
         logger.info(f"DTMF received: {digit}")
+
+        await self._call_event_handler("on_dtmf", message)
         
         try:
             return InputDTMFFrame(KeypadEntry(digit))
