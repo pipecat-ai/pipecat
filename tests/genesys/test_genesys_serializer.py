@@ -1,14 +1,11 @@
 """Tests for the Genesys AudioHook serializer."""
 
 import json
+
 import pytest
 
 from pipecat.frames.frames import InputDTMFFrame, OutputTransportMessageUrgentFrame
-
-from pipecat.serializers.genesys import (
-    GenesysAudioHookSerializer,
-    AudioHookChannel
-)
+from pipecat.serializers.genesys import AudioHookChannel, GenesysAudioHookSerializer
 
 
 class TestGenesysAudioHookSerializer:

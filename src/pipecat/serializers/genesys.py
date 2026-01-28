@@ -30,6 +30,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
+from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
+from pipecat.audio.utils import pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -37,14 +39,12 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
+    InterruptionFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
-    InterruptionFrame
 )
 from pipecat.serializers.base_serializer import FrameSerializer
-from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
-from pipecat.audio.utils import ulaw_to_pcm, pcm_to_ulaw
 
 
 class AudioHookMessageType(str, Enum):
@@ -832,7 +832,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
         Returns:
             OutputTransportMessageUrgentFrame with pong response.
         """
-        
         logger.info(f"Sending pong response to Genesys...")
         # Return as urgent frame to be sent through pipeline immediately
         return OutputTransportMessageUrgentFrame(message=self.create_pong_response())
