@@ -31,7 +31,7 @@ Requirements:
     - [Optional] Anthropic API key (if using Claude with local config)
 
     Environment variables (set in .env or in your terminal using `export`):
-        DAILY_SAMPLE_ROOM_URL=daily_sample_room_url
+        DAILY_ROOM_URL=daily_room_url
         DAILY_API_KEY=daily_api_key
         OPENAI_API_KEY=openai_api_key
         ELEVENLABS_API_KEY=elevenlabs_api_key

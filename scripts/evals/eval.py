@@ -195,7 +195,7 @@ class EvalRunner:
 
 
 async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    room_url = os.getenv("DAILY_ROOM_URL")
 
     module = load_module_from_path(script_path)
 
@@ -225,7 +225,7 @@ async def run_eval_pipeline(
 ):
     logger.info(f"Starting eval bot")
 
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    room_url = os.getenv("DAILY_ROOM_URL")
 
     transport = DailyTransport(
         room_url,

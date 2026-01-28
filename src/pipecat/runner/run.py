@@ -583,13 +583,13 @@ def _setup_daily_routes(app: FastAPI, dialin_enabled: bool = False):
 
         bot_module = _get_bot_module()
 
-        existing_room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+        existing_room_url = os.getenv("DAILY_ROOM_URL")
 
         result = None
 
         # Configure room if:
         # 1. Explicitly requested via createDailyRoom in payload
-        # 2. Using pre-configured room from DAILY_SAMPLE_ROOM_URL env var
+        # 2. Using pre-configured room from DAILY_ROOM_URL env var
         if create_daily_room or existing_room_url:
             import aiohttp
 
