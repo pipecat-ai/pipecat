@@ -23,6 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -39,24 +40,20 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserT
 load_dotenv(override=True)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
 }
 
@@ -68,7 +65,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
     openai_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -93,6 +90,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     openai_context = LLMContext(openai_messages)
     groq_context = LLMContext(groq_messages)
+
+    # We use an external VADProcessor because the UserTurnProcessor is shared
+    # across multiple parallel aggregators. The VADProcessor emits
+    # VADUserStartedSpeakingFrame and VADUserStoppedSpeakingFrame which the
+    # UserTurnProcessor needs to manage turn lifecycle.
+    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)))
 
     # We use this external user turn processor. This processor will push
     # UserStartedSpeakingFrame and UserStoppedSpeakingFrame as well as
@@ -119,6 +122,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             stt,  # STT
+            vad_processor,
             user_turn_processor,
             ParallelPipeline(
                 [

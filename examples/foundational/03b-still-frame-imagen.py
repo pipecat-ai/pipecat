@@ -22,9 +22,8 @@ from pipecat.transports.daily.transport import DailyParams
 load_dotenv(override=True)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         video_out_enabled=True,
