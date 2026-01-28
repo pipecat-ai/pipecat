@@ -84,7 +84,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
             ),
             user_idle_timeout=6.0,
-            filter_incomplete_turns=True,
+            filter_incomplete_user_turns=True,
         ),
     )
 

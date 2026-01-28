@@ -440,7 +440,7 @@ class AnthropicLLMService(LLMService):
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
                         # Use turn completion if enabled, otherwise push normally
-                        if self._filter_incomplete_turns:
+                        if self._filter_incomplete_user_turns:
                             await self._push_turn_text(event.delta.text)
                         else:
                             await self.push_frame(LLMTextFrame(event.delta.text))
@@ -555,7 +555,7 @@ class AnthropicLLMService(LLMService):
                 cache_read_input_tokens=cache_read_input_tokens,
             )
             # Reset turn completion state if enabled
-            if self._filter_incomplete_turns:
+            if self._filter_incomplete_user_turns:
                 await self._turn_reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

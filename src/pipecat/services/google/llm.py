@@ -1024,7 +1024,7 @@ class GoogleLLMService(LLMService):
                                 else:
                                     accumulated_text += part.text
                                     # Use turn completion if enabled, otherwise push normally
-                                    if self._filter_incomplete_turns:
+                                    if self._filter_incomplete_user_turns:
                                         await self._push_turn_text(part.text)
                                     else:
                                         await self.push_frame(LLMTextFrame(part.text))
@@ -1166,7 +1166,7 @@ class GoogleLLMService(LLMService):
             )
             await self.push_frame(LLMFullResponseEndFrame())
             # Reset turn completion state if enabled
-            if self._filter_incomplete_turns:
+            if self._filter_incomplete_user_turns:
                 await self._turn_reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

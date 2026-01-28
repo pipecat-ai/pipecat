@@ -115,7 +115,7 @@ class TurnCompletionMixin:
         _push_turn_text instead of push_frame:
 
         # With turn completion:
-        if self._filter_incomplete_turns:
+        if self._filter_incomplete_user_turns:
             await self._push_turn_text(chunk.text)
         else:
             await self.push_frame(LLMTextFrame(chunk.text))
@@ -157,7 +157,7 @@ class TurnCompletionMixin:
         marker_found = self._turn_suppressed or self._turn_complete_found
         if not marker_found and self._turn_text_buffer:
             logger.warning(
-                f"{self}: filter_incomplete_turns is enabled but LLM response did not "
+                f"{self}: filter_incomplete_user_turns is enabled but LLM response did not "
                 f"contain turn completion markers (✓/○). The system prompt may be missing "
                 "turn completion instructions."
             )
