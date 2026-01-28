@@ -460,7 +460,10 @@ class TTSService(AIService):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
-            await self._push_tts_frames(AggregatedTextFrame(frame.text, AggregationType.SENTENCE))
+            await self._push_tts_frames(
+                AggregatedTextFrame(frame.text, AggregationType.SENTENCE),
+                append_tts_text_to_context=frame.append_to_context,
+            )
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
@@ -571,7 +574,10 @@ class TTSService(AIService):
                 )
 
     async def _push_tts_frames(
-        self, src_frame: AggregatedTextFrame, includes_inter_frame_spaces: Optional[bool] = False
+        self,
+        src_frame: AggregatedTextFrame,
+        includes_inter_frame_spaces: Optional[bool] = False,
+        append_tts_text_to_context: Optional[bool] = True,
     ):
         type = src_frame.aggregated_by
         text = src_frame.text
@@ -639,6 +645,9 @@ class TTSService(AIService):
             # or transformations.
             frame = TTSTextFrame(text, aggregated_by=type)
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
+            # Only override append_to_context if explicitly set
+            if append_tts_text_to_context is not None:
+                frame.append_to_context = append_tts_text_to_context
             await self.push_frame(frame)
 
     async def _stop_frame_handler(self):
