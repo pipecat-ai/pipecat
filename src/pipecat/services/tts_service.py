@@ -206,6 +206,7 @@ class TTSService(AIService):
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
         self._processing_text: bool = False
+        self._current_append_to_context: bool = True
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -460,7 +461,10 @@ class TTSService(AIService):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
             # Assumption: text in TTSSpeakFrame does not include inter-frame spaces
-            await self._push_tts_frames(AggregatedTextFrame(frame.text, AggregationType.SENTENCE))
+            await self._push_tts_frames(
+                AggregatedTextFrame(frame.text, AggregationType.SENTENCE),
+                append_tts_text_to_context=frame.append_to_context,
+            )
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
@@ -571,7 +575,10 @@ class TTSService(AIService):
                 )
 
     async def _push_tts_frames(
-        self, src_frame: AggregatedTextFrame, includes_inter_frame_spaces: Optional[bool] = False
+        self,
+        src_frame: AggregatedTextFrame,
+        includes_inter_frame_spaces: Optional[bool] = False,
+        append_tts_text_to_context: Optional[bool] = True,
     ):
         type = src_frame.aggregated_by
         text = src_frame.text
@@ -623,6 +630,11 @@ class TTSService(AIService):
             if aggregation_type == type or aggregation_type == "*":
                 transformed_text = await transform(transformed_text, type)
 
+        # Store append_to_context for word-level frames (used by WordTTSService)
+        self._current_append_to_context = (
+            append_tts_text_to_context if append_tts_text_to_context is not None else True
+        )
+
         # Apply any final text preparation (e.g., trailing space)
         prepared_text = self._prepare_text_for_tts(transformed_text)
         await self.process_generator(self.run_tts(prepared_text))
@@ -639,6 +651,9 @@ class TTSService(AIService):
             # or transformations.
             frame = TTSTextFrame(text, aggregated_by=type)
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
+            # Only override append_to_context if explicitly set
+            if append_tts_text_to_context is not None:
+                frame.append_to_context = append_tts_text_to_context
             await self.push_frame(frame)
 
     async def _stop_frame_handler(self):
@@ -783,6 +798,7 @@ class WordTTSService(TTSService):
                 # we can rely on the default includes_inter_frame_spaces=False
                 frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
                 frame.pts = self._initial_word_timestamp + timestamp
+                frame.append_to_context = self._current_append_to_context
             if frame:
                 last_pts = frame.pts
                 await self.push_frame(frame)

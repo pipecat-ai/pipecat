@@ -921,9 +921,11 @@ class TTSSpeakFrame(DataFrame):
 
     Parameters:
         text: The text to be spoken.
+        append_to_context: Whether to append the text to the context.
     """
 
     text: str
+    append_to_context: Optional[bool] = None
 
 
 @dataclass
