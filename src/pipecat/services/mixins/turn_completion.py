@@ -115,7 +115,7 @@ class TurnCompletionMixin:
         _push_turn_text instead of push_frame:
 
         # With turn completion:
-        if self._enable_turn_completion:
+        if self._filter_incomplete_turns:
             await self._push_turn_text(chunk.text)
         else:
             await self.push_frame(LLMTextFrame(chunk.text))

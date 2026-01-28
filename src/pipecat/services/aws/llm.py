@@ -1108,7 +1108,7 @@ class AWSBedrockLLMService(LLMService):
                         delta = event["contentBlockDelta"]["delta"]
                         if "text" in delta:
                             # Use turn completion if enabled, otherwise push normally
-                            if self._enable_turn_completion:
+                            if self._filter_incomplete_turns:
                                 await self._push_turn_text(delta["text"])
                             else:
                                 await self.push_frame(LLMTextFrame(delta["text"]))
@@ -1185,7 +1185,7 @@ class AWSBedrockLLMService(LLMService):
                 cache_creation_input_tokens=cache_creation_input_tokens,
             )
             # Reset turn completion state if enabled
-            if self._enable_turn_completion:
+            if self._filter_incomplete_turns:
                 await self._turn_reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

@@ -175,7 +175,6 @@ class LLMService(TurnCompletionMixin, AIService):
         self,
         run_in_parallel: bool = True,
         function_call_timeout_secs: float = 10.0,
-        enable_turn_completion: bool = False,
         **kwargs,
     ):
         """Initialize the LLM service.
@@ -185,16 +184,13 @@ class LLMService(TurnCompletionMixin, AIService):
                 Defaults to True.
             function_call_timeout_secs: Timeout in seconds for deferred function calls.
                 Defaults to 10.0 seconds.
-            enable_turn_completion: Whether to enable turn completion detection.
-                When enabled, the service will detect <turn>COMPLETE</turn> and
-                <turn>INCOMPLETE</turn> markers in LLM responses. Defaults to False.
             **kwargs: Additional arguments passed to the parent AIService.
 
         """
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
         self._function_call_timeout_secs = function_call_timeout_secs
-        self._enable_turn_completion = enable_turn_completion
+        self._filter_incomplete_turns: bool = False
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
@@ -303,6 +299,27 @@ class LLMService(TurnCompletionMixin, AIService):
         await super().cancel(frame)
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
+
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Update LLM service settings.
+
+        Handles filter_incomplete_turns specially since it is not a model
+        parameter and should not be passed to the underlying LLM API.
+
+        Args:
+            settings: Dictionary of settings to update.
+        """
+        # Handle incomplete turn filtering specially (not a model parameter)
+        if "filter_incomplete_turns" in settings:
+            self._filter_incomplete_turns = settings["filter_incomplete_turns"]
+            logger.info(
+                f"{self}: Incomplete turn filtering {'enabled' if self._filter_incomplete_turns else 'disabled'}"
+            )
+            # Create a copy without filter_incomplete_turns for the parent
+            settings = {k: v for k, v in settings.items() if k != "filter_incomplete_turns"}
+
+        # Let the parent handle remaining model parameters
+        await super()._update_settings(settings)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame.
