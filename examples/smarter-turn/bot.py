@@ -63,7 +63,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), enable_turn_completion=True)
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -85,7 +85,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             user_turn_strategies=UserTurnStrategies(
                 stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
             ),
-            user_idle_timeout=3.0,
+            user_idle_timeout=6.0,
+            filter_incomplete_turns=True,
         ),
     )
 

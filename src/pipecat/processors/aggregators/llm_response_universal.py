@@ -47,6 +47,7 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    LLMUpdateSettingsFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
@@ -89,6 +90,12 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to None to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
+        filter_incomplete_turns: Whether to filter out incomplete user turns.
+            When enabled, the LLM is required to output a turn completion status
+            (✓ for complete, ○ for incomplete) at the start of each response.
+            If the turn is incomplete, the LLM's response is suppressed (not spoken).
+            The LLM should be prompted with turn completion instructions
+            (see TurnCompletionMixin.TURN_COMPLETION_INSTRUCTIONS).
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
@@ -96,6 +103,7 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: Optional[float] = None
     vad_analyzer: Optional[VADAnalyzer] = None
+    filter_incomplete_turns: bool = False
 
 
 @dataclass
@@ -487,6 +495,12 @@ class LLMUserAggregator(LLMContextAggregator):
 
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
+
+        # Enable incomplete turn filtering on the LLM if configured
+        if self._params.filter_incomplete_turns:
+            await self.push_frame(
+                LLMUpdateSettingsFrame(settings={"filter_incomplete_turns": True})
+            )
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)

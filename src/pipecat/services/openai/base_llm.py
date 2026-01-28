@@ -423,7 +423,7 @@ class BaseOpenAILLMService(LLMService):
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
                 # Use turn completion if enabled, otherwise push normally
-                if self._enable_turn_completion:
+                if self._filter_incomplete_turns:
                     await self._push_turn_text(chunk.choices[0].delta.content)
                 else:
                     await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
@@ -435,7 +435,7 @@ class BaseOpenAILLMService(LLMService):
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
         # Reset turn completion state if enabled
-        if self._enable_turn_completion:
+        if self._filter_incomplete_turns:
             await self._turn_reset()
 
         # if we got a function name and arguments, check to see if it's a function with
