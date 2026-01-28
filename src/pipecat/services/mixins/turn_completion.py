@@ -151,16 +151,18 @@ class TurnCompletionMixin:
         """Reset turn completion state between responses.
 
         Call this at the end of each LLM response to clear buffered text and reset state.
-        Also warns if markers are not being detected.
+        If no marker was found, pushes the buffered text to avoid losing content.
         """
-        # Warn if no marker was found in this response
+        # Check if no marker was found in this response
         marker_found = self._turn_suppressed or self._turn_complete_found
         if not marker_found and self._turn_text_buffer:
+            # Graceful degradation: push the buffered text so it's not lost
             logger.warning(
                 f"{self}: filter_incomplete_user_turns is enabled but LLM response did not "
-                f"contain turn completion markers (✓/○). The system prompt may be missing "
-                "turn completion instructions."
+                f"contain turn completion markers (✓/○). Pushing text anyway. "
+                "The system prompt may be missing turn completion instructions."
             )
+            await self.push_frame(LLMTextFrame(self._turn_text_buffer))
 
         self._turn_text_buffer = ""
         self._turn_suppressed = False
