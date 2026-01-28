@@ -206,6 +206,7 @@ class TTSService(AIService):
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
         self._processing_text: bool = False
+        self._current_append_to_context: bool = True
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -629,6 +630,11 @@ class TTSService(AIService):
             if aggregation_type == type or aggregation_type == "*":
                 transformed_text = await transform(transformed_text, type)
 
+        # Store append_to_context for word-level frames (used by WordTTSService)
+        self._current_append_to_context = (
+            append_tts_text_to_context if append_tts_text_to_context is not None else True
+        )
+
         # Apply any final text preparation (e.g., trailing space)
         prepared_text = self._prepare_text_for_tts(transformed_text)
         await self.process_generator(self.run_tts(prepared_text))
@@ -792,6 +798,7 @@ class WordTTSService(TTSService):
                 # we can rely on the default includes_inter_frame_spaces=False
                 frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
                 frame.pts = self._initial_word_timestamp + timestamp
+                frame.append_to_context = self._current_append_to_context
             if frame:
                 last_pts = frame.pts
                 await self.push_frame(frame)
