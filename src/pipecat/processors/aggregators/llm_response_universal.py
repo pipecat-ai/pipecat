@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Literal, Optional, Set, Type
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer
+from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     CancelFrame,
@@ -50,6 +52,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     UserImageRawFrame,
+    UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -85,12 +88,14 @@ class LLMUserAggregatorParams:
             If set, the aggregator will emit an `on_user_turn_idle` event when the user
             has been idle (not speaking) for this duration. Set to None to disable
             idle detection.
+        vad_analyzer: Voice Activity Detection analyzer instance.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: Optional[float] = None
+    vad_analyzer: Optional[VADAnalyzer] = None
 
 
 @dataclass
@@ -384,6 +389,18 @@ class LLMUserAggregator(LLMContextAggregator):
                 "on_user_turn_idle", self._on_user_turn_idle
             )
 
+        # VAD controller
+        self._vad_controller: Optional[VADController] = None
+        if self._params.vad_analyzer:
+            self._vad_controller = VADController(self._params.vad_analyzer)
+            self._vad_controller.add_event_handler("on_speech_started", self._on_vad_speech_started)
+            self._vad_controller.add_event_handler("on_speech_stopped", self._on_vad_speech_stopped)
+            self._vad_controller.add_event_handler(
+                "on_speech_activity", self._on_vad_speech_activity
+            )
+            self._vad_controller.add_event_handler("on_push_frame", self._on_push_frame)
+            self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -400,6 +417,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if await self._maybe_mute_frame(frame):
             return
+
+        if self._vad_controller:
+            await self._vad_controller.process_frame(frame)
 
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
@@ -574,6 +594,18 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
         await self.broadcast_frame(frame_cls, **kwargs)
+
+    async def _on_vad_speech_started(self, controller):
+        await self.queue_frame(VADUserStartedSpeakingFrame())
+        await self.broadcast_frame(VADUserStartedSpeakingFrame)
+
+    async def _on_vad_speech_stopped(self, controller):
+        await self.queue_frame(VADUserStoppedSpeakingFrame())
+        await self.broadcast_frame(VADUserStoppedSpeakingFrame)
+
+    async def _on_vad_speech_activity(self, controller):
+        await self.queue_frame(UserSpeakingFrame())
+        await self.broadcast_frame(UserSpeakingFrame)
 
     async def _on_user_turn_started(
         self,
