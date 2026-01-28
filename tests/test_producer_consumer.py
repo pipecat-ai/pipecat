@@ -118,3 +118,7 @@ class TestProducerConsumerProcessor(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

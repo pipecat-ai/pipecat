@@ -350,3 +350,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertIsNot(up_frame.metadata, orig.metadata)
         self.assertIsNot(down_frame.metadata, up_frame.metadata)
         self.assertIsNot(down_frame.metadata["nested"], up_frame.metadata["nested"])
+
+
+if __name__ == "__main__":
+    unittest.main()

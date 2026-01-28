@@ -32,3 +32,7 @@ class TestUtilsNetwork(unittest.IsolatedAsyncioTestCase):
         assert exponential_backoff_time(attempt=4, min_wait=1, max_wait=20, multiplier=2) == 16
         assert exponential_backoff_time(attempt=5, min_wait=1, max_wait=20, multiplier=2) == 20
         assert exponential_backoff_time(attempt=6, min_wait=1, max_wait=20, multiplier=2) == 20
+
+
+if __name__ == "__main__":
+    unittest.main()
