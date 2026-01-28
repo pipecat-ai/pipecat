@@ -941,16 +941,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
         image_appended = False
 
-        # Check if this image is a result of a function call if so, let's cache.
-        # TODO(aleix): The function call might have already been executed
-        # because FunctionCallResultFrame was just faster, in that case we just
-        # push the context frame now.
+        # Check if this image is a result of a function call.
         if (
             frame.request
             and frame.request.tool_call_id
             and frame.request.tool_call_id in self._function_calls_in_progress
         ):
             self._function_calls_image_results[frame.request.tool_call_id] = frame
+
+            # Call the result_callback if provided. This signals that the image
+            # has been retrieved and the function call can now complete.
+            if frame.request.result_callback:
+                await frame.request.result_callback(None)
         else:
             image_appended = await self._maybe_append_image_to_context(frame)
 

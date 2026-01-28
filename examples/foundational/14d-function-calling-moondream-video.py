@@ -57,7 +57,8 @@ async def fetch_user_image(params: FunctionCallParams):
 
     When called, this function pushes a UserImageRequestFrame upstream to the
     transport. As a result, the transport will request the user image and push a
-    UserImageRawFrame downstream.
+    UserImageRawFrame downstream. The result_callback will be invoked once the
+    image is retrieved and processed.
     """
     user_id = params.arguments["user_id"]
     question = params.arguments["question"]
@@ -65,7 +66,8 @@ async def fetch_user_image(params: FunctionCallParams):
 
     # Request a user image frame. In this case, we don't want the requested
     # image to be added to the context because we will process it with
-    # Moondream. Also associate it to the function call.
+    # Moondream. Also associate it to the function call. Pass the result_callback
+    # so it can be invoked when the image is actually retrieved.
     await params.llm.push_frame(
         UserImageRequestFrame(
             user_id=user_id,
@@ -73,15 +75,10 @@ async def fetch_user_image(params: FunctionCallParams):
             append_to_context=False,
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
+            result_callback=params.result_callback,
         ),
         FrameDirection.UPSTREAM,
     )
-
-    await params.result_callback(None)
-
-    # Instead of None, it's possible to also provide a tool call answer to
-    # tell the LLM that we are grabbing the image to analyze.
-    # await params.result_callback({"result": "Image is being captured."})
 
 
 class MoondreamTextFrameWrapper(FrameProcessor):
