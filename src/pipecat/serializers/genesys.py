@@ -572,7 +572,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             the frame type is not handled or session is not open.
         """
         if isinstance(frame, (EndFrame, CancelFrame)):
-            return json.dumps(self.create_disconnect_message(reason="completed"))
+            return json.dumps(self.create_disconnect_message(output_variables=self.output_variables, reason="completed"))
             
         elif isinstance(frame, AudioRawFrame):
             if not self._is_open or self._is_paused:
