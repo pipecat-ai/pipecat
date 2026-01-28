@@ -39,6 +39,7 @@ from loguru import logger
 
 from pipecat.runner.types import (
     DailyRunnerArguments,
+    LiveKitRunnerArguments,
     SmallWebRTCRunnerArguments,
     WebSocketRunnerArguments,
 )
@@ -567,6 +568,17 @@ async def create_transport(
         # Create telephony transport with pre-parsed data
         return await _create_telephony_transport(
             runner_args.websocket, params, transport_type, call_data
+        )
+    elif isinstance(runner_args, LiveKitRunnerArguments):
+        params = _get_transport_params("livekit", transport_params)
+
+        from pipecat.transports.livekit.transport import LiveKitTransport
+
+        return LiveKitTransport(
+            runner_args.url,
+            runner_args.token,
+            runner_args.room_name,
+            params=params,
         )
 
     else:
