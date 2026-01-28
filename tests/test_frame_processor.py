@@ -347,3 +347,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertIs(up_frame.items, orig.items)
         self.assertIs(down_frame.metadata, orig.metadata)
         self.assertIs(up_frame.metadata, orig.metadata)
+
+
+if __name__ == "__main__":
+    unittest.main()

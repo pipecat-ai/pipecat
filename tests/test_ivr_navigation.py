@@ -353,3 +353,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
             expected_up_frames=expected_up_frames,
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

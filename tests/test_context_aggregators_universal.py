@@ -566,3 +566,7 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The pending text should be emitted on EndFrame
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
+
+
+if __name__ == "__main__":
+    unittest.main()

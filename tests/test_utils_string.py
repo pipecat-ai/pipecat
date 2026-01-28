@@ -232,3 +232,7 @@ class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
             ("<a>", "</a>"),
             41,
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

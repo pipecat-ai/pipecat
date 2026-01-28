@@ -118,3 +118,7 @@ class TestWakeCheckFilter(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
         assert received_down[-1].text == "Phrase 1"
+
+
+if __name__ == "__main__":
+    unittest.main()
