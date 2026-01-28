@@ -90,13 +90,13 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to None to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
-        filter_incomplete_turns: Whether to filter out incomplete user turns.
+        filter_incomplete_user_turns: Whether to filter out incomplete user turns.
             When enabled, the LLM is required to output a turn completion status
             (✓ for complete, ○ for incomplete) at the start of each response.
             If the turn is incomplete, the LLM's response is suppressed (not spoken).
         turn_completion_instructions: Optional custom instructions for turn completion.
             If not provided, uses default instructions from TurnCompletionMixin.
-            Only used when filter_incomplete_turns is True.
+            Only used when filter_incomplete_user_turns is True.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
@@ -104,7 +104,7 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: Optional[float] = None
     vad_analyzer: Optional[VADAnalyzer] = None
-    filter_incomplete_turns: bool = False
+    filter_incomplete_user_turns: bool = False
     turn_completion_instructions: Optional[str] = None
 
 
@@ -499,10 +499,10 @@ class LLMUserAggregator(LLMContextAggregator):
             await s.setup(self.task_manager)
 
         # Enable incomplete turn filtering on the LLM if configured
-        if self._params.filter_incomplete_turns:
+        if self._params.filter_incomplete_user_turns:
             # Enable the feature on the LLM
             await self.push_frame(
-                LLMUpdateSettingsFrame(settings={"filter_incomplete_turns": True})
+                LLMUpdateSettingsFrame(settings={"filter_incomplete_user_turns": True})
             )
             # Auto-inject turn completion instructions into context
             if self._params.turn_completion_instructions:

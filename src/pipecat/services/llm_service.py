@@ -190,7 +190,7 @@ class LLMService(TurnCompletionMixin, AIService):
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
         self._function_call_timeout_secs = function_call_timeout_secs
-        self._filter_incomplete_turns: bool = False
+        self._filter_incomplete_user_turns: bool = False
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
@@ -303,20 +303,20 @@ class LLMService(TurnCompletionMixin, AIService):
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Update LLM service settings.
 
-        Handles filter_incomplete_turns specially since it is not a model
+        Handles filter_incomplete_user_turns specially since it is not a model
         parameter and should not be passed to the underlying LLM API.
 
         Args:
             settings: Dictionary of settings to update.
         """
         # Handle incomplete turn filtering specially (not a model parameter)
-        if "filter_incomplete_turns" in settings:
-            self._filter_incomplete_turns = settings["filter_incomplete_turns"]
+        if "filter_incomplete_user_turns" in settings:
+            self._filter_incomplete_user_turns = settings["filter_incomplete_user_turns"]
             logger.info(
-                f"{self}: Incomplete turn filtering {'enabled' if self._filter_incomplete_turns else 'disabled'}"
+                f"{self}: Incomplete turn filtering {'enabled' if self._filter_incomplete_user_turns else 'disabled'}"
             )
-            # Create a copy without filter_incomplete_turns for the parent
-            settings = {k: v for k, v in settings.items() if k != "filter_incomplete_turns"}
+            # Create a copy without filter_incomplete_user_turns for the parent
+            settings = {k: v for k, v in settings.items() if k != "filter_incomplete_user_turns"}
 
         # Let the parent handle remaining model parameters
         await super()._update_settings(settings)
