@@ -54,9 +54,8 @@ def _create_aic_filter() -> AICFilter:
     )
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: (
         lambda aic: DailyParams(
