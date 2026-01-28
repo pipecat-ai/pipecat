@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024-2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 """Pytest fixtures for Genesys AudioHook serializer tests.
 
 These fixtures provide sample AudioHook protocol messages for testing
