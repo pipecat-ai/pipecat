@@ -151,7 +151,17 @@ class TurnCompletionMixin:
         """Reset turn completion state between responses.
 
         Call this at the end of each LLM response to clear buffered text and reset state.
+        Also warns if markers are not being detected.
         """
+        # Warn if no marker was found in this response
+        marker_found = self._turn_suppressed or self._turn_complete_found
+        if not marker_found and self._turn_text_buffer:
+            logger.warning(
+                f"{self}: filter_incomplete_turns is enabled but LLM response did not "
+                f"contain turn completion markers (✓/○). The system prompt may be missing "
+                "turn completion instructions."
+            )
+
         self._turn_text_buffer = ""
         self._turn_suppressed = False
         self._turn_complete_found = False
@@ -200,7 +210,7 @@ class TurnCompletionMixin:
         # Check for ○ (INCOMPLETE) marker
         if TURN_INCOMPLETE_MARKER in self._turn_text_buffer:
             # Found ○ (INCOMPLETE) - suppress all text, push nothing
-            logger.info(f"INCOMPLETE ({TURN_INCOMPLETE_MARKER}) detected, suppressing all text")
+            logger.debug(f"INCOMPLETE ({TURN_INCOMPLETE_MARKER}) detected, suppressing all text")
             self._turn_suppressed = True
             frame = LLMTextFrame(self._turn_text_buffer)
             frame.skip_tts = True
@@ -213,7 +223,7 @@ class TurnCompletionMixin:
         # Check for ✓ (COMPLETE) marker
         if TURN_COMPLETE_MARKER in self._turn_text_buffer:
             # Found ✓ (COMPLETE) - push all buffered text (including the marker)
-            logger.info(f"COMPLETE ({TURN_COMPLETE_MARKER}) detected, pushing buffered text")
+            logger.debug(f"COMPLETE ({TURN_COMPLETE_MARKER}) detected, pushing buffered text")
             frame = LLMTextFrame(self._turn_text_buffer)
             frame.skip_tts = True
             await self.push_frame(frame)

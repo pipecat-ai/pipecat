@@ -498,9 +498,14 @@ class LLMUserAggregator(LLMContextAggregator):
 
         # Enable incomplete turn filtering on the LLM if configured
         if self._params.filter_incomplete_turns:
+            # Enable the feature on the LLM
             await self.push_frame(
                 LLMUpdateSettingsFrame(settings={"filter_incomplete_turns": True})
             )
+            # Auto-inject turn completion instructions into context
+            from pipecat.services.mixins.turn_completion import TURN_COMPLETION_INSTRUCTIONS
+
+            self._context.add_message({"role": "system", "content": TURN_COMPLETION_INSTRUCTIONS})
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
