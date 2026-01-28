@@ -8,7 +8,6 @@
 
 import asyncio
 import os
-import time
 from enum import Enum
 from typing import Any, AsyncGenerator
 
@@ -67,7 +66,7 @@ class TurnDetectionMode(str, Enum):
     """Endpoint and turn detection handling mode.
 
     How the STT engine handles the endpointing of speech. If using Pipecat's built-in endpointing,
-    then use `TurnDetectionMode.FIXED` (default).
+    then use `TurnDetectionMode.EXTERNAL` (default).
 
     To use the STT engine's built-in endpointing, then use `TurnDetectionMode.ADAPTIVE` for simple
     voice activity detection or `TurnDetectionMode.SMART_TURN` for more advanced ML-based
@@ -107,7 +106,7 @@ class SpeechmaticsSTTService(STTService):
 
             turn_detection_mode: Endpoint handling, one of `TurnDetectionMode.FIXED`,
                 `TurnDetectionMode.EXTERNAL`, `TurnDetectionMode.ADAPTIVE` and
-                `TurnDetectionMode.SMART_TURN`. Defaults to `TurnDetectionMode.FIXED`.
+                `TurnDetectionMode.SMART_TURN`. Defaults to `TurnDetectionMode.EXTERNAL`.
 
             speaker_active_format: Formatter for active speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
@@ -201,6 +200,7 @@ class SpeechmaticsSTTService(STTService):
             extra_params: Extra parameters to pass to the STT engine. This is a dictionary of
                 additional parameters that can be used to configure the STT engine.
                 Default to None.
+
         """
 
         # Service configuration
@@ -208,7 +208,7 @@ class SpeechmaticsSTTService(STTService):
         language: Language | str = Language.EN
 
         # Endpointing mode
-        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.FIXED
+        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.EXTERNAL
 
         # Output formatting
         speaker_active_format: str | None = None
@@ -346,7 +346,7 @@ class SpeechmaticsSTTService(STTService):
             params.speaker_passive_format or params.speaker_active_format
         )
 
-        # Metrics
+        # Model + metrics
         self.set_model_name(self._config.operating_point.value)
 
         # Message queue
@@ -598,9 +598,6 @@ class SpeechmaticsSTTService(STTService):
         if segments:
             await self._send_frames(segments)
 
-        # Update metrics
-        await self._emit_metrics(message.get("metadata", {}).get("processing_time", 0.0))
-
     async def _handle_segment(self, message: dict[str, Any]) -> None:
         """Handle AddSegment events.
 
@@ -695,6 +692,7 @@ class SpeechmaticsSTTService(STTService):
                     f"{self} VADUserStoppedSpeakingFrame received but internal VAD is being used"
                 )
             elif not self._enable_vad and self._client is not None:
+                self.request_finalize()
                 self._client.finalize()
 
     async def _send_frames(self, segments: list[dict[str, Any]], finalized: bool = False) -> None:
@@ -738,16 +736,33 @@ class SpeechmaticsSTTService(STTService):
 
         # If final, then re-parse into TranscriptionFrame
         if finalized:
+            # Do any segments have `is_eou` set to True?
+            if (
+                any(segment.get("is_eou", False) for segment in segments)
+                and self._finalize_requested
+            ):
+                self.confirm_finalize()
+
+            # Add the finalized frames
             frames += [TranscriptionFrame(**attr_from_segment(segment)) for segment in segments]
+
+            # Handle the text (for metrics reporting)
             finalized_text = "|".join([s["text"] for s in segments])
-            await self._handle_transcription(finalized_text, True, segments[0]["language"])
+            await self._handle_transcription(
+                finalized_text, is_final=True, language=segments[0]["language"]
+            )
+
+            # Log the frames
             logger.debug(f"{self} finalized transcript: {[f.text for f in frames]}")
 
         # Return as interim results (unformatted)
         else:
+            # Add the interim frames
             frames += [
                 InterimTranscriptionFrame(**attr_from_segment(segment)) for segment in segments
             ]
+
+            # Log the frames
             logger.debug(f"{self} interim transcript: {[f.text for f in frames]}")
 
         # Send the frames
@@ -803,28 +818,6 @@ class SpeechmaticsSTTService(STTService):
         except Exception as e:
             yield ErrorFrame(f"Speechmatics error: {e}")
             await self._disconnect()
-
-    async def _emit_metrics(self, processing_time: float) -> None:
-        """Create TTFB metrics.
-
-        The TTFB is the seconds between the person speaking and the STT
-        engine emitting the first partial. This is only calculated at the
-        start of an utterance.
-        """
-        # Skip if metrics not available
-        if not self._metrics or processing_time == 0.0:
-            return
-
-        # Calculate time as time.time() - ttfb (which is seconds)
-        start_time = time.time() - processing_time
-
-        # Update internal metrics
-        self._metrics._start_ttfb_time = start_time
-        self._metrics._start_processing_time = start_time
-
-        # Stop TTFB metrics
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
 
     # ============================================================================
     # HELPERS

@@ -344,6 +344,35 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         # The user mute strategies should have muted the user.
         self.assertFalse(user_turn)
 
+    async def test_pending_transcription_emitted_on_end_frame(self):
+        """Pending user transcription should be emitted when EndFrame arrives."""
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(context)
+
+        stop_messages = []
+
+        @user_aggregator.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(aggregator, strategy, message):
+            stop_messages.append((strategy, message))
+
+        pipeline = Pipeline([user_aggregator])
+
+        # Start turn and send transcription, but don't trigger normal turn stop
+        frames_to_send = [
+            VADUserStartedSpeakingFrame(),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            # No VADUserStoppedSpeakingFrame - turn doesn't stop normally
+            # EndFrame will be sent by run_test, triggering emission
+        ]
+        await run_test(pipeline, frames_to_send=frames_to_send)
+
+        # The pending transcription should be emitted on EndFrame
+        self.assertEqual(len(stop_messages), 1)
+        strategy, message = stop_messages[0]
+        self.assertIsNone(strategy)  # strategy is None for end/cancel
+        self.assertEqual(message.content, "Hello!")
+
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_empty(self):
@@ -512,3 +541,28 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         await run_test(aggregator, frames_to_send=frames_to_send)
         self.assertEqual(thought_message.content, "I'm thinking!")
+
+    async def test_pending_text_emitted_on_end_frame(self):
+        """Pending assistant text should be emitted when EndFrame arrives."""
+        context = LLMContext()
+
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        # Start response and send text, but don't send LLMFullResponseEndFrame
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello from Pipecat!"),
+            # No LLMFullResponseEndFrame - response doesn't end normally
+            # EndFrame will be sent by run_test, triggering emission
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # The pending text should be emitted on EndFrame
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")

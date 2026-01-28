@@ -221,13 +221,10 @@ class CartesiaSTTService(WebsocketSTTService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            # Reset finalize state for new utterance
-            self.set_finalize_pending(False)
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize command to flush the transcription session
             if self._websocket and self._websocket.state is State.OPEN:
-                self.set_finalize_pending(True)
                 await self._websocket.send("finalize")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:

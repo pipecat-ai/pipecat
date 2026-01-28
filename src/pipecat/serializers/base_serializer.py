@@ -9,9 +9,10 @@
 from abc import ABC, abstractmethod
 
 from pipecat.frames.frames import Frame, StartFrame
+from pipecat.utils.base_object import BaseObject
 
 
-class FrameSerializer(ABC):
+class FrameSerializer(BaseObject):
     """Abstract base class for frame serialization implementations.
 
     Defines the interface for converting frames to/from serialized formats

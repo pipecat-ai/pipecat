@@ -698,7 +698,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             message: The application message to process.
         """
         logger.debug(f"Received app message inside SmallWebRTCInputTransport  {message}")
-        await self.broadcast_frame_class(InputTransportMessageFrame, message=message)
+        await self.broadcast_frame(InputTransportMessageFrame, message=message)
 
     # Add this method similar to DailyInputTransport.request_participant_image
     async def request_participant_image(self, frame: UserImageRequestFrame):
