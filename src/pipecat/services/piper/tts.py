@@ -21,9 +21,10 @@ from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-# This assumes a running TTS service running: https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_HTTP.md
-class PiperTTSService(TTSService):
-    """Piper TTS service implementation.
+# This assumes a running TTS service running:
+# https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_HTTP.md
+class PiperHttpTTSService(TTSService):
+    """Piper HTTP TTS service implementation.
 
     Provides integration with Piper's HTTP TTS server for text-to-speech
     synthesis. Supports streaming audio generation with configurable sample

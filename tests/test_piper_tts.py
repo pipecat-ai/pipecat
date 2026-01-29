@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.piper.tts import PiperTTSService
+from pipecat.services.piper.tts import PiperHttpTTSService
 from pipecat.tests.utils import run_test
 
 
@@ -67,8 +67,10 @@ async def test_run_piper_tts_success(aiohttp_client):
     base_url = str(client.make_url("")).rstrip("/")
 
     async with aiohttp.ClientSession() as session:
-        # Instantiate PiperTTSService with our mock server
-        tts_service = PiperTTSService(base_url=base_url, aiohttp_session=session, sample_rate=24000)
+        # Instantiate PiperHttpTTSService with our mock server
+        tts_service = PiperHttpTTSService(
+            base_url=base_url, aiohttp_session=session, sample_rate=24000
+        )
 
         frames_to_send = [
             TTSSpeakFrame(text="Hello world."),
@@ -117,7 +119,9 @@ async def test_run_piper_tts_error(aiohttp_client):
     base_url = str(client.make_url("")).rstrip("/")
 
     async with aiohttp.ClientSession() as session:
-        tts_service = PiperTTSService(base_url=base_url, aiohttp_session=session, sample_rate=24000)
+        tts_service = PiperHttpTTSService(
+            base_url=base_url, aiohttp_session=session, sample_rate=24000
+        )
 
         frames_to_send = [
             TTSSpeakFrame(text="Error case."),
