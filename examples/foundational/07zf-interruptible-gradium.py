@@ -59,11 +59,15 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = GradiumSTTService(api_key=os.getenv("GRADIUM_API_KEY"))
+    stt = GradiumSTTService(
+        api_key=os.getenv("GRADIUM_API_KEY"),
+        api_endpoint_base_url="wss://us.api.gradium.ai/api/speech/asr",
+    )
 
     tts = GradiumTTSService(
         api_key=os.getenv("GRADIUM_API_KEY"),
         voice_id="YTpq7expH9539ERJ",
+        url="wss://us.api.gradium.ai/api/speech/tts",
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
