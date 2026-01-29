@@ -239,7 +239,8 @@ class DeepgramTTSService(WebsocketTTSService):
     async def _receive_messages(self):
         """Receive and process messages from Deepgram WebSocket."""
         # Note: context_id is not available in this method since it's not passed through WebSocket messages
-        # Audio frames will not have context_id set in this streaming implementation
+        # Audio frames will not have context_id set in this streaming implementation.
+        # But the TTSTextFrame will have the context_id, because they will be pushed by the TTSService
         async for message in self._get_websocket():
             if isinstance(message, bytes):
                 # Binary message contains audio data
