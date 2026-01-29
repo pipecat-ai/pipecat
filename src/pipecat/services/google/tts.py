@@ -829,6 +829,7 @@ class GoogleBaseTTSService(TTSService):
         self,
         streaming_config: texttospeech_v1.StreamingSynthesizeConfig,
         text: str,
+        context_id: str,
         prompt: Optional[str] = None,
     ) -> AsyncGenerator[Frame, None]:
         """Shared streaming synthesis logic.
@@ -836,6 +837,7 @@ class GoogleBaseTTSService(TTSService):
         Args:
             streaming_config: The streaming configuration.
             text: The text to synthesize.
+            context_id: Unique identifier for this TTS context.
             prompt: Optional prompt for style instructions (Gemini only).
 
         Yields:
@@ -1016,7 +1018,7 @@ class GoogleTTSService(GoogleBaseTTSService):
             )
 
             # Use base class streaming logic
-            async for frame in self._stream_tts(streaming_config, text):
+            async for frame in self._stream_tts(streaming_config, text, context_id):
                 yield frame
 
         except Exception as e:
@@ -1270,7 +1272,9 @@ class GeminiTTSService(GoogleBaseTTSService):
             )
 
             # Use base class streaming logic with prompt support
-            async for frame in self._stream_tts(streaming_config, text, self._settings["prompt"]):
+            async for frame in self._stream_tts(
+                streaming_config, text, context_id, self._settings["prompt"]
+            ):
                 yield frame
 
         except Exception as e:
