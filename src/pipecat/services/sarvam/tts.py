@@ -534,6 +534,8 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         """Connect to Sarvam WebSocket and start background tasks."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -546,6 +548,8 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         try:
             # First, set a flag to prevent new operations
             self._disconnecting = True

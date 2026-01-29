@@ -23,7 +23,6 @@ from loguru import logger
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -63,9 +62,11 @@ from pipecat.processors.aggregators.llm_context import (
     NotGiven,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.turns.mute import BaseUserMuteStrategy
+from pipecat.turns.user_idle_controller import UserIdleController
+from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
@@ -80,11 +81,16 @@ class LLMUserAggregatorParams:
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Time in seconds to wait before considering the
             user's turn finished.
+        user_idle_timeout: Optional timeout in seconds for detecting user idle state.
+            If set, the aggregator will emit an `on_user_turn_idle` event when the user
+            has been idle (not speaking) for this duration. Set to None to disable
+            idle detection.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
+    user_idle_timeout: Optional[float] = None
 
 
 @dataclass
@@ -99,6 +105,59 @@ class LLMAssistantAggregatorParams:
     """
 
     expect_stripped_words: bool = True
+
+
+@dataclass
+class UserTurnStoppedMessage:
+    """A user turn stopped message containing a user transcript update.
+
+    A message in a conversation transcript containing the user content. This is
+    the aggregated transcript that is then used in the context.
+
+    Parameters:
+        content: The message content/text.
+        timestamp: When the user turn started.
+        user_id: Optional identifier for the user.
+
+    """
+
+    content: str
+    timestamp: str
+    user_id: Optional[str] = None
+
+
+@dataclass
+class AssistantTurnStoppedMessage:
+    """An assistant turn stopped message containing an assistant transcript update.
+
+    A message in a conversation transcript containing the assistant
+    content. This is the aggregated transcript that is then used in the context.
+
+    Parameters:
+        content: The message content/text.
+        timestamp: When the assistant turn started.
+
+    """
+
+    content: str
+    timestamp: str
+
+
+@dataclass
+class AssistantThoughtMessage:
+    """An assistant thought message containing an assistant thought update.
+
+    A message in a conversation transcript containing the assistant thought
+    content.
+
+    Parameters:
+        content: The message content/text.
+        timestamp: When the thought started.
+
+    """
+
+    content: str
+    timestamp: str
 
 
 class LLMContextAggregator(FrameProcessor):
@@ -204,8 +263,12 @@ class LLMContextAggregator(FrameProcessor):
         self._aggregation = []
 
     @abstractmethod
-    async def push_aggregation(self):
-        """Push the current aggregation downstream."""
+    async def push_aggregation(self) -> str:
+        """Push the current aggregation downstream.
+
+        Returns:
+            The pushed aggregation.
+        """
         pass
 
     def aggregation_string(self) -> str:
@@ -220,10 +283,10 @@ class LLMContextAggregator(FrameProcessor):
 class LLMUserAggregator(LLMContextAggregator):
     """User LLM aggregator that aggregates user input during active user turns.
 
-    This aggregator operates within turn boundaries defined by the configured
-    user and bot turn start strategies. User turn start strategies indicate when
-    a user turn begins, while bot turn start strategies signal when the user
-    turn has ended and control transitions to the bot turn.
+    This aggregator uses a turn controller and operates within turn boundaries
+    defined by the controller's configured user turn strategies. User turn start
+    strategies indicate when a user turn begins, while user turn stop strategies
+    signal when the user turn has ended.
 
     The aggregator collects and aggregates speech-to-text transcriptions that
     occur while a user turn is active and pushes the final aggregation when the
@@ -234,19 +297,34 @@ class LLMUserAggregator(LLMContextAggregator):
     - on_user_turn_started: Called when the user turn starts
     - on_user_turn_stopped: Called when the user turn ends
     - on_user_turn_stop_timeout: Called when no user turn stop strategy triggers
+    - on_user_turn_idle: Called when the user has been idle for the configured timeout
+    - on_user_mute_started: Called when the user becomes muted
+    - on_user_mute_stopped: Called when the user becomes unmuted
 
     Example::
 
         @aggregator.event_handler("on_user_turn_started")
-        async def on_user_turn_started(aggregator, Optional[strategy]):
+        async def on_user_turn_started(aggregator, strategy: BaseUserTurnStartStrategy):
             ...
 
         @aggregator.event_handler("on_user_turn_stopped")
-        async def on_user_turn_stopped(aggregator, Optional[strategy]):
+        async def on_user_turn_stopped(aggregator, strategy: BaseUserTurnStopStrategy, message: UserTurnStoppedMessage):
             ...
 
         @aggregator.event_handler("on_user_turn_stop_timeout")
         async def on_user_turn_stop_timeout(aggregator):
+            ...
+
+        @aggregator.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(aggregator):
+            ...
+
+        @aggregator.event_handler("on_user_mute_started")
+        async def on_user_mute_started(aggregator):
+            ...
+
+        @aggregator.event_handler("on_user_mute_stopped")
+        async def on_user_mute_stopped(aggregator):
             ...
 
     """
@@ -268,19 +346,43 @@ class LLMUserAggregator(LLMContextAggregator):
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
 
-        # Initialize default user turn strategies.
-        self._user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
-
-        self._vad_user_speaking = False
-
-        self._user_turn = False
-        self._user_is_muted = False
-        self._user_turn_stop_timeout_event = asyncio.Event()
-        self._user_turn_stop_timeout_task: Optional[asyncio.Task] = None
-
         self._register_event_handler("on_user_turn_started")
         self._register_event_handler("on_user_turn_stopped")
         self._register_event_handler("on_user_turn_stop_timeout")
+        self._register_event_handler("on_user_turn_idle")
+        self._register_event_handler("on_user_mute_started")
+        self._register_event_handler("on_user_mute_stopped")
+
+        user_turn_strategies = self._params.user_turn_strategies or UserTurnStrategies()
+
+        self._user_is_muted = False
+        self._user_turn_start_timestamp = ""
+
+        self._user_turn_controller = UserTurnController(
+            user_turn_strategies=user_turn_strategies,
+            user_turn_stop_timeout=self._params.user_turn_stop_timeout,
+        )
+        self._user_turn_controller.add_event_handler("on_push_frame", self._on_push_frame)
+        self._user_turn_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_started", self._on_user_turn_started
+        )
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_stopped", self._on_user_turn_stopped
+        )
+        self._user_turn_controller.add_event_handler(
+            "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
+        )
+
+        # Optional user idle controller
+        self._user_idle_controller: Optional[UserIdleController] = None
+        if self._params.user_idle_timeout:
+            self._user_idle_controller = UserIdleController(
+                user_idle_timeout=self._params.user_idle_timeout
+            )
+            self._user_idle_controller.add_event_handler(
+                "on_user_turn_idle", self._on_user_turn_idle
+            )
 
     async def cleanup(self):
         """Clean up processor resources."""
@@ -312,12 +414,6 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._handle_vad_user_started_speaking(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            await self._handle_vad_user_stopped_speaking(frame)
-            await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
         elif isinstance(frame, LLMRunFrame):
@@ -341,70 +437,46 @@ class LLMUserAggregator(LLMContextAggregator):
         else:
             await self.push_frame(frame, direction)
 
-        await self._user_turn_strategies_process_frame(frame)
+        await self._user_turn_controller.process_frame(frame)
 
-    async def push_aggregation(self):
+        if self._user_idle_controller:
+            await self._user_idle_controller.process_frame(frame)
+
+    async def push_aggregation(self) -> str:
         """Push the current aggregation."""
         if len(self._aggregation) == 0:
-            return
+            return ""
 
         aggregation = self.aggregation_string()
         await self.reset()
         self._context.add_message({"role": self.role, "content": aggregation})
         await self.push_context_frame()
 
+        return aggregation
+
     async def _start(self, frame: StartFrame):
-        if not self._user_turn_stop_timeout_task:
-            self._user_turn_stop_timeout_task = self.create_task(
-                self._user_turn_stop_timeout_task_handler()
-            )
+        await self._user_turn_controller.setup(self.task_manager)
 
-        await self._setup_user_turn_strategies()
-        await self._setup_user_mute_strategies()
+        if self._user_idle_controller:
+            await self._user_idle_controller.setup(self.task_manager)
 
-    async def _setup_user_mute_strategies(self):
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
 
-    async def _setup_user_turn_strategies(self):
-        if self._user_turn_strategies.start:
-            for s in self._user_turn_strategies.start:
-                await s.setup(self.task_manager)
-                s.add_event_handler("on_push_frame", self._on_push_frame)
-                s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
-                s.add_event_handler("on_user_turn_started", self._on_user_turn_started)
-
-        if self._user_turn_strategies.stop:
-            for s in self._user_turn_strategies.stop:
-                await s.setup(self.task_manager)
-                s.add_event_handler("on_push_frame", self._on_push_frame)
-                s.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
-                s.add_event_handler("on_user_turn_stopped", self._on_user_turn_stopped)
-
     async def _stop(self, frame: EndFrame):
+        await self._maybe_emit_user_turn_stopped(on_session_end=True)
         await self._cleanup()
 
     async def _cancel(self, frame: CancelFrame):
+        await self._maybe_emit_user_turn_stopped(on_session_end=True)
         await self._cleanup()
 
     async def _cleanup(self):
-        if self._user_turn_stop_timeout_task:
-            await self.cancel_task(self._user_turn_stop_timeout_task)
-            self._user_turn_stop_timeout_task = None
+        await self._user_turn_controller.cleanup()
 
-        await self._cleanup_user_turn_strategies()
-        await self._cleanup_user_mute_strategies()
+        if self._user_idle_controller:
+            await self._user_idle_controller.cleanup()
 
-    async def _cleanup_user_turn_strategies(self):
-        if self._user_turn_strategies.start:
-            for s in self._user_turn_strategies.start:
-                await s.cleanup()
-
-        if self._user_turn_strategies.stop:
-            for s in self._user_turn_strategies.stop:
-                await s.cleanup()
-
-    async def _cleanup_user_mute_strategies(self):
         for s in self._params.user_mute_strategies:
             await s.cleanup()
 
@@ -434,16 +506,13 @@ class LLMUserAggregator(LLMContextAggregator):
             logger.debug(f"{self}: user is now {'muted' if should_mute_next_time else 'unmuted'}")
             self._user_is_muted = should_mute_next_time
 
+            # Emit mute state change events
+            if self._user_is_muted:
+                await self._call_event_handler("on_user_mute_started")
+            else:
+                await self._call_event_handler("on_user_mute_stopped")
+
         return should_mute_frame
-
-    async def _user_turn_strategies_process_frame(self, frame: Frame):
-        if self._user_turn_strategies.start:
-            for strategy in self._user_turn_strategies.start:
-                await strategy.process_frame(frame)
-
-        if self._user_turn_strategies.stop:
-            for strategy in self._user_turn_strategies.stop:
-                await strategy.process_frame(frame)
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame()
@@ -482,21 +551,7 @@ class LLMUserAggregator(LLMContextAggregator):
             "    )"
         )
 
-        await self._cleanup_user_turn_strategies()
-        self._user_turn_strategies = ExternalUserTurnStrategies()
-        await self._setup_user_turn_strategies()
-
-    async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        self._vad_user_speaking = True
-
-        # The user started talking, let's reset the user turn timeout.
-        self._user_turn_stop_timeout_event.set()
-
-    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        self._vad_user_speaking = False
-
-        # The user stopped talking, let's reset the user turn timeout.
-        self._user_turn_stop_timeout_event.set()
+        await self._user_turn_controller.update_strategies(ExternalUserTurnStrategies())
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
@@ -505,9 +560,6 @@ class LLMUserAggregator(LLMContextAggregator):
         if not text.strip():
             return
 
-        # We have creceived a transcription, let's reset the user turn timeout.
-        self._user_turn_stop_timeout_event.set()
-
         # Transcriptions never include inter-part spaces (so far).
         self._aggregation.append(
             TextPartForConcatenation(
@@ -515,101 +567,70 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
-    async def _on_user_turn_started(
-        self,
-        strategy: BaseUserTurnStartStrategy,
-        params: UserTurnStartedParams,
-    ):
-        await self._trigger_user_turn_start(strategy, params)
-
-    async def _on_user_turn_stopped(
-        self, strategy: BaseUserTurnStopStrategy, params: UserTurnStoppedParams
-    ):
-        await self._trigger_user_turn_stop(strategy, params)
-
     async def _on_push_frame(
-        self,
-        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
-        frame: Frame,
-        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
         await self.push_frame(frame, direction)
 
-    async def _on_broadcast_frame(
-        self,
-        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy,
-        frame_cls: Type[Frame],
-        **kwargs,
-    ):
+    async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
         await self.broadcast_frame(frame_cls, **kwargs)
 
-    async def _trigger_user_turn_start(
-        self, strategy: Optional[BaseUserTurnStartStrategy], params: UserTurnStartedParams
+    async def _on_user_turn_started(
+        self,
+        controller: UserTurnController,
+        strategy: BaseUserTurnStartStrategy,
+        params: UserTurnStartedParams,
     ):
-        # Prevent two consecutive user turn starts.
-        if self._user_turn:
-            return
+        logger.debug(f"{self}: User started speaking (strategy: {strategy})")
 
-        logger.debug(f"User started speaking (user turn start strategy: {strategy})")
-
-        self._user_turn = True
-        self._user_turn_stop_timeout_event.set()
-
-        # Reset all user turn start strategies to start fresh.
-        if self._user_turn_strategies.start:
-            for s in self._user_turn_strategies.start:
-                await s.reset()
+        self._user_turn_start_timestamp = time_now_iso8601()
 
         if params.enable_user_speaking_frames:
-            # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
         if params.enable_interruptions and self._allow_interruptions:
-            # TODO(aleix): This frame should really come from the top of the pipeline.
-            await self.broadcast_frame(InterruptionFrame)
+            await self.push_interruption_task_frame_and_wait()
 
         await self._call_event_handler("on_user_turn_started", strategy)
 
-    async def _trigger_user_turn_stop(
-        self, strategy: Optional[BaseUserTurnStopStrategy], params: UserTurnStoppedParams
+    async def _on_user_turn_stopped(
+        self,
+        controller: UserTurnController,
+        strategy: BaseUserTurnStopStrategy,
+        params: UserTurnStoppedParams,
     ):
-        # Prevent two consecutive user turn stops.
-        if not self._user_turn:
-            return
-
-        logger.debug(f"User stopped speaking (user turn stop strategy: {strategy})")
-
-        self._user_turn = False
-        self._user_turn_stop_timeout_event.set()
-
-        # Reset all user turn stop strategies to start fresh.
-        if self._user_turn_strategies.stop:
-            for s in self._user_turn_strategies.stop:
-                await s.reset()
+        logger.debug(f"{self}: User stopped speaking (strategy: {strategy})")
 
         if params.enable_user_speaking_frames:
-            # TODO(aleix): This frame should really come from the top of the pipeline.
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
-        await self._call_event_handler("on_user_turn_stopped", strategy)
+        await self._maybe_emit_user_turn_stopped(strategy)
 
-        # Always push context frame.
-        await self.push_aggregation()
+    async def _on_user_turn_stop_timeout(self, controller):
+        await self._call_event_handler("on_user_turn_stop_timeout")
 
-    async def _user_turn_stop_timeout_task_handler(self):
-        while True:
-            try:
-                await asyncio.wait_for(
-                    self._user_turn_stop_timeout_event.wait(),
-                    timeout=self._params.user_turn_stop_timeout,
-                )
-                self._user_turn_stop_timeout_event.clear()
-            except asyncio.TimeoutError:
-                if self._user_turn and not self._vad_user_speaking:
-                    await self._call_event_handler("on_user_turn_stop_timeout")
-                    await self._trigger_user_turn_stop(
-                        None, UserTurnStoppedParams(enable_user_speaking_frames=True)
-                    )
+    async def _on_user_turn_idle(self, controller):
+        await self._call_event_handler("on_user_turn_idle")
+
+    async def _maybe_emit_user_turn_stopped(
+        self,
+        strategy: Optional[BaseUserTurnStopStrategy] = None,
+        on_session_end: bool = False,
+    ):
+        """Maybe emit user turn stopped event.
+
+        Args:
+            strategy: The strategy that triggered the turn stop.
+            on_session_end: If True, only emit if there's unemitted content
+                (avoids duplicate events when session ends).
+        """
+        aggregation = await self.push_aggregation()
+        if not on_session_end or aggregation:
+            message = UserTurnStoppedMessage(
+                content=aggregation, timestamp=self._user_turn_start_timestamp
+            )
+            await self._call_event_handler("on_user_turn_stopped", strategy, message)
+            self._user_turn_start_timestamp = ""
 
 
 class LLMAssistantAggregator(LLMContextAggregator):
@@ -625,6 +646,27 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     The aggregator manages function calls in progress and coordinates between
     text generation and tool execution phases of LLM responses.
+
+    Event handlers available:
+
+    - on_assistant_turn_started: Called when the assistant turn starts
+    - on_assistant_turn_stopped: Called when the assistant turn ends
+    - on_assistant_thought: Called when an assistant thought is available
+
+    Example::
+
+        @aggregator.event_handler("on_assistant_turn_started")
+        async def on_assistant_turn_started(aggregator):
+            ...
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            ...
+
+        @aggregator.event_handler("on_assistant_thought")
+        async def on_assistant_thought(aggregator, message: AssistantThoughtMessage):
+            ...
+
     """
 
     def __init__(
@@ -666,11 +708,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         self._started = 0
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
+        self._function_calls_image_results: Dict[str, UserImageRawFrame] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
-        self._thought_aggregation_enabled = False
+        self._assistant_turn_start_timestamp = ""
+
+        self._thought_append_to_context = False
         self._thought_llm: str = ""
         self._thought_aggregation: List[TextPartForConcatenation] = []
+        self._thought_start_time: str = ""
+
+        self._register_event_handler("on_assistant_turn_started")
+        self._register_event_handler("on_assistant_turn_stopped")
+        self._register_event_handler("on_assistant_thought")
 
     @property
     def has_function_calls_in_progress(self) -> bool:
@@ -688,7 +738,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _reset_thought_aggregation(self):
         """Reset the thought aggregation state."""
-        self._thought_aggregation_enabled = False
+        self._thought_append_to_context = False
         self._thought_llm = ""
         self._thought_aggregation = []
 
@@ -703,6 +753,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            await self._handle_end_or_cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
             await self._handle_llm_start(frame)
@@ -738,22 +791,18 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, AssistantImageRawFrame):
             await self._handle_assistant_image_frame(frame)
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.push_aggregation()
-            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
-    async def push_aggregation(self):
+    async def push_aggregation(self) -> str:
         """Push the current assistant aggregation with timestamp."""
         if not self._aggregation:
-            return
+            return ""
 
         aggregation = self.aggregation_string()
         await self.reset()
 
-        if aggregation:
-            self._context.add_message({"role": "assistant", "content": aggregation})
+        self._context.add_message({"role": "assistant", "content": aggregation})
 
         # Push context frame
         await self.push_context_frame()
@@ -761,6 +810,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Push timestamp frame with current time
         timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
         await self.push_frame(timestamp_frame)
+
+        return aggregation
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame(FrameDirection.UPSTREAM)
@@ -776,9 +827,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
-        await self.push_aggregation()
+        await self._trigger_assistant_turn_stopped()
         self._started = 0
         await self.reset()
+
+    async def _handle_end_or_cancel(self, frame: Frame):
+        await self._trigger_assistant_turn_stopped()
+        self._started = 0
 
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
@@ -800,7 +855,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
                         "id": frame.tool_call_id,
                         "function": {
                             "name": frame.function_name,
-                            "arguments": json.dumps(frame.arguments),
+                            "arguments": json.dumps(frame.arguments, ensure_ascii=False),
                         },
                         "type": "function",
                     }
@@ -833,12 +888,21 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         # Update context with the function call result
         if frame.result:
-            result = json.dumps(frame.result)
+            result = json.dumps(frame.result, ensure_ascii=False)
             self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
         else:
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "COMPLETED")
 
         run_llm = False
+
+        # Append any images that were generated by function calls.
+        if frame.tool_call_id in self._function_calls_image_results:
+            image_frame = self._function_calls_image_results[frame.tool_call_id]
+
+            del self._function_calls_image_results[frame.tool_call_id]
+
+            # If an image frame has been added to the context, let's run inference.
+            run_llm = await self._maybe_append_image_to_context(image_frame)
 
         # Run inference if the function call result requires it.
         if frame.result:
@@ -868,39 +932,32 @@ class LLMAssistantAggregator(LLMContextAggregator):
         logger.debug(
             f"{self} FunctionCallCancelFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
-        if frame.tool_call_id not in self._function_calls_in_progress:
-            return
-
-        if self._function_calls_in_progress[frame.tool_call_id].cancel_on_interruption:
+        function_call = self._function_calls_in_progress.get(frame.tool_call_id)
+        if function_call and function_call.cancel_on_interruption:
             # Update context with the function call cancellation
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
             del self._function_calls_in_progress[frame.tool_call_id]
 
-    def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
-        for message in self._context.get_messages():
-            if (
-                not isinstance(message, LLMSpecificMessage)
-                and message["role"] == "tool"
-                and message["tool_call_id"]
-                and message["tool_call_id"] == tool_call_id
-            ):
-                message["content"] = result
-
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
-        if not frame.append_to_context:
-            return
+        image_appended = False
 
-        logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
+        # Check if this image is a result of a function call.
+        if (
+            frame.request
+            and frame.request.tool_call_id
+            and frame.request.tool_call_id in self._function_calls_in_progress
+        ):
+            self._function_calls_image_results[frame.request.tool_call_id] = frame
 
-        await self._context.add_image_frame_message(
-            format=frame.format,
-            size=frame.size,
-            image=frame.image,
-            text=frame.text,
-        )
+            # Call the result_callback if provided. This signals that the image
+            # has been retrieved and the function call can now complete.
+            if frame.request.result_callback:
+                await frame.request.result_callback(None)
+        else:
+            image_appended = await self._maybe_append_image_to_context(frame)
 
-        await self.push_aggregation()
-        await self.push_context_frame(FrameDirection.UPSTREAM)
+        if image_appended:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_assistant_image_frame(self, frame: AssistantImageRawFrame):
         logger.debug(f"{self} Appending AssistantImageRawFrame to LLM context (size: {frame.size})")
@@ -922,10 +979,11 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
         self._started += 1
+        await self._trigger_assistant_turn_started()
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
         self._started -= 1
-        await self.push_aggregation()
+        await self._trigger_assistant_turn_stopped()
 
     async def _handle_text(self, frame: TextFrame):
         if not self._started or not frame.append_to_context:
@@ -946,11 +1004,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             return
 
         await self._reset_thought_aggregation()
-        self._thought_aggregation_enabled = frame.append_to_context
+        self._thought_append_to_context = frame.append_to_context
         self._thought_llm = frame.llm
+        self._thought_start_time = time_now_iso8601()
 
     async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
-        if not self._started or not self._thought_aggregation_enabled:
+        if not self._started:
             return
 
         # Make sure we really have text (spaces count, too!)
@@ -964,26 +1023,72 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
     async def _handle_thought_end(self, frame: LLMThoughtEndFrame):
-        if not self._started or not self._thought_aggregation_enabled:
+        if not self._started:
             return
 
         thought = concatenate_aggregated_text(self._thought_aggregation)
-        llm = self._thought_llm
+
+        if self._thought_append_to_context:
+            llm = self._thought_llm
+            self._context.add_message(
+                LLMSpecificMessage(
+                    llm=llm,
+                    message={
+                        "type": "thought",
+                        "text": thought,
+                        "signature": frame.signature,
+                    },
+                )
+            )
+
+        message = AssistantThoughtMessage(content=thought, timestamp=self._thought_start_time)
+
         await self._reset_thought_aggregation()
 
-        self._context.add_message(
-            LLMSpecificMessage(
-                llm=llm,
-                message={
-                    "type": "thought",
-                    "text": thought,
-                    "signature": frame.signature,
-                },
-            )
+        await self._call_event_handler("on_assistant_thought", message)
+
+    async def _maybe_append_image_to_context(self, frame: UserImageRawFrame) -> bool:
+        if not frame.append_to_context:
+            return False
+
+        logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
+
+        await self._context.add_image_frame_message(
+            format=frame.format,
+            size=frame.size,
+            image=frame.image,
+            text=frame.text,
         )
+
+        return True
+
+    def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
+        for message in self._context.get_messages():
+            if (
+                not isinstance(message, LLMSpecificMessage)
+                and message["role"] == "tool"
+                and message["tool_call_id"]
+                and message["tool_call_id"] == tool_call_id
+            ):
+                message["content"] = result
 
     def _context_updated_task_finished(self, task: asyncio.Task):
         self._context_updated_tasks.discard(task)
+
+    async def _trigger_assistant_turn_started(self):
+        self._assistant_turn_start_timestamp = time_now_iso8601()
+
+        await self._call_event_handler("on_assistant_turn_started")
+
+    async def _trigger_assistant_turn_stopped(self):
+        aggregation = await self.push_aggregation()
+        if aggregation:
+            message = AssistantTurnStoppedMessage(
+                content=aggregation, timestamp=self._assistant_turn_start_timestamp
+            )
+            await self._call_event_handler("on_assistant_turn_stopped", message)
+
+            self._assistant_turn_start_timestamp = ""
 
 
 class LLMContextAggregatorPair:
@@ -1021,3 +1126,15 @@ class LLMContextAggregatorPair:
             The assistant context aggregator instance.
         """
         return self._assistant
+
+    def __iter__(self):
+        """Allow tuple unpacking of the aggregator pair.
+
+        This enables both usage patterns::
+            pair = LLMContextAggregatorPair(context)  # Returns the instance
+            user, assistant = LLMContextAggregatorPair(context)  # Unpacks into tuple
+
+        Yields:
+            The user aggregator, then the assistant aggregator.
+        """
+        return iter((self._user, self._assistant))

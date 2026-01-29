@@ -263,7 +263,7 @@ def _setup_webrtc_routes(
         """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
 
         # Prepare runner arguments with the callback to run your bot
-        async def webrtc_connection_callback(connection):
+        async def webrtc_connection_callback(connection: SmallWebRTCConnection):
             bot_module = _get_bot_module()
 
             runner_args = SmallWebRTCRunnerArguments(
@@ -298,7 +298,7 @@ def _setup_webrtc_routes(
 
         # Store session info immediately in memory, replicate the behavior expected on Pipecat Cloud
         session_id = str(uuid.uuid4())
-        active_sessions[session_id] = request_data
+        active_sessions[session_id] = request_data.get("body", {})
 
         result: StartBotResult = {"sessionId": session_id}
         if request_data.get("enableDefaultIceServers"):
@@ -331,7 +331,8 @@ def _setup_webrtc_routes(
                         pc_id=request_data.get("pc_id"),
                         restart_pc=request_data.get("restart_pc"),
                         request_data=request_data.get("request_data")
-                        or request_data.get("requestData"),
+                        or request_data.get("requestData")
+                        or active_session,
                     )
                     return await offer(webrtc_request, background_tasks)
                 elif request.method == HTTPMethod.PATCH.value:
@@ -406,13 +407,7 @@ def _setup_whatsapp_routes(app: FastAPI):
         return
 
     try:
-        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
-
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-        from pipecat.transports.smallwebrtc.request_handler import (
-            SmallWebRTCRequest,
-            SmallWebRTCRequestHandler,
-        )
         from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
         from pipecat.transports.whatsapp.client import WhatsAppClient
     except ImportError as e:
@@ -589,13 +584,13 @@ def _setup_daily_routes(app: FastAPI, dialin_enabled: bool = False):
 
         bot_module = _get_bot_module()
 
-        existing_room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+        existing_room_url = os.getenv("DAILY_ROOM_URL")
 
         result = None
 
         # Configure room if:
         # 1. Explicitly requested via createDailyRoom in payload
-        # 2. Using pre-configured room from DAILY_SAMPLE_ROOM_URL env var
+        # 2. Using pre-configured room from DAILY_ROOM_URL env var
         if create_daily_room or existing_room_url:
             import aiohttp
 

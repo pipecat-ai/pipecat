@@ -161,7 +161,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_ttfb_metrics()
+            pass
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if (
                 self._vad_force_turn_endpoint
@@ -198,6 +198,8 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         Establishes websocket connection and starts receive task.
         """
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -208,6 +210,8 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         Sends termination message, waits for acknowledgment, and cleans up.
         """
+        await super()._disconnect()
+
         if not self._connected or not self._websocket:
             return
 
@@ -350,7 +354,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         """Handle transcription results."""
         if not message.transcript:
             return
-        await self.stop_ttfb_metrics()
         if message.end_of_turn and (
             not self._connection_params.formatted_finals or message.turn_is_formatted
         ):

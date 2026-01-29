@@ -195,7 +195,7 @@ class EvalRunner:
 
 
 async def run_example_pipeline(script_path: Path, eval_config: EvalConfig):
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    room_url = os.getenv("DAILY_ROOM_URL")
 
     module = load_module_from_path(script_path)
 
@@ -225,7 +225,7 @@ async def run_eval_pipeline(
 ):
     logger.info(f"Starting eval bot")
 
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    room_url = os.getenv("DAILY_ROOM_URL")
 
     transport = DailyTransport(
         room_url,
@@ -293,12 +293,13 @@ async def run_eval_pipeline(
         "You should only call the eval function if:\n"
         "- The user explicitly attempts to answer the question, AND\n"
         f"- Their answer can be cleanly evaluated using: {eval_config.eval}\n"
-        "Ignore greetings, comments, non-answers, or requests for clarification."
+        "Ignore greetings, comments, non-answers, or requests for clarification.\n"
+        "Numerical word answers are allowed (e.g., 'five' is the same as '5').\n"
     )
     if eval_config.eval_speaks_first:
-        system_prompt = f"You are an evaluation agent, be extremly brief. Numerical word answers are allowed. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
     else:
-        system_prompt = f"You are an evaluation agent, be extremly brief. Numerical word answers are allowed. First, ask one question: {example_prompt}. {common_system_prompt}"
+        system_prompt = f"You are an evaluation agent, be extremly brief. First, ask one question: {example_prompt}. {common_system_prompt}"
 
     messages = [
         {

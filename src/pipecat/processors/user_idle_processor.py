@@ -8,6 +8,7 @@
 
 import asyncio
 import inspect
+import warnings
 from typing import Awaitable, Callable, Union
 
 from pipecat.frames.frames import (
@@ -25,6 +26,10 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 class UserIdleProcessor(FrameProcessor):
     """Monitors user inactivity and triggers callbacks after timeout periods.
+
+    .. deprecated::
+        UserIdleProcessor is deprecated in 0.0.100 and will be removed in a future version.
+        Use LLMUserAggregator with user_idle_timeout parameter instead.
 
     This processor tracks user activity and triggers configurable callbacks when
     users become idle. It starts monitoring only after the first conversation
@@ -70,6 +75,14 @@ class UserIdleProcessor(FrameProcessor):
             **kwargs: Additional arguments passed to FrameProcessor.
         """
         super().__init__(**kwargs)
+
+        warnings.warn(
+            "UserIdleProcessor is deprecated in 0.0.100 and will be removed in a "
+            "future version. Use LLMUserAggregator with user_idle_timeout parameter "
+            "instead.",
+            DeprecationWarning,
+        )
+
         self._callback = self._wrap_callback(callback)
         self._timeout = timeout
         self._retry_count = 0

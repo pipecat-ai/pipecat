@@ -130,6 +130,7 @@ class RimeTTSService(AudioContextWordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
+            append_trailing_space=True,
             sample_rate=sample_rate,
             **kwargs,
         )
@@ -278,6 +279,8 @@ class RimeTTSService(AudioContextWordTTSService):
 
     async def _connect(self):
         """Establish websocket connection and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -285,6 +288,8 @@ class RimeTTSService(AudioContextWordTTSService):
 
     async def _disconnect(self):
         """Close websocket connection and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -767,12 +772,16 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         """Establish WebSocket connection and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         """Close WebSocket connection and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None

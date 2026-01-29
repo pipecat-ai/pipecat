@@ -141,7 +141,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         api_key=os.getenv("AZURE_REALTIME_API_KEY"),
         base_url=os.getenv("AZURE_REALTIME_BASE_URL"),
         session_properties=session_properties,
-        start_audio_paused=False,
     )
 
     # you can either register a single function for all function calls, or specific functions

@@ -680,7 +680,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                                 format=video_frame.format,
                                 text=request_text,
                                 append_to_context=add_to_context,
-                                # Deprecated fields below.
                                 request=request_frame,
                             )
                             image_frame.transport_source = video_source
@@ -699,8 +698,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             message: The application message to process.
         """
         logger.debug(f"Received app message inside SmallWebRTCInputTransport  {message}")
-        frame = InputTransportMessageFrame(message=message)
-        await self.push_frame(frame)
+        await self.broadcast_frame(InputTransportMessageFrame, message=message)
 
     # Add this method similar to DailyInputTransport.request_participant_image
     async def request_participant_image(self, frame: UserImageRequestFrame):

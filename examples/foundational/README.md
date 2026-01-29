@@ -4,7 +4,7 @@ This directory contains examples showing how to build voice and multimodal agent
 
 ## Setup
 
-1. Follow the [README](../../README.md#%EF%B8%8F-contributing-to-the-framework) steps to get your local environment configured.
+1. Follow the [README](https://github.com/pipecat-ai/pipecat/blob/main/README.md#%EF%B8%8F-contributing-to-the-framework) steps to get your local environment configured.
 
    > **Run from root directory**: Make sure you are running the steps from the root directory.
 
@@ -37,7 +37,7 @@ Most examples support running with other transports, like Twilio or Daily.
 
 ### Daily
 
-You need to create a Daily account at https://dashboard.daily.co/u/signup. Once signed up, you can create your own room from the dashboard and set the environment variables `DAILY_SAMPLE_ROOM_URL` and `DAILY_API_KEY`. Alternatively, you can let the example create a room for you (still needs `DAILY_API_KEY` environment variable). Then, start any example with `-t daily`:
+You need to create a Daily account at https://dashboard.daily.co/u/signup. Once signed up, you can create your own room from the dashboard and set the environment variables `DAILY_ROOM_URL` and `DAILY_API_KEY`. Alternatively, you can let the example create a room for you (still needs `DAILY_API_KEY` environment variable). Then, start any example with `-t daily`:
 
 ```bash
 uv run 07-interruptible.py -t daily
@@ -140,4 +140,4 @@ uv run python <example-name> --host 0.0.0.0 --port 8080
 - **Connection errors**: Verify API keys in `.env` file
 - **Port conflicts**: Use `--port` to change the port
 
-For more examples, visit our the [`pipecat-examples repository](https://github.com/pipecat-ai/pipecat-examples).
+For more examples, visit our the [pipecat-examples repository](https://github.com/pipecat-ai/pipecat-examples).

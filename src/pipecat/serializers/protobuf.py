@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer
 
 
 @dataclasses.dataclass
@@ -63,15 +63,6 @@ class ProtobufFrameSerializer(FrameSerializer):
     def __init__(self):
         """Initialize the Protobuf frame serializer."""
         pass
-
-    @property
-    def type(self) -> FrameSerializerType:
-        """Get the serializer type.
-
-        Returns:
-            FrameSerializerType.BINARY indicating binary serialization format.
-        """
-        return FrameSerializerType.BINARY
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """Serialize a frame to Protocol Buffer binary format.
@@ -135,7 +126,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-        # Special handling for MessageFrame -> OutputTransportMessageUrgentFrame
+        # Special handling for MessageFrame -> InputTransportMessageFrame
         if class_name == MessageFrame:
             try:
                 msg = json.loads(args_dict["data"])

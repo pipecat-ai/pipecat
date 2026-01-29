@@ -44,6 +44,9 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    LLMThoughtEndFrame,
+    LLMThoughtStartFrame,
+    LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     TranscriptionFrame,
@@ -1195,7 +1198,20 @@ class GeminiLiveLLMService(LLMService):
                         # Reset failure counter if connection has been stable
                         self._check_and_reset_failure_counter()
 
-                        if message.server_content and message.server_content.model_turn:
+                        if message.server_content and message.server_content.interrupted:
+                            # NOTE: while the service triggers interruptions in
+                            # the specific case of barge-ins, it does *not*
+                            # emit UserStarted/StoppedSpeakingFrames, as the
+                            # Gemini Live API does not give us broadly reliable
+                            # signals to base those off of. Pipelines that
+                            # require turn tracking (like those using context
+                            # aggregators) still need an independent way to
+                            # track turns, such as local Silero VAD in
+                            # combination with the context aggregator default
+                            # turn strategies.
+                            logger.debug("Gemini VAD: interrupted signal received")
+                            await self.push_interruption_task_frame_and_wait()
+                        elif message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
                         elif (
                             message.server_content
@@ -1346,7 +1362,7 @@ class GeminiLiveLLMService(LLMService):
             return  # Ignore if less than 1 second has passed
 
         self._last_sent_time = now  # Update last sent time
-        logger.debug(f"Sending video frame to Gemini: {frame}")
+        logger.trace(f"Sending video frame to Gemini: {frame}")
 
         buffer = io.BytesIO()
         Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
@@ -1455,10 +1471,19 @@ class GeminiLiveLLMService(LLMService):
                 await self._set_bot_is_responding(True)
                 await self.push_frame(LLMFullResponseStartFrame())
 
-            self._bot_text_buffer += text
-            self._search_result_buffer += text  # Also accumulate for grounding
-            frame = LLMTextFrame(text=text)
-            await self.push_frame(frame)
+            # Check if this is a thought
+            if part.thought:
+                # Gemini Live emits fully-formed thoughts rather than chunks,
+                # so bracket each thought in start/end frames
+                await self.push_frame(LLMThoughtStartFrame())
+                await self.push_frame(LLMThoughtTextFrame(text))
+                await self.push_frame(LLMThoughtEndFrame())
+            else:
+                # Regular text response
+                self._bot_text_buffer += text
+                self._search_result_buffer += text  # Also accumulate for grounding
+                frame = LLMTextFrame(text=text)
+                await self.push_frame(frame)
 
         # Check for grounding metadata in server content
         if msg.server_content and msg.server_content.grounding_metadata:
@@ -1698,11 +1723,26 @@ class GeminiLiveLLMService(LLMService):
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
-        frame = TTSTextFrame(text=text, aggregated_by=AggregationType.SENTENCE)
-        # Gemini Live text already includes any necessary inter-chunk spaces
-        frame.includes_inter_frame_spaces = True
+        await self._push_output_transcription_text_frames(text)
 
-        await self.push_frame(frame)
+    async def _push_output_transcription_text_frames(self, text: str):
+        # In a typical "cascade" LLM + TTS setup, LLMTextFrames would not
+        # proceed beyond the TTS service. Therefore, since a speech-to-speech
+        # service like Gemini Live combines both LLM and TTS functionality, you
+        # might think we wouldn't need to push LLMTextFrames at all. However,
+        # RTVI relies on LLMTextFrames being pushed to trigger its
+        # "bot-llm-text" event. So here we push an LLMTextFrame, too, but avoid
+        # appending it to context to avoid context message duplication.
+
+        # Push LLMTextFrame
+        llm_text_frame = LLMTextFrame(text)
+        llm_text_frame.append_to_context = False
+        await self.push_frame(llm_text_frame)
+
+        # Push TTSTextFrame
+        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame.includes_inter_frame_spaces = True
+        await self.push_frame(tts_text_frame)
 
     async def _handle_msg_grounding_metadata(self, message: LiveServerMessage):
         """Handle dedicated grounding metadata messages."""

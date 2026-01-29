@@ -90,7 +90,7 @@ class AzureBaseTTSService:
             emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
             language: Language for synthesis. Defaults to English (US).
             pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
-            rate: Speech rate multiplier. Defaults to "1.05".
+            rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
             role: Voice role for expression (e.g., "YoungAdultFemale").
             style: Speaking style (e.g., "cheerful", "sad", "excited").
             style_degree: Intensity of the speaking style (0.01 to 2.0).
@@ -100,7 +100,7 @@ class AzureBaseTTSService:
         emphasis: Optional[str] = None
         language: Optional[Language] = Language.EN_US
         pitch: Optional[str] = None
-        rate: Optional[str] = "1.05"
+        rate: Optional[str] = None
         role: Optional[str] = None
         style: Optional[str] = None
         style_degree: Optional[str] = None
@@ -185,7 +185,9 @@ class AzureBaseTTSService:
         if self._settings["volume"]:
             prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
-        ssml += f"<prosody {' '.join(prosody_attrs)}>"
+        # Only wrap in prosody tag if there are prosody attributes
+        if prosody_attrs:
+            ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
         if self._settings["emphasis"]:
             ssml += f"<emphasis level='{self._settings['emphasis']}'>"
@@ -195,7 +197,8 @@ class AzureBaseTTSService:
         if self._settings["emphasis"]:
             ssml += "</emphasis>"
 
-        ssml += "</prosody>"
+        if prosody_attrs:
+            ssml += "</prosody>"
 
         if self._settings["style"]:
             ssml += "</mstts:express-as>"
@@ -277,6 +280,13 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._started = False
         self._first_chunk = True
         self._cumulative_audio_offset: float = 0.0  # Cumulative audio duration in seconds
+        self._current_sentence_base_offset: float = 0.0  # Base offset for current sentence
+        self._current_sentence_duration: float = 0.0  # Duration from Azure callback
+        self._current_sentence_max_word_offset: float = (
+            0.0  # Max word boundary offset seen in current sentence (for 8kHz workaround)
+        )
+        self._last_word: Optional[str] = None  # Track last word for punctuation merging
+        self._last_timestamp: Optional[float] = None  # Track last timestamp
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -346,8 +356,33 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         await self.cancel_task(self._word_processor_task)
         self._word_processor_task = None
 
+    def _is_cjk_language(self) -> bool:
+        """Check if the configured language is CJK (Chinese, Japanese, Korean).
+
+        Returns:
+            True if the language is CJK, False otherwise.
+        """
+        language = self._settings.get("language", "").lower()
+        # Check if language starts with CJK language codes
+        return language.startswith(("zh", "ja", "ko", "cmn", "yue", "wuu"))
+
+    def _is_punctuation_only(self, text: str) -> bool:
+        """Check if text consists only of punctuation and whitespace.
+
+        Args:
+            text: Text to check.
+
+        Returns:
+            True if text is only punctuation/whitespace, False otherwise.
+        """
+        return text and all(not c.isalnum() for c in text)
+
     def _handle_word_boundary(self, evt):
         """Handle word boundary events from Azure SDK.
+
+        Azure sends punctuation as separate word boundaries, and breaks CJK text
+        into individual characters/particles. This method routes to language-specific
+        handlers to properly merge and emit word boundaries.
 
         Args:
             evt: SpeechSynthesisWordBoundaryEventArgs from Azure Speech SDK
@@ -359,16 +394,84 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         word = evt.text
         sentence_relative_seconds = evt.audio_offset / 10_000_000.0
 
-        # Add cumulative offset to get absolute timestamp across sentences
-        absolute_seconds = self._cumulative_audio_offset + sentence_relative_seconds
+        # Use base offset captured at start of run_tts to avoid race conditions
+        # with callbacks from overlapping TTS requests
+        absolute_seconds = self._current_sentence_base_offset + sentence_relative_seconds
 
-        # Queue word timestamp for async processing
-        # Use thread-safe queue since this is called from Azure SDK thread
-        if word:
-            logger.trace(f"{self}: Word boundary - '{word}' at {absolute_seconds:.2f}s")
-            # Put in temporary queue - will be processed by async task
-            # Store as (word, timestamp_in_seconds) tuple
-            self._word_boundary_queue.put_nowait((word, absolute_seconds))
+        # Track max word offset for accurate cumulative timing
+        # (audio_duration from Azure doesn't always match word boundary offsets at 8kHz)
+        if sentence_relative_seconds > self._current_sentence_max_word_offset:
+            self._current_sentence_max_word_offset = sentence_relative_seconds
+
+        if not word:
+            return
+
+        # Route to language-specific handler
+        if self._is_cjk_language():
+            self._handle_cjk_word_boundary(word, absolute_seconds)
+        else:
+            self._handle_non_cjk_word_boundary(word, absolute_seconds)
+
+    def _emit_pending_word(self):
+        """Emit the currently buffered word if one exists."""
+        if self._last_word is not None:
+            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            self._last_word = None
+            self._last_timestamp = None
+
+    def _handle_cjk_word_boundary(self, word: str, timestamp: float):
+        """Handle word boundaries for CJK languages (Chinese, Japanese, Korean).
+
+        CJK languages don't use spaces between words, so we merge characters together
+        and only emit at natural break points (punctuation or whitespace boundaries).
+        Without this logic, we don't get word output for CJK languages.
+
+        Args:
+            word: The word/character from Azure.
+            timestamp: Timestamp in seconds.
+        """
+        # First word: just store it
+        if self._last_word is None:
+            self._last_word = word
+            self._last_timestamp = timestamp
+            return
+
+        # Punctuation: merge and emit (natural break)
+        if self._is_punctuation_only(word):
+            self._last_word += word
+            self._emit_pending_word()
+            return
+
+        # Whitespace: emit before boundary, start new segment
+        if word.strip() != word:
+            self._emit_pending_word()
+            self._last_word = word
+            self._last_timestamp = timestamp
+            return
+
+        # Default: continue merging CJK characters
+        self._last_word += word
+
+    def _handle_non_cjk_word_boundary(self, word: str, timestamp: float):
+        """Handle word boundaries for non-CJK languages.
+
+        Non-CJK languages use spaces between words, so we emit each word separately
+        after merging any trailing punctuation.
+
+        Args:
+            word: The word from Azure.
+            timestamp: Timestamp in seconds.
+        """
+        # Punctuation: merge with previous word (don't emit yet)
+        if self._is_punctuation_only(word) and self._last_word is not None:
+            self._last_word += word
+            return
+
+        # Regular word: emit previous, store current
+        if self._last_word is not None:
+            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+        self._last_word = word
+        self._last_timestamp = timestamp
 
     async def _word_processor_task_handler(self):
         """Process word timestamps from the queue and call add_word_timestamps."""
@@ -397,9 +500,15 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         Args:
             evt: Completion event from Azure Speech SDK.
         """
-        # Update cumulative audio offset for next sentence
+        # Flush any pending word before completing
+        if self._last_word is not None:
+            self._word_boundary_queue.put_nowait((self._last_word, self._last_timestamp))
+            self._last_word = None
+            self._last_timestamp = None
+
+        # Store duration for cumulative offset calculation
         if evt.result and evt.result.audio_duration:
-            self._cumulative_audio_offset += evt.result.audio_duration.total_seconds()
+            self._current_sentence_duration = evt.result.audio_duration.total_seconds()
 
         self._audio_queue.put_nowait(None)  # Signal completion
 
@@ -435,6 +544,11 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._started = False
         self._first_chunk = True
         self._cumulative_audio_offset = 0.0
+        self._current_sentence_base_offset = 0.0
+        self._current_sentence_duration = 0.0
+        self._current_sentence_max_word_offset = 0.0
+        self._last_word = None
+        self._last_timestamp = None
 
     async def flush_audio(self):
         """Flush any pending audio data."""
@@ -507,6 +621,12 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                     self._started = True
                     self._first_chunk = True
 
+                # Capture base offset BEFORE starting synthesis to avoid race conditions
+                # Word boundary callbacks will use this value
+                self._current_sentence_base_offset = self._cumulative_audio_offset
+                self._current_sentence_duration = 0.0
+                self._current_sentence_max_word_offset = 0.0
+
                 ssml = self._construct_ssml(text)
                 self._speech_synthesizer.speak_ssml_async(ssml)
                 await self.start_tts_usage_metrics(text)
@@ -529,6 +649,16 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                         num_channels=1,
                     )
                     yield frame
+
+                # Update cumulative offset for next sentence
+                # At 8kHz, Azure's audio_duration doesn't match word boundary offsets,
+                # so we use max_word_offset as a workaround. At other sample rates,
+                # audio_duration is accurate.
+                # TODO: Remove after Azure fixes word boundary timing at 8kHz
+                if self.sample_rate == 8000:
+                    self._cumulative_audio_offset += self._current_sentence_max_word_offset
+                else:
+                    self._cumulative_audio_offset += self._current_sentence_duration
 
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")

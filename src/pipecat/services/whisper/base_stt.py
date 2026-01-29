@@ -204,11 +204,9 @@ class BaseWhisperSTTService(SegmentedSTTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
             response = await self._transcribe(audio)
 
-            await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
 
             text = response.text.strip()

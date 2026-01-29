@@ -169,6 +169,9 @@ class GladiaInputParams(BaseModel):
         pre_processing: Audio pre-processing options
         realtime_processing: Real-time processing features
         messages_config: WebSocket message filtering options
+        enable_vad: Enable VAD to trigger end of utterance detection. This should be used
+            without any other VAD enabled in the agent and will emit the speaker started
+            and stopped frames. Defaults to False.
     """
 
     encoding: Optional[str] = "wav/pcm"
@@ -182,3 +185,4 @@ class GladiaInputParams(BaseModel):
     pre_processing: Optional[PreProcessingConfig] = None
     realtime_processing: Optional[RealtimeProcessingConfig] = None
     messages_config: Optional[MessagesConfig] = None
+    enable_vad: bool = False

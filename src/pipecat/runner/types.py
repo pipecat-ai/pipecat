@@ -106,3 +106,18 @@ class SmallWebRTCRunnerArguments(RunnerArguments):
     """
 
     webrtc_connection: Any
+
+
+@dataclass
+class LiveKitRunnerArguments(RunnerArguments):
+    """LiveKit transport session arguments for the runner.
+
+    Parameters:
+        room_name: LiveKit room name to join
+        token: Authentication token for the room
+        body: Additional request data
+    """
+
+    room_name: str
+    url: str
+    token: Optional[str] = None

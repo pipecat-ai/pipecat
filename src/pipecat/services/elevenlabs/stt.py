@@ -310,7 +310,6 @@ class ElevenLabsSTTService(SegmentedSTTService):
         self, transcript: str, is_final: bool, language: Optional[str] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -328,7 +327,6 @@ class ElevenLabsSTTService(SegmentedSTTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
             # Upload audio and get transcription result directly
             result = await self._transcribe_audio(audio)
@@ -539,9 +537,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def start_metrics(self):
+    async def _start_metrics(self):
         """Start performance metrics collection for transcription processing."""
-        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -555,7 +552,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
         if isinstance(frame, VADUserStartedSpeakingFrame):
             # Start metrics when user starts speaking
-            await self.start_metrics()
+            await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send commit when user stops speaking (manual commit mode)
             if self._params.commit_strategy == CommitStrategy.MANUAL:
@@ -605,6 +602,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     async def _connect(self):
         """Establish WebSocket connection to ElevenLabs Realtime STT."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -612,6 +611,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     async def _disconnect(self):
         """Close WebSocket connection and cleanup tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -760,8 +761,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
-        await self.stop_ttfb_metrics()
-
         # Get language if provided
         language = data.get("language_code")
 
@@ -799,7 +798,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
         # Get language if provided
@@ -841,7 +839,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
         # Get language if provided

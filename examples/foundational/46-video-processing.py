@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -22,7 +22,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
@@ -116,7 +115,7 @@ async def run_bot(pipecat_transport):
     ]
 
     context = LLMContext(messages)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -125,21 +124,17 @@ async def run_bot(pipecat_transport):
         ),
     )
 
-    # RTVI events for Pipecat client UI
-    rtvi = RTVIProcessor()
-
     pipeline = Pipeline(
         [
             pipecat_transport.input(),
-            context_aggregator.user(),
-            rtvi,
+            user_aggregator,
             llm,  # LLM
             EdgeDetectionProcessor(
                 pipecat_transport._params.video_out_width,
                 pipecat_transport._params.video_out_height,
             ),  # Sending the video back to the user
             pipecat_transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -149,13 +144,11 @@ async def run_bot(pipecat_transport):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        observers=[RTVIObserver(rtvi)],
     )
 
-    @rtvi.event_handler("on_client_ready")
+    @task.rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         logger.info("Pipecat client ready.")
-        await rtvi.set_bot_ready()
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
 

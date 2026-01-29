@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
     OutputTransportMessageUrgentFrame,
@@ -50,6 +51,7 @@ class WebsocketClientParams(TransportParams):
     """
 
     add_wav_header: bool = True
+    additional_headers: Optional[dict[str, str]] = None
     serializer: Optional[FrameSerializer] = None
 
 
@@ -130,7 +132,11 @@ class WebsocketClientSession:
             return
 
         try:
-            self._websocket = await websocket_connect(uri=self._uri, open_timeout=10)
+            self._websocket = await websocket_connect(
+                uri=self._uri,
+                open_timeout=10,
+                additional_headers=self._params.additional_headers,
+            )
             self._client_task = self.task_manager.create_task(
                 self._client_task_handler(),
                 f"{self._transport_name}::WebsocketClientSession::_client_task_handler",
@@ -293,6 +299,8 @@ class WebsocketClientInputTransport(BaseInputTransport):
             return
         if isinstance(frame, InputAudioRawFrame) and self._params.audio_in_enabled:
             await self.push_audio_frame(frame)
+        elif isinstance(frame, InputTransportMessageFrame):
+            await self.broadcast_frame(frame)
         else:
             await self.push_frame(frame)
 

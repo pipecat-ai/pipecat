@@ -170,17 +170,22 @@ class LLMService(AIService):
     # However, subclasses should override this with a more specific adapter when necessary.
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
-    def __init__(self, run_in_parallel: bool = True, **kwargs):
+    def __init__(
+        self, run_in_parallel: bool = True, function_call_timeout_secs: float = 10.0, **kwargs
+    ):
         """Initialize the LLM service.
 
         Args:
             run_in_parallel: Whether to run function calls in parallel or sequentially.
                 Defaults to True.
+            function_call_timeout_secs: Timeout in seconds for deferred function calls.
+                Defaults to 10.0 seconds.
             **kwargs: Additional arguments passed to the parent AIService.
 
         """
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
+        self._function_call_timeout_secs = function_call_timeout_secs
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
@@ -519,9 +524,10 @@ class LLMService(AIService):
             UserImageRequestFrame(
                 user_id=user_id,
                 text=text_content,
-                # Deprecated fields below.
+                append_to_context=True,
                 function_name=function_name,
                 tool_call_id=tool_call_id,
+                # Deprecated fields below.
                 context=text_content,
             ),
             FrameDirection.UPSTREAM,
@@ -595,10 +601,26 @@ class LLMService(AIService):
             cancel_on_interruption=item.cancel_on_interruption,
         )
 
+        # Start a timeout task for deferred function calls
+        async def timeout_handler():
+            await asyncio.sleep(self._function_call_timeout_secs)
+            logger.warning(
+                f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {self._function_call_timeout_secs} seconds"
+            )
+            await function_call_result_callback(None)
+
+        timeout_task = self.create_task(timeout_handler())
+
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
         async def function_call_result_callback(
             result: Any, *, properties: Optional[FunctionCallResultProperties] = None
         ):
+            nonlocal timeout_task
+
+            # Cancel timeout task if it exists
+            if timeout_task and not timeout_task.done():
+                await self.cancel_task(timeout_task)
+
             await self.broadcast_frame(
                 FunctionCallResultFrame,
                 function_name=runner_item.function_name,
@@ -609,40 +631,45 @@ class LLMService(AIService):
                 properties=properties,
             )
 
-        if isinstance(item.handler, DirectFunctionWrapper):
-            # Handler is a DirectFunctionWrapper
-            await item.handler.invoke(
-                args=runner_item.arguments,
-                params=FunctionCallParams(
-                    function_name=runner_item.function_name,
-                    tool_call_id=runner_item.tool_call_id,
-                    arguments=runner_item.arguments,
-                    llm=self,
-                    context=runner_item.context,
-                    result_callback=function_call_result_callback,
-                ),
-            )
-        else:
-            # Handler is a FunctionCallHandler
-            if item.handler_deprecated:
-                await item.handler(
-                    runner_item.function_name,
-                    runner_item.tool_call_id,
-                    runner_item.arguments,
-                    self,
-                    runner_item.context,
-                    function_call_result_callback,
+        try:
+            if isinstance(item.handler, DirectFunctionWrapper):
+                # Handler is a DirectFunctionWrapper
+                await item.handler.invoke(
+                    args=runner_item.arguments,
+                    params=FunctionCallParams(
+                        function_name=runner_item.function_name,
+                        tool_call_id=runner_item.tool_call_id,
+                        arguments=runner_item.arguments,
+                        llm=self,
+                        context=runner_item.context,
+                        result_callback=function_call_result_callback,
+                    ),
                 )
             else:
-                params = FunctionCallParams(
-                    function_name=runner_item.function_name,
-                    tool_call_id=runner_item.tool_call_id,
-                    arguments=runner_item.arguments,
-                    llm=self,
-                    context=runner_item.context,
-                    result_callback=function_call_result_callback,
-                )
-                await item.handler(params)
+                # Handler is a FunctionCallHandler
+                if item.handler_deprecated:
+                    await item.handler(
+                        runner_item.function_name,
+                        runner_item.tool_call_id,
+                        runner_item.arguments,
+                        self,
+                        runner_item.context,
+                        function_call_result_callback,
+                    )
+                else:
+                    params = FunctionCallParams(
+                        function_name=runner_item.function_name,
+                        tool_call_id=runner_item.tool_call_id,
+                        arguments=runner_item.arguments,
+                        llm=self,
+                        context=runner_item.context,
+                        result_callback=function_call_result_callback,
+                    )
+                    await item.handler(params)
+        except Exception as e:
+            error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
+            logger.error(f"{self} {error_message}")
+            await self.push_error(error_msg=error_message, exception=e, fatal=False)
 
     async def _cancel_function_call(self, function_name: Optional[str]):
         cancelled_tasks = set()

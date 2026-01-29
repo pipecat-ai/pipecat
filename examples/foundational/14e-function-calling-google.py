@@ -5,7 +5,6 @@
 #
 
 
-import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -16,7 +15,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -25,6 +24,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -43,10 +43,6 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 load_dotenv(override=True)
 
 
-# Global variable to store the client ID
-client_id = ""
-
-
 async def get_weather(params: FunctionCallParams):
     location = params.arguments["location"]
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
@@ -57,23 +53,31 @@ async def fetch_restaurant_recommendation(params: FunctionCallParams):
 
 
 async def get_image(params: FunctionCallParams):
+    """Fetch the user image and push it to the LLM.
+
+    When called, this function pushes a UserImageRequestFrame upstream to the
+    transport. As a result, the transport will request the user image and push a
+    UserImageRawFrame downstream which will be added to the context by the LLM
+    assistant aggregator. The result_callback will be invoked once the image is
+    retrieved and processed.
+    """
+    user_id = params.arguments["user_id"]
     question = params.arguments["question"]
-    logger.debug(f"Requesting image with user_id={client_id}, question={question}")
+    logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
-    # Request the image frame
-    await params.llm.request_image_frame(
-        user_id=client_id,
-        function_name=params.function_name,
-        tool_call_id=params.tool_call_id,
-        text_content=question,
-    )
-
-    # Wait a short time for the frame to be processed
-    await asyncio.sleep(0.5)
-
-    # Return a result to complete the function call
-    await params.result_callback(
-        f"I've captured an image from your camera and I'm analyzing what you asked about: {question}"
+    # Request a user image frame and indicate that it should be added to the
+    # context. Also associate it to the function call. Pass the result_callback
+    # so it can be invoked when the image is actually retrieved.
+    await params.llm.push_frame(
+        UserImageRequestFrame(
+            user_id=user_id,
+            text=question,
+            append_to_context=True,
+            function_name=params.function_name,
+            tool_call_id=params.tool_call_id,
+            result_callback=params.result_callback,
+        ),
+        FrameDirection.UPSTREAM,
     )
 
 
@@ -144,14 +148,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     get_image_function = FunctionSchema(
         name="get_image",
-        description="Get an image from the video stream.",
+        description="Called when the user requests a description of their camera feed",
         properties={
+            "user_id": {
+                "type": "string",
+                "description": "The ID of the user to grab the image from",
+            },
             "question": {
                 "type": "string",
-                "description": "The question that the user is asking about the image.",
-            }
+                "description": "The question that the user is asking about the image",
+            },
         },
-        required=["question"],
+        required=["user_id", "question"],
     )
     tools = ToolsSchema(standard_tools=[weather_function, get_image_function, restaurant_function])
 
@@ -175,11 +183,10 @@ indicate you should use the get_image tool are:
 """
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "Say hello."},
     ]
 
     context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -192,11 +199,11 @@ indicate you should use the get_image tool are:
         [
             transport.input(),
             stt,
-            context_aggregator.user(),
+            user_aggregator,
             llm,
             tts,
             transport.output(),
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -215,10 +222,15 @@ indicate you should use the get_image tool are:
 
         await maybe_capture_participant_camera(transport, client)
 
-        global client_id
         client_id = get_transport_client_id(transport, client)
 
         # Kick off the conversation.
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
+            }
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

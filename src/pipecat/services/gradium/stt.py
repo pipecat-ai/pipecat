@@ -122,7 +122,6 @@ class GradiumSTTService(WebsocketSTTService):
             None (processing handled via WebSocket messages).
         """
         self._audio_buffer.extend(audio)
-        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
         while len(self._audio_buffer) >= self._chunk_size_bytes:
@@ -141,6 +140,8 @@ class GradiumSTTService(WebsocketSTTService):
         pass
 
     async def _connect(self):
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -179,6 +180,8 @@ class GradiumSTTService(WebsocketSTTService):
             raise
 
     async def _disconnect(self):
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None

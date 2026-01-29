@@ -36,7 +36,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
 # Note: Grok has built-in server-side VAD, so we don't need local VAD
 # from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
 )
@@ -45,15 +45,14 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
+    UserTurnStoppedMessage,
 )
-from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.grok.realtime.events import (
     SessionProperties,
-    WebSearchTool,
-    XSearchTool,
 )
 from pipecat.services.grok.realtime.llm import GrokRealtimeLLMService
 from pipecat.services.llm_service import FunctionCallParams
@@ -201,7 +200,6 @@ Always be helpful and proactive in offering assistance.""",
     llm = GrokRealtimeLLMService(
         api_key=os.getenv("GROK_API_KEY"),
         session_properties=session_properties,
-        start_audio_paused=False,
     )
 
     # Register function handlers
@@ -209,16 +207,13 @@ Always be helpful and proactive in offering assistance.""",
     llm.register_function("get_current_time", get_current_time)
     llm.register_function("get_restaurant_recommendation", get_restaurant_recommendation)
 
-    # Create transcript processor for logging
-    transcript = TranscriptProcessor()
-
     # Create context with initial message and tools
     context = LLMContext(
         [{"role": "user", "content": "Say hello and introduce yourself!"}],
         tools,
     )
 
-    context_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     # Build the pipeline
     # Note: In realtime mode, transcription comes from Grok (upstream),
@@ -226,12 +221,10 @@ Always be helpful and proactive in offering assistance.""",
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input (audio)
-            context_aggregator.user(),
-            transcript.user(),  # Transcription from Grok goes upstream
+            user_aggregator,
             llm,  # Grok Realtime LLM (handles STT + LLM + TTS)
             transport.output(),  # Transport bot output (audio)
-            transcript.assistant(),  # Log assistant speech
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -257,13 +250,17 @@ Always be helpful and proactive in offering assistance.""",
         await task.cancel()
 
     # Log transcript updates
-    @transcript.event_handler("on_transcript_update")
-    async def on_transcript_update(processor, frame):
-        for msg in frame.messages:
-            if isinstance(msg, TranscriptionMessage):
-                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
-                line = f"{timestamp}{msg.role}: {msg.content}"
-                logger.info(f"Transcript: {line}")
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}user: {message.content}"
+        logger.info(f"Transcript: {line}")
+
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

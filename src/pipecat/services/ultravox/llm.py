@@ -19,7 +19,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 import aiohttp
 from loguru import logger
-from openai.types import chat as openai_chat_types
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema

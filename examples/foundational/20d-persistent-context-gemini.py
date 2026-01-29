@@ -17,7 +17,7 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -26,6 +26,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -46,9 +47,6 @@ load_dotenv(override=True)
 
 BASE_FILENAME = "/tmp/pipecat_conversation_"
 
-# Global variable to store the client ID
-client_id = ""
-
 
 async def fetch_weather_from_api(params: FunctionCallParams):
     temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
@@ -63,15 +61,23 @@ async def fetch_weather_from_api(params: FunctionCallParams):
 
 
 async def get_image(params: FunctionCallParams):
+    user_id = params.arguments["user_id"]
     question = params.arguments["question"]
-    logger.debug(f"Requesting image with user_id={client_id}, question={question}")
+    logger.debug(f"Requesting image with user_id={user_id}, question={question}")
 
-    # Request the image frame
-    await params.llm.request_image_frame(
-        user_id=client_id,
-        function_name=params.function_name,
-        tool_call_id=params.tool_call_id,
-        text_content=question,
+    # Request a user image frame and indicate that it should be added to the
+    # context. Also associate it to the function call. Pass the result_callback
+    # so it can be invoked when the image is actually retrieved.
+    await params.llm.push_frame(
+        UserImageRequestFrame(
+            user_id=user_id,
+            text=question,
+            append_to_context=True,
+            function_name=params.function_name,
+            tool_call_id=params.tool_call_id,
+            result_callback=params.result_callback,
+        ),
+        FrameDirection.UPSTREAM,
     )
 
 
@@ -207,14 +213,18 @@ load_conversation_function = FunctionSchema(
 
 get_image_function = FunctionSchema(
     name="get_image",
-    description="Get and image from the camera or video stream.",
+    description="Called when the user requests a description of their camera feed",
     properties={
+        "user_id": {
+            "type": "string",
+            "description": "The ID of the user to grab the image from",
+        },
         "question": {
             "type": "string",
-            "description": "The question to to use when running inference on the acquired image.",
+            "description": "The question that the user is asking about the image",
         },
     },
-    required=["question"],
+    required=["user_id", "question"],
 )
 
 tools = ToolsSchema(
@@ -257,7 +267,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = GoogleLLMService(model="gemini-2.0-flash-001", api_key=os.getenv("GOOGLE_API_KEY"))
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
     # you can either register a single function for all function calls, or specific functions
     # llm.register_function(None, fetch_weather_from_api)
@@ -268,7 +278,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("get_image", get_image)
 
     context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair(
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -281,11 +291,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             stt,  # STT
-            context_aggregator.user(),
+            user_aggregator,
             llm,  # LLM
             tts,
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),
+            assistant_aggregator,
         ]
     )
 
@@ -304,10 +314,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         await maybe_capture_participant_camera(transport, client)
 
-        global client_id
         client_id = get_transport_client_id(transport, client)
 
         # Kick off the conversation.
+        messages.append(
+            {
+                "role": "system",
+                "content": f"Please introduce yourself to the user. Use '{client_id}' as the user ID during function calls.",
+            }
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
