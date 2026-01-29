@@ -180,9 +180,7 @@ class HumeTTSService(WordTTSService):
             self._reset_state()
 
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps(
-                    [("Reset", 0)], self._current_context_id
-                ) if self._current_context_id else None
+                await self.add_word_timestamps([("Reset", 0)])
 
     async def update_setting(self, key: str, value: Any) -> None:
         """Runtime updates via `TTSUpdateSettingsFrame`.
@@ -248,7 +246,6 @@ class HumeTTSService(WordTTSService):
         # Start TTS sequence if not already started
         if not self._started:
             await self.start_word_timestamps()
-            self._current_context_id = context_id
             yield TTSStartedFrame(context_id=context_id)
             self._started = True
 
@@ -303,8 +300,8 @@ class HumeTTSService(WordTTSService):
 
                         # Add word timestamp
                         await self.add_word_timestamps(
-                            [(timestamp.text, word_start_time)], self._current_context_id
-                        ) if self._current_context_id else None
+                            [(timestamp.text, word_start_time)], context_id
+                        )
 
             # Flush any remaining audio bytes
             if self._audio_bytes:
