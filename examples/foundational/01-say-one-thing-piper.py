@@ -16,7 +16,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.piper.tts import PiperTTSService
+from pipecat.services.piper.tts import PiperHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -39,7 +39,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
-        tts = PiperTTSService(
+        tts = PiperHttpTTSService(
             base_url=os.getenv("PIPER_BASE_URL"), aiohttp_session=session, sample_rate=24000
         )
 
