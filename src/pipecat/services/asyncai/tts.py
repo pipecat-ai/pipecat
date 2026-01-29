@@ -323,7 +323,7 @@ class AsyncAITTSService(AudioContextTTSService):
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
                 audio = base64.b64decode(msg["audio"])
-                frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=received_ctx_id)
                 await self.append_to_audio_context(received_ctx_id, frame)
 
     async def _keepalive_task_handler(self):
@@ -368,11 +368,12 @@ class AsyncAITTSService(AudioContextTTSService):
             self._started = False
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Async API websocket endpoint.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -386,11 +387,11 @@ class AsyncAITTSService(AudioContextTTSService):
             try:
                 if not self._started:
                     await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._started = True
 
                     if not self._context_id:
-                        self._context_id = str(uuid.uuid4())
+                        self._context_id = context_id
                     if not self.audio_context_available(self._context_id):
                         await self.create_audio_context(self._context_id)
 
@@ -404,7 +405,7 @@ class AsyncAITTSService(AudioContextTTSService):
 
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 self._started = False
                 return
             yield None
@@ -510,11 +511,12 @@ class AsyncAIHttpTTSService(TTSService):
         self._settings["output_format"]["sample_rate"] = self.sample_rate
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Async's HTTP streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -531,7 +533,7 @@ class AsyncAIHttpTTSService(TTSService):
                 "output_format": self._settings["output_format"],
                 "language": self._settings["language"],
             }
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
             headers = {
                 "version": self._api_version,
                 "x-api-key": self._api_key,
@@ -560,6 +562,7 @@ class AsyncAIHttpTTSService(TTSService):
                 audio=audio_data,
                 sample_rate=self.sample_rate,
                 num_channels=1,
+                context_id=context_id,
             )
 
             yield frame
@@ -568,4 +571,4 @@ class AsyncAIHttpTTSService(TTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)

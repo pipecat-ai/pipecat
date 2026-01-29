@@ -7,6 +7,7 @@
 """Base classes for Text-to-speech services."""
 
 import asyncio
+import uuid
 from abc import abstractmethod
 from typing import (
     Any,
@@ -206,7 +207,7 @@ class TTSService(AIService):
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
         self._processing_text: bool = False
-        self._current_append_to_context: bool = True
+        self._tts_contexts: Dict[str, dict] = {}
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -256,13 +257,14 @@ class TTSService(AIService):
 
     # Converts the text to audio.
     @abstractmethod
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Run text-to-speech synthesis on the provided text.
 
         This method must be implemented by subclasses to provide actual TTS functionality.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -485,6 +487,12 @@ class TTSService(AIService):
             frame: The frame to push.
             direction: The direction to push the frame.
         """
+        # Clean up context when we see TTSStoppedFrame
+        if isinstance(frame, TTSStoppedFrame) and frame.context_id:
+            if frame.context_id in self._tts_contexts:
+                logger.debug(f"{self} cleaning up TTS context {frame.context_id}")
+                del self._tts_contexts[frame.context_id]
+
         if self._push_silence_after_stop and isinstance(frame, TTSStoppedFrame):
             silence_num_bytes = int(self._silence_time_s * self.sample_rate * 2)  # 16-bit
             silence_frame = TTSAudioRawFrame(
@@ -630,14 +638,17 @@ class TTSService(AIService):
             if aggregation_type == type or aggregation_type == "*":
                 transformed_text = await transform(transformed_text, type)
 
-        # Store append_to_context for word-level frames (used by WordTTSService)
-        self._current_append_to_context = (
-            append_tts_text_to_context if append_tts_text_to_context is not None else True
-        )
+        # Create context ID and store metadata
+        context_id = str(uuid.uuid4())
+        self._tts_contexts[context_id] = {
+            "append_to_context": append_tts_text_to_context
+            if append_tts_text_to_context is not None
+            else True,
+        }
 
         # Apply any final text preparation (e.g., trailing space)
         prepared_text = self._prepare_text_for_tts(transformed_text)
-        await self.process_generator(self.run_tts(prepared_text))
+        await self.process_generator(self.run_tts(prepared_text, context_id))
 
         await self.stop_processing_metrics()
 
@@ -651,6 +662,7 @@ class TTSService(AIService):
             # or transformations.
             frame = TTSTextFrame(text, aggregated_by=type)
             frame.includes_inter_frame_spaces = includes_inter_frame_spaces
+            frame.context_id = context_id
             # Only override append_to_context if explicitly set
             if append_tts_text_to_context is not None:
                 frame.append_to_context = append_tts_text_to_context
@@ -699,25 +711,35 @@ class WordTTSService(TTSService):
             # If we cached some initial word times (because we didn't receive
             # audio), let's add them now.
             if self._initial_word_times:
-                await self._add_word_timestamps(self._initial_word_times)
+                # Group by context_id and add each group
+                context_groups = {}
+                for word, timestamp, context_id in self._initial_word_times:
+                    if context_id not in context_groups:
+                        context_groups[context_id] = []
+                    context_groups[context_id].append((word, timestamp))
+                for context_id, word_times in context_groups.items():
+                    await self._add_word_timestamps(word_times, context_id)
                 self._initial_word_times = []
 
     async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
         self._initial_word_timestamp = -1
 
-    async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
+    async def add_word_timestamps(self, word_times: List[Tuple[str, float]], context_id: str):
         """Add word timestamps to the processing queue.
 
         Args:
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
+            context_id: Unique identifier for the TTS context.
         """
         if self._initial_word_timestamp == -1:
             # Cache word timestamps and don't add them until we have started
             # (i.e. we have some audio).
-            self._initial_word_times.extend(word_times)
+            self._initial_word_times.extend(
+                [(word, timestamp, context_id) for word, timestamp in word_times]
+            )
         else:
-            await self._add_word_timestamps(word_times)
+            await self._add_word_timestamps(word_times, context_id)
 
     async def start(self, frame: StartFrame):
         """Start the word TTS service.
@@ -775,15 +797,15 @@ class WordTTSService(TTSService):
             await self.cancel_task(self._words_task)
             self._words_task = None
 
-    async def _add_word_timestamps(self, word_times: List[Tuple[str, float]]):
+    async def _add_word_timestamps(self, word_times: List[Tuple[str, float]], context_id: str):
         for word, timestamp in word_times:
-            await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
+            await self._words_queue.put((word, seconds_to_nanoseconds(timestamp), context_id))
 
     async def _words_task_handler(self):
         last_pts = 0
         while True:
             frame = None
-            (word, timestamp) = await self._words_queue.get()
+            (word, timestamp, context_id) = await self._words_queue.get()
             if word == "Reset" and timestamp == 0:
                 await self.reset_word_timestamps()
                 if self._llm_response_started:
@@ -793,12 +815,16 @@ class WordTTSService(TTSService):
             elif word == "TTSStoppedFrame" and timestamp == 0:
                 frame = TTSStoppedFrame()
                 frame.pts = last_pts
+                frame.context_id = context_id
             else:
                 # Assumption: word-by-word text frames don't include spaces, so
                 # we can rely on the default includes_inter_frame_spaces=False
                 frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
                 frame.pts = self._initial_word_timestamp + timestamp
-                frame.append_to_context = self._current_append_to_context
+                frame.context_id = context_id
+                # Look up append_to_context from context metadata
+                if context_id in self._tts_contexts:
+                    frame.append_to_context = self._tts_contexts[context_id]["append_to_context"]
             if frame:
                 last_pts = frame.pts
                 await self.push_frame(frame)

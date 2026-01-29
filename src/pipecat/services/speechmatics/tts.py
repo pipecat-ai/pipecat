@@ -106,11 +106,12 @@ class SpeechmaticsTTSService(TTSService):
         return True
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Speechmatics' HTTP API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -187,7 +188,7 @@ class SpeechmaticsTTSService(TTSService):
                     await self.start_tts_usage_metrics(text)
 
                     # Emit the TTS started frame
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
 
                     # Process the response in streaming chunks
                     first_chunk = True
@@ -216,6 +217,7 @@ class SpeechmaticsTTSService(TTSService):
                                 audio=audio_data,
                                 sample_rate=self.sample_rate,
                                 num_channels=1,
+                                context_id=context_id,
                             )
 
                     # Successfully processed the response, break out of retry loop
@@ -225,7 +227,7 @@ class SpeechmaticsTTSService(TTSService):
             yield ErrorFrame(error=f"Error generating TTS: {e}")
         finally:
             # Emit the TTS stopped frame
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
 
 def _get_endpoint_url(base_url: str, voice: str, sample_rate: int) -> str:
