@@ -11,14 +11,19 @@ and conversation context. These aggregators handle the flow between speech-to-te
 LLM processing, and text-to-speech components in conversational AI pipelines.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Set, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set, Type
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from pipecat.services.mixins.turn_completion import TurnCompletionConfig
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
@@ -45,6 +50,7 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    LLMUpdateSettingsFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
@@ -85,12 +91,21 @@ class LLMUserAggregatorParams:
             If set, the aggregator will emit an `on_user_turn_idle` event when the user
             has been idle (not speaking) for this duration. Set to None to disable
             idle detection.
+        filter_incomplete_user_turns: Whether to filter out incomplete user turns.
+            When enabled, the LLM outputs a turn completion marker at the start of
+            each response: ✓ (complete), ○ (incomplete short), or ◐ (incomplete long).
+            Incomplete responses are suppressed and timeouts trigger re-prompting.
+        turn_completion_config: Configuration for turn completion behavior including
+            custom instructions, timeouts, and prompts. Only used when
+            filter_incomplete_user_turns is True.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: Optional[float] = None
+    filter_incomplete_user_turns: bool = False
+    turn_completion_config: Optional[TurnCompletionConfig] = None
 
 
 @dataclass
@@ -462,6 +477,26 @@ class LLMUserAggregator(LLMContextAggregator):
 
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
+
+        # Enable incomplete turn filtering on the LLM if configured
+        if self._params.filter_incomplete_user_turns:
+            from pipecat.services.mixins.turn_completion import TurnCompletionConfig
+
+            # Get config or use defaults
+            config = self._params.turn_completion_config or TurnCompletionConfig()
+
+            # Enable the feature on the LLM with config
+            await self.push_frame(
+                LLMUpdateSettingsFrame(
+                    settings={
+                        "filter_incomplete_user_turns": True,
+                        "turn_completion_config": config,
+                    }
+                )
+            )
+
+            # Auto-inject turn completion instructions into context
+            self._context.add_message({"role": "system", "content": config.get_instructions()})
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
