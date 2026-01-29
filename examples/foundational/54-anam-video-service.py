@@ -92,12 +92,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
         avatar_id = os.getenv("ANAM_AVATAR_ID").strip().strip('"')
+        persona_id = os.getenv("ANAM_PERSONA_ID").strip().strip('"')
         logger.info(f"Avatar ID: {avatar_id}")
-        logger.info(f"Persona config: {PersonaConfig(avatar_id=avatar_id)}")
+        logger.info(f"Persona config: {PersonaConfig(persona_id=persona_id)}")
 
         anam = AnamVideoService(
             api_key=os.getenv("ANAM_API_KEY"),
-            persona_config=PersonaConfig(avatar_id=avatar_id),
+            persona_config=PersonaConfig(persona_id=persona_id),
             session=session,
             api_base_url="https://api.anam.dev",
         )
@@ -125,11 +126,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                stt,  # STT
-                context_aggregator.user(),  # User responses
-                llm,  # LLM
-                tts,  # TTS
-                anam,  # Avatar
+                # stt,  # STT
+                # context_aggregator.user(),  # User responses
+                # llm,  # LLM
+                # tts,  # TTS
+                anam,  # Turnkey Avatar
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]

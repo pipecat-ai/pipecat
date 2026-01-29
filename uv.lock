@@ -244,8 +244,8 @@ wheels = [
 ]
 
 [[package]]
-name = "anam-ai"
-version = "1.0.0"
+name = "anam"
+version = "0.1.0"
 source = { editable = "../python-sdk" }
 dependencies = [
     { name = "aiohttp" },
@@ -3481,7 +3481,7 @@ aic = [
     { name = "aic-sdk" },
 ]
 anam = [
-    { name = "anam-ai" },
+    { name = "anam" },
 ]
 anthropic = [
     { name = "anthropic" },
@@ -3718,7 +3718,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0,<25" },
     { name = "aiohttp", specifier = ">=3.11.12,<4" },
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.14.0,<2" },
-    { name = "anam-ai", marker = "extra == 'anam'", editable = "../python-sdk" },
+    { name = "anam", marker = "extra == 'anam'", editable = "../python-sdk" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = "~=0.49.0" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.1" },
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.2.0" },

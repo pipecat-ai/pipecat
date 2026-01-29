@@ -22,7 +22,6 @@ from anam import (
     ClientOptions,
     PersonaConfig,
 )
-from av.audio.frame import AudioFrame
 from av.audio.resampler import AudioResampler
 from av.video.frame import VideoFrame
 from loguru import logger
