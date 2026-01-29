@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for OpenAI LLM timeout handling."""
+"""Unit tests for OpenAI LLM error handling."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -125,3 +125,39 @@ async def test_openai_llm_timeout_still_pushes_end_frame():
 
         # Verify metrics were stopped
         service.stop_processing_metrics.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_emits_error_frame_on_exception():
+    """Test that OpenAI LLM service emits ErrorFrame when a general exception occurs.
+
+    This enables proper error handling for API errors, rate limits, and other failures.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(model="gpt-4")
+        service._client = AsyncMock()
+
+        pushed_errors = []
+
+        async def mock_push_error(error_msg, exception=None):
+            pushed_errors.append({"error_msg": error_msg, "exception": exception})
+
+        service.push_frame = AsyncMock()
+        service.push_error = mock_push_error
+        service._call_event_handler = AsyncMock()
+        service._process_context = AsyncMock(side_effect=RuntimeError("API Error"))
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        # Verify push_error was called with correct message
+        assert len(pushed_errors) == 1
+        assert "Error during completion" in pushed_errors[0]["error_msg"]
+        assert "API Error" in pushed_errors[0]["error_msg"]
+        assert isinstance(pushed_errors[0]["exception"], RuntimeError)
