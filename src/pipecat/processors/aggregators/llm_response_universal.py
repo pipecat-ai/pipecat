@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Literal, Optional, Set, Type
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer
+from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     CancelFrame,
@@ -50,6 +52,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     UserImageRawFrame,
+    UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -61,7 +64,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
@@ -85,12 +88,14 @@ class LLMUserAggregatorParams:
             If set, the aggregator will emit an `on_user_turn_idle` event when the user
             has been idle (not speaking) for this duration. Set to None to disable
             idle detection.
+        vad_analyzer: Voice Activity Detection analyzer instance.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: Optional[float] = None
+    vad_analyzer: Optional[VADAnalyzer] = None
 
 
 @dataclass
@@ -384,6 +389,18 @@ class LLMUserAggregator(LLMContextAggregator):
                 "on_user_turn_idle", self._on_user_turn_idle
             )
 
+        # VAD controller
+        self._vad_controller: Optional[VADController] = None
+        if self._params.vad_analyzer:
+            self._vad_controller = VADController(self._params.vad_analyzer)
+            self._vad_controller.add_event_handler("on_speech_started", self._on_vad_speech_started)
+            self._vad_controller.add_event_handler("on_speech_stopped", self._on_vad_speech_stopped)
+            self._vad_controller.add_event_handler(
+                "on_speech_activity", self._on_vad_speech_activity
+            )
+            self._vad_controller.add_event_handler("on_push_frame", self._on_push_frame)
+            self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -400,6 +417,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if await self._maybe_mute_frame(frame):
             return
+
+        if self._vad_controller:
+            await self._vad_controller.process_frame(frame)
 
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
@@ -432,7 +452,7 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, SpeechControlParamsFrame):
+        elif isinstance(frame, SpeechControlParamsFrame) and not self._vad_controller:
             await self._handle_speech_control_params(frame)
         else:
             await self.push_frame(frame, direction)
@@ -567,13 +587,36 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
+    async def _queued_broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
+        """Broadcasts a frame upstream and queues it downstream for internal processing.
+
+        Queues the frame downstream so it flows through ``process_frame`` and
+        is handled internally (e.g. by the ``UserTurnController``). The
+        upstream frame is pushed directly.
+
+        Args:
+            frame_cls: The class of the frame to be broadcasted.
+            **kwargs: Keyword arguments to be passed to the frame's constructor.
+        """
+        await self.queue_frame(frame_cls(**kwargs))
+        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
+
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
-        await self.push_frame(frame, direction)
+        await self.queue_frame(frame, direction)
 
     async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
-        await self.broadcast_frame(frame_cls, **kwargs)
+        await self._queued_broadcast_frame(frame_cls, **kwargs)
+
+    async def _on_vad_speech_started(self, controller):
+        await self._queued_broadcast_frame(VADUserStartedSpeakingFrame)
+
+    async def _on_vad_speech_stopped(self, controller):
+        await self._queued_broadcast_frame(VADUserStoppedSpeakingFrame)
+
+    async def _on_vad_speech_activity(self, controller):
+        await self._queued_broadcast_frame(UserSpeakingFrame)
 
     async def _on_user_turn_started(
         self,

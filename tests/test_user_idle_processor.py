@@ -218,3 +218,7 @@ class TestUserIdleProcessor(unittest.IsolatedAsyncioTestCase):
         )
 
         assert callback_called.is_set(), "Idle callback not called after bot speech"
+
+
+if __name__ == "__main__":
+    unittest.main()

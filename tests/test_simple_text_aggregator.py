@@ -123,3 +123,7 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
         # flush() returns any remaining text (the "W" in this case)
         result = await self.aggregator.flush()
         assert result.text == "W"
+
+
+if __name__ == "__main__":
+    unittest.main()

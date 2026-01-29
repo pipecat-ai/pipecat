@@ -509,3 +509,7 @@ async def test_aws_bedrock_run_inference_client_exception():
     with patch.object(service._aws_session, "client", return_value=mock_context_manager):
         with pytest.raises(Exception, match="Bedrock API Error"):
             await service.run_inference(mock_context)
+
+
+if __name__ == "__main__":
+    unittest.main()

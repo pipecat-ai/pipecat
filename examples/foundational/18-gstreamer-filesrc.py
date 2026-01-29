@@ -24,9 +24,8 @@ parser = argparse.ArgumentParser(description="Pipecat Video Streaming Bot")
 parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
 args = parser.parse_args()
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_out_enabled=True,

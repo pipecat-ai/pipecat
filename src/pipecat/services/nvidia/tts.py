@@ -12,7 +12,7 @@ gRPC API for high-quality speech synthesis.
 
 import asyncio
 import os
-from typing import AsyncGenerator, AsyncIterable, Generator, Mapping, Optional
+from typing import AsyncGenerator, AsyncIterator, Generator, Mapping, Optional
 
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -181,7 +181,7 @@ class NvidiaTTSService(TTSService):
             except StopIteration:
                 return None
 
-        async def async_iterator(iterator) -> AsyncIterable[rtts.SynthesizeSpeechResponse]:
+        async def async_iterator(iterator) -> AsyncIterator[rtts.SynthesizeSpeechResponse]:
             while True:
                 item = await asyncio.to_thread(async_next, iterator)
                 if item is None:

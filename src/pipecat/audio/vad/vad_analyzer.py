@@ -127,7 +127,7 @@ class VADAnalyzer(ABC):
         pass
 
     @abstractmethod
-    def voice_confidence(self, buffer) -> float:
+    def voice_confidence(self, buffer: bytes) -> float:
         """Calculate voice activity confidence for the given audio buffer.
 
         Args:

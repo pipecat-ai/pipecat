@@ -1055,3 +1055,7 @@ class TestLLMAssistantAggregator(
             0,
             "Hello Pipecat. Here's some code: ```python\nprint('Hello, World!')\n``` ```javascript\nconsole.log('Hello, World!');\n``` And some more: ```html\n<div>Hello, World!</div>\n``` Hope that helps!",
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
