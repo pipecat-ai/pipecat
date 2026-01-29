@@ -13,7 +13,6 @@ from typing import AsyncGenerator, AsyncIterator, Optional
 import aiohttp
 from loguru import logger
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -63,8 +62,6 @@ class PiperTTSService(TTSService):
 
         self._voice_id = voice_id
 
-        self._resampler = create_stream_resampler()
-
         download_dir = download_dir or Path.cwd()
 
         model_file = f"{voice_id}.onnx"
@@ -105,17 +102,12 @@ class PiperTTSService(TTSService):
             except StopIteration:
                 return None
 
-        async def async_iterator(iterator, sample_rate: int) -> AsyncIterator[bytes]:
+        async def async_iterator(iterator) -> AsyncIterator[bytes]:
             while True:
                 item = await asyncio.to_thread(async_next, iterator)
                 if item is None:
                     return
-
-                audio_data = await self._resampler.resample(
-                    item.audio_int16_bytes, sample_rate, self.sample_rate
-                )
-
-                yield audio_data
+                yield item.audio_int16_bytes
 
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -127,8 +119,8 @@ class PiperTTSService(TTSService):
             yield TTSStartedFrame()
 
             async for frame in self._stream_audio_frames_from_iterator(
-                async_iterator(self._voice.synthesize(text), self._voice.config.sample_rate),
-                strip_wav_header=False,
+                async_iterator(self._voice.synthesize(text)),
+                in_sample_rate=self._voice.config.sample_rate,
             ):
                 await self.stop_ttfb_metrics()
                 yield frame
@@ -143,6 +135,12 @@ class PiperTTSService(TTSService):
 
 # This assumes a running TTS service running:
 # https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_HTTP.md
+#
+# Usage:
+#
+#  $ uv pip install "piper-tts[http]"
+#  $ uv run python -m piper.http_server -m en_US-ryan-high
+#
 class PiperHttpTTSService(TTSService):
     """Piper HTTP TTS service implementation.
 
@@ -156,9 +154,7 @@ class PiperHttpTTSService(TTSService):
         *,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
-        # When using Piper, the sample rate of the generated audio depends on the
-        # voice model being used.
-        sample_rate: Optional[int] = None,
+        voice_id: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
@@ -166,10 +162,10 @@ class PiperHttpTTSService(TTSService):
         Args:
             base_url: Base URL for the Piper TTS HTTP server.
             aiohttp_session: aiohttp ClientSession for making HTTP requests.
-            sample_rate: Output sample rate. If None, uses the voice model's native rate.
+            voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(**kwargs)
 
         if base_url.endswith("/"):
             logger.warning("Base URL ends with a slash, this is not allowed.")
@@ -177,7 +173,7 @@ class PiperHttpTTSService(TTSService):
 
         self._base_url = base_url
         self._session = aiohttp_session
-        self._settings = {"base_url": base_url}
+        self._model_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -204,9 +200,12 @@ class PiperHttpTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            async with self._session.post(
-                self._base_url, json={"text": text}, headers=headers
-            ) as response:
+            data = {
+                "text": text,
+                "voice": self._model_id,
+            }
+
+            async with self._session.post(self._base_url, json=data, headers=headers) as response:
                 if response.status != 200:
                     error = await response.text()
                     yield ErrorFrame(
