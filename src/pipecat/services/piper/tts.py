@@ -6,11 +6,14 @@
 
 """Piper TTS service implementation."""
 
-from typing import AsyncGenerator, Optional
+import asyncio
+from pathlib import Path
+from typing import AsyncGenerator, AsyncIterator, Optional
 
 import aiohttp
 from loguru import logger
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -19,6 +22,123 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+
+try:
+    from piper import PiperVoice
+    from piper.download_voices import download_voice
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use Piper, you need to `pip install pipecat-ai[piper]`.")
+    raise Exception(f"Missing module: {e}")
+
+
+class PiperTTSService(TTSService):
+    """Piper TTS service implementation.
+
+    Provides local text-to-speech synthesis using Piper voice models. Automatically
+    downloads voice models if not already present and resamples audio output to
+    match the configured sample rate.
+    """
+
+    def __init__(
+        self,
+        *,
+        voice_id: str,
+        download_dir: Optional[Path] = None,
+        force_redownload: bool = False,
+        use_cuda: bool = False,
+        **kwargs,
+    ):
+        """Initialize the Piper TTS service.
+
+        Args:
+            voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
+            download_dir: Directory for storing voice model files. Defaults to
+                the current working directory.
+            force_redownload: Re-download the voice model even if it already exists.
+            use_cuda: Use CUDA for GPU-accelerated inference.
+            **kwargs: Additional arguments passed to the parent `TTSService`.
+        """
+        super().__init__(**kwargs)
+
+        self._voice_id = voice_id
+
+        self._resampler = create_stream_resampler()
+
+        download_dir = download_dir or Path.cwd()
+
+        model_file = f"{voice_id}.onnx"
+        model_path = Path(download_dir) / model_file
+
+        if not model_path.exists():
+            logger.debug(f"Downloading Piper '{voice_id}' model")
+            download_voice(voice_id, download_dir, force_redownload=force_redownload)
+
+        logger.debug(f"Loading Piper '{voice_id}' model from {model_path}")
+
+        self._voice = PiperVoice.load(model_path, use_cuda=use_cuda)
+
+        logger.debug(f"Loaded Piper '{voice_id}' model")
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Piper service supports metrics generation.
+        """
+        return True
+
+    @traced_tts
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Piper.
+
+        Args:
+            text: The text to convert to speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech and status frames.
+        """
+
+        def async_next(it):
+            try:
+                return next(it)
+            except StopIteration:
+                return None
+
+        async def async_iterator(iterator, sample_rate: int) -> AsyncIterator[bytes]:
+            while True:
+                item = await asyncio.to_thread(async_next, iterator)
+                if item is None:
+                    return
+
+                audio_data = await self._resampler.resample(
+                    item.audio_int16_bytes, sample_rate, self.sample_rate
+                )
+
+                yield audio_data
+
+        logger.debug(f"{self}: Generating TTS [{text}]")
+
+        try:
+            await self.start_ttfb_metrics()
+
+            await self.start_tts_usage_metrics(text)
+
+            yield TTSStartedFrame()
+
+            async for frame in self._stream_audio_frames_from_iterator(
+                async_iterator(self._voice.synthesize(text), self._voice.config.sample_rate),
+                strip_wav_header=False,
+            ):
+                await self.stop_ttfb_metrics()
+                yield frame
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+            yield ErrorFrame(error=f"Unknown error occurred: {e}")
+        finally:
+            logger.debug(f"{self}: Finished TTS [{text}]")
+            await self.stop_ttfb_metrics()
+            yield TTSStoppedFrame()
 
 
 # This assumes a running TTS service running:
