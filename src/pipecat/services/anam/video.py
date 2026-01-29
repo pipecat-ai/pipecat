@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InputAudioRawFrame,
     InterruptionFrame,
     OutputImageRawFrame,
     OutputTransportReadyFrame,
@@ -139,8 +140,10 @@ class AnamVideoService(AIService):
             raise ValueError("Either persona_id or persona config must be provided")
 
         # Create client options
+        # Enable audio input for turnkey solutions (Anam handles STT)
+        # disable_input_audio=False allows sending audio via send_user_audio()
         options = ClientOptions(
-            disable_input_audio=True,
+            disable_input_audio=False,  # Enable audio input for send_user_audio()
             api_base_url=self._api_base_url or "https://api.anam.ai",
             ice_servers=self._ice_servers,
         )
@@ -264,6 +267,8 @@ class AnamVideoService(AIService):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
             await self._handle_audio_frame(frame)
+        elif isinstance(frame, InputAudioRawFrame):
+            await self._handle_user_audio_frame(frame, direction)
         elif isinstance(frame, OutputTransportReadyFrame):
             # Mark transport as ready so we can start sending video/audio frames
             self._transport_ready = True
@@ -408,6 +413,38 @@ class AnamVideoService(AIService):
             frame: The audio frame to process.
         """
         await self._queue.put(frame)
+
+    async def _handle_user_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
+        """Handle user audio frame by sending it to Anam SDK.
+
+        For turnkey solutions where Anam handles STT, this sends user audio
+        directly to the SDK via send_user_audio(). The SDK handles WebRTC
+        transmission and format conversion internally.
+
+        Args:
+            frame: The user audio frame to process (InputAudioRawFrame).
+            direction: The direction of frame processing.
+        """
+        if not self._client or not self._client._streaming_client:
+            logger.warning("Anam client not initialized - cannot send user audio")
+            return
+
+        try:
+            # Send raw audio samples directly to SDK
+            # SDK handles resampling/conversion to WebRTC format (48kHz mono)
+            self._client._streaming_client.send_user_audio(
+                audio_bytes=frame.audio,
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send user audio to Anam SDK: {e}")
+            await self.push_error(ErrorFrame(error=f"Failed to send user audio: {e}"))
+
+        # Forward the frame UPSTREAM for other processors (e.g., local STT if needed)
+        # Don't forward DOWNSTREAM to avoid reaching output transport: TODO SEB CHEK IF TRUE
+        if direction == FrameDirection.UPSTREAM:
+            await self.push_frame(frame, FrameDirection.UPSTREAM)
 
     async def _send_task_handler(self):
         """Handle sending audio frames to the Anam client.
