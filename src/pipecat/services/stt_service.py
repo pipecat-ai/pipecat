@@ -497,10 +497,10 @@ class SegmentedSTTService(STTService):
         wav.close()
         content.seek(0)
 
-        await self.process_generator(self.run_stt(content.read()))
-
         # Start clean.
         self._audio_buffer.clear()
+
+        await self.process_generator(self.run_stt(content.read()))
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.
