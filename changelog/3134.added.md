@@ -1,0 +1,1 @@
+- Added `ResembleAITTSService` for text-to-speech using Resemble AI's streaming WebSocket API with word-level timestamps and jitter buffering for smooth audio playback.
