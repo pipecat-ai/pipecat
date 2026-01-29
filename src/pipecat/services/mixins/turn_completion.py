@@ -396,11 +396,27 @@ class TurnCompletionMixin:
 
         # Check for ✓ (COMPLETE) marker
         if TURN_COMPLETE_MARKER in self._turn_text_buffer:
-            # Found ✓ (COMPLETE) - push all buffered text (including the marker)
+            # Found ✓ (COMPLETE) - separate marker from text
             logger.debug(f"COMPLETE ({TURN_COMPLETE_MARKER}) detected, pushing buffered text")
-            frame = LLMTextFrame(self._turn_text_buffer)
+
+            # Split buffer at the marker
+            marker_pos = self._turn_text_buffer.index(TURN_COMPLETE_MARKER)
+            marker_end = marker_pos + len(TURN_COMPLETE_MARKER)
+
+            # Push the marker (and any text before it) with skip_tts
+            marker_text = self._turn_text_buffer[:marker_end]
+            frame = LLMTextFrame(marker_text)
             frame.skip_tts = True
             await self.push_frame(frame)
+
+            # Push any remaining text after the marker as normal (should be spoken)
+            remaining_text = self._turn_text_buffer[marker_end:]
+            if remaining_text:
+                # Strip leading space after marker if present (✓ Hello -> Hello)
+                if remaining_text.startswith(" "):
+                    remaining_text = remaining_text[1:]
+                if remaining_text:
+                    await self.push_frame(LLMTextFrame(remaining_text))
 
             # Clear buffer and mark COMPLETE found - all subsequent text flows through immediately
             self._turn_text_buffer = ""
