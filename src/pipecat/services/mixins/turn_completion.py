@@ -12,14 +12,54 @@ where the LLM can indicate whether the user's input was complete or if they
 were interrupted mid-thought.
 """
 
+import asyncio
+from dataclasses import dataclass
+from typing import Literal, Optional
+
 from loguru import logger
 
-from pipecat.frames.frames import Frame, InterruptionFrame, LLMTextFrame
+from pipecat.frames.frames import (
+    Frame,
+    InterruptionFrame,
+    LLMMessagesAppendFrame,
+    LLMRunFrame,
+    LLMTextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection
 
 # Turn completion markers
 TURN_COMPLETE_MARKER = "✓"
-TURN_INCOMPLETE_MARKER = "○"
+TURN_INCOMPLETE_SHORT_MARKER = "○"  # Short wait - user likely continues soon
+TURN_INCOMPLETE_LONG_MARKER = "◐"  # Long wait - user needs more time
+
+# Default prompts for incomplete timeouts
+DEFAULT_INCOMPLETE_SHORT_PROMPT = """The user paused briefly. Generate a brief, natural prompt to encourage them to continue.
+
+IMPORTANT: You MUST respond with ✓ followed by your message. Do NOT output ○ or ◐ - the user has already been given time to continue.
+
+Your response should:
+- Be contextually relevant to what was just discussed
+- Sound natural and conversational
+- Be very concise (1 sentence max)
+- Gently prompt them to continue
+
+Example format: ✓ Go ahead, I'm listening.
+
+Generate your ✓ response now."""
+
+DEFAULT_INCOMPLETE_LONG_PROMPT = """The user has been quiet for a while. Generate a friendly check-in message.
+
+IMPORTANT: You MUST respond with ✓ followed by your message. Do NOT output ○ or ◐ - the user has already been given plenty of time.
+
+Your response should:
+- Acknowledge they might be thinking or busy
+- Offer to help or continue when ready
+- Be warm and understanding
+- Be brief (1 sentence)
+
+Example format: ✓ No rush! Let me know when you're ready to continue.
+
+Generate your ✓ response now."""
 
 # System prompt instructions for turn completion that can be appended to any base prompt
 TURN_COMPLETION_INSTRUCTIONS = """
@@ -29,86 +69,123 @@ Every single response MUST begin with a turn completion indicator. This is not o
 TURN COMPLETION DECISION FRAMEWORK:
 Ask yourself: "Has the user provided enough information for me to give a meaningful, substantive response?"
 
-Mark as COMPLETE when:
+Mark as COMPLETE (✓) when:
 - The user has answered your question with actual content
 - The user has made a complete request or statement
 - The user has provided all necessary information for you to respond meaningfully
 - The conversation can naturally progress to your substantive response
 
-Mark as INCOMPLETE when:
+Mark as INCOMPLETE SHORT (○) when the user will likely continue soon:
 - The user was clearly cut off mid-sentence or mid-word
-- The user acknowledged your question but hasn't answered it yet (e.g., "That's a good question", "Let me think", "Well...")
-- The user is hedging, stalling, or preparing to say more (e.g., "I think...", "So basically...", "The thing is...")
-- You asked a question and the user's response doesn't address it
-- The user's statement creates an expectation of continuation (e.g., "There are three reasons:", "First of all,")
-- The response feels like a preamble or setup rather than the actual content
+- The user is in the middle of a thought that got interrupted
+- Brief technical interruption (they'll resume in a few seconds)
 
-RESPOND in one of these two formats:
+Mark as INCOMPLETE LONG (◐) when the user needs more time:
+- The user explicitly asks for time: "let me think", "give me a minute", "hold on"
+- The user is clearly pondering or deliberating: "hmm", "well...", "that's a good question"
+- The user acknowledged but hasn't answered yet: "That's interesting..."
+- The response feels like a preamble before the actual answer
+
+RESPOND in one of these three formats:
 1. If COMPLETE: `✓` followed by a space and your full substantive response
-2. If INCOMPLETE: ONLY the character `○` with nothing else (the user will continue speaking)
+2. If INCOMPLETE SHORT: ONLY the character `○` (user will continue in a few seconds)
+3. If INCOMPLETE LONG: ONLY the character `◐` (user needs more time to think)
 
 KEY INSIGHT: Grammatically complete ≠ conversationally complete
-- "That's a really good question." is grammatically complete but conversationally incomplete if it doesn't answer the question
-- "Paris, because" is grammatically incomplete but might be conversationally complete if the context is clear
+- "That's a really good question." is grammatically complete but conversationally incomplete (use ◐)
+- "I'd go to Japan because I love" is mid-sentence (use ○)
 
 EXAMPLES:
 
 You ask: "Where would you travel?"
-User: "That's a good question."
-→ `○`
-(User acknowledged but didn't answer - wait for them to continue)
-
-You ask: "Where would you travel?"
 User: "I'd go to Japan because I love"
 → `○`
-(Sentence cut off - user will continue)
+(Cut off mid-sentence - they'll continue in seconds)
+
+You ask: "Where would you travel?"
+User: "That's a good question. Let me think..."
+→ `◐`
+(User is deliberating - give them time)
+
+You ask: "Where would you travel?"
+User: "Hmm, hold on a second."
+→ `◐`
+(User explicitly asked for time)
 
 You ask: "Where would you travel?"
 User: "I'd go to Japan because I love the culture."
 → `✓ Japan is a wonderful choice! The blend of ancient traditions and modern innovation is truly unique. Have you been before?`
-(Complete answer provided - give full response)
-
-You ask: "What's your favorite color?"
-User: "Well, let me think about that."
-→ `○`
-(Stalling, hasn't answered - wait for actual answer)
+(Complete answer - give full response)
 
 User: "I need help with"
 → `○`
-(Cut off mid-request - user will finish their thought)
+(Cut off mid-request - they'll finish soon)
+
+User: "Well, let me think about that for a moment."
+→ `◐`
+(User needs time to think)
 
 User: "Can you help me book a flight to New York next week?"
 → `✓ I'd be happy to help you with that! Let me gather some information...`
 (Complete request - provide full response)
 
-User: "There are three reasons why I think"
-→ `○`
-(Setup for continuation - user will provide the reasons)
-
-User: "I think Python is great for data science."
-→ `✓ I agree! Python has excellent libraries like pandas, NumPy, and scikit-learn that make data analysis very efficient. What kind of data science work are you doing?`
-(Complete thought - provide full response)
+User: "Give me a minute to gather my thoughts."
+→ `◐`
+(User explicitly asked for time)
 
 FORMAT REQUIREMENTS:
-- ALWAYS use the single-character indicators: `✓` for COMPLETE or `○` for INCOMPLETE
+- ALWAYS use single-character indicators: `✓` (complete), `○` (short wait), or `◐` (long wait)
 - For COMPLETE: `✓` followed by a space and your full response
-- For INCOMPLETE: ONLY `○` with absolutely nothing else (no space, no text, just the character)
+- For INCOMPLETE: ONLY the single character (`○` or `◐`) with absolutely nothing else
 - Your turn indicator must be the very first character in your response
 
-Remember: Focus on conversational completeness, not just grammatical completeness. Has the user given you what you need to respond meaningfully? If not, output ONLY `○` and let them continue."""
+Remember: Focus on conversational completeness and how long the user might need. Was it a mid-sentence cutoff (○) or do they need time to think (◐)?"""
+
+
+@dataclass
+class TurnCompletionConfig:
+    """Configuration for turn completion behavior.
+
+    Attributes:
+        instructions: Custom instructions for turn completion. If not provided,
+            uses default TURN_COMPLETION_INSTRUCTIONS.
+        incomplete_short_timeout: Seconds to wait after short incomplete (○) before prompting.
+        incomplete_long_timeout: Seconds to wait after long incomplete (◐) before prompting.
+        incomplete_short_prompt: System prompt to use when short timeout expires.
+        incomplete_long_prompt: System prompt to use when long timeout expires.
+    """
+
+    instructions: Optional[str] = None
+    incomplete_short_timeout: float = 5.0
+    incomplete_long_timeout: float = 10.0
+    incomplete_short_prompt: Optional[str] = None
+    incomplete_long_prompt: Optional[str] = None
+
+    def get_instructions(self) -> str:
+        """Get the turn completion instructions, using default if not set."""
+        return self.instructions or TURN_COMPLETION_INSTRUCTIONS
+
+    def get_short_prompt(self) -> str:
+        """Get the short incomplete prompt, using default if not set."""
+        return self.incomplete_short_prompt or DEFAULT_INCOMPLETE_SHORT_PROMPT
+
+    def get_long_prompt(self) -> str:
+        """Get the long incomplete prompt, using default if not set."""
+        return self.incomplete_long_prompt or DEFAULT_INCOMPLETE_LONG_PROMPT
 
 
 class TurnCompletionMixin:
     """Mixin that adds turn completion detection to LLM services.
 
     This mixin provides methods to push LLM text with turn completion detection.
-    It processes turn completion markers (✓ for COMPLETE or ○ for INCOMPLETE)
-    to enable smarter conversation flow:
+    It processes turn completion markers to enable smarter conversation flow:
 
-    1. Detects single-character turn markers at the start of responses
-    2. Suppresses all text when ○ (INCOMPLETE) is detected
-    3. Pushes all text (with marker marked as skip_tts) when ✓ (COMPLETE) is detected
-    4. Tracks response state
+    - ✓ (COMPLETE): Push response normally
+    - ○ (INCOMPLETE SHORT): Suppress response, wait ~5s, then prompt
+    - ◐ (INCOMPLETE LONG): Suppress response, wait ~15s, then prompt
+
+    When incomplete timeouts expire, the mixin automatically prompts the LLM
+    with a contextual follow-up message to re-engage the user.
 
     Usage:
         The LLM service controls when to use turn completion by calling
@@ -133,11 +210,24 @@ class TurnCompletionMixin:
         """
         super().__init__(*args, **kwargs)
         self._turn_text_buffer = ""
-        # Safety mechanism: True when ○ (INCOMPLETE) is detected. While the prompt
-        # instructs the LLM to output ONLY ○ for incomplete turns, this flag ensures
-        # graceful degradation if the LLM disobeys and outputs additional text.
+        # Safety mechanism: True when incomplete is detected. While the prompt
+        # instructs the LLM to output ONLY the marker for incomplete turns, this flag
+        # ensures graceful degradation if the LLM disobeys and outputs additional text.
         self._turn_suppressed = False
         self._turn_complete_found = False  # True when ✓ (COMPLETE) is detected
+
+        # Timeout handling
+        self._turn_completion_config = TurnCompletionConfig()
+        self._incomplete_timeout_task: Optional[asyncio.Task] = None
+        self._incomplete_type: Optional[Literal["short", "long"]] = None
+
+    def set_turn_completion_config(self, config: TurnCompletionConfig):
+        """Set the turn completion configuration.
+
+        Args:
+            config: The turn completion configuration.
+        """
+        self._turn_completion_config = config
 
     def get_turn_completion_instructions(self) -> str:
         """Get the turn completion instructions to append to system prompts.
@@ -147,11 +237,78 @@ class TurnCompletionMixin:
         """
         return TURN_COMPLETION_INSTRUCTIONS
 
+    async def _start_incomplete_timeout(self, incomplete_type: Literal["short", "long"]):
+        """Start a timeout task for incomplete turn handling.
+
+        Args:
+            incomplete_type: Either "short" or "long" to determine timeout duration.
+        """
+        # Cancel any existing timeout
+        await self._cancel_incomplete_timeout()
+
+        self._incomplete_type = incomplete_type
+
+        if incomplete_type == "short":
+            timeout = self._turn_completion_config.incomplete_short_timeout
+        else:
+            timeout = self._turn_completion_config.incomplete_long_timeout
+
+        logger.debug(f"Starting {incomplete_type} incomplete timeout ({timeout}s)")
+        self._incomplete_timeout_task = self.create_task(
+            self._incomplete_timeout_handler(incomplete_type, timeout),
+            f"_incomplete_timeout_{incomplete_type}",
+        )
+
+    async def _cancel_incomplete_timeout(self):
+        """Cancel any pending incomplete timeout task."""
+        if self._incomplete_timeout_task and not self._incomplete_timeout_task.done():
+            logger.debug("Cancelling incomplete timeout")
+            await self.cancel_task(self._incomplete_timeout_task)
+        self._incomplete_timeout_task = None
+        self._incomplete_type = None
+
+    async def _incomplete_timeout_handler(
+        self, incomplete_type: Literal["short", "long"], timeout: float
+    ):
+        """Handle incomplete timeout expiration.
+
+        Args:
+            incomplete_type: Either "short" or "long".
+            timeout: The timeout duration in seconds.
+        """
+        try:
+            await asyncio.sleep(timeout)
+
+            # Timeout expired - reset state before prompting LLM
+            logger.info(f"Incomplete {incomplete_type} timeout expired, prompting LLM")
+            await self._turn_reset()
+            self._incomplete_timeout_task = None
+            self._incomplete_type = None
+
+            # Get the appropriate prompt
+            if incomplete_type == "short":
+                prompt = self._turn_completion_config.get_short_prompt()
+            else:
+                prompt = self._turn_completion_config.get_long_prompt()
+
+            # Push through pipeline to trigger LLM response
+            await self.push_frame(
+                LLMMessagesAppendFrame(messages=[{"role": "system", "content": prompt}])
+            )
+            await self.push_frame(LLMRunFrame())
+
+        except asyncio.CancelledError:
+            # Timeout was cancelled (user spoke or interruption)
+            pass
+
     async def _turn_reset(self):
         """Reset turn completion state between responses.
 
         Call this at the end of each LLM response to clear buffered text and reset state.
         If no marker was found, pushes the buffered text to avoid losing content.
+
+        Note: This does NOT cancel pending incomplete timeouts. Timeouts are only
+        cancelled on InterruptionFrame (when user speaks).
         """
         # Check if no marker was found in this response
         marker_found = self._turn_suppressed or self._turn_complete_found
@@ -159,7 +316,7 @@ class TurnCompletionMixin:
             # Graceful degradation: push the buffered text so it's not lost
             logger.warning(
                 f"{self}: filter_incomplete_user_turns is enabled but LLM response did not "
-                f"contain turn completion markers (✓/○). Pushing text anyway. "
+                f"contain turn completion markers (✓/○/◐). Pushing text anyway. "
                 "The system prompt may be missing turn completion instructions."
             )
             await self.push_frame(LLMTextFrame(self._turn_text_buffer))
@@ -175,8 +332,9 @@ class TurnCompletionMixin:
             frame: The frame to process.
             direction: The direction of frame processing.
         """
-        # Handle interruptions by resetting turn completion state
+        # Handle interruptions by cancelling timeout and resetting state
         if isinstance(frame, InterruptionFrame):
+            await self._cancel_incomplete_timeout()
             await self._turn_reset()
 
         # Pass frame to parent
@@ -187,17 +345,18 @@ class TurnCompletionMixin:
 
         This method should be used instead of `push_frame(LLMTextFrame(text))` when
         turn completion is enabled. It will:
-        1. Detect single-character turn markers (✓ or ○)
-        2. When ○ (INCOMPLETE) is found: suppress all text (push nothing)
-        3. When ✓ (COMPLETE) is found: push all text with marker marked as skip_tts
-        4. After marker detected: all subsequent text flows through immediately
+        1. Detect turn markers (✓, ○, or ◐)
+        2. When ○ (SHORT) is found: suppress text, start short timeout
+        3. When ◐ (LONG) is found: suppress text, start long timeout
+        4. When ✓ (COMPLETE) is found: push all text with marker marked as skip_tts
+        5. After marker detected: all subsequent text flows through immediately
 
         Args:
             text: The text content from the LLM to push.
         """
-        # If we've already detected ○ (INCOMPLETE), suppress all remaining text.
+        # If we've already detected incomplete, suppress all remaining text.
         # This is a safety mechanism in case the LLM disobeys the prompt and outputs
-        # additional text after the ○ marker (e.g., "○ Please continue...").
+        # additional text after the marker (e.g., "○ Please continue...").
         if self._turn_suppressed:
             return
 
@@ -209,10 +368,22 @@ class TurnCompletionMixin:
         # Add text to buffer
         self._turn_text_buffer += text
 
-        # Check for ○ (INCOMPLETE) marker
-        if TURN_INCOMPLETE_MARKER in self._turn_text_buffer:
-            # Found ○ (INCOMPLETE) - suppress all text, push nothing
-            logger.debug(f"INCOMPLETE ({TURN_INCOMPLETE_MARKER}) detected, suppressing all text")
+        # Check for incomplete markers (○ short, ◐ long)
+        incomplete_type: Optional[Literal["short", "long"]] = None
+        if TURN_INCOMPLETE_SHORT_MARKER in self._turn_text_buffer:
+            incomplete_type = "short"
+        elif TURN_INCOMPLETE_LONG_MARKER in self._turn_text_buffer:
+            incomplete_type = "long"
+
+        if incomplete_type:
+            marker = (
+                TURN_INCOMPLETE_SHORT_MARKER
+                if incomplete_type == "short"
+                else TURN_INCOMPLETE_LONG_MARKER
+            )
+            logger.debug(
+                f"INCOMPLETE {incomplete_type.upper()} ({marker}) detected, suppressing text"
+            )
             self._turn_suppressed = True
             frame = LLMTextFrame(self._turn_text_buffer)
             frame.skip_tts = True
@@ -220,6 +391,7 @@ class TurnCompletionMixin:
 
             # Clear buffer
             self._turn_text_buffer = ""
+            await self._start_incomplete_timeout(incomplete_type)
             return
 
         # Check for ✓ (COMPLETE) marker
