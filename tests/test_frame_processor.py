@@ -259,11 +259,11 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(up_frame.value, 42)
         self.assertEqual(up_frame.items, ["a", "b"])
 
-        # Verify the items lists are separate instances (not shared references)
-        self.assertIsNot(down_frame.items, up_frame.items)
+        # Verify the items lists are shared references (no deep copy)
+        self.assertIs(down_frame.items, up_frame.items)
 
     async def test_broadcast_frame_instance(self):
-        """Test that broadcast_frame_instance copies all fields except id and name."""
+        """Test that broadcast_frame_instance shallow-copies all fields except id and name."""
         downstream_frames: List[Frame] = []
         upstream_frames: List[Frame] = []
         original_frame: List[Frame] = []
@@ -298,7 +298,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
 
         pipeline = Pipeline([up_capture, broadcaster, down_capture])
 
-        # Create a frame with mutable fields to test deep copying
+        # Create a frame with mutable fields to test shallow copying
         test_frame = BroadcastTestFrame(text="test", value=99, items=["x", "y", "z"])
 
         frames_to_send = [test_frame]
@@ -342,11 +342,8 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(up_frame.pts, 12345)
         self.assertEqual(up_frame.metadata, {"key": "value", "nested": {"a": 1}})
 
-        # Verify mutable fields are deep copied (not shared references)
-        self.assertIsNot(down_frame.items, orig.items)
-        self.assertIsNot(up_frame.items, orig.items)
-        self.assertIsNot(down_frame.items, up_frame.items)
-        self.assertIsNot(down_frame.metadata, orig.metadata)
-        self.assertIsNot(up_frame.metadata, orig.metadata)
-        self.assertIsNot(down_frame.metadata, up_frame.metadata)
-        self.assertIsNot(down_frame.metadata["nested"], up_frame.metadata["nested"])
+        # Verify mutable fields are shallow-copied (shared references)
+        self.assertIs(down_frame.items, orig.items)
+        self.assertIs(up_frame.items, orig.items)
+        self.assertIs(down_frame.metadata, orig.metadata)
+        self.assertIs(up_frame.metadata, orig.metadata)
