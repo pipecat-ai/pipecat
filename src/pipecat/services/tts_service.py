@@ -718,7 +718,9 @@ class WordTTSService(TTSService):
         """Reset word timestamp tracking."""
         self._initial_word_timestamp = -1
 
-    async def add_word_timestamps(self, word_times: List[Tuple[str, float]], context_id: Optional[str] = None):
+    async def add_word_timestamps(
+        self, word_times: List[Tuple[str, float]], context_id: Optional[str] = None
+    ):
         """Add word timestamps to the processing queue.
 
         Args:
