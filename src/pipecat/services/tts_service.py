@@ -711,14 +711,7 @@ class WordTTSService(TTSService):
             # If we cached some initial word times (because we didn't receive
             # audio), let's add them now.
             if self._initial_word_times:
-                # Group by context_id and add each group
-                context_groups = {}
-                for word, timestamp, context_id in self._initial_word_times:
-                    if context_id not in context_groups:
-                        context_groups[context_id] = []
-                    context_groups[context_id].append((word, timestamp))
-                for context_id, word_times in context_groups.items():
-                    await self._add_word_timestamps(word_times, context_id)
+                await self._add_word_timestamps(self._initial_word_times)
                 self._initial_word_times = []
 
     async def reset_word_timestamps(self):
@@ -732,14 +725,15 @@ class WordTTSService(TTSService):
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
             context_id: Unique identifier for the TTS context.
         """
+        # Transform to include context_id in each tuple
+        word_times_with_context = [(word, timestamp, context_id) for word, timestamp in word_times]
+
         if self._initial_word_timestamp == -1:
             # Cache word timestamps and don't add them until we have started
             # (i.e. we have some audio).
-            self._initial_word_times.extend(
-                [(word, timestamp, context_id) for word, timestamp in word_times]
-            )
+            self._initial_word_times.extend(word_times_with_context)
         else:
-            await self._add_word_timestamps(word_times, context_id)
+            await self._add_word_timestamps(word_times_with_context)
 
     async def start(self, frame: StartFrame):
         """Start the word TTS service.
@@ -797,8 +791,8 @@ class WordTTSService(TTSService):
             await self.cancel_task(self._words_task)
             self._words_task = None
 
-    async def _add_word_timestamps(self, word_times: List[Tuple[str, float]], context_id: str):
-        for word, timestamp in word_times:
+    async def _add_word_timestamps(self, word_times_with_context: List[Tuple[str, float, str]]):
+        for word, timestamp, context_id in word_times_with_context:
             await self._words_queue.put((word, seconds_to_nanoseconds(timestamp), context_id))
 
     async def _words_task_handler(self):
