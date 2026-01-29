@@ -11,6 +11,7 @@ Speech SDK for real-time audio transcription.
 """
 
 import asyncio
+import json
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -32,6 +33,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from azure.cognitiveservices.speech import (
+        OutputFormat,
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
@@ -63,6 +65,7 @@ class AzureSTTService(STTService):
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
         endpoint_id: Optional[str] = None,
+        enable_confidence: bool = False,
         **kwargs,
     ):
         """Initialize the Azure STT service.
@@ -73,6 +76,7 @@ class AzureSTTService(STTService):
             language: Language for speech recognition. Defaults to English (US).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             endpoint_id: Custom model endpoint id.
+            enable_confidence: If True, extract confidence scores.
             **kwargs: Additional arguments passed to parent STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -86,6 +90,10 @@ class AzureSTTService(STTService):
         if endpoint_id:
             self._speech_config.endpoint_id = endpoint_id
 
+        if enable_confidence:
+            self._speech_config.output_format = OutputFormat.Detailed
+
+        self._enable_confidence = enable_confidence
         self._audio_stream = None
         self._speech_recognizer = None
         self._settings = {
@@ -101,6 +109,35 @@ class AzureSTTService(STTService):
             True as this service supports metrics generation.
         """
         return True
+
+    def _extract_nbest_from_result(self, result) -> Optional[dict]:
+        """Extract NBest data from Azure result JSON.
+
+        Args:
+            result: Azure SDK recognition result.
+
+        Returns:
+            Dictionary containing NBest data, or None if unavailable.
+        """
+        if not self._enable_confidence:
+            return None
+        try:
+            data = json.loads(result.json)
+            nbest = data.get("NBest", [])
+            if nbest and len(nbest) > 0:
+                # Return the top result with useful info
+                top = nbest[0]
+                logger.debug(f"NBest details: {json.dumps(nbest)}")
+                return {
+                    "confidence": top.get("Confidence"),
+                    "lexical": top.get("Lexical"),
+                    "itn": top.get("ITN"),
+                    "masked_itn": top.get("MaskedITN"),
+                    "display": top.get("Display"),
+                }
+        except Exception as e:
+            logger.error(f"Could not extract NBest data: {e}")
+        return None
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process audio data for speech-to-text conversion.
@@ -187,7 +224,7 @@ class AzureSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Optional[Language] = None, **kwargs
     ):
         """Handle a transcription result with tracing."""
         await self.stop_processing_metrics()
@@ -195,6 +232,22 @@ class AzureSTTService(STTService):
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             language = getattr(event.result, "language", None) or self._settings.get("language")
+
+            # Prepare additional tracing attributes
+            trace_kwargs = {}
+            if self._enable_confidence:
+                nbest_data = self._extract_nbest_from_result(event.result)
+
+                if nbest_data:
+                    confidence = nbest_data.get("confidence")
+                    if confidence is not None:
+                        trace_kwargs["confidence"] = confidence
+                        logger.debug(
+                            f"Final transcription confidence: {confidence} for text: '{event.result.text}'"
+                        )
+                    # Serialize NBest data for tracing as a JSON string
+                    trace_kwargs["nbest"] = json.dumps(nbest_data)
+
             frame = TranscriptionFrame(
                 event.result.text,
                 self._user_id,
@@ -203,13 +256,25 @@ class AzureSTTService(STTService):
                 result=event,
             )
             asyncio.run_coroutine_threadsafe(
-                self._handle_transcription(event.result.text, True, language), self.get_event_loop()
+                self._handle_transcription(event.result.text, True, language, **trace_kwargs),
+                self.get_event_loop(),
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
     def _on_handle_recognizing(self, event):
         if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
             language = getattr(event.result, "language", None) or self._settings.get("language")
+
+            # Log confidence for interim transcriptions if enabled
+            if self._enable_confidence:
+                nbest_data = self._extract_nbest_from_result(event.result)
+                if nbest_data:
+                    confidence = nbest_data.get("confidence")
+                    if confidence is not None:
+                        logger.debug(
+                            f"Interim transcription confidence: {confidence} for text: '{event.result.text}'"
+                        )
+
             frame = InterimTranscriptionFrame(
                 event.result.text,
                 self._user_id,
