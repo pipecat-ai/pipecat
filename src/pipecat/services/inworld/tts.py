@@ -414,6 +414,11 @@ class InworldTTSService(AudioContextWordTTSService):
             apply_text_normalization: Whether to apply text normalization.
             max_buffer_delay_ms: Maximum buffer delay in milliseconds.
             buffer_char_threshold: Buffer character threshold.
+            auto_mode: Whether to use auto mode. Recommended when texts are sent
+                in full sentences/phrases. When enabled, the server controls
+                flushing of buffered text to achieve minimal latency while
+                maintaining high quality audio output. If None (default),
+                automatically set based on aggregate_sentences.
         """
 
         temperature: Optional[float] = None
@@ -421,6 +426,7 @@ class InworldTTSService(AudioContextWordTTSService):
         apply_text_normalization: Optional[str] = None
         max_buffer_delay_ms: Optional[int] = None
         buffer_char_threshold: Optional[int] = None
+        auto_mode: Optional[bool] = None
 
     def __init__(
         self,
@@ -432,6 +438,7 @@ class InworldTTSService(AudioContextWordTTSService):
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
         params: InputParams = None,
+        aggregate_sentences: bool = True,
         **kwargs: Any,
     ):
         """Initialize the Inworld WebSocket TTS service.
@@ -444,6 +451,7 @@ class InworldTTSService(AudioContextWordTTSService):
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
             params: Input parameters for Inworld WebSocket TTS configuration.
+            aggregate_sentences: Whether to aggregate sentences before synthesis.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(
@@ -451,6 +459,7 @@ class InworldTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            aggregate_sentences=aggregate_sentences,
             **kwargs,
         )
 
@@ -474,6 +483,11 @@ class InworldTTSService(AudioContextWordTTSService):
             self._settings["audioConfig"]["speakingRate"] = params.speaking_rate
         if params.apply_text_normalization is not None:
             self._settings["applyTextNormalization"] = params.apply_text_normalization
+
+        if params.auto_mode is not None:
+            self._settings["autoMode"] = params.auto_mode
+        else:
+            self._settings["autoMode"] = aggregate_sentences
 
         self._buffer_settings = {
             "maxBufferDelayMs": params.max_buffer_delay_ms,
@@ -818,6 +832,8 @@ class InworldTTSService(AudioContextWordTTSService):
             create_config["temperature"] = self._settings["temperature"]
         if "applyTextNormalization" in self._settings:
             create_config["applyTextNormalization"] = self._settings["applyTextNormalization"]
+        if "autoMode" in self._settings:
+            create_config["autoMode"] = self._settings["autoMode"]
 
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.
