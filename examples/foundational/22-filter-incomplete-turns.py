@@ -30,8 +30,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
+    UserTurnStoppedMessage,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -148,6 +150,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @user_aggregator.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message: UserTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}user: {message.content}"
+        logger.info(f"Transcript: {line}")
+
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

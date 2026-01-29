@@ -1180,12 +1180,39 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _trigger_assistant_turn_stopped(self):
         aggregation = await self.push_aggregation()
         if aggregation:
+            # Strip turn completion markers from the transcript
+            content = self._maybe_strip_turn_completion_markers(aggregation)
             message = AssistantTurnStoppedMessage(
-                content=aggregation, timestamp=self._assistant_turn_start_timestamp
+                content=content, timestamp=self._assistant_turn_start_timestamp
             )
             await self._call_event_handler("on_assistant_turn_stopped", message)
 
             self._assistant_turn_start_timestamp = ""
+
+    def _maybe_strip_turn_completion_markers(self, text: str) -> str:
+        """Strip turn completion markers from assistant transcript.
+
+        These markers (✓, ○, ◐) are used internally for turn completion
+        detection and shouldn't appear in the final transcript.
+        """
+        from pipecat.services.mixins.turn_completion import (
+            TURN_COMPLETE_MARKER,
+            TURN_INCOMPLETE_LONG_MARKER,
+            TURN_INCOMPLETE_SHORT_MARKER,
+        )
+
+        marker_found = False
+        for marker in (
+            TURN_COMPLETE_MARKER,
+            TURN_INCOMPLETE_SHORT_MARKER,
+            TURN_INCOMPLETE_LONG_MARKER,
+        ):
+            if marker in text:
+                text = text.replace(marker, "")
+                marker_found = True
+
+        # Only strip whitespace if we removed a marker
+        return text.strip() if marker_found else text
 
 
 class LLMContextAggregatorPair:
