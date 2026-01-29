@@ -474,7 +474,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
-            if isinstance(frame, TTSStoppedFrame) and self._context_id:
+            if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)], self._context_id)
 
     async def _connect(self):
@@ -850,9 +850,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self._partial_word = ""
         self._partial_word_start_time = 0.0
 
-        # Track current context_id for word timestamps
-        self._current_context_id: Optional[str] = None
-
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language to ElevenLabs language code.
 
@@ -887,7 +884,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self._previous_text = ""
         self._partial_word = ""
         self._partial_word_start_time = 0.0
-        self._current_context_id = None
         logger.debug(f"{self}: Reset internal state")
 
     async def start(self, frame: StartFrame):
@@ -910,9 +906,10 @@ class ElevenLabsHttpTTSService(WordTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
             # Reset timing on interruption or stop
-            if isinstance(frame, TTSStoppedFrame) and self._current_context_id:
-                await self.add_word_timestamps([("Reset", 0)], self._current_context_id)
             self._reset_state()
+
+            if isinstance(frame, TTSStoppedFrame):
+                await self.add_word_timestamps([("Reset", 0)])
 
         elif isinstance(frame, LLMFullResponseEndFrame):
             # End of turn - reset previous text
@@ -1058,7 +1055,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
                     await self.start_word_timestamps()
                     yield TTSStartedFrame(context_id=context_id)
                     self._started = True
-                    self._current_context_id = context_id
 
                 # Track the duration of this utterance based on the last character's end time
                 utterance_duration = 0
@@ -1092,10 +1088,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
                                 # Calculate word timestamps
                                 word_times = self.calculate_word_times(alignment)
-                                if word_times and self._current_context_id:
-                                    await self.add_word_timestamps(
-                                        word_times, self._current_context_id
-                                    )
+                                if word_times:
+                                    await self.add_word_timestamps(word_times, context_id)
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse JSON from stream: {e}")
                         continue
@@ -1105,9 +1099,9 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
                 # After processing all chunks, emit any remaining partial word
                 # since this is the end of the utterance
-                if self._partial_word and self._current_context_id:
+                if self._partial_word:
                     final_word_time = [(self._partial_word, self._partial_word_start_time)]
-                    await self.add_word_timestamps(final_word_time, self._current_context_id)
+                    await self.add_word_timestamps(final_word_time, context_id)
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
 
