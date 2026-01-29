@@ -649,6 +649,12 @@ class InworldTTSService(AudioContextWordTTSService):
             logger.debug("Connecting to Inworld WebSocket TTS")
             headers = [("Authorization", f"Basic {self._api_key}")]
             self._websocket = await websocket_connect(self._url, additional_headers=headers)
+
+            if self._context_id:
+                if not self.audio_context_available(self._context_id):
+                    await self.create_audio_context(self._context_id)
+                await self._send_context(self._context_id)
+
             await self._call_event_handler("on_connected")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
@@ -666,7 +672,7 @@ class InworldTTSService(AudioContextWordTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Inworld WebSocket TTS")
-                if self._context_id:
+                if self._disconnecting and self._context_id:
                     try:
                         await self._send_close_context(self._context_id)
                     except Exception:
@@ -677,7 +683,8 @@ class InworldTTSService(AudioContextWordTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._started = False
-            self._context_id = None
+            if self._disconnecting:
+                self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
