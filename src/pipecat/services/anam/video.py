@@ -275,18 +275,12 @@ class AnamVideoService(AIService):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSStartedFrame):
             await self.start_ttfb_metrics()
-            await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
             # We constantly receive audio through WebRTC, but most of the time it is silence.
             # As soon as we receive actual audio, the base output transport will create a
             # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
             await self.stop_ttfb_metrics()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)):
-            # Just forward these frames for other processors that might need them.
-            await self.push_frame(frame, direction)
-        else:
-            await self.push_frame(frame, direction)
+        await self.push_frame(frame, direction)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -440,11 +434,6 @@ class AnamVideoService(AIService):
         except Exception as e:
             logger.error(f"Failed to send user audio to Anam SDK: {e}")
             await self.push_error(ErrorFrame(error=f"Failed to send user audio: {e}"))
-
-        # Forward the frame UPSTREAM for other processors (e.g., local STT if needed)
-        # Don't forward DOWNSTREAM to avoid reaching output transport: TODO SEB CHEK IF TRUE
-        if direction == FrameDirection.UPSTREAM:
-            await self.push_frame(frame, FrameDirection.UPSTREAM)
 
     async def _send_task_handler(self):
         """Handle sending audio frames to the Anam client.
