@@ -434,10 +434,6 @@ class BaseOpenAILLMService(LLMService):
             ):
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
-        # Reset turn completion state if enabled
-        if self._filter_incomplete_user_turns:
-            await self._turn_reset()
-
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered

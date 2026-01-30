@@ -554,9 +554,6 @@ class AnthropicLLMService(LLMService):
                 cache_creation_input_tokens=cache_creation_input_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
             )
-            # Reset turn completion state if enabled
-            if self._filter_incomplete_user_turns:
-                await self._turn_reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and route them appropriately.

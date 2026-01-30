@@ -21,6 +21,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
+    LLMFullResponseEndFrame,
     LLMMessagesAppendFrame,
     LLMRunFrame,
     LLMTextFrame,
@@ -326,7 +327,7 @@ class TurnCompletionMixin:
         self._turn_complete_found = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames, handling interruptions to reset turn completion state.
+        """Process frames, handling turn completion state resets.
 
         Args:
             frame: The frame to process.
@@ -335,6 +336,10 @@ class TurnCompletionMixin:
         # Handle interruptions by cancelling timeout and resetting state
         if isinstance(frame, InterruptionFrame):
             await self._cancel_incomplete_timeout()
+            await self._turn_reset()
+        # Reset turn state at end of LLM response (but don't cancel timeout -
+        # incomplete timeouts should continue running)
+        elif isinstance(frame, LLMFullResponseEndFrame):
             await self._turn_reset()
 
         # Pass frame to parent
