@@ -269,6 +269,7 @@ class AnamVideoService(AIService):
             await self._handle_audio_frame(frame)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_user_audio_frame(frame, direction)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, OutputTransportReadyFrame):
             # Mark transport as ready so we can start sending video/audio frames
             self._transport_ready = True
@@ -280,7 +281,8 @@ class AnamVideoService(AIService):
             # As soon as we receive actual audio, the base output transport will create a
             # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
             await self.stop_ttfb_metrics()
-        await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -346,7 +348,11 @@ class AnamVideoService(AIService):
             self._audio_task = None
 
     async def _on_connection_established(self) -> None:
-        """Handle connection established event."""
+        """Handle connection established event.
+
+        Audio pushed before this point has been discarded.
+        Synchronise with live piont by flushing stale audio in prior buffers here.
+        """
         logger.info("Anam connection established")
 
     async def _on_connection_closed(self, code: str, reason: Optional[str]) -> None:
@@ -419,13 +425,17 @@ class AnamVideoService(AIService):
             frame: The user audio frame to process (InputAudioRawFrame).
             direction: The direction of frame processing.
         """
-        if not self._client or not self._client._streaming_client:
-            logger.warning("Anam client not initialized - cannot send user audio")
+        if (
+            not self._client
+            or not self._client._streaming_client.is_connected
+            or not self._client._streaming_client._peer_connection.connectionState == "connected"
+        ):
+            logger.warning("anam client not initialized - or connection not ready yet")
             return
 
         try:
             # Send raw audio samples directly to SDK
-            # SDK handles resampling/conversion to WebRTC format (48kHz mono)
+            # SDK handles resampling/conversion to WebRTC format
             self._client._streaming_client.send_user_audio(
                 audio_bytes=frame.audio,
                 sample_rate=frame.sample_rate,

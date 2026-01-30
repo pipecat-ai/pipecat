@@ -91,7 +91,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
-        avatar_id = os.getenv("ANAM_AVATAR_ID").strip().strip('"')
+        avatar_id = os.getenv("ANAM_AVATAR_ID", "").strip().strip('"')
         logger.info(f"Avatar ID: {avatar_id}")
         logger.info(f"Persona config: {PersonaConfig(avatar_id=avatar_id)}")
 
