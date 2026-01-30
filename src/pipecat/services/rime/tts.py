@@ -387,6 +387,7 @@ class RimeTTSService(AudioContextWordTTSService):
             if not msg or not self.audio_context_available(msg["contextId"]):
                 continue
 
+            context_id = msg["contextId"]
             if msg["type"] == "chunk":
                 # Process audio chunk
                 await self.stop_ttfb_metrics()
@@ -395,9 +396,9 @@ class RimeTTSService(AudioContextWordTTSService):
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,
                     num_channels=1,
-                    context_id=self._current_context_id,
+                    context_id=context_id,
                 )
-                await self.append_to_audio_context(msg["contextId"], frame)
+                await self.append_to_audio_context(context_id, frame)
 
             elif msg["type"] == "timestamps":
                 # Process word timing information
@@ -410,9 +411,7 @@ class RimeTTSService(AudioContextWordTTSService):
                     # Calculate word timing pairs
                     word_pairs = self._calculate_word_times(words, starts, ends)
                     if word_pairs:
-                        await self.add_word_timestamps(
-                            word_pairs, self._current_context_id
-                        ) if self._current_context_id and word_pairs else None
+                        await self.add_word_timestamps(word_pairs, context_id=context_id)
                         self._cumulative_time = ends[-1] + self._cumulative_time
                         logger.debug(f"Updated cumulative time to: {self._cumulative_time}")
 
@@ -432,9 +431,7 @@ class RimeTTSService(AudioContextWordTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps(
-                    [("Reset", 0)], self._current_context_id
-                ) if self._current_context_id else None
+                await self.add_word_timestamps([("Reset", 0)])
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -455,7 +452,6 @@ class RimeTTSService(AudioContextWordTTSService):
             try:
                 if not self._context_id:
                     await self.start_ttfb_metrics()
-                    self._current_context_id = context_id
                     yield TTSStartedFrame(context_id=context_id)
                     self._cumulative_time = 0
                     self._context_id = context_id
@@ -609,7 +605,6 @@ class RimeHttpTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                self._current_context_id = context_id
                 yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
@@ -727,7 +722,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             self._settings.update(params.extra)
 
         self._started = False
-        self._current_context_id: Optional[str] = None
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
@@ -848,6 +842,9 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
 
     async def _receive_messages(self):
         """Process incoming WebSocket messages (raw audio bytes)."""
+        # Note: context_id is not available in this method since it's not passed through WebSocket messages
+        # Audio frames will not have context_id set in this streaming implementation.
+        # But the TTSTextFrame will have the context_id, because they will be pushed by the TTSService
         async for message in self._get_websocket():
             try:
                 # Rime Arcana sends raw audio bytes directly (not JSON)
@@ -858,7 +855,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                         audio=message,
                         sample_rate=self.sample_rate,
                         num_channels=1,
-                        context_id=self._current_context_id,
                     )
                     await self.push_frame(frame)
             except Exception as e:
@@ -882,7 +878,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             try:
                 if not self._started:
                     await self.start_ttfb_metrics()
-                    self._current_context_id = context_id
                     yield TTSStartedFrame(context_id=context_id)
                     self._started = True
                 # Send bare text (not JSON)
