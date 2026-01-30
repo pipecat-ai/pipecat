@@ -60,6 +60,9 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
         Returns:
             Dictionary of parameters for OpenAI's ChatCompletion API.
         """
+        # Warn about orphaned tool-related messages
+        self._warn_about_orphaned_tool_messages(context)
+
         return {
             "messages": self._from_universal_context_messages(self.get_messages(context)),
             # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)

@@ -59,6 +59,9 @@ class GrokRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             Dictionary of parameters for invoking Grok's Voice Agent API.
         """
+        # Warn about orphaned tool-related messages
+        self._warn_about_orphaned_tool_messages(context)
+
         messages = self._from_universal_context_messages(self.get_messages(context))
         return {
             "system_instruction": messages.system_instruction,

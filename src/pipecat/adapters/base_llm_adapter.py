@@ -129,4 +129,42 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         # Fallback to return the same tools in case they are not in a standard format
         return tools
 
+    def _warn_about_orphaned_tool_messages(self, context: LLMContext) -> None:
+        """Warn if context contains messages referencing tools that aren't currently available.
+
+        This can happen when tools are removed/deactivated but the conversation history
+        still contains function calls or tool responses for those tools. Such orphaned
+        messages may cause API errors from the LLM provider.
+
+        Args:
+            context: The LLM context to check.
+        """
+        # Get the set of currently available tool names
+        available_tool_names: set[str] = set()
+        if isinstance(context.tools, ToolsSchema):
+            available_tool_names = {tool.name for tool in context.tools.standard_tools}
+            # Note: We don't check custom tools as they may have varying formats
+
+        # Track orphaned function names found in messages
+        orphaned_tools: set[str] = set()
+
+        for message in self.get_messages(context):
+            if isinstance(message, LLMSpecificMessage):
+                # Skip LLM-specific messages for now
+                continue
+
+            # Check for tool_calls in assistant messages
+            if message.get("tool_calls"):
+                for tc in message["tool_calls"]:
+                    func_name = tc.get("function", {}).get("name")
+                    if func_name and available_tool_names and func_name not in available_tool_names:
+                        orphaned_tools.add(func_name)
+
+        # Log warning for orphaned messages
+        if orphaned_tools:
+            logger.warning(
+                f"Context contains references to tools that are no longer available: "
+                f"{sorted(orphaned_tools)}. This may cause unexpected behavior or API errors."
+            )
+
     # TODO: we can move the logic to also handle the Messages here
