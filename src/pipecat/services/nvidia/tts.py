@@ -212,7 +212,7 @@ class NvidiaTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
             yield TTSStoppedFrame(context_id=context_id)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             logger.error(f"{self} timeout waiting for audio response")
             yield ErrorFrame(error=f"{self} error: {e}")
         except Exception as e:
