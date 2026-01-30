@@ -47,6 +47,7 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    LLMUpdateSettingsFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
@@ -69,6 +70,7 @@ from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
@@ -89,6 +91,13 @@ class LLMUserAggregatorParams:
             has been idle (not speaking) for this duration. Set to None to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
+        filter_incomplete_user_turns: Whether to filter out incomplete user turns.
+            When enabled, the LLM outputs a turn completion marker at the start of
+            each response: ✓ (complete), ○ (incomplete short), or ◐ (incomplete long).
+            Incomplete responses are suppressed and timeouts trigger re-prompting.
+        user_turn_completion_config: Configuration for turn completion behavior including
+            custom instructions, timeouts, and prompts. Only used when
+            filter_incomplete_user_turns is True.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
@@ -96,6 +105,8 @@ class LLMUserAggregatorParams:
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: Optional[float] = None
     vad_analyzer: Optional[VADAnalyzer] = None
+    filter_incomplete_user_turns: bool = False
+    user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
 
 
 @dataclass
@@ -487,6 +498,24 @@ class LLMUserAggregator(LLMContextAggregator):
 
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
+
+        # Enable incomplete turn filtering on the LLM if configured
+        if self._params.filter_incomplete_user_turns:
+            # Get config or use defaults
+            config = self._params.user_turn_completion_config or UserTurnCompletionConfig()
+
+            # Enable the feature on the LLM with config
+            await self.push_frame(
+                LLMUpdateSettingsFrame(
+                    settings={
+                        "filter_incomplete_user_turns": True,
+                        "user_turn_completion_config": config,
+                    }
+                )
+            )
+
+            # Auto-inject turn completion instructions into context
+            self._context.add_message({"role": "system", "content": config.completion_instructions})
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
@@ -1145,12 +1174,39 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _trigger_assistant_turn_stopped(self):
         aggregation = await self.push_aggregation()
         if aggregation:
+            # Strip turn completion markers from the transcript
+            content = self._maybe_strip_turn_completion_markers(aggregation)
             message = AssistantTurnStoppedMessage(
-                content=aggregation, timestamp=self._assistant_turn_start_timestamp
+                content=content, timestamp=self._assistant_turn_start_timestamp
             )
             await self._call_event_handler("on_assistant_turn_stopped", message)
 
             self._assistant_turn_start_timestamp = ""
+
+    def _maybe_strip_turn_completion_markers(self, text: str) -> str:
+        """Strip turn completion markers from assistant transcript.
+
+        These markers (✓, ○, ◐) are used internally for turn completion
+        detection and shouldn't appear in the final transcript.
+        """
+        from pipecat.turns.user_turn_completion_mixin import (
+            USER_TURN_COMPLETE_MARKER,
+            USER_TURN_INCOMPLETE_LONG_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+        )
+
+        marker_found = False
+        for marker in (
+            USER_TURN_COMPLETE_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+            USER_TURN_INCOMPLETE_LONG_MARKER,
+        ):
+            if marker in text:
+                text = text.replace(marker, "")
+                marker_found = True
+
+        # Only strip whitespace if we removed a marker
+        return text.strip() if marker_found else text
 
 
 class LLMContextAggregatorPair:

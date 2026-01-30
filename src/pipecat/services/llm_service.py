@@ -56,6 +56,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -142,7 +143,7 @@ class FunctionCallRunnerItem:
     run_llm: Optional[bool] = None
 
 
-class LLMService(AIService):
+class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     """Base class for all LLM services.
 
     Handles function calling registration and execution with support for both
@@ -186,6 +187,7 @@ class LLMService(AIService):
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
         self._function_call_timeout_secs = function_call_timeout_secs
+        self._filter_incomplete_user_turns: bool = False
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
@@ -295,6 +297,35 @@ class LLMService(AIService):
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
 
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Update LLM service settings.
+
+        Handles turn completion settings specially since they are not model
+        parameters and should not be passed to the underlying LLM API.
+
+        Args:
+            settings: Dictionary of settings to update.
+        """
+        # Turn completion settings to extract (not model parameters)
+        turn_completion_keys = {"filter_incomplete_user_turns", "user_turn_completion_config"}
+
+        # Handle turn completion settings
+        if "filter_incomplete_user_turns" in settings:
+            self._filter_incomplete_user_turns = settings["filter_incomplete_user_turns"]
+            logger.info(
+                f"{self}: Incomplete turn filtering {'enabled' if self._filter_incomplete_user_turns else 'disabled'}"
+            )
+
+            # Configure the mixin with config object
+            if self._filter_incomplete_user_turns and "user_turn_completion_config" in settings:
+                self.set_user_turn_completion_config(settings["user_turn_completion_config"])
+
+        # Remove turn completion settings before passing to parent
+        settings = {k: v for k, v in settings.items() if k not in turn_completion_keys}
+
+        # Let the parent handle remaining model parameters
+        await super()._update_settings(settings)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame.
 
@@ -321,6 +352,20 @@ class LLMService(AIService):
                 frame.skip_tts = self._skip_tts
 
         await super().push_frame(frame, direction)
+
+    async def _push_llm_text(self, text: str):
+        """Push LLM text, using turn completion detection if enabled.
+
+        This helper method simplifies text pushing in LLM implementations by
+        handling the conditional logic for turn completion internally.
+
+        Args:
+            text: The text content from the LLM to push.
+        """
+        if self._filter_incomplete_user_turns:
+            await self._push_turn_text(text)
+        else:
+            await self.push_frame(LLMTextFrame(text))
 
     async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():
