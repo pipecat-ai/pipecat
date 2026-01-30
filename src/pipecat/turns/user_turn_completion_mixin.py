@@ -29,9 +29,9 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 
 # Turn completion markers
-TURN_COMPLETE_MARKER = "✓"
-TURN_INCOMPLETE_SHORT_MARKER = "○"  # Short wait - user likely continues soon
-TURN_INCOMPLETE_LONG_MARKER = "◐"  # Long wait - user needs more time
+USER_TURN_COMPLETE_MARKER = "✓"
+USER_TURN_INCOMPLETE_SHORT_MARKER = "○"  # Short wait - user likely continues soon
+USER_TURN_INCOMPLETE_LONG_MARKER = "◐"  # Long wait - user needs more time
 
 # Default prompts for incomplete timeouts
 DEFAULT_INCOMPLETE_SHORT_PROMPT = """The user paused briefly. Generate a brief, natural prompt to encourage them to continue.
@@ -144,7 +144,7 @@ Remember: Focus on conversational completeness and how long the user might need.
 
 
 @dataclass
-class TurnCompletionConfig:
+class UserTurnCompletionConfig:
     """Configuration for turn completion behavior.
 
     Attributes:
@@ -218,17 +218,17 @@ class TurnCompletionMixin:
         self._turn_complete_found = False  # True when ✓ (COMPLETE) is detected
 
         # Timeout handling
-        self._turn_completion_config = TurnCompletionConfig()
+        self._user_turn_completion_config = UserTurnCompletionConfig()
         self._incomplete_timeout_task: Optional[asyncio.Task] = None
         self._incomplete_type: Optional[Literal["short", "long"]] = None
 
-    def set_turn_completion_config(self, config: TurnCompletionConfig):
+    def set_user_turn_completion_config(self, config: UserTurnCompletionConfig):
         """Set the turn completion configuration.
 
         Args:
             config: The turn completion configuration.
         """
-        self._turn_completion_config = config
+        self._user_turn_completion_config = config
 
     def get_turn_completion_instructions(self) -> str:
         """Get the turn completion instructions to append to system prompts.
@@ -250,9 +250,9 @@ class TurnCompletionMixin:
         self._incomplete_type = incomplete_type
 
         if incomplete_type == "short":
-            timeout = self._turn_completion_config.incomplete_short_timeout
+            timeout = self._user_turn_completion_config.incomplete_short_timeout
         else:
-            timeout = self._turn_completion_config.incomplete_long_timeout
+            timeout = self._user_turn_completion_config.incomplete_long_timeout
 
         logger.debug(f"Starting {incomplete_type} incomplete timeout ({timeout}s)")
         self._incomplete_timeout_task = self.create_task(
@@ -288,9 +288,9 @@ class TurnCompletionMixin:
 
             # Get the appropriate prompt
             if incomplete_type == "short":
-                prompt = self._turn_completion_config.get_short_prompt()
+                prompt = self._user_turn_completion_config.get_short_prompt()
             else:
-                prompt = self._turn_completion_config.get_long_prompt()
+                prompt = self._user_turn_completion_config.get_long_prompt()
 
             # Push through pipeline to trigger LLM response
             await self.push_frame(
@@ -375,16 +375,16 @@ class TurnCompletionMixin:
 
         # Check for incomplete markers (○ short, ◐ long)
         incomplete_type: Optional[Literal["short", "long"]] = None
-        if TURN_INCOMPLETE_SHORT_MARKER in self._turn_text_buffer:
+        if USER_TURN_INCOMPLETE_SHORT_MARKER in self._turn_text_buffer:
             incomplete_type = "short"
-        elif TURN_INCOMPLETE_LONG_MARKER in self._turn_text_buffer:
+        elif USER_TURN_INCOMPLETE_LONG_MARKER in self._turn_text_buffer:
             incomplete_type = "long"
 
         if incomplete_type:
             marker = (
-                TURN_INCOMPLETE_SHORT_MARKER
+                USER_TURN_INCOMPLETE_SHORT_MARKER
                 if incomplete_type == "short"
-                else TURN_INCOMPLETE_LONG_MARKER
+                else USER_TURN_INCOMPLETE_LONG_MARKER
             )
             logger.debug(
                 f"INCOMPLETE {incomplete_type.upper()} ({marker}) detected, suppressing text"
@@ -400,13 +400,13 @@ class TurnCompletionMixin:
             return
 
         # Check for ✓ (COMPLETE) marker
-        if TURN_COMPLETE_MARKER in self._turn_text_buffer:
+        if USER_TURN_COMPLETE_MARKER in self._turn_text_buffer:
             # Found ✓ (COMPLETE) - separate marker from text
-            logger.debug(f"COMPLETE ({TURN_COMPLETE_MARKER}) detected, pushing buffered text")
+            logger.debug(f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected, pushing buffered text")
 
             # Split buffer at the marker
-            marker_pos = self._turn_text_buffer.index(TURN_COMPLETE_MARKER)
-            marker_end = marker_pos + len(TURN_COMPLETE_MARKER)
+            marker_pos = self._turn_text_buffer.index(USER_TURN_COMPLETE_MARKER)
+            marker_end = marker_pos + len(USER_TURN_COMPLETE_MARKER)
 
             # Push the marker (and any text before it) with skip_tts
             marker_text = self._turn_text_buffer[:marker_end]

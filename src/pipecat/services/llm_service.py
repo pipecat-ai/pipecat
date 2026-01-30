@@ -310,7 +310,7 @@ class LLMService(TurnCompletionMixin, AIService):
             settings: Dictionary of settings to update.
         """
         # Turn completion settings to extract (not model parameters)
-        turn_completion_keys = {"filter_incomplete_user_turns", "turn_completion_config"}
+        turn_completion_keys = {"filter_incomplete_user_turns", "user_turn_completion_config"}
 
         # Handle turn completion settings
         if "filter_incomplete_user_turns" in settings:
@@ -320,8 +320,8 @@ class LLMService(TurnCompletionMixin, AIService):
             )
 
             # Configure the mixin with config object
-            if self._filter_incomplete_user_turns and "turn_completion_config" in settings:
-                self.set_turn_completion_config(settings["turn_completion_config"])
+            if self._filter_incomplete_user_turns and "user_turn_completion_config" in settings:
+                self.set_user_turn_completion_config(settings["user_turn_completion_config"])
 
         # Remove turn completion settings before passing to parent
         settings = {k: v for k, v in settings.items() if k not in turn_completion_keys}

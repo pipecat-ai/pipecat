@@ -72,7 +72,7 @@ from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
-from pipecat.turns.user_turn_completion_mixin import TurnCompletionConfig
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
@@ -97,7 +97,7 @@ class LLMUserAggregatorParams:
             When enabled, the LLM outputs a turn completion marker at the start of
             each response: ✓ (complete), ○ (incomplete short), or ◐ (incomplete long).
             Incomplete responses are suppressed and timeouts trigger re-prompting.
-        turn_completion_config: Configuration for turn completion behavior including
+        user_turn_completion_config: Configuration for turn completion behavior including
             custom instructions, timeouts, and prompts. Only used when
             filter_incomplete_user_turns is True.
     """
@@ -108,7 +108,7 @@ class LLMUserAggregatorParams:
     user_idle_timeout: Optional[float] = None
     vad_analyzer: Optional[VADAnalyzer] = None
     filter_incomplete_user_turns: bool = False
-    turn_completion_config: Optional[TurnCompletionConfig] = None
+    user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
 
 
 @dataclass
@@ -504,14 +504,14 @@ class LLMUserAggregator(LLMContextAggregator):
         # Enable incomplete turn filtering on the LLM if configured
         if self._params.filter_incomplete_user_turns:
             # Get config or use defaults
-            config = self._params.turn_completion_config or TurnCompletionConfig()
+            config = self._params.user_turn_completion_config or UserTurnCompletionConfig()
 
             # Enable the feature on the LLM with config
             await self.push_frame(
                 LLMUpdateSettingsFrame(
                     settings={
                         "filter_incomplete_user_turns": True,
-                        "turn_completion_config": config,
+                        "user_turn_completion_config": config,
                     }
                 )
             )
@@ -1192,16 +1192,16 @@ class LLMAssistantAggregator(LLMContextAggregator):
         detection and shouldn't appear in the final transcript.
         """
         from pipecat.turns.user_turn_completion_mixin import (
-            TURN_COMPLETE_MARKER,
-            TURN_INCOMPLETE_LONG_MARKER,
-            TURN_INCOMPLETE_SHORT_MARKER,
+            USER_TURN_COMPLETE_MARKER,
+            USER_TURN_INCOMPLETE_LONG_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
         )
 
         marker_found = False
         for marker in (
-            TURN_COMPLETE_MARKER,
-            TURN_INCOMPLETE_SHORT_MARKER,
-            TURN_INCOMPLETE_LONG_MARKER,
+            USER_TURN_COMPLETE_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+            USER_TURN_INCOMPLETE_LONG_MARKER,
         ):
             if marker in text:
                 text = text.replace(marker, "")
