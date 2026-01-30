@@ -82,14 +82,15 @@ class FrameSerializer(BaseObject):
         pass
 
     @abstractmethod
-    async def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | list[str | bytes] | None:
         """Convert a frame to its serialized representation.
 
         Args:
             frame: The frame to serialize.
 
         Returns:
-            Serialized frame data as string, bytes, or None if serialization fails.
+            Serialized frame data as string, bytes, list of strings/bytes for
+            multi-packet protocols (e.g., OPUS), or None if serialization fails.
         """
         pass
 
