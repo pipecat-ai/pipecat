@@ -401,6 +401,11 @@ class LLMUserAggregator(LLMContextAggregator):
             self._vad_controller.add_event_handler("on_push_frame", self._on_push_frame)
             self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
 
+        # NOTE(aleix): Probably just needed temporarily. This was added to
+        # prevent processing self-queued frames (SpeechControlParamsFrame)
+        # pushed by strategies.
+        self._self_queued_frames = set()
+
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -452,7 +457,7 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, SpeechControlParamsFrame) and not self._vad_controller:
+        elif isinstance(frame, SpeechControlParamsFrame):
             await self._handle_speech_control_params(frame)
         else:
             await self.push_frame(frame, direction)
@@ -548,6 +553,9 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_context_frame()
 
     async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
+        if frame.id in self._self_queued_frames:
+            return
+
         if not frame.turn_params:
             return
 
@@ -587,24 +595,35 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
-    async def _queued_broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
-        """Broadcasts a frame upstream and queues it downstream for internal processing.
+    async def _internal_queue_frame(
+        self,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        callback: Optional[FrameCallback] = None,
+    ):
+        """Queues the given frame to ourselves."""
+        self._self_queued_frames.add(frame.id)
+        await self.queue_frame(frame, direction, callback)
 
-        Queues the frame downstream so it flows through ``process_frame`` and
-        is handled internally (e.g. by the ``UserTurnController``). The
-        upstream frame is pushed directly.
+    async def _queued_broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
+        """Broadcasts a frame upstream and queues it for internal processing.
+
+        Queues the frame so it flows through `process_frame` and is handled
+        internally (e.g. by the `UserTurnController`). The upstream frame is
+        pushed directly.
 
         Args:
             frame_cls: The class of the frame to be broadcasted.
             **kwargs: Keyword arguments to be passed to the frame's constructor.
+
         """
-        await self.queue_frame(frame_cls(**kwargs))
+        await self._internal_queue_frame(frame_cls(**kwargs))
         await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
 
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
-        await self.queue_frame(frame, direction)
+        await self._internal_queue_frame(frame, direction)
 
     async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
         await self._queued_broadcast_frame(frame_cls, **kwargs)
