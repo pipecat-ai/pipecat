@@ -127,7 +127,7 @@ async def main():
         api_key=os.getenv("HUME_API_KEY", ""),
         config_id=os.getenv("HUME_CONFIG_ID", ""),
         model=os.getenv("HUME_MODEL", "evi"),
-        start_frame_cls=OjinVideoContinuousInitializedFrame,
+        start_frame_cls=OjinVideoInitializedFrame,
     )
 
     messages = [
