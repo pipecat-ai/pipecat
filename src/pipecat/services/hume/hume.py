@@ -80,6 +80,7 @@ class HumeSTSService(LLMService):
         model: str = "evi",
         system_prompt: str | None = None,
         start_frame_cls: type[Frame] | None = None,
+        track_cancelled_conversations: bool = True,
         audio_passthrough: bool = False,
         **kwargs,
     ):
@@ -94,6 +95,7 @@ class HumeSTSService(LLMService):
         self._cm = None
         self.active_conversation: bool = False
         self.active_conversation_id: str | None = None
+        self.track_cancelled_conversations = track_cancelled_conversations
         self.cancelled_conversation_ids: list[str] = []
         self.system_prompt = system_prompt
         self._context: OpenAIRealtimeLLMContext | None = None
@@ -122,7 +124,7 @@ class HumeSTSService(LLMService):
         if isinstance(frame, self._start_frame_cls):
             await self._connect()
         elif isinstance(frame, StartInterruptionFrame):
-            if self.active_conversation_id is not None:
+            if self.active_conversation_id is not None and self.track_cancelled_conversations:
                 self.cancelled_conversation_ids.append(self.active_conversation_id)
             self.active_conversation_id = None
             self.active_conversation = False
@@ -200,7 +202,10 @@ class HumeSTSService(LLMService):
     async def _on_message(self, message: SubscribeEvent):
         logger.trace(f"Received message from Hume: {message}")
         msg_type = message.type
-        if hasattr(message, "id") and message.id in self.cancelled_conversation_ids:
+        if hasattr(message, "id") and (
+            message.id in self.cancelled_conversation_ids and self.active_conversation
+        ):
+            logger.info(f"Skipping message from cancelled conversation {message.id}")
             return
 
         if msg_type == "audio_output":
@@ -235,7 +240,9 @@ class HumeSTSService(LLMService):
             logger.info(message)
             content: str = message.message.content
             await self.push_frame(LLMTextFrame(text=content))
-            await self.push_frame(TTSTextFrame(text=content, aggregated_by=AggregationType.SENTENCE))
+            await self.push_frame(
+                TTSTextFrame(text=content, aggregated_by=AggregationType.SENTENCE)
+            )
         elif msg_type == "user_message":
             content: str = message.message.content
             logger.info(message)
