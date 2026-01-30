@@ -13,6 +13,7 @@ voice transcription, streaming responses, and tool usage.
 
 import asyncio
 import base64
+import copy
 import io
 import time
 import uuid
@@ -59,7 +60,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext, LLMContextDiff
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -684,6 +685,7 @@ class GeminiLiveLLMService(LLMService):
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
         self._context = None
+        self._context_snapshot = None
         self._api_key = api_key
         self._http_options = update_google_client_http_options(http_options)
         self._session: AsyncSession = None
@@ -826,6 +828,9 @@ class GeminiLiveLLMService(LLMService):
             logger.error("Context already set. Can only set up Gemini Live context once.")
             return
         self._context = GeminiLiveContext.upgrade(context)
+        self._context_snapshot = copy.deepcopy(
+            self._context
+        )  # Take a static snapshot guaranteed not to change
         await self._create_initial_response()
 
     #
@@ -950,7 +955,13 @@ class GeminiLiveLLMService(LLMService):
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMSetToolsFrame):
-            await self._update_settings()
+            # TODO: you are here - setting tools doesn't work yet (requires reconnection)
+            # Do we have reference to previous tools to compare?
+            # New tools should already have been set on the context by the user aggregator.
+            # LLMSetToolsFrame without a user aggregator is not supported.
+            # If tools have changed, update context snapshot.
+            # await self._update_settings()
+            pass
         else:
             await self.push_frame(frame, direction)
 
@@ -958,6 +969,9 @@ class GeminiLiveLLMService(LLMService):
         if not self._context:
             # We got our initial context
             self._context = context
+            self._context_snapshot = copy.deepcopy(
+                context
+            )  # Take a static snapshot guaranteed not to change
 
             # If context contains system instruction or tools, reconnect in
             # order to apply them.
@@ -1011,17 +1025,54 @@ class GeminiLiveLLMService(LLMService):
             # We got an updated context.
             self._context = context
 
-            # Here we assume that the updated context will contain either:
-            # - new messages (that the Gemini Live service, with its own
-            #   context management, is already aware of), or
-            # - tool call results (that we need to tell the remote service
-            #   about).
-            # (In the future, we could do more sophisticated diffing here,
-            # which would enable the user to programmatically manipulate the
-            # context).
+            diff = self._context_snapshot.diff(self._context)
+            self._context_snapshot = copy.deepcopy(
+                context
+            )  # Take a static snapshot guaranteed not to change
 
-            # Send results for newly-completed function calls, if any.
-            await self._process_completed_function_calls(send_new_results=True)
+            if self._context_update_requires_reconnect(diff):
+                # Reconnect
+                print("[pk] Context update requires reconnect. Reconnecting...")
+                # TODO: necessary?
+                self._session_resumption_handle = None
+                # TODO: do something special here to handle the context like it's the initial one again?
+                await self._reconnect()
+                await self._create_initial_response()
+            else:
+                # Send results for newly-completed function calls, if any.
+                print(
+                    "[pk] Context update does not require reconnect. Sending any newly-completed function call results..."
+                )
+                await self._process_completed_function_calls(send_new_results=True)
+
+    def _context_update_requires_reconnect(self, diff: LLMContextDiff) -> bool:
+        """Check if an update to our LLM context requires reconnection.
+
+        Args:
+            diff: The context diff representing the update
+        Returns:
+            True if reconnection is required, False otherwise.
+        """
+        # During the course of a "normal" conversation with no external context
+        # manipulation (like adding tools, changing system instructions,
+        # rewriting history), context updates will contain either:
+        # - new messages (that the Gemini Live service, with its own internal
+        #   context management, is already aware of), or
+        # - tool call results (that we need to tell the remote service
+        #   about).
+        # Any other changes to the context require reconnection.
+        # TODO: the below
+        # Note that it's possible that the developer is trying to
+        # programmatically append messages, in which case we'd miss that
+        # update...maybe we can check the number of appended messages...
+        if diff.history_edited or diff.tools_diff.has_changes() or diff.tool_choice_changed:
+            if diff.history_edited:
+                print("[pk] Context diff: history edited.")
+            if diff.tools_diff.has_changes():
+                print("[pk] Context diff: tools changed.")
+            if diff.tool_choice_changed:
+                print("[pk] Context diff: tool choice changed.")
+            return True
 
     async def _process_completed_function_calls(self, send_new_results: bool):
         # Check for set of completed function calls in the context
@@ -1446,6 +1497,7 @@ class GeminiLiveLLMService(LLMService):
 
     @traced_gemini_live(operation="llm_setup")
     async def _handle_session_ready(self, session: AsyncSession):
+        print("[pk] Handling session ready...")
         """Handle the session being ready."""
         self._session = session
         # If we were just waititng for the session to be ready to run the LLM,
