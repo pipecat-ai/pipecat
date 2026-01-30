@@ -16,11 +16,14 @@ import inspect
 import traceback
 from abc import ABC
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from loguru import logger
 
 from pipecat.utils.utils import obj_count, obj_id
+
+# TypeVar for preserving function signatures in decorators
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 @dataclass
@@ -99,7 +102,7 @@ class BaseObject(ABC):
             logger.debug(f"{self}: waiting on event handlers to finish {list(event_names)}...")
             await asyncio.wait(tasks)
 
-    def event_handler(self, event_name: str):
+    def event_handler(self, event_name: str) -> Callable[[F], F]:
         """Decorator for registering event handlers.
 
         Args:
@@ -109,7 +112,7 @@ class BaseObject(ABC):
             The decorator function that registers the handler.
         """
 
-        def decorator(handler):
+        def decorator(handler: F) -> F:
             self.add_event_handler(event_name, handler)
             return handler
 
