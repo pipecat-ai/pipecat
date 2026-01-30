@@ -369,6 +369,8 @@ class TurnCompletionMixin:
         self._turn_text_buffer += text
 
         # Check for incomplete markers (○ short, ◐ long)
+        # These indicate the user was cut off or needs time - we suppress the bot's
+        # response and start a timeout to re-prompt later.
         incomplete_type: Optional[Literal["short", "long"]] = None
         if USER_TURN_INCOMPLETE_SHORT_MARKER in self._turn_text_buffer:
             incomplete_type = "short"
@@ -385,31 +387,33 @@ class TurnCompletionMixin:
                 f"INCOMPLETE {incomplete_type.upper()} ({marker}) detected, suppressing text"
             )
             self._turn_suppressed = True
+
+            # Push the marker with skip_tts=True so it's added to context (maintains
+            # conversation continuity per prompt instructions) but not spoken by TTS
             frame = LLMTextFrame(self._turn_text_buffer)
             frame.skip_tts = True
             await self.push_frame(frame)
 
-            # Clear buffer
             self._turn_text_buffer = ""
             await self._start_incomplete_timeout(incomplete_type)
             return
 
-        # Check for ✓ (COMPLETE) marker
+        # Check for ✓ (COMPLETE) marker - user's turn was complete, respond normally
         if USER_TURN_COMPLETE_MARKER in self._turn_text_buffer:
-            # Found ✓ (COMPLETE) - separate marker from text
             logger.debug(f"COMPLETE ({USER_TURN_COMPLETE_MARKER}) detected, pushing buffered text")
 
-            # Split buffer at the marker
+            # Split buffer at the marker to handle cases where marker and text
+            # arrive in the same chunk (e.g., "✓ Hello!" from some LLMs)
             marker_pos = self._turn_text_buffer.index(USER_TURN_COMPLETE_MARKER)
             marker_end = marker_pos + len(USER_TURN_COMPLETE_MARKER)
 
-            # Push the marker (and any text before it) with skip_tts
+            # Push the marker with skip_tts=True - adds to context but not spoken
             marker_text = self._turn_text_buffer[:marker_end]
             frame = LLMTextFrame(marker_text)
             frame.skip_tts = True
             await self.push_frame(frame)
 
-            # Push any remaining text after the marker as normal (should be spoken)
+            # Push remaining text after marker as normal speech
             remaining_text = self._turn_text_buffer[marker_end:]
             if remaining_text:
                 # Strip leading space after marker if present (✓ Hello -> Hello)
@@ -418,7 +422,7 @@ class TurnCompletionMixin:
                 if remaining_text:
                     await self.push_frame(LLMTextFrame(remaining_text))
 
-            # Clear buffer and mark COMPLETE found - all subsequent text flows through immediately
+            # Mark complete - all subsequent text flows through immediately
             self._turn_text_buffer = ""
             self._turn_complete_found = True
             return

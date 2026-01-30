@@ -423,6 +423,7 @@ class BaseOpenAILLMService(LLMService):
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
                 await self._push_llm_text(chunk.choices[0].delta.content)
+
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript
             elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(

@@ -172,10 +172,7 @@ class LLMService(TurnCompletionMixin, AIService):
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
     def __init__(
-        self,
-        run_in_parallel: bool = True,
-        function_call_timeout_secs: float = 10.0,
-        **kwargs,
+        self, run_in_parallel: bool = True, function_call_timeout_secs: float = 10.0, **kwargs
     ):
         """Initialize the LLM service.
 
