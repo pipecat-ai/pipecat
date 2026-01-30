@@ -178,7 +178,7 @@ class UserTurnCompletionConfig:
         return self.incomplete_long_prompt or DEFAULT_INCOMPLETE_LONG_PROMPT
 
 
-class TurnCompletionMixin:
+class UserTurnCompletionLLMServiceMixin:
     """Mixin that adds turn completion detection to LLM services.
 
     This mixin provides methods to push LLM text with turn completion detection.

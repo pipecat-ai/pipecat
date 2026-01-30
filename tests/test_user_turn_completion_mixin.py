@@ -13,18 +13,18 @@ from pipecat.turns.user_turn_completion_mixin import (
     USER_TURN_COMPLETE_MARKER,
     USER_TURN_INCOMPLETE_LONG_MARKER,
     USER_TURN_INCOMPLETE_SHORT_MARKER,
-    TurnCompletionMixin,
+    UserTurnCompletionLLMServiceMixin,
 )
 
 
-class MockProcessor(TurnCompletionMixin, FrameProcessor):
+class MockProcessor(UserTurnCompletionLLMServiceMixin, FrameProcessor):
     """Simple mock processor using the turn completion mixin."""
 
     pass
 
 
-class TestUserTurnCompletionMixin(unittest.IsolatedAsyncioTestCase):
-    """Tests for UserTurnCompletionMixin functionality."""
+class TestUserUserTurnCompletionLLMServiceMixin(unittest.IsolatedAsyncioTestCase):
+    """Tests for UserUserTurnCompletionLLMServiceMixin functionality."""
 
     async def test_complete_marker_pushes_text(self):
         """Test that ✓ marker is detected and text after it is pushed normally."""
