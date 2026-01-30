@@ -63,7 +63,7 @@ Example format: ✓ No rush! Let me know when you're ready to continue.
 Generate your ✓ response now."""
 
 # System prompt instructions for turn completion that can be appended to any base prompt
-TURN_COMPLETION_INSTRUCTIONS = """
+USER_TURN_COMPLETION_INSTRUCTIONS = """
 CRITICAL INSTRUCTION - MANDATORY RESPONSE FORMAT:
 Every single response MUST begin with a turn completion indicator. This is not optional.
 
@@ -149,11 +149,11 @@ class UserTurnCompletionConfig:
 
     Attributes:
         instructions: Custom instructions for turn completion. If not provided,
-            uses default TURN_COMPLETION_INSTRUCTIONS.
+            uses default USER_TURN_COMPLETION_INSTRUCTIONS.
         incomplete_short_timeout: Seconds to wait after short incomplete (○) before prompting.
         incomplete_long_timeout: Seconds to wait after long incomplete (◐) before prompting.
-        incomplete_short_prompt: System prompt to use when short timeout expires.
-        incomplete_long_prompt: System prompt to use when long timeout expires.
+        incomplete_short_prompt: Custom prompt when short timeout expires.
+        incomplete_long_prompt: Custom prompt when long timeout expires.
     """
 
     instructions: Optional[str] = None
@@ -162,16 +162,19 @@ class UserTurnCompletionConfig:
     incomplete_short_prompt: Optional[str] = None
     incomplete_long_prompt: Optional[str] = None
 
-    def get_instructions(self) -> str:
-        """Get the turn completion instructions, using default if not set."""
-        return self.instructions or TURN_COMPLETION_INSTRUCTIONS
+    @property
+    def completion_instructions(self) -> str:
+        """Turn completion instructions, using default if not set."""
+        return self.instructions or USER_TURN_COMPLETION_INSTRUCTIONS
 
-    def get_short_prompt(self) -> str:
-        """Get the short incomplete prompt, using default if not set."""
+    @property
+    def short_prompt(self) -> str:
+        """Short incomplete prompt, using default if not set."""
         return self.incomplete_short_prompt or DEFAULT_INCOMPLETE_SHORT_PROMPT
 
-    def get_long_prompt(self) -> str:
-        """Get the long incomplete prompt, using default if not set."""
+    @property
+    def long_prompt(self) -> str:
+        """Long incomplete prompt, using default if not set."""
         return self.incomplete_long_prompt or DEFAULT_INCOMPLETE_LONG_PROMPT
 
 
@@ -236,7 +239,7 @@ class TurnCompletionMixin:
         Returns:
             The turn completion instructions string.
         """
-        return TURN_COMPLETION_INSTRUCTIONS
+        return USER_TURN_COMPLETION_INSTRUCTIONS
 
     async def _start_incomplete_timeout(self, incomplete_type: Literal["short", "long"]):
         """Start a timeout task for incomplete turn handling.
@@ -288,9 +291,9 @@ class TurnCompletionMixin:
 
             # Get the appropriate prompt
             if incomplete_type == "short":
-                prompt = self._user_turn_completion_config.get_short_prompt()
+                prompt = self._user_turn_completion_config.short_prompt
             else:
-                prompt = self._user_turn_completion_config.get_long_prompt()
+                prompt = self._user_turn_completion_config.long_prompt
 
             # Push through pipeline to trigger LLM response
             await self.push_frame(

@@ -517,7 +517,7 @@ class LLMUserAggregator(LLMContextAggregator):
             )
 
             # Auto-inject turn completion instructions into context
-            self._context.add_message({"role": "system", "content": config.get_instructions()})
+            self._context.add_message({"role": "system", "content": config.completion_instructions})
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
