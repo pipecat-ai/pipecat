@@ -332,6 +332,7 @@ async def run_eval_pipeline(
             audio_in_sample_rate=16000,
             audio_out_sample_rate=16000,
         ),
+        enable_rtvi=False,
         idle_timeout_secs=PIPELINE_IDLE_TIMEOUT_SECS,
     )
 
