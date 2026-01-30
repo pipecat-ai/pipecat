@@ -62,3 +62,7 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, text)
         self.assertEqual(self.aggregator.text.text, "")
         self.assertEqual(self.aggregator.text.type, "sentence")
+
+
+if __name__ == "__main__":
+    unittest.main()

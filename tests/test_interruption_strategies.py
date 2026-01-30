@@ -22,3 +22,7 @@ class TestMinWordsInterruptionStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await strategy.should_interrupt(), False)
         await strategy.append_text(" How are you?")
         self.assertEqual(await strategy.should_interrupt(), True)
+
+
+if __name__ == "__main__":
+    unittest.main()
