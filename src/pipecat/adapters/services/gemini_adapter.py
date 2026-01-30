@@ -53,19 +53,32 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for Google."""
         return "google"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> GeminiLLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, strip_function_messages: bool = False
+    ) -> GeminiLLMInvocationParams:
         """Get Gemini-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            strip_function_messages: If True, filter out function_call and function_response
+                parts from messages. This is needed for Gemini Live (at least with
+                "models/gemini-2.5-flash-native-audio-preview-12-2025", the default at
+                the time of this writing) which cannot handle function-call-related
+                messages when initializing conversation history.
+                See https://stackoverflow.com/a/79851394.
 
         Returns:
             Dictionary of parameters for Gemini's API.
         """
-        messages = self._from_universal_context_messages(self.get_messages(context))
+        converted = self._from_universal_context_messages(self.get_messages(context))
+        messages = converted.messages
+
+        if strip_function_messages:
+            messages = self._strip_function_messages(messages)
+
         return {
-            "system_instruction": messages.system_instruction,
-            "messages": messages.messages,
+            "system_instruction": converted.system_instruction,
+            "messages": messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
         }
@@ -668,3 +681,29 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             return True
 
         return False
+
+    def _strip_function_messages(self, messages: List[Content]) -> List[Content]:
+        """Strip function_call and function_response parts from messages.
+
+        Args:
+            messages: List of Content messages to filter.
+
+        Returns:
+            List of Content messages with function-related parts removed.
+        """
+        filtered_messages = []
+        for msg in messages:
+            if msg.parts:
+                filtered_parts = [
+                    part
+                    for part in msg.parts
+                    if not (
+                        getattr(part, "function_call", None)
+                        or getattr(part, "function_response", None)
+                    )
+                ]
+                if filtered_parts:
+                    filtered_messages.append(Content(role=msg.role, parts=filtered_parts))
+            else:
+                filtered_messages.append(msg)
+        return filtered_messages
