@@ -64,16 +64,16 @@ class VADProcessor(FrameProcessor):
         @self._vad_controller.event_handler("on_speech_started")
         async def on_speech_started(_controller):
             logger.debug(f"{self}: User started speaking")
-            await self.push_frame(VADUserStartedSpeakingFrame())
+            await self.broadcast_frame(VADUserStartedSpeakingFrame)
 
         @self._vad_controller.event_handler("on_speech_stopped")
         async def on_speech_stopped(_controller):
             logger.debug(f"{self}: User stopped speaking")
-            await self.push_frame(VADUserStoppedSpeakingFrame())
+            await self.broadcast_frame(VADUserStoppedSpeakingFrame)
 
         @self._vad_controller.event_handler("on_speech_activity")
         async def on_speech_activity(_controller):
-            await self.push_frame(UserSpeakingFrame())
+            await self.broadcast_frame(UserSpeakingFrame)
 
         # Wire up frame pushing from controller to processor
         @self._vad_controller.event_handler("on_push_frame")
