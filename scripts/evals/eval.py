@@ -237,7 +237,6 @@ async def run_eval_pipeline(
             audio_in_enabled=True,
             audio_out_enabled=True,
             video_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=2.0)),
         ),
     )
 
@@ -314,7 +313,7 @@ async def run_eval_pipeline(
     context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=2.0)),
         ),
     )
 
