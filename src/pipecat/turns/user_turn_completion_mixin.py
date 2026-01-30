@@ -233,14 +233,6 @@ class TurnCompletionMixin:
         """
         self._user_turn_completion_config = config
 
-    def get_turn_completion_instructions(self) -> str:
-        """Get the turn completion instructions to append to system prompts.
-
-        Returns:
-            The turn completion instructions string.
-        """
-        return USER_TURN_COMPLETION_INSTRUCTIONS
-
     async def _start_incomplete_timeout(self, incomplete_type: Literal["short", "long"]):
         """Start a timeout task for incomplete turn handling.
 
