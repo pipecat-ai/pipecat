@@ -646,15 +646,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             cancel_on_interruption=item.cancel_on_interruption,
         )
 
-        # Start a timeout task for deferred function calls
-        async def timeout_handler():
-            await asyncio.sleep(self._function_call_timeout_secs)
-            logger.warning(
-                f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {self._function_call_timeout_secs} seconds"
-            )
-            await function_call_result_callback(None)
-
-        timeout_task = self.create_task(timeout_handler())
+        timeout_task: Optional[asyncio.Task] = None
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
         async def function_call_result_callback(
@@ -675,6 +667,24 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 run_llm=runner_item.run_llm,
                 properties=properties,
             )
+
+        # Start a timeout task for deferred function calls
+        async def timeout_handler():
+            try:
+                await asyncio.sleep(self._function_call_timeout_secs)
+                logger.warning(
+                    f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {self._function_call_timeout_secs} seconds"
+                )
+                await function_call_result_callback(None)
+            except asyncio.CancelledError:
+                raise
+
+        timeout_task = self.create_task(timeout_handler())
+
+        # Yield to the event loop so the timeout task coroutine gets entered
+        # before it could be cancelled. Without this, cancelling the task before
+        # it starts would leave the coroutine in a "never awaited" state.
+        await asyncio.sleep(0)
 
         try:
             if isinstance(item.handler, DirectFunctionWrapper):
@@ -712,6 +722,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     )
                     await item.handler(params)
         except Exception as e:
+            # Cancel timeout task if it exists
+            if timeout_task and not timeout_task.done():
+                await self.cancel_task(timeout_task)
             error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
             logger.error(f"{self} {error_message}")
             await self.push_error(error_msg=error_message, exception=e, fatal=False)
