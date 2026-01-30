@@ -4,12 +4,35 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Sarvam AI text-to-speech service implementation."""
+"""Sarvam AI text-to-speech service implementation.
+
+This module provides TTS services using Sarvam AI's API with support for multiple
+Indian languages and two model variants:
+
+**Model Variants:**
+
+- **bulbul:v2** (default): Standard TTS model
+    - Supports: pitch, loudness, pace (0.3-3.0)
+    - Default sample rate: 22050 Hz
+    - Speakers: anushka (default), abhilash, manisha, vidya, arya, karun, hitesh
+
+- **bulbul:v3-beta**: Advanced TTS model with temperature control
+    - Does NOT support: pitch, loudness
+    - Supports: pace (0.5-2.0), temperature (0.01-1.0)
+    - Default sample rate: 24000 Hz
+    - Preprocessing is always enabled
+    - Speakers: aditya (default), ritu, priya, neha, rahul, pooja, rohan, simran,
+      kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa, kabir,
+      aayan, shubh, ashutosh, advait, amelia, sophia
+
+See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for full API details.
+"""
 
 import asyncio
 import base64
 import json
-from typing import Any, AsyncGenerator, Mapping, Optional
+from enum import Enum
+from typing import Any, AsyncGenerator, List, Mapping, Optional
 
 import aiohttp
 from loguru import logger
@@ -42,6 +65,101 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+class SarvamTTSModel(str, Enum):
+    """Available Sarvam TTS models.
+
+    Attributes:
+        BULBUL_V2: Standard TTS model with pitch/loudness control.
+            - Supports pitch, loudness, pace (0.3-3.0)
+            - Default sample rate: 22050 Hz
+        BULBUL_V3_BETA: Advanced model with temperature control.
+            - Does NOT support pitch/loudness
+            - Pace range: 0.5-2.0
+            - Supports temperature parameter
+            - Default sample rate: 24000 Hz
+            - Preprocessing is always enabled
+    """
+
+    BULBUL_V2 = "bulbul:v2"
+    BULBUL_V3_BETA = "bulbul:v3-beta"
+
+
+class SarvamTTSSpeakerV2(str, Enum):
+    """Available speakers for bulbul:v2 model.
+
+    Female voices: anushka, manisha, vidya, arya
+    Male voices: abhilash, karun, hitesh
+    """
+
+    ANUSHKA = "anushka"
+    ABHILASH = "abhilash"
+    MANISHA = "manisha"
+    VIDYA = "vidya"
+    ARYA = "arya"
+    KARUN = "karun"
+    HITESH = "hitesh"
+
+
+class SarvamTTSSpeakerV3(str, Enum):
+    """Available speakers for bulbul:v3-beta model.
+
+    Includes a wider variety of voices with different characteristics.
+    """
+
+    ADITYA = "aditya"
+    RITU = "ritu"
+    PRIYA = "priya"
+    NEHA = "neha"
+    RAHUL = "rahul"
+    POOJA = "pooja"
+    ROHAN = "rohan"
+    SIMRAN = "simran"
+    KAVYA = "kavya"
+    AMIT = "amit"
+    DEV = "dev"
+    ISHITA = "ishita"
+    SHREYA = "shreya"
+    RATAN = "ratan"
+    VARUN = "varun"
+    MANAN = "manan"
+    SUMIT = "sumit"
+    ROOPA = "roopa"
+    KABIR = "kabir"
+    AAYAN = "aayan"
+    SHUBH = "shubh"
+    ASHUTOSH = "ashutosh"
+    ADVAIT = "advait"
+    AMELIA = "amelia"
+    SOPHIA = "sophia"
+
+
+# Default sample rates per model
+SARVAM_DEFAULT_SAMPLE_RATES = {
+    SarvamTTSModel.BULBUL_V2: 22050,
+    SarvamTTSModel.BULBUL_V3_BETA: 24000,
+}
+
+# Default speakers per model
+SARVAM_DEFAULT_SPEAKERS = {
+    SarvamTTSModel.BULBUL_V2: SarvamTTSSpeakerV2.ANUSHKA.value,
+    SarvamTTSModel.BULBUL_V3_BETA: SarvamTTSSpeakerV3.ADITYA.value,
+}
+
+
+def get_speakers_for_model(model: str) -> List[str]:
+    """Get the list of available speakers for a given model.
+
+    Args:
+        model: The model name (e.g., "bulbul:v2" or "bulbul:v3-beta").
+
+    Returns:
+        List of speaker names available for the model.
+    """
+    if model in (SarvamTTSModel.BULBUL_V3_BETA.value):
+        return [s.value for s in SarvamTTSSpeakerV3]
+    return [s.value for s in SarvamTTSSpeakerV2]
+
+
 def language_to_sarvam_language(language: Language) -> Optional[str]:
     """Convert Pipecat Language enum to Sarvam AI language codes.
 
@@ -72,11 +190,27 @@ class SarvamHttpTTSService(TTSService):
     """Text-to-Speech service using Sarvam AI's API.
 
     Converts text to speech using Sarvam AI's TTS models with support for multiple
-    Indian languages. Provides control over voice characteristics like pitch, pace,
-    and loudness.
+    Indian languages. Provides control over voice characteristics.
+
+    **Model Differences:**
+
+    - **bulbul:v2** (default):
+        - Supports: pitch (-0.75 to 0.75), loudness (0.3 to 3.0), pace (0.3 to 3.0)
+        - Default sample rate: 22050 Hz
+        - Speakers: anushka, abhilash, manisha, vidya, arya, karun, hitesh
+
+    - **bulbul:v3-beta**:
+        - Does NOT support: pitch, loudness (will be ignored)
+        - Supports: pace (0.5 to 2.0), temperature (0.01 to 1.0)
+        - Default sample rate: 24000 Hz
+        - Preprocessing is always enabled
+        - Speakers: aditya, ritu, priya, neha, rahul, pooja, rohan, simran, kavya,
+          amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa, kabir,
+          aayan, shubh, ashutosh, advait, amelia, sophia
 
     Example::
 
+        # Using bulbul:v2 (default)
         tts = SarvamHttpTTSService(
             api_key="your-api-key",
             voice_id="anushka",
@@ -85,18 +219,20 @@ class SarvamHttpTTSService(TTSService):
             params=SarvamHttpTTSService.InputParams(
                 language=Language.HI,
                 pitch=0.1,
-                pace=1.2
+                pace=1.2,
+                loudness=1.5
             )
         )
 
-        # For bulbul v3 beta with any speaker:
+        # Using bulbul:v3-beta with temperature control
         tts_v3 = SarvamHttpTTSService(
             api_key="your-api-key",
-            voice_id="speaker_name",
-            model="bulbul:v3,
+            voice_id="aditya",  # Use v3 speaker
+            model="bulbul:v3-beta",
             aiohttp_session=session,
             params=SarvamHttpTTSService.InputParams(
                 language=Language.HI,
+                pace=1.2,  # Range: 0.5-2.0 for v3
                 temperature=0.8
             )
         )
@@ -108,23 +244,47 @@ class SarvamHttpTTSService(TTSService):
         Parameters:
             language: Language for synthesis. Defaults to English (India).
             pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-            pace: Speech pace multiplier (0.3 to 3.0). Defaults to 1.0.
-            loudness: Volume multiplier (0.1 to 3.0). Defaults to 1.0.
+                **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+            pace: Speech pace multiplier. Defaults to 1.0.
+                - bulbul:v2: Range 0.3 to 3.0
+                - bulbul:v3-beta: Range 0.5 to 2.0
+            loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
+                **Note:** Only supported for bulbul:v2. Ignored for v3 models.
             enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
+                **Note:** Always enabled for bulbul:v3-beta (cannot be disabled).
+            temperature: Controls output randomness for bulbul:v3-beta (0.01 to 1.0).
+                Lower values = more deterministic, higher = more random. Defaults to 0.6.
+                **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
         """
 
         language: Optional[Language] = Language.EN
-        pitch: Optional[float] = Field(default=0.0, ge=-0.75, le=0.75)
-        pace: Optional[float] = Field(default=1.0, ge=0.3, le=3.0)
-        loudness: Optional[float] = Field(default=1.0, ge=0.1, le=3.0)
-        enable_preprocessing: Optional[bool] = False
+        pitch: Optional[float] = Field(
+            default=0.0,
+            ge=-0.75,
+            le=0.75,
+            description="Voice pitch adjustment. Only for bulbul:v2.",
+        )
+        pace: Optional[float] = Field(
+            default=1.0,
+            ge=0.3,
+            le=3.0,
+            description="Speech pace. v2: 0.3-3.0, v3: 0.5-2.0.",
+        )
+        loudness: Optional[float] = Field(
+            default=1.0,
+            ge=0.3,
+            le=3.0,
+            description="Volume multiplier. Only for bulbul:v2.",
+        )
+        enable_preprocessing: Optional[bool] = Field(
+            default=False,
+            description="Enable text preprocessing. Always enabled for v3-beta model.",
+        )
         temperature: Optional[float] = Field(
             default=0.6,
             ge=0.01,
             le=1.0,
-            description="Controls the randomness of the output for bulbul v3 beta. "
-            "Lower values make the output more focused and deterministic, while "
-            "higher values make it more random. Range: 0.01 to 1.0. Default: 0.6.",
+            description="Output randomness for bulbul:v3-beta only. Range: 0.01-1.0.",
         )
 
     def __init__(
@@ -132,7 +292,7 @@ class SarvamHttpTTSService(TTSService):
         *,
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
-        voice_id: str = "anushka",
+        voice_id: Optional[str] = None,
         model: str = "bulbul:v2",
         base_url: str = "https://api.sarvam.ai",
         sample_rate: Optional[int] = None,
@@ -144,37 +304,79 @@ class SarvamHttpTTSService(TTSService):
         Args:
             api_key: Sarvam AI API subscription key.
             aiohttp_session: Shared aiohttp session for making requests.
-            voice_id: Speaker voice ID (e.g., "anushka", "meera"). Defaults to "anushka".
-            model: TTS model to use ("bulbul:v2" or "bulbul:v3-beta" or "bulbul:v3"). Defaults to "bulbul:v2".
+            voice_id: Speaker voice ID. If None, uses model-appropriate default:
+                - bulbul:v2: "anushka"
+                - bulbul:v3-beta/v3: "aditya"
+            model: TTS model to use. Options:
+                - "bulbul:v2" (default): Standard model with pitch/loudness support
+                - "bulbul:v3-beta": Advanced model with temperature control
+                - "bulbul:v3": Alias for v3-beta
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
-            sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000). If None, uses default.
+            sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000).
+                If None, uses model-specific default (v2: 22050, v3: 24000).
             params: Additional voice and preprocessing parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
+
+        Note:
+            When using bulbul:v3-beta:
+            - pitch and loudness parameters are ignored
+            - pace range is limited to 0.5-2.0
+            - preprocessing is always enabled
+            - use SarvamTTSSpeakerV3 speakers (e.g., "aditya", "ritu")
         """
+        # Determine if using v3 model
+        is_v3_model = model in (
+            SarvamTTSModel.BULBUL_V3_BETA.value,
+            "bulbul:v3-beta",
+        )
+
+        # Set default sample rate based on model if not specified
+        if sample_rate is None:
+            sample_rate = 24000 if is_v3_model else 22050
+
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or SarvamHttpTTSService.InputParams()
 
+        # Set default voice based on model if not specified
+        if voice_id is None:
+            voice_id = "aditya" if is_v3_model else "anushka"
+
         self._api_key = api_key
         self._base_url = base_url
         self._session = aiohttp_session
+        self._is_v3_model = is_v3_model
 
         # Build base settings common to all models
         self._settings = {
             "language": (
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
-            "enable_preprocessing": params.enable_preprocessing,
+            "enable_preprocessing": params.enable_preprocessing if not is_v3_model else True,
         }
 
         # Add model-specific parameters
-        if model in ("bulbul:v3-beta", "bulbul:v3"):
+        if is_v3_model:
+            # Validate pace for v3 (0.5-2.0)
+            pace = params.pace
+            if pace is not None and (pace < 0.5 or pace > 2.0):
+                logger.warning(
+                    f"Pace {pace} is outside v3 model range (0.5-2.0). Clamping to valid range."
+                )
+                pace = max(0.5, min(2.0, pace))
+
             self._settings.update(
                 {
-                    "temperature": getattr(params, "temperature", 0.6),
+                    "temperature": params.temperature,
+                    "pace": pace,
                     "model": model,
                 }
             )
+            # Log warning if v2-only parameters are set
+            if params.pitch != 0.0:
+                logger.warning(f"pitch parameter is ignored for {model}")
+            if params.loudness != 1.0:
+                logger.warning(f"loudness parameter is ignored for {model}")
         else:
             self._settings.update(
                 {
@@ -184,6 +386,9 @@ class SarvamHttpTTSService(TTSService):
                     "model": model,
                 }
             )
+            # Log warning if v3-only parameters are set
+            if params.temperature != 0.6:
+                logger.warning(f"temperature parameter is ignored for {model}")
 
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -231,17 +436,27 @@ class SarvamHttpTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
+            # Build payload based on model type
             payload = {
                 "text": text,
                 "target_language_code": self._settings["language"],
                 "speaker": self._voice_id,
-                "pitch": self._settings["pitch"],
-                "pace": self._settings["pace"],
-                "loudness": self._settings["loudness"],
                 "sample_rate": self.sample_rate,
                 "enable_preprocessing": self._settings["enable_preprocessing"],
                 "model": self._model_name,
             }
+
+            # Add model-specific parameters
+            if self._is_v3_model:
+                # v3 models use temperature and pace (0.5-2.0)
+                payload["temperature"] = self._settings.get("temperature", 0.6)
+                if "pace" in self._settings:
+                    payload["pace"] = self._settings["pace"]
+            else:
+                # v2 models use pitch, pace, loudness
+                payload["pitch"] = self._settings.get("pitch", 0.0)
+                payload["pace"] = self._settings.get("pace", 1.0)
+                payload["loudness"] = self._settings.get("loudness", 1.0)
 
             headers = {
                 "api-subscription-key": self._api_key,
@@ -296,10 +511,34 @@ class SarvamTTSService(InterruptibleTTSService):
     """WebSocket-based text-to-speech service using Sarvam AI.
 
     Provides streaming TTS with real-time audio generation for multiple Indian languages.
-    Supports voice control parameters like pitch, pace, and loudness adjustment.
+    Uses WebSocket for low-latency streaming audio synthesis.
+
+    **Model Differences:**
+
+    - **bulbul:v2** (default):
+        - Supports: pitch (-0.75 to 0.75), loudness (0.3 to 3.0), pace (0.3 to 3.0)
+        - Default sample rate: 22050 Hz
+        - Speakers: anushka, abhilash, manisha, vidya, arya, karun, hitesh
+
+    - **bulbul:v3-beta** / **bulbul:v3**:
+        - Does NOT support: pitch, loudness (will be ignored)
+        - Supports: pace (0.5 to 2.0), temperature (0.01 to 1.0)
+        - Default sample rate: 24000 Hz
+        - Preprocessing is always enabled
+        - Speakers: aditya, ritu, priya, neha, rahul, pooja, rohan, simran, kavya,
+          amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa, kabir,
+          aayan, shubh, ashutosh, advait, amelia, sophia
+
+    **WebSocket Protocol:**
+    The service uses a WebSocket connection for real-time streaming. Messages include:
+    - config: Initial configuration with voice settings
+    - text: Text chunks for synthesis
+    - flush: Signal to process remaining buffered text
+    - ping: Keepalive signal
 
     Example::
 
+        # Using bulbul:v2 (default)
         tts = SarvamTTSService(
             api_key="your-api-key",
             voice_id="anushka",
@@ -307,63 +546,108 @@ class SarvamTTSService(InterruptibleTTSService):
             params=SarvamTTSService.InputParams(
                 language=Language.HI,
                 pitch=0.1,
-                pace=1.2
+                pace=1.2,
+                loudness=1.5
             )
         )
 
-        # For bulbul v3 beta with any speaker and temperature:
-        # Note: pace and loudness are not supported for bulbul v3 and bulbul v3 beta
+        # Using bulbul:v3-beta with temperature control
         tts_v3 = SarvamTTSService(
             api_key="your-api-key",
-            voice_id="speaker_name",
-            model="bulbul:v3",
+            voice_id="aditya",  # Use v3 speaker
+            model="bulbul:v3-beta",
             params=SarvamTTSService.InputParams(
                 language=Language.HI,
+                pace=1.2,  # Range: 0.5-2.0 for v3
                 temperature=0.8
             )
         )
+
+    See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for API details.
     """
 
     class InputParams(BaseModel):
-        """Configuration parameters for Sarvam TTS.
+        """Configuration parameters for Sarvam TTS WebSocket service.
 
         Parameters:
             pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
-            pace: Speech pace multiplier (0.3 to 3.0). Defaults to 1.0.
-            loudness: Volume multiplier (0.1 to 3.0). Defaults to 1.0.
+                **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+            pace: Speech pace multiplier. Defaults to 1.0.
+                - bulbul:v2: Range 0.3 to 3.0
+                - bulbul:v3-beta: Range 0.5 to 2.0
+            loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
+                **Note:** Only supported for bulbul:v2. Ignored for v3 models.
             enable_preprocessing: Enable text preprocessing. Defaults to False.
-            min_buffer_size: Minimum number of characters to buffer before generating audio.
+                **Note:** Always enabled for bulbul:v3-beta.
+            min_buffer_size: Minimum characters to buffer before generating audio.
                 Lower values reduce latency but may affect quality. Defaults to 50.
-            max_chunk_length: Maximum number of characters processed in a single chunk.
-                Controls memory usage and processing efficiency. Defaults to 200.
-            output_audio_codec: Audio codec format. Defaults to "linear16".
-            output_audio_bitrate: Audio bitrate. Defaults to "128k".
-            language: Target language for synthesis. Supports Bengali (bn-IN), English (en-IN),
-                Gujarati (gu-IN), Hindi (hi-IN), Kannada (kn-IN), Malayalam (ml-IN),
-                Marathi (mr-IN), Odia (od-IN), Punjabi (pa-IN), Tamil (ta-IN),
-                Telugu (te-IN). Defaults to en-IN.
+            max_chunk_length: Maximum characters processed in a single chunk.
+                Controls memory usage and processing efficiency. Defaults to 150.
+            output_audio_codec: Audio codec format. Options: linear16, mulaw, alaw,
+                opus, flac, aac, wav, mp3. Defaults to "linear16".
+            output_audio_bitrate: Audio bitrate (32k, 64k, 96k, 128k, 192k).
+                Defaults to "128k".
+            language: Target language for synthesis. Supports Indian languages.
+            temperature: Controls output randomness for bulbul:v3-beta (0.01 to 1.0).
+                Lower = more deterministic, higher = more random. Defaults to 0.6.
+                **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
 
-                Available Speakers:
-            Female: anushka, manisha, vidya, arya
-            Male: abhilash, karun, hitesh
+        **Speakers by Model:**
+
+        bulbul:v2:
+            - Female: anushka (default), manisha, vidya, arya
+            - Male: abhilash, karun, hitesh
+
+        bulbul:v3-beta:
+            - aditya (default), ritu, priya, neha, rahul, pooja, rohan, simran,
+              kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit,
+              roopa, kabir, aayan, shubh, ashutosh, advait, amelia, sophia
         """
 
-        pitch: Optional[float] = Field(default=0.0, ge=-0.75, le=0.75)
-        pace: Optional[float] = Field(default=1.0, ge=0.3, le=3.0)
-        loudness: Optional[float] = Field(default=1.0, ge=0.1, le=3.0)
-        enable_preprocessing: Optional[bool] = False
-        min_buffer_size: Optional[int] = 50
-        max_chunk_length: Optional[int] = 200
-        output_audio_codec: Optional[str] = "linear16"
-        output_audio_bitrate: Optional[str] = "128k"
+        pitch: Optional[float] = Field(
+            default=0.0,
+            ge=-0.75,
+            le=0.75,
+            description="Voice pitch adjustment. Only for bulbul:v2.",
+        )
+        pace: Optional[float] = Field(
+            default=1.0,
+            ge=0.3,
+            le=3.0,
+            description="Speech pace. v2: 0.3-3.0, v3: 0.5-2.0.",
+        )
+        loudness: Optional[float] = Field(
+            default=1.0,
+            ge=0.3,
+            le=3.0,
+            description="Volume multiplier. Only for bulbul:v2.",
+        )
+        enable_preprocessing: Optional[bool] = Field(
+            default=False,
+            description="Enable text preprocessing. Always enabled for v3 models.",
+        )
+        min_buffer_size: Optional[int] = Field(
+            default=50,
+            description="Minimum characters to buffer before TTS processing.",
+        )
+        max_chunk_length: Optional[int] = Field(
+            default=150,
+            description="Maximum length for sentence splitting.",
+        )
+        output_audio_codec: Optional[str] = Field(
+            default="linear16",
+            description="Audio codec: linear16, mulaw, alaw, opus, flac, aac, wav, mp3.",
+        )
+        output_audio_bitrate: Optional[str] = Field(
+            default="128k",
+            description="Audio bitrate: 32k, 64k, 96k, 128k, 192k.",
+        )
         language: Optional[Language] = Language.EN
         temperature: Optional[float] = Field(
             default=0.6,
             ge=0.01,
             le=1.0,
-            description="Controls the randomness of the output for bulbul v3 beta. "
-            "Lower values make the output more focused and deterministic, while "
-            "higher values make it more random. Range: 0.01 to 1.0. Default: 0.6.",
+            description="Output randomness for bulbul:v3-beta only. Range: 0.01-1.0.",
         )
 
     def __init__(
@@ -371,7 +655,7 @@ class SarvamTTSService(InterruptibleTTSService):
         *,
         api_key: str,
         model: str = "bulbul:v2",
-        voice_id: str = "anushka",
+        voice_id: Optional[str] = None,
         url: str = "wss://api.sarvam.ai/text-to-speech/ws",
         aggregate_sentences: Optional[bool] = True,
         sample_rate: Optional[int] = None,
@@ -382,20 +666,39 @@ class SarvamTTSService(InterruptibleTTSService):
 
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
-            model: Identifier of the Sarvam speech model (default "bulbul:v2").
-                Supports "bulbul:v2", "bulbul:v3-beta" and "bulbul:v3".
-            voice_id: Voice identifier for synthesis (default "anushka").
-            url: WebSocket URL for connecting to the TTS backend (default production URL).
-            aggregate_sentences: Whether to merge multiple sentences into one audio chunk (default True).
-            sample_rate: Desired sample rate for the output audio in Hz (overrides default if set).
-            params: Optional input parameters to override global configuration.
-            **kwargs: Optional keyword arguments forwarded to InterruptibleTTSService (such as
-                `push_stop_frames`, `sample_rate`, task manager parameters, event hooks, etc.)
-                to customize transport behavior or enable metrics support.
+            model: TTS model to use. Options:
+                - "bulbul:v2" (default): Standard model with pitch/loudness support
+                - "bulbul:v3-beta": Advanced model with temperature control
+                - "bulbul:v3": Alias for v3-beta
+            voice_id: Speaker voice ID. If None, uses model-appropriate default:
+                - bulbul:v2: "anushka"
+                - bulbul:v3-beta/v3: "aditya"
+            url: WebSocket URL for the TTS backend (default production URL).
+            aggregate_sentences: Merge multiple sentences into one audio chunk (default True).
+            sample_rate: Output audio sample rate in Hz (8000, 16000, 22050, 24000).
+                If None, uses model-specific default (v2: 22050, v3: 24000).
+            params: Optional input parameters to override defaults.
+            **kwargs: Arguments forwarded to InterruptibleTTSService.
 
-        This method sets up the internal TTS configuration mapping, constructs the WebSocket
-        URL based on the chosen model, and initializes state flags before connecting.
+        Note:
+            When using bulbul:v3-beta:
+            - pitch and loudness parameters are ignored
+            - pace range is limited to 0.5-2.0
+            - preprocessing is always enabled
+            - use SarvamTTSSpeakerV3 speakers (e.g., "aditya", "ritu")
+
+        See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream
         """
+        # Determine if using v3 model
+        is_v3_model = model in (
+            SarvamTTSModel.BULBUL_V3_BETA.value,
+            "bulbul:v3-beta",
+        )
+
+        # Set default sample rate based on model if not specified
+        if sample_rate is None:
+            sample_rate = 24000 if is_v3_model else 22050
+
         # Initialize parent class first
         super().__init__(
             aggregate_sentences=aggregate_sentences,
@@ -407,19 +710,26 @@ class SarvamTTSService(InterruptibleTTSService):
         )
         params = params or SarvamTTSService.InputParams()
 
-        # WebSocket endpoint URL
+        # Set default voice based on model if not specified
+        if voice_id is None:
+            voice_id = "aditya" if is_v3_model else "anushka"
+
+        self._is_v3_model = is_v3_model
+
+        # WebSocket endpoint URL with model query parameter
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
         self.set_model_name(model)
         self.set_voice(voice_id)
+
         # Build base settings common to all models
         self._settings = {
             "target_language_code": (
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
             "speaker": voice_id,
-            "speech_sample_rate": 0,
-            "enable_preprocessing": params.enable_preprocessing,
+            "speech_sample_rate": str(sample_rate),
+            "enable_preprocessing": params.enable_preprocessing if not is_v3_model else True,
             "min_buffer_size": params.min_buffer_size,
             "max_chunk_length": params.max_chunk_length,
             "output_audio_codec": params.output_audio_codec,
@@ -427,13 +737,27 @@ class SarvamTTSService(InterruptibleTTSService):
         }
 
         # Add model-specific parameters
-        if model in ("bulbul:v3-beta", "bulbul:v3"):
+        if is_v3_model:
+            # Validate pace for v3 (0.5-2.0)
+            pace = params.pace
+            if pace is not None and (pace < 0.5 or pace > 2.0):
+                logger.warning(
+                    f"Pace {pace} is outside v3 model range (0.5-2.0). Clamping to valid range."
+                )
+                pace = max(0.5, min(2.0, pace))
+
             self._settings.update(
                 {
-                    "temperature": getattr(params, "temperature", 0.6),
+                    "temperature": params.temperature,
+                    "pace": pace,
                     "model": model,
                 }
             )
+            # Log warning if v2-only parameters are set
+            if params.pitch != 0.0:
+                logger.warning(f"pitch parameter is ignored for {model}")
+            if params.loudness != 1.0:
+                logger.warning(f"loudness parameter is ignored for {model}")
         else:
             self._settings.update(
                 {
@@ -443,8 +767,11 @@ class SarvamTTSService(InterruptibleTTSService):
                     "model": model,
                 }
             )
-        self._started = False
+            # Log warning if v3-only parameters are set
+            if params.temperature != 0.6:
+                logger.warning(f"temperature parameter is ignored for {model}")
 
+        self._started = False
         self._receive_task = None
         self._keepalive_task = None
         self._disconnecting = False
@@ -476,7 +803,8 @@ class SarvamTTSService(InterruptibleTTSService):
         """
         await super().start(frame)
 
-        self._settings["speech_sample_rate"] = self.sample_rate
+        # WebSocket API expects sample rate as string
+        self._settings["speech_sample_rate"] = str(self.sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
