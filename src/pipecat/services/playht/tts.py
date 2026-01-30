@@ -169,7 +169,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         self._user_id = user_id
         self._websocket_url = None
         self._receive_task = None
-        self._request_id = None
+        self._context_id = None
 
         self._settings = {
             "language": self.language_to_service_language(params.language)
@@ -285,7 +285,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
-            self._request_id = None
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -328,7 +328,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         """Handle interruption by stopping metrics and clearing request ID."""
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        self._request_id = None
+        self._context_id = None
 
     async def _receive_messages(self):
         """Receive messages from PlayHT websocket."""
@@ -338,7 +338,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 if message.startswith(b"RIFF"):
                     continue
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(message, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(message, self.sample_rate, 1, context_id=self._context_id)
                 await self.push_frame(frame)
             else:
                 logger.debug(f"Received text message: {message}")
@@ -349,9 +349,9 @@ class PlayHTTTSService(InterruptibleTTSService):
                         logger.debug(f"Started processing request: {msg.get('request_id')}")
                     elif msg.get("type") == "end":
                         # Handle end of stream
-                        if "request_id" in msg and msg["request_id"] == self._request_id:
-                            await self.push_frame(TTSStoppedFrame())
-                            self._request_id = None
+                        if "request_id" in msg and msg["request_id"] == self._context_id:
+                            await self.push_frame(TTSStoppedFrame(context_id=self._context_id))
+                            self._context_id = None
                     elif "error" in msg:
                         await self.push_error(error_msg=f"Error: {msg['error']}")
                 except json.JSONDecodeError:
@@ -375,10 +375,10 @@ class PlayHTTTSService(InterruptibleTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self._request_id:
+            if not self._context_id:
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame(context_id=context_id)
-                self._request_id = str(uuid.uuid4())
+                self._context_id = context_id
 
             tts_command = {
                 "text": text,
@@ -389,7 +389,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 "language": self._settings["language"],
                 "speed": self._settings["speed"],
                 "seed": self._settings["seed"],
-                "request_id": self._request_id,
+                "request_id": self._context_id,
             }
 
             try:
