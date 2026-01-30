@@ -18,12 +18,9 @@ import json
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set, Type
+from typing import Any, Dict, List, Literal, Optional, Set, Type
 
 from loguru import logger
-
-if TYPE_CHECKING:
-    from pipecat.services.mixins.turn_completion import TurnCompletionConfig
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
@@ -75,6 +72,7 @@ from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from pipecat.turns.user_turn_completion_mixin import TurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
@@ -505,8 +503,6 @@ class LLMUserAggregator(LLMContextAggregator):
 
         # Enable incomplete turn filtering on the LLM if configured
         if self._params.filter_incomplete_user_turns:
-            from pipecat.services.mixins.turn_completion import TurnCompletionConfig
-
             # Get config or use defaults
             config = self._params.turn_completion_config or TurnCompletionConfig()
 
@@ -1195,7 +1191,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         These markers (✓, ○, ◐) are used internally for turn completion
         detection and shouldn't appear in the final transcript.
         """
-        from pipecat.services.mixins.turn_completion import (
+        from pipecat.turns.user_turn_completion_mixin import (
             TURN_COMPLETE_MARKER,
             TURN_INCOMPLETE_LONG_MARKER,
             TURN_INCOMPLETE_SHORT_MARKER,
