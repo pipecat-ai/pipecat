@@ -617,6 +617,7 @@ class RimeHttpTTSService(TTSService):
                 async for frame in self._stream_audio_frames_from_iterator(
                     response.content.iter_chunked(CHUNK_SIZE),
                     strip_wav_header=need_to_strip_wav_header,
+                    context_id=context_id,
                 ):
                     await self.stop_ttfb_metrics()
                     yield frame

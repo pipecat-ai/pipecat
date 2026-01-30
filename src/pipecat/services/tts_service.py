@@ -517,7 +517,11 @@ class TTSService(AIService):
             await self._stop_frame_queue.put(frame)
 
     async def _stream_audio_frames_from_iterator(
-        self, iterator: AsyncIterator[bytes], *, strip_wav_header: bool
+        self,
+        iterator: AsyncIterator[bytes],
+        *,
+        strip_wav_header: bool,
+        context_id: Optional[str] = None,
     ) -> AsyncGenerator[Frame, None]:
         buffer = bytearray()
         need_to_strip_wav_header = strip_wav_header
@@ -536,7 +540,9 @@ class TTSService(AIService):
                 buffer = buffer[aligned_length:]  # keep any leftover byte
 
                 if len(aligned_chunk) > 0:
-                    frame = TTSAudioRawFrame(bytes(aligned_chunk), self.sample_rate, 1)
+                    frame = TTSAudioRawFrame(
+                        bytes(aligned_chunk), self.sample_rate, 1, context_id=context_id
+                    )
                     yield frame
 
         if len(buffer) > 0:

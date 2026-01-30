@@ -101,7 +101,9 @@ class PiperTTSService(TTSService):
                 CHUNK_SIZE = self.chunk_size
 
                 async for frame in self._stream_audio_frames_from_iterator(
-                    response.content.iter_chunked(CHUNK_SIZE), strip_wav_header=True
+                    response.content.iter_chunked(CHUNK_SIZE),
+                    strip_wav_header=True,
+                    context_id=context_id,
                 ):
                     await self.stop_ttfb_metrics()
                     yield frame
