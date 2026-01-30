@@ -49,6 +49,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TextFrame,
     TranscriptionFrame,
+    TranslationFrame,
     UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -706,7 +707,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
                     DeprecationWarning,
                 )
 
-        self._started = 0
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._function_calls_image_results: Dict[str, UserImageRawFrame] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
@@ -828,12 +828,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
         await self._trigger_assistant_turn_stopped()
-        self._started = 0
         await self.reset()
 
     async def _handle_end_or_cancel(self, frame: Frame):
         await self._trigger_assistant_turn_stopped()
-        self._started = 0
 
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
@@ -978,11 +976,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
-        self._started += 1
         await self._trigger_assistant_turn_started()
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
-        self._started -= 1
         await self._trigger_assistant_turn_stopped()
 
     async def _handle_text(self, frame: TextFrame):
@@ -1000,18 +996,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
     async def _handle_thought_start(self, frame: LLMThoughtStartFrame):
-        if not self._started:
-            return
-
         await self._reset_thought_aggregation()
         self._thought_append_to_context = frame.append_to_context
         self._thought_llm = frame.llm
         self._thought_start_time = time_now_iso8601()
 
     async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
-        if not self._started:
-            return
-
         # Make sure we really have text (spaces count, too!)
         if len(frame.text) == 0:
             return
@@ -1023,9 +1013,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         )
 
     async def _handle_thought_end(self, frame: LLMThoughtEndFrame):
-        if not self._started:
-            return
-
         thought = concatenate_aggregated_text(self._thought_aggregation)
 
         if self._thought_append_to_context:
