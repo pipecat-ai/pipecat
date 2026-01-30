@@ -982,6 +982,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self._trigger_assistant_turn_stopped()
 
     async def _handle_text(self, frame: TextFrame):
+        # Skip TextFrame types not intended to build the assistant context
+        if isinstance(frame, (TranscriptionFrame, TranslationFrame, InterimTranscriptionFrame)):
+            return
+
         if not frame.append_to_context:
             return
 
