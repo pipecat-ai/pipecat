@@ -356,6 +356,20 @@ class LLMService(TurnCompletionMixin, AIService):
 
         await super().push_frame(frame, direction)
 
+    async def _push_llm_text(self, text: str):
+        """Push LLM text, using turn completion detection if enabled.
+
+        This helper method simplifies text pushing in LLM implementations by
+        handling the conditional logic for turn completion internally.
+
+        Args:
+            text: The text content from the LLM to push.
+        """
+        if self._filter_incomplete_user_turns:
+            await self._push_turn_text(text)
+        else:
+            await self.push_frame(LLMTextFrame(text))
+
     async def _handle_interruptions(self, _: InterruptionFrame):
         for function_name, entry in self._functions.items():
             if entry.cancel_on_interruption:

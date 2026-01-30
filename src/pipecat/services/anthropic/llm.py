@@ -439,11 +439,7 @@ class AnthropicLLMService(LLMService):
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
-                        # Use turn completion if enabled, otherwise push normally
-                        if self._filter_incomplete_user_turns:
-                            await self._push_turn_text(event.delta.text)
-                        else:
-                            await self.push_frame(LLMTextFrame(event.delta.text))
+                        await self._push_llm_text(event.delta.text)
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
                     elif hasattr(event.delta, "partial_json") and tool_use_block:
                         json_accumulator += event.delta.partial_json

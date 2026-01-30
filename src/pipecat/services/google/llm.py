@@ -1023,11 +1023,7 @@ class GoogleLLMService(LLMService):
                                     await self.push_frame(LLMThoughtEndFrame())
                                 else:
                                     accumulated_text += part.text
-                                    # Use turn completion if enabled, otherwise push normally
-                                    if self._filter_incomplete_user_turns:
-                                        await self._push_turn_text(part.text)
-                                    else:
-                                        await self.push_frame(LLMTextFrame(part.text))
+                                    await self._push_llm_text(part.text)
                             elif part.function_call:
                                 function_call = part.function_call
                                 function_call_id = function_call.id or str(uuid.uuid4())

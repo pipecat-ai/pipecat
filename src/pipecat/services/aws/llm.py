@@ -1107,11 +1107,7 @@ class AWSBedrockLLMService(LLMService):
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]
                         if "text" in delta:
-                            # Use turn completion if enabled, otherwise push normally
-                            if self._filter_incomplete_user_turns:
-                                await self._push_turn_text(delta["text"])
-                            else:
-                                await self.push_frame(LLMTextFrame(delta["text"]))
+                            await self._push_llm_text(delta["text"])
                             completion_tokens_estimate += self._estimate_tokens(delta["text"])
                         elif "toolUse" in delta and "input" in delta["toolUse"]:
                             # Handle partial JSON for tool use
