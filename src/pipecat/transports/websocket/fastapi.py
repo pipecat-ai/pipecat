@@ -498,6 +498,13 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload:
+                # Handle list of payloads (e.g., OPUS frames that must be sent individually)
+                if isinstance(payload, list):
+                    for p in payload:
+                        if p:
+                            await self._client.send(p)
+                    return
+
                 # Optional protocol-level audio packetization:
                 # If a downstream WebSocket media endpoint requires fixed-size PCM frames,
                 # configure params.fixed_audio_packet_size (e.g. 640 for 20ms @ 16kHz PCM16 mono).

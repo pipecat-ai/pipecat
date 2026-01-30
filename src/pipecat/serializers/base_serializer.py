@@ -7,6 +7,7 @@
 """Frame serialization interfaces for Pipecat."""
 
 from abc import ABC, abstractmethod
+from typing import List, Union
 
 from pipecat.frames.frames import Frame, StartFrame
 from pipecat.utils.base_object import BaseObject
@@ -29,14 +30,15 @@ class FrameSerializer(BaseObject):
         pass
 
     @abstractmethod
-    async def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> Union[str, bytes, List[Union[str, bytes]], None]:
         """Convert a frame to its serialized representation.
 
         Args:
             frame: The frame to serialize.
 
         Returns:
-            Serialized frame data as string, bytes, or None if serialization fails.
+            Serialized frame data as string, bytes, list of strings/bytes for
+            multi-packet protocols (e.g., OPUS), or None if serialization fails.
         """
         pass
 
