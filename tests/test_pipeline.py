@@ -7,6 +7,7 @@
 import asyncio
 import time
 import unittest
+from unittest.mock import patch
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -528,3 +529,20 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         except asyncio.CancelledError:
             assert error_received
+
+    @patch("pipecat.pipeline.task.logger")
+    async def test_duplicate_start_frame_warns(self, mock_logger):
+        """Test that duplicate StartFrame logs a warning."""
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        task = PipelineTask(pipeline)
+
+        # User mistakenly queues a StartFrame (pipeline sends one automatically)
+        await task.queue_frame(StartFrame())
+        await task.queue_frame(EndFrame())
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+
+        # Verify warning was logged for duplicate StartFrame
+        mock_logger.warning.assert_called()
+        warning_call = mock_logger.warning.call_args[0][0]
+        assert "Duplicate StartFrame" in warning_call
