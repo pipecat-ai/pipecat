@@ -1033,10 +1033,20 @@ class GeminiLiveLLMService(LLMService):
             if self._context_update_requires_reconnect(diff):
                 # Reconnect
                 print("[pk] Context update requires reconnect. Reconnecting...")
+
                 # TODO: necessary?
                 self._session_resumption_handle = None
+
                 # TODO: do something special here to handle the context like it's the initial one again?
+
+                # Reconnect
                 await self._reconnect()
+
+                # Initialize our bookkeeping of already-completed tool calls in
+                # the context
+                await self._process_completed_function_calls(send_new_results=False)
+
+                # Trigger "initial" response with new connection
                 await self._create_initial_response()
             else:
                 # Send results for newly-completed function calls, if any.
