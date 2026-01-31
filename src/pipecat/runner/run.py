@@ -1347,7 +1347,7 @@ def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace, ws_used_toke
             "telnyx": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="wss://{args.proxy}/ws" bidirectionalMode="rtp"></Stream>
+    <Stream url="wss://{args.proxy}/ws" bidirectionalMode="rtp" bidirectionalCodec="OPUS" bidirectionalSamplingRate="16000"></Stream>
   </Connect>
 </Response>""",
             "plivo": f"""<?xml version="1.0" encoding="UTF-8"?>
