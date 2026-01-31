@@ -266,11 +266,15 @@ class PatternPairAggregator(SimpleTextAggregator):
         self._handlers[type] = handler
         return self
 
-    def _push_open_if_start_delimiter(self) -> Optional[_OpenPattern]:
+    def _push_open_if_start_delimiter(
+        self, ignore_spec: Optional[_PatternSpec] = None
+    ) -> Optional[_OpenPattern]:
         if not self._text:
             return None
         last = self._text[-1]
         for spec in self._start_by_last.get(last, []):
+            if ignore_spec and spec is ignore_spec:
+                continue
             if len(self._text) >= spec.start_len and self._text.endswith(spec.start):
                 start_idx = len(self._text) - spec.start_len
                 op = _OpenPattern(spec=spec, start_idx=start_idx)
@@ -344,11 +348,16 @@ class PatternPairAggregator(SimpleTextAggregator):
             self._text += char
             yielded_aggregate = False
 
+            ignore_spec = None
             while True:
                 closed = await self._close_one_if_end_delimiter()
                 if closed is None:
                     break
                 spec, pm = closed
+
+                if spec.action == MatchAction.KEEP:
+                    ignore_spec = spec
+
                 if spec.action == MatchAction.AGGREGATE:
                     yield pm
                     yielded_aggregate = True
@@ -358,7 +367,7 @@ class PatternPairAggregator(SimpleTextAggregator):
                 continue
 
             was_open = bool(self._open)
-            opened = self._push_open_if_start_delimiter()
+            opened = self._push_open_if_start_delimiter(ignore_spec=ignore_spec)
 
             if (
                 opened is not None
