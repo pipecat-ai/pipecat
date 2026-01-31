@@ -1689,6 +1689,8 @@ class GeminiLiveLLMService(LLMService):
             self._transcription_timeout_task = self.create_task(
                 self._transcription_timeout_handler()
             )
+            # Let the event loop schedule the taks before it gets cancelled.
+            await asyncio.sleep(0)
 
     async def _handle_msg_output_transcription(self, message: LiveServerMessage):
         """Handle the output transcription message."""
