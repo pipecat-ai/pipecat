@@ -50,6 +50,17 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
     """Attempt to auto-detect transport type from WebSocket message structure."""
     logger.trace("=== Auto-Detection Analysis ===")
 
+    # Talkdesk detection (must be before Twilio as both have streamSid/callSid)
+    # Talkdesk has interaction_id in customParameters which is Talkdesk-specific
+    if (
+        message_data.get("event") == "start"
+        and "start" in message_data
+        and "streamSid" in message_data.get("start", {})
+        and "interaction_id" in message_data.get("start", {}).get("customParameters", {})
+    ):
+        logger.trace("Auto-detected: TALKDESK")
+        return "talkdesk"
+
     # Twilio detection
     if (
         message_data.get("event") == "start"
@@ -136,6 +147,16 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "to": str,
             }
 
+        - Talkdesk::
+
+            {
+                "stream_id": str,
+                "interaction_id": str,
+                "account_id": str,
+                "correlation_id": str,
+                "custom_parameters": dict,
+            }
+
     Example usage::
 
         transport_type, call_data = await parse_telephony_websocket(websocket)
@@ -181,7 +202,18 @@ async def parse_telephony_websocket(websocket: WebSocket):
             logger.warning("Could not auto-detect transport type")
 
         # Extract provider-specific data
-        if transport_type == "twilio":
+        if transport_type == "talkdesk":
+            start_data = call_data_raw.get("start", {})
+            custom_params = start_data.get("customParameters", {})
+            call_data = {
+                "stream_id": start_data.get("streamSid"),
+                "interaction_id": custom_params.get("interaction_id"),
+                "account_id": custom_params.get("account_id"),
+                "correlation_id": custom_params.get("correlation_id"),
+                "custom_parameters": custom_params,
+            }
+
+        elif transport_type == "twilio":
             start_data = call_data_raw.get("start", {})
             body_data = start_data.get("customParameters", {})
             call_data = {
@@ -412,7 +444,7 @@ async def _create_telephony_transport(
     Args:
         websocket: FastAPI WebSocket connection from telephony provider
         params: FastAPIWebsocketParams (required)
-        transport_type: Pre-detected provider type ("twilio", "telnyx", "plivo")
+        transport_type: Pre-detected provider type ("twilio", "telnyx", "plivo", "exotel", "talkdesk")
         call_data: Pre-parsed call data dict with provider-specific fields
 
     Returns:
@@ -466,10 +498,16 @@ async def _create_telephony_transport(
             stream_sid=call_data["stream_id"],
             call_sid=call_data["call_id"],
         )
+    elif transport_type == "talkdesk":
+        from pipecat.serializers.talkdesk import TalkdeskFrameSerializer
+
+        params.serializer = TalkdeskFrameSerializer(
+            stream_sid=call_data["stream_id"],
+        )
     else:
         raise ValueError(
             f"Unsupported telephony provider: {transport_type}. "
-            f"Supported providers: twilio, telnyx, plivo, exotel"
+            f"Supported providers: twilio, telnyx, plivo, exotel, talkdesk"
         )
 
     return FastAPIWebsocketTransport(websocket=websocket, params=params)
@@ -486,7 +524,7 @@ async def create_transport(
     Args:
         runner_args: Arguments from the runner.
         transport_params: Dict mapping transport names to parameter factory functions.
-            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo", "exotel"
+            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo", "exotel", "talkdesk"
             Values should be functions that return transport parameters when called.
 
     Returns:
@@ -528,6 +566,12 @@ async def create_transport(
                 # add_wav_header and serializer will be set automatically
             ),
             "exotel": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                # add_wav_header and serializer will be set automatically
+            ),
+            "talkdesk": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
