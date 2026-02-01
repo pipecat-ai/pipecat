@@ -92,7 +92,7 @@ class OjinVideoContinuousSettings:
     image_size: Tuple[int, int] = field(default=(1280, 720))
     tts_audio_passthrough: bool = field(default=False)
     # Audio streaming settings
-    audio_chunk_duration_ms: int = field(default=500)  # Duration of each audio chunk in ms
+    audio_chunk_duration_ms: int = field(default=100)  # Duration of each audio chunk in ms
     # Speaking notification delays
     started_speaking_delay_s: float = field(default=0.5)  # Delay before sending StartedSpeaking
     stopped_speaking_delay_s: float = field(default=0.5)  # Delay before sending StoppedSpeaking
@@ -160,6 +160,7 @@ class OjinVideoContinuousService(FrameProcessor):
         # Frame timing
         self._frame_duration = 1.0 / self.fps
         self._audio_bytes_per_frame = 2 * int(self._frame_duration * OJIN_PERSONA_SAMPLE_RATE)
+        self._speech_audio_end_time = 0.0
 
         # Speaking state tracking
         self._first_tts_received_at: Optional[float] = None
@@ -210,7 +211,7 @@ class OjinVideoContinuousService(FrameProcessor):
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, TTSAudioRawFrame):
-            await self._buffer_tts_audio(frame)
+            await self._send_tts_audio(frame)
 
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
@@ -219,16 +220,12 @@ class OjinVideoContinuousService(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
-    async def _buffer_tts_audio(self, frame: TTSAudioRawFrame):
-        """Buffer incoming TTS audio for continuous streaming."""
+    async def _send_tts_audio(self, frame: TTSAudioRawFrame):
+        """Send TTS audio to the server for continuous streaming."""
         # Resample audio to target sample rate
         resampled_audio = await self._resampler.resample(
             frame.audio, frame.sample_rate, OJIN_PERSONA_SAMPLE_RATE
         )
-
-        # Add to speech buffer
-        self._speech_buffer.extend(resampled_audio)
-        logger.debug(f"Buffered TTS audio, buffer size: {len(self._speech_buffer)} bytes")
 
         # Track first TTS audio for started speaking notification
         if self._first_tts_received_at is None:
@@ -238,6 +235,20 @@ class OjinVideoContinuousService(FrameProcessor):
         # Reset empty timer since we have audio
         self._tts_empty_since = None
 
+        # Send audio to server immediately to avoid latency
+        logger.debug(f"Sending TTS audio to server, size: {len(resampled_audio)} bytes")
+        await self._client.send_message(
+            OjinAudioInputMessage(
+                audio_int16_bytes=resampled_audio,
+                params={
+                    "filter_amount": SPEECH_FILTER_AMOUNT,
+                    "mouth_opening_scale": SPEECH_MOUTH_OPENING_SCALE,
+                },
+            )
+        )
+        self._speech_audio_end_time = time.perf_counter() + (
+            len(resampled_audio) / OJIN_PERSONA_SAMPLE_RATE
+        )
         if self._settings.tts_audio_passthrough:
             await self.push_frame(frame, FrameDirection.DOWNSTREAM)
 
@@ -259,7 +270,7 @@ class OjinVideoContinuousService(FrameProcessor):
         await self._client.start_interaction()
 
         next_send_time = time.perf_counter() + self._chunk_duration_s
-
+        self._speech_audio_end_time = 0.0
         while True:
             # Sleep until next send time
             now = time.perf_counter()
@@ -271,31 +282,19 @@ class OjinVideoContinuousService(FrameProcessor):
             while time.perf_counter() < next_send_time:
                 pass
 
-            next_send_time += self._chunk_duration_s
+            if self._speech_audio_end_time > next_send_time:
+                next_send_time = self._speech_audio_end_time
+                continue
 
-            # Check if we should send StartedSpeaking
-            await self._check_started_speaking()
+            next_send_time += self._chunk_duration_s
 
             # Check if we should send StoppedSpeaking
             await self._check_stopped_speaking()
 
-            # Get audio chunk to send - dequeue all available speech audio and pad with silence
-            if len(self._speech_buffer) >= self._chunk_size_bytes:
-                # Send speech audio
-                audio_chunk = bytes(self._speech_buffer[: self._chunk_size_bytes])
-                del self._speech_buffer[: self._chunk_size_bytes]
-                logger.debug(
-                    f"Sending speech chunk, remaining buffer: {len(self._speech_buffer)} bytes"
-                )
-
-            else:
-                # Send silence
-                audio_chunk = self._silence_chunk
-
             # Send audio to server
             await self._client.send_message(
                 OjinAudioInputMessage(
-                    audio_int16_bytes=audio_chunk,
+                    audio_int16_bytes=self._silence_chunk,
                     params={
                         "filter_amount": SPEECH_FILTER_AMOUNT,
                         "mouth_opening_scale": SPEECH_MOUTH_OPENING_SCALE,
@@ -317,9 +316,6 @@ class OjinVideoContinuousService(FrameProcessor):
 
             # Transition to streaming state
             self._state = OjinVideoContinuousState.STREAMING
-
-            # Start the playback loop
-            self._playback_task = self.create_task(self._playback_loop())
 
             # Notify that we're ready
             initialized_frame = OjinVideoInitializedFrame(session_data=self._session_data)
@@ -377,7 +373,14 @@ class OjinVideoContinuousService(FrameProcessor):
         start_ts = time.perf_counter()
         next_frame_time = start_ts + self._frame_duration
 
+        # Wait for session to be ready
+        while self._state == OjinVideoContinuousState.CONNECTING:
+            await asyncio.sleep(0.01)
+
         while True:
+            # Check if we should send StartedSpeaking
+            await self._check_started_speaking()
+
             # Sleep for most of the wait time
             now = time.perf_counter()
             sleep_time = next_frame_time - now - 0.01
@@ -404,6 +407,7 @@ class OjinVideoContinuousService(FrameProcessor):
 
             elif self._last_played_image_bytes:
                 # Repeat last frame to avoid stutter
+                logger.debug("frame miss")
                 image_bytes = self._last_played_image_bytes
 
             else:
@@ -436,6 +440,9 @@ class OjinVideoContinuousService(FrameProcessor):
 
         # Start continuous audio input
         self._audio_input_task = self.create_task(self._audio_input_loop())
+
+        # Start the playback loop
+        self._playback_task = self.create_task(self._playback_loop())
 
     async def _stop(self):
         """Stop the service and clean up resources."""

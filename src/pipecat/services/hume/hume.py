@@ -122,6 +122,7 @@ class HumeSTSService(LLMService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, self._start_frame_cls):
+            logger.info("Starting Hume service")
             await self._connect()
         elif isinstance(frame, StartInterruptionFrame):
             if self.active_conversation_id is not None and self.track_cancelled_conversations:
