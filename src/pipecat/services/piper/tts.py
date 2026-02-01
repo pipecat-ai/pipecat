@@ -227,6 +227,5 @@ class PiperHttpTTSService(TTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
-            logger.debug(f"{self}: Finished TTS [{text}]")
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

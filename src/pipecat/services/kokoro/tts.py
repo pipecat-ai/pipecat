@@ -4,10 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Kokoro TTS service implementation."""
+"""Kokoro TTS service implementation using kokoro-onnx."""
 
-import asyncio
-from typing import AsyncGenerator, AsyncIterator, Optional
+import os
+from pathlib import Path
+from typing import AsyncGenerator, Optional
 
 import numpy as np
 from loguru import logger
@@ -17,6 +18,7 @@ from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -25,33 +27,61 @@ from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
-    from kokoro import KPipeline
+    import requests
+    from kokoro_onnx import Kokoro
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Kokoro, you need to `pip install pipecat-ai[kokoro]`.")
     raise Exception(f"Missing module: {e}")
 
+KOKORO_CACHE_DIR = Path(os.path.expanduser("~/.cache/kokoro-onnx"))
+KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
+KOKORO_VOICES_URL = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+)
+
+
+def _download_file(url: str, dest: Path):
+    """Download a file from a URL to a destination path."""
+    logger.debug(f"Downloading {url} to {dest}...")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    resp = requests.get(url, stream=True, timeout=300)
+    resp.raise_for_status()
+    with open(dest, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            f.write(chunk)
+    logger.debug(f"Downloaded {dest}")
+
+
+def _ensure_model_files(model_path: Path, voices_path: Path):
+    """Download model files if they don't exist."""
+    if not model_path.exists():
+        _download_file(KOKORO_MODEL_URL, model_path)
+    if not voices_path.exists():
+        _download_file(KOKORO_VOICES_URL, voices_path)
+
 
 def language_to_kokoro_language(language: Language) -> str:
-    """Convert a Language enum to Kokoro language code.
+    """Convert a Language enum to kokoro-onnx language code.
 
     Args:
         language: The Language enum value to convert.
 
     Returns:
-        The corresponding Kokoro language code, or None if not supported.
+        The corresponding kokoro-onnx locale code.
+
     """
     LANGUAGE_MAP = {
-        Language.EN: "a",
-        Language.EN_US: "a",
-        Language.EN_GB: "b",
-        Language.ES: "e",
-        Language.FR: "f",
-        Language.HI: "h",
-        Language.IT: "i",
-        Language.JA: "j",
-        Language.PT: "p",
-        Language.ZH: "z",
+        Language.EN: "en-us",
+        Language.EN_US: "en-us",
+        Language.EN_GB: "en-gb",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.HI: "hi",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.PT: "pt",
+        Language.ZH: "zh",
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
@@ -60,8 +90,8 @@ def language_to_kokoro_language(language: Language) -> str:
 class KokoroTTSService(TTSService):
     """Kokoro TTS service implementation.
 
-    Provides local text-to-speech synthesis using the Kokoro-82M model.
-    Automatically downloads the model on first use.
+    Provides local text-to-speech synthesis using kokoro-onnx.
+    Automatically downloads model files on first use.
     """
 
     class InputParams(BaseModel):
@@ -77,7 +107,8 @@ class KokoroTTSService(TTSService):
         self,
         *,
         voice_id: str,
-        repo_id="hexgrad/Kokoro-82M",
+        model_path: Optional[str] = None,
+        voices_path: Optional[str] = None,
         params: Optional[InputParams] = None,
         **kwargs,
     ):
@@ -85,10 +116,11 @@ class KokoroTTSService(TTSService):
 
         Args:
             voice_id: Voice identifier to use for synthesis.
-            repo_id: Hugging Face repository ID for the Kokoro model.
-                Defaults to "hexgrad/Kokoro-82M".
+            model_path: Path to the kokoro ONNX model file. Defaults to auto-downloaded file.
+            voices_path: Path to the voices binary file. Defaults to auto-downloaded file.
             params: Configuration parameters for synthesis.
             **kwargs: Additional arguments passed to parent `TTSService`.
+
         """
         super().__init__(**kwargs)
 
@@ -96,7 +128,13 @@ class KokoroTTSService(TTSService):
 
         self._voice_id = voice_id
         self._lang_code = language_to_kokoro_language(params.language)
-        self._pipeline = KPipeline(lang_code=self._lang_code, repo_id=repo_id)
+
+        model = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
+        voices = Path(voices_path) if voices_path else KOKORO_CACHE_DIR / "voices-v1.0.bin"
+
+        _ensure_model_files(model, voices)
+
+        self._kokoro = Kokoro(str(model), str(voices))
 
         self._resampler = create_stream_resampler()
 
@@ -106,50 +144,38 @@ class KokoroTTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Synthesize speech from text using the Kokoro pipeline.
+        """Synthesize speech from text using kokoro-onnx.
 
-        Runs the Kokoro pipeline in a background thread and streams audio
-        frames as they become available.
+        Uses the async streaming API to generate audio frames.
 
         Args:
             text: The text to synthesize.
+
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
-
-        def async_next(it):
-            try:
-                return next(it)
-            except StopIteration:
-                return None
-
-        async def async_iterator(iterator) -> AsyncIterator[bytes]:
-            while True:
-                item = await asyncio.to_thread(async_next, iterator)
-                if item is None:
-                    return
-
-                (_, _, audio) = item
-
-                # Kokoro outputs a PyTorch tensor at 24kHz, convert to int16 bytes
-                audio_np = np.array(audio)
-                audio_int16 = (audio_np * 32767).astype(np.int16).tobytes()
-
-                yield audio_int16
 
         try:
             await self.start_ttfb_metrics()
             await self.start_tts_usage_metrics(text)
             yield TTSStartedFrame()
 
-            async for frame in self._stream_audio_frames_from_iterator(
-                async_iterator(self._pipeline(text, voice=self._voice_id)),
-                in_sample_rate=24000,
-            ):
+            stream = self._kokoro.create_stream(
+                text, voice=self._voice_id, lang=self._lang_code, speed=1.0
+            )
+
+            async for samples, sample_rate in stream:
                 await self.stop_ttfb_metrics()
-                yield frame
+
+                audio_int16 = (samples * 32767).astype(np.int16).tobytes()
+                audio_data = await self._resampler.resample(
+                    audio_int16, sample_rate, self.sample_rate
+                )
+
+                yield TTSAudioRawFrame(
+                    audio=audio_data, sample_rate=self.sample_rate, num_channels=1
+                )
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
-            logger.debug(f"{self}: Finished TTS [{text}]")
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
