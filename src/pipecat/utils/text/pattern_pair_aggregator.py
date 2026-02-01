@@ -11,11 +11,9 @@ pattern pairs (like XML tags or custom delimiters) in streaming text, with
 support for custom handlers and configurable actions for when a pattern is found.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import Enum
-from typing import AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import AsyncIterator, Awaitable, Callable, List, Optional, Tuple
 
 from loguru import logger
 
@@ -29,8 +27,8 @@ class MatchAction(Enum):
     Parameters:
         REMOVE: The text along with its delimiters will be removed from the streaming text.
             Sentence aggregation will continue on as if this text did not exist.
-        KEEP: The matched pattern will be kept in the text (including delimiters).
-            Sentence aggregation will continue on with the pattern included as normal text.
+        KEEP: The matched pattern (including delimiters) will be kept in the text.
+            Sentence aggregation will continue on with the full matched text included.
         AGGREGATE: The delimiters will be removed and the content between will be treated
             as a separate aggregation. Any text before the start of the pattern will be
             returned early, whether or not a complete sentence was found. Then the pattern
@@ -103,9 +101,10 @@ class PatternPairAggregator(SimpleTextAggregator):
     (defined by start and end patterns), processes the content between these
     patterns using registered handlers. By default, its aggregation method
     returns text at sentence boundaries, and remove the content found between
-    any matched patterns. However,    matched patterns can also be configured to be returned as a separate aggregation
-    object containing the content between their start and end patterns, removed entirely,
-    or kept in-stream (including delimiters) while still triggering a handler.
+    any matched patterns. However, matched patterns can also be configured to
+    returned as a separate aggregation object containing the content between
+    their start and end patterns or left in, so that only the delimiters are
+    removed and a callback can be triggered.
 
     This aggregator is particularly useful for processing structured content in
     streaming text, such as XML tags, markdown formatting, or custom delimiters.
@@ -121,14 +120,12 @@ class PatternPairAggregator(SimpleTextAggregator):
         Text buffering and pattern detection will begin when text is aggregated.
         """
         super().__init__()
-        self._patterns: Dict[str, dict] = {}
-        self._specs: Dict[str, _PatternSpec] = {}
-        self._handlers: Dict[str, Callable[[PatternMatch], Awaitable[None]]] = {}
-
-        self._open: List[_OpenPattern] = []
-
-        self._start_by_last: Dict[str, List[_PatternSpec]] = {}
-        self._end_by_last: Dict[str, List[_PatternSpec]] = {}
+        self._patterns = {}
+        self._specs = {}
+        self._handlers = {}
+        self._open = []
+        self._start_by_last = {}
+        self._end_by_last = {}
 
     @property
     def text(self) -> Aggregation:
@@ -174,9 +171,8 @@ class PatternPairAggregator(SimpleTextAggregator):
             raise ValueError(
                 f"The aggregation type '{type}' is reserved for default behavior and can not be used for custom patterns."
             )
-
         if not start_pattern or not end_pattern:
-            raise ValueError("start_pattern and end_pattern must be non-empty strings")
+            raise ValueError("start_pattern and end_pattern must be non-empty strings.")
 
         old = self._specs.get(type)
         if old is not None:
