@@ -38,13 +38,6 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 load_dotenv(override=True)
 
 
-# Create audio buffer processor so we can hear the audio fitler results.
-audiobuffer = AudioBufferProcessor(
-    num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
-    enable_turn_audio=False,  # Enable per-turn audio recording
-)
-
-
 def _create_aic_filter() -> AICFilter:
     license_key = os.getenv("AICOUSTICS_LICENSE_KEY", "")
 
@@ -54,39 +47,29 @@ def _create_aic_filter() -> AICFilter:
     )
 
 
+aic_filter = _create_aic_filter()
+aic_vad_analyzer = aic_filter.create_vad_analyzer(
+    speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
+)
+
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
-    "daily": lambda: (
-        lambda aic: DailyParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(
-                speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
-            ),
-            audio_in_filter=aic,
-        )
-    )(_create_aic_filter()),
-    "twilio": lambda: (
-        lambda aic: FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(
-                speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
-            ),
-            audio_in_filter=aic,
-        )
-    )(_create_aic_filter()),
-    "webrtc": lambda: (
-        lambda aic: TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=aic.create_vad_analyzer(
-                speech_hold_duration=0.05, minimum_speech_duration=0.0, sensitivity=6.0
-            ),
-            audio_in_filter=aic,
-        )
-    )(_create_aic_filter()),
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_in_filter=aic_filter,
+    ),
 }
 
 
@@ -113,10 +96,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
+            vad_analyzer=aic_vad_analyzer,
             user_turn_strategies=UserTurnStrategies(
                 stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
             ),
         ),
+    )
+
+    # Create audio buffer processor so we can hear the audio fitler results.
+    audiobuffer = AudioBufferProcessor(
+        num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
+        enable_turn_audio=False,  # Enable per-turn audio recording
     )
 
     pipeline = Pipeline(
