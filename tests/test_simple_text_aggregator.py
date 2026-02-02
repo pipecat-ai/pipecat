@@ -124,6 +124,62 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
         result = await self.aggregator.flush()
         assert result.text == "W"
 
+    async def test_japanese_multiple_sentences(self):
+        """Test that Japanese sentences are properly split during streaming."""
+        text = "こんにちは。元気ですか？"
+        results = [agg async for agg in self.aggregator.aggregate(text)]
+
+        # First sentence detected when 元 arrives as lookahead after 。
+        assert len(results) == 1
+        assert results[0].text == "こんにちは。"
+
+        # Flush returns the second sentence
+        result = await self.aggregator.flush()
+        assert result.text == "元気ですか？"
+
+    async def test_japanese_sentence_with_lookahead(self):
+        """Test that a Japanese sentence is detected with a lookahead character."""
+        text = "こんにちは。元"
+        results = [agg async for agg in self.aggregator.aggregate(text)]
+
+        # 。 triggers lookahead, then 元 confirms it
+        assert len(results) == 1
+        assert results[0].text == "こんにちは。"
+
+        # Flush returns remainder
+        result = await self.aggregator.flush()
+        assert result.text == "元"
+
+    async def test_chinese_streaming_tokens(self):
+        """Test Chinese text split across multiple streaming tokens."""
+        aggregator = SimpleTextAggregator()
+
+        tokens = ["你好", "世界", "。", "下一", "句话", "。"]
+        all_results = []
+        for token in tokens:
+            results = [agg async for agg in aggregator.aggregate(token)]
+            all_results.extend(results)
+
+        # First sentence detected when 下 arrives after 。
+        assert len(all_results) == 1
+        assert all_results[0].text == "你好世界。"
+
+        # Flush returns the second sentence
+        result = await aggregator.flush()
+        assert result.text == "下一句话。"
+
+    async def test_japanese_single_sentence_flush(self):
+        """Test that a single Japanese sentence with no lookahead flushes correctly."""
+        text = "こんにちは。"
+        results = [agg async for agg in self.aggregator.aggregate(text)]
+
+        # No lookahead yet - waiting
+        assert len(results) == 0
+
+        # Flush returns the complete sentence
+        result = await self.aggregator.flush()
+        assert result.text == "こんにちは。"
+
 
 if __name__ == "__main__":
     unittest.main()

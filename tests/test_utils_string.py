@@ -153,6 +153,46 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         for sentence in latin_script_sentences:
             assert match_endofsentence(sentence), f"Failed for Latin script: {sentence}"
 
+    async def test_endofsentence_cjk_with_lookahead(self):
+        """Test sentence detection for CJK text with lookahead characters.
+
+        This tests the NLTK fallback path: NLTK returns entire text as one
+        sentence because it doesn't support CJK languages, but unambiguous
+        punctuation is detected via the fallback scan.
+        """
+        # Japanese: sentence + lookahead character
+        assert match_endofsentence("こんにちは。元") == 6
+        assert match_endofsentence("元気ですか？は") == 6
+        assert match_endofsentence("ありがとう！次") == 6
+
+        # Chinese: sentence + lookahead character
+        assert match_endofsentence("你好世界。下") == 5
+        assert match_endofsentence("你好吗？我") == 4
+
+        # Korean: sentence + lookahead character
+        assert match_endofsentence("안녕하세요。다") == 6
+
+        # Multiple CJK sentences with lookahead - should return first sentence
+        assert match_endofsentence("こんにちは。元気ですか？は") == 6
+
+        # Indic script with lookahead
+        assert match_endofsentence("हैलो।अ") == 5
+
+        # Arabic with lookahead
+        assert match_endofsentence("مرحبا؟ك") == 6
+
+    async def test_endofsentence_latin_not_affected_by_fallback(self):
+        """Verify that the CJK fallback does not change behavior for Latin text."""
+        # These should still return 0 - Latin "." is NOT in the unambiguous set
+        assert not match_endofsentence("Mr. S")
+        assert not match_endofsentence("Ok, Mr. Smith let's ")
+        assert not match_endofsentence("The number pi is 3.14159")
+        assert not match_endofsentence("America, or the U.S")
+
+        # These should still return correct values via NLTK path
+        assert match_endofsentence("This is a sentence. This is another one") == 19
+        assert match_endofsentence("For information, call 411.") == 26
+
     async def test_endofsentence_streaming_tokens(self):
         """Test the specific use case of streaming LLM tokens."""
 
