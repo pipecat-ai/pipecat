@@ -63,13 +63,6 @@ SPEECH_FILTER_AMOUNT = 1000.0
 SPEECH_MOUTH_OPENING_SCALE = 1.0
 
 
-class OjinVideoContinuousState(Enum):
-    """Service states."""
-
-    CONNECTING = "connecting"
-    STREAMING = "streaming"
-
-
 @dataclass
 class VideoFrame:
     """Represents a video frame with bundled audio from the server."""
@@ -124,7 +117,6 @@ class OjinVideoContinuousService(FrameProcessor):
         else:
             self._client = client
 
-        self._state = OjinVideoContinuousState.CONNECTING
         self._session_data: Optional[dict] = None
 
         # Video frames queue from server
@@ -257,8 +249,8 @@ class OjinVideoContinuousService(FrameProcessor):
 
             self._server_fps_tracker.start()
 
-            # Transition to streaming state
-            self._state = OjinVideoContinuousState.STREAMING
+            # Start the playback loop
+            self._playback_task = self.create_task(self._playback_loop())
 
             # Notify that we're ready
             initialized_frame = OjinVideoInitializedFrame(session_data=self._session_data)
@@ -280,24 +272,9 @@ class OjinVideoContinuousService(FrameProcessor):
             logger.debug(f"Received video frame {frame_idx}, is_final={message.is_final_response}")
 
         elif isinstance(message, ErrorResponseMessage):
-            is_fatal = False
-            if message.payload.code == "NO_BACKEND_SERVER_AVAILABLE":
-                logger.error("No OJIN servers available. Please try again later.")
-                is_fatal = True
-            elif message.payload.code == "FRAME_SIZE_TOO_BIG":
-                logger.error("Frame Size sent to Ojin server exceeded max limit.")
-            elif message.payload.code == "INVALID_INTERACTION_ID":
-                logger.error("Invalid interaction ID sent to Ojin server")
-            elif message.payload.code == "FAILED_CREATE_MODEL":
-                is_fatal = True
-                logger.error("Ojin couldn't create a model from supplied persona ID.")
-            elif message.payload.code == "INVALID_PERSONA_ID_CONFIGURATION":
-                is_fatal = True
-                logger.error("Ojin couldn't load the configuration from the supplied persona ID.")
-
-            if is_fatal:
-                await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
-                await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+            logger.error(f"Received error response: {message.payload.code}")
+            await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
 
     async def _receive_ojin_messages(self):
         """Continuously receive and process messages from the server."""
@@ -315,10 +292,6 @@ class OjinVideoContinuousService(FrameProcessor):
 
         start_ts = time.perf_counter()
         next_frame_time = start_ts + self._frame_duration
-
-        # Wait for session to be ready
-        while self._state == OjinVideoContinuousState.CONNECTING:
-            await asyncio.sleep(0.01)
 
         while True:
             # Check speaking state notifications
@@ -381,9 +354,6 @@ class OjinVideoContinuousService(FrameProcessor):
 
         # Start receiving messages
         self._receive_msg_task = self.create_task(self._receive_ojin_messages())
-
-        # Start the playback loop
-        self._playback_task = self.create_task(self._playback_loop())
 
         # Start an interaction for continuous streaming
         await self._client.start_interaction()
