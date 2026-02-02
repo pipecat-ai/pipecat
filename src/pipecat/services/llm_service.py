@@ -681,12 +681,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         timeout_task = self.create_task(timeout_handler())
 
-        # Yield to the event loop so the timeout task coroutine gets entered
-        # before it could be cancelled. Without this, cancelling the task before
-        # it starts would leave the coroutine in a "never awaited" state.
-        await asyncio.sleep(0)
-
         try:
+            # Yield to the event loop so the timeout task coroutine gets entered
+            # before it could be cancelled. Without this, cancelling the task before
+            # it starts would leave the coroutine in a "never awaited" state.
+            await asyncio.sleep(0)
             if isinstance(item.handler, DirectFunctionWrapper):
                 # Handler is a DirectFunctionWrapper
                 await item.handler.invoke(
@@ -722,12 +721,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     )
                     await item.handler(params)
         except Exception as e:
-            # Cancel timeout task if it exists
-            if timeout_task and not timeout_task.done():
-                await self.cancel_task(timeout_task)
             error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
             logger.error(f"{self} {error_message}")
             await self.push_error(error_msg=error_message, exception=e, fatal=False)
+        finally:
+            if timeout_task and not timeout_task.done():
+                await self.cancel_task(timeout_task)
 
     async def _cancel_function_call(self, function_name: Optional[str]):
         cancelled_tasks = set()
