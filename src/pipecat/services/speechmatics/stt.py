@@ -66,7 +66,7 @@ class TurnDetectionMode(str, Enum):
     """Endpoint and turn detection handling mode.
 
     How the STT engine handles the endpointing of speech. If using Pipecat's built-in endpointing,
-    then use `TurnDetectionMode.FIXED` (default).
+    then use `TurnDetectionMode.EXTERNAL` (default).
 
     To use the STT engine's built-in endpointing, then use `TurnDetectionMode.ADAPTIVE` for simple
     voice activity detection or `TurnDetectionMode.SMART_TURN` for more advanced ML-based
@@ -106,7 +106,7 @@ class SpeechmaticsSTTService(STTService):
 
             turn_detection_mode: Endpoint handling, one of `TurnDetectionMode.FIXED`,
                 `TurnDetectionMode.EXTERNAL`, `TurnDetectionMode.ADAPTIVE` and
-                `TurnDetectionMode.SMART_TURN`. Defaults to `TurnDetectionMode.FIXED`.
+                `TurnDetectionMode.SMART_TURN`. Defaults to `TurnDetectionMode.EXTERNAL`.
 
             speaker_active_format: Formatter for active speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
@@ -207,7 +207,7 @@ class SpeechmaticsSTTService(STTService):
         language: Language | str = Language.EN
 
         # Endpointing mode
-        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.FIXED
+        turn_detection_mode: TurnDetectionMode = TurnDetectionMode.EXTERNAL
 
         # Output formatting
         speaker_active_format: str | None = None
@@ -326,6 +326,13 @@ class SpeechmaticsSTTService(STTService):
         self._client: VoiceAgentClient | None = None
         self._config: VoiceAgentConfig = self._prepare_config(params)
 
+        # If the "model" is passed as an init parameter, then use this as the operating point
+        if model := kwargs.get("model"):
+            try:
+                params.operating_point = model
+            except Exception as e:
+                logger.warning(f"{self}: Invalid operating point: {e}")
+
         # Outbound frame queue
         self._outbound_frames: asyncio.Queue[Frame] = asyncio.Queue()
 
@@ -424,6 +431,15 @@ class SpeechmaticsSTTService(STTService):
         self._client.on(AgentServerMessageType.INFO, add_message)
         self._client.on(AgentServerMessageType.END_OF_TURN_PREDICTION, add_message)
         self._client.on(AgentServerMessageType.END_OF_UTTERANCE, add_message)
+
+        # # Log messages
+        # def log_message(message: dict[str, Any]):
+        #     logger.warning(f"{self} {message}")
+
+        # # Detailed logging
+        # for message_type in AgentServerMessageType:
+        #     if message_type not in [AgentServerMessageType.AUDIO_ADDED]:
+        #         self._client.on(message_type, log_message)
 
         # Connect to the client
         try:
