@@ -32,7 +32,7 @@ from openai.types.chat import (
 from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.frames.frames import AudioRawFrame, ImageFileFormat
+from pipecat.frames.frames import AudioRawFrame
 
 if TYPE_CHECKING:
     from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -412,19 +412,18 @@ class LLMContext:
             role: The role of this message (defaults to "user").
         """
         bytes = file
-        is_image = format in get_args(ImageFileFormat)
-        if not is_image and format != "pdf":
+        is_image = format.startswith("image/")
+        if not is_image and format != "application/pdf":
             # TODO how to send error back?
             logger.warning(f"Unsupported file format for LLM context: {format}")
             return
-        mime_type = f"image/{format}" if is_image else "application/pdf"
         if type == "url":
             async with aiohttp.ClientSession() as session:
                 async with session.get(file) as response:
                     content = io.BytesIO(await response.content.read())
                     base64_string = base64.b64encode(content.getvalue()).decode("utf-8")
-                    bytes = f"data:{mime_type};base64,{base64_string}"
-            if format in get_args(ImageFileFormat):
+                    bytes = f"data:{format};base64,{base64_string}"
+            if is_image:
                 message = LLMContext.create_image_url_message(role=role, url=bytes, text=text)
                 self.add_message(message)
                 return
