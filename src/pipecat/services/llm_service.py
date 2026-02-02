@@ -39,6 +39,8 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMConfigureOutputFrame,
+    LLMContextSummaryRequestFrame,
+    LLMContextSummaryResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -48,6 +50,9 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
+)
+from pipecat.processors.aggregators.llm_context_summarization_mixin import (
+    ContextSummarizationMixin,
 )
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
@@ -143,7 +148,7 @@ class FunctionCallRunnerItem:
     run_llm: Optional[bool] = None
 
 
-class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
+class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, AIService):
     """Base class for all LLM services.
 
     Handles function calling registration and execution with support for both
@@ -339,6 +344,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._handle_interruptions(frame)
         elif isinstance(frame, LLMConfigureOutputFrame):
             self._skip_tts = frame.skip_tts
+        elif isinstance(frame, LLMContextSummaryRequestFrame):
+            await self._handle_summary_request(frame)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Pushes a frame.
@@ -371,6 +378,95 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         for function_name, entry in self._functions.items():
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
+
+    async def _handle_summary_request(self, frame: LLMContextSummaryRequestFrame):
+        """Handle context summarization request.
+
+        Args:
+            frame: The summary request frame.
+        """
+        try:
+            logger.debug(f"{self}: Processing summarization request {frame.request_id}")
+            summary, last_index = await self._generate_summary(frame)
+            await self.broadcast_frame(
+                LLMContextSummaryResultFrame,
+                request_id=frame.request_id,
+                summary=summary,
+                last_summarized_index=last_index,
+            )
+        except Exception as e:
+            await self.push_error(f"Error generating context summary: {e}", exception=e)
+            await self.broadcast_frame(
+                LLMContextSummaryResultFrame, summary="", last_summarized_index=-1, error=str(e)
+            )
+
+    async def _generate_summary(self, frame: LLMContextSummaryRequestFrame) -> tuple[str, int]:
+        """Generate summary from context.
+
+        Args:
+            frame: The summary request frame.
+
+        Returns:
+            Tuple of (summary text, last_summarized_index)
+        """
+        logger.debug(f"{self}: Processing summarization request {frame.request_id}")
+
+        # Get messages to summarize using mixin method
+        result = self.get_messages_to_summarize(frame.context, frame.min_messages_to_keep)
+
+        if not result.messages:
+            logger.debug(f"{self}: No messages to summarize")
+            return "", -1
+
+        logger.debug(
+            f"{self}: Generating summary for {len(result.messages)} messages "
+            f"(index 0 to {result.last_summarized_index})"
+        )
+
+        # Format messages as transcript
+        transcript = self.format_messages_for_summary(result.messages)
+        transcript_length = len(transcript)
+
+        logger.debug(f"{self}: Formatted transcript length: {transcript_length} characters")
+
+        # Create summary context
+        prompt_messages = [
+            {
+                "role": "system",
+                "content": frame.summarization_prompt,
+            },
+            {
+                "role": "user",
+                "content": f"Conversation history: {transcript}",
+            },
+        ]
+        summary_context = LLMContext(messages=prompt_messages)
+
+        # Generate summary using run_inference
+        # This will be overridden by each LLM service implementation
+        if not hasattr(self, "run_inference"):
+            logger.warning(
+                f"{self}: LLM service does not implement run_inference, skipping summarization"
+            )
+            return "", -1
+
+        logger.debug(f"{self}: Calling LLM to generate summary...")
+
+        # Call run_inference to generate summary (returns Optional[str])
+        summary = await self.run_inference(summary_context)
+
+        if not summary:
+            logger.warning(f"{self}: LLM returned empty summary")
+            return "", -1
+
+        summary = summary.strip()
+
+        logger.info(
+            f"{self}: Generated summary of {len(summary)} characters "
+            f"for {len(result.messages)} messages"
+        )
+
+        return summary, result.last_summarized_index
 
     def register_function(
         self,

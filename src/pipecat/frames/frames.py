@@ -1864,6 +1864,44 @@ class LLMFullResponseEndFrame(ControlFrame):
 
 
 @dataclass
+class LLMContextSummaryRequestFrame(ControlFrame):
+    """Frame requesting context summarization from LLM service.
+
+    Sent to LLM service when summarization is needed.
+
+    Parameters:
+        request_id: Unique ID to match request/response.
+        context: Full context to process.
+        min_messages_to_keep: Keep this many recent messages.
+        summarization_prompt: Prompt for summarization.
+    """
+
+    request_id: str
+    context: "LLMContext"
+    min_messages_to_keep: int
+    summarization_prompt: str
+
+
+@dataclass
+class LLMContextSummaryResultFrame(ControlFrame):
+    """Frame containing context summarization result.
+
+    Sent by LLM service back after summarization.
+
+    Parameters:
+        request_id: ID from request for matching.
+        summary: Generated summary text.
+        last_summarized_index: Index of last summarized message.
+        error: Error message if summarization failed.
+    """
+
+    request_id: str
+    summary: str
+    last_summarized_index: int
+    error: Optional[str] = None
+
+
+@dataclass
 class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
     """Frame signaling that a function call is currently executing.
 
