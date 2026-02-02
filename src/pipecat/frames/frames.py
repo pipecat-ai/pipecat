@@ -235,14 +235,6 @@ class ImageRawFrame:
     format: Optional[str]
 
 
-ImageFileFormat = Literal["png", "jpg", "jpeg", "webp", "gif", "heic", "hief"]
-DocFileFormat = Literal[
-    "pdf", "csv", "txt", "md", "doc", "docx", "xls", "xlsx", "json", "html", "css", "javascript"
-]
-MediaFileFormat = Literal["mp3", "wav", "ogg", "aac", "mp4", "webm", "ogg", "avi"]
-
-FileFormat = Literal[ImageFileFormat, DocFileFormat, MediaFileFormat]
-
 FileSourceType = Literal["bytes", "url"]  # TODO: Add support for "id"
 
 
@@ -254,13 +246,13 @@ class FileRawFrame:
         file: Raw file bytes.
         type: Type of the file ('bytes' or 'url'),
         name: Optional name of the file.
-        format: File format (e.g., 'pdf', 'docx').
+        format: File format (expected in Mime Format).
     """
 
     file: bytes | str
     type: FileSourceType
     name: Optional[str]
-    format: Optional[FileFormat]
+    format: Optional[str]
 
 
 #

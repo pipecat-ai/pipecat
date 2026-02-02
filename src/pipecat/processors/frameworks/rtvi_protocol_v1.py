@@ -21,7 +21,6 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     AggregationType,
-    FileFormat,
     FileSourceType,
 )
 
@@ -245,7 +244,7 @@ class RTVIFileUrl(RTVIFileSource):
 class RTVIFile(BaseModel):
     """File data structure for RTVI file sending."""
 
-    format: FileFormat
+    format: str  # Mime format of the file, e.g., 'application/pdf'
     name: Optional[str] = None
     source: RTVIFileBytes | RTVIFileUrl
     customOpts: Optional[dict] = None  # ex. 'detail' in openAI or 'citations' in Bedrock

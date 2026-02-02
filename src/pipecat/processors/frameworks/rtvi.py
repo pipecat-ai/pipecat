@@ -44,10 +44,8 @@ from pipecat.frames.frames import (
     EndFrame,
     EndTaskFrame,
     ErrorFrame,
-    FileFormat,
     Frame,
     FunctionCallResultFrame,
-    ImageFileFormat,
     InputAudioRawFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
@@ -1415,10 +1413,6 @@ class RTVIProcessor(FrameProcessor):
     async def _handle_send_file(self, data: RTVI.SendFileData):
         """Handle a send-file message from the client."""
         file = data.file
-        if file.format not in get_args(FileFormat):
-            logger.warning(f"Unsupported file format: {file.format}")
-            return
-
         source = None
         if file.source.type == "bytes":
             source = file.source.bytes
@@ -1428,7 +1422,7 @@ class RTVIProcessor(FrameProcessor):
             logger.warning(f"Unsupported file source type: {file.source.type}")
             return
 
-        if file.source.type == "bytes" and file.format in get_args(ImageFileFormat):
+        if file.source.type == "bytes" and file.format.startswith("image/"):
             size = [file.source.width or 0, file.source.height or 0]
             file_frame = UserImageRawFrame(
                 text=data.content,
