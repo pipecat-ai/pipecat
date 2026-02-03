@@ -425,17 +425,8 @@ class AnamVideoService(AIService):
             frame: The user audio frame to process (InputAudioRawFrame).
             direction: The direction of frame processing.
         """
-        if (
-            not self._client
-            or not self._client._streaming_client.is_connected
-            or not self._client._streaming_client._peer_connection.connectionState == "connected"
-        ):
-            # Dropping frames until connection is setup. Avoid growing latency - Expected behaviour.
-            logger.debug("anam client not initialized - or connection not ready yet")
-            return
-
         try:
-            # Send raw audio samples directly to SDK for transport to Anam's service
+            # Send raw audio samples to SDK for WebRTC transport to Anam's service
             self._client._streaming_client.send_user_audio(
                 audio_bytes=frame.audio,
                 sample_rate=frame.sample_rate,
