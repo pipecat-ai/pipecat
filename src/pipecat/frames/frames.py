@@ -667,9 +667,16 @@ class LLMContextFrame(Frame):
 
     Parameters:
         context: The LLM context containing messages, tools, and configuration.
+        messages_programmatically_edited: Whether the context messages were
+            programmatically edited (e.g. via LLMMessagesAppendFrame or
+            LLMMessagesUpdateFrame) since the last context frame was pushed.
+            This is used by speech-to-speech LLM services (like Gemini Live) to
+            distinguish between messages that originated from the LLM output
+            itself vs. messages that were externally injected.
     """
 
     context: "LLMContext"
+    messages_programmatically_edited: bool = False
 
 
 @dataclass

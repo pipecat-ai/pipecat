@@ -231,7 +231,16 @@ class LLMContextAggregator(FrameProcessor):
         Returns:
             LLMContextFrame containing the current context.
         """
-        return LLMContextFrame(context=self._context)
+        # Check if messages were programmatically edited since the last push.
+        # This flag is stored as a runtime attribute on the shared context
+        # object so that both user and assistant aggregators can see it.
+        messages_programmatically_edited = getattr(
+            self._context, "_pipecat_messages_programmatically_edited", False
+        )
+        return LLMContextFrame(
+            context=self._context,
+            messages_programmatically_edited=messages_programmatically_edited,
+        )
 
     async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a context frame in the specified direction.
@@ -241,6 +250,9 @@ class LLMContextAggregator(FrameProcessor):
         """
         frame = self._get_context_frame()
         await self.push_frame(frame, direction)
+        # Clear the programmatic edit flag after pushing, since the context
+        # frame now carries this information to downstream processors.
+        self._context._pipecat_messages_programmatically_edited = False
 
     def add_messages(self, messages):
         """Add messages to the context.
@@ -573,11 +585,19 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
+        # Mark the context as programmatically edited. This flag is stored as a
+        # runtime attribute on the shared context object so that both user and
+        # assistant aggregators can see it.
+        self._context._pipecat_messages_programmatically_edited = True
         if frame.run_llm:
             await self.push_context_frame()
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
+        # Mark the context as programmatically edited. This flag is stored as a
+        # runtime attribute on the shared context object so that both user and
+        # assistant aggregators can see it.
+        self._context._pipecat_messages_programmatically_edited = True
         if frame.run_llm:
             await self.push_context_frame()
 
@@ -909,11 +929,19 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
+        # Mark the context as programmatically edited. This flag is stored as a
+        # runtime attribute on the shared context object so that both user and
+        # assistant aggregators can see it.
+        self._context._pipecat_messages_programmatically_edited = True
         if frame.run_llm:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
+        # Mark the context as programmatically edited. This flag is stored as
+        # a runtime attribute on the shared context object so that both user
+        # and assistant aggregators can see it.
+        self._context._pipecat_messages_programmatically_edited = True
         if frame.run_llm:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
