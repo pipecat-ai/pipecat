@@ -179,22 +179,25 @@ class TestContextSummarizationConfig(unittest.TestCase):
         """Test default configuration values."""
         config = ContextSummarizationConfig()
 
-        self.assertEqual(config.max_tokens, 8000)
-        self.assertEqual(config.summarization_threshold, 0.5)
-        self.assertEqual(config.min_messages_after_summary, 6)
+        self.assertEqual(config.max_context_tokens, 8000)
+        self.assertEqual(config.summarization_threshold, 0.8)
+        self.assertEqual(config.max_unsummarized_messages, 20)
+        self.assertEqual(config.min_messages_after_summary, 4)
         self.assertIsNone(config.summarization_prompt)
 
     def test_custom_config(self):
         """Test custom configuration."""
         config = ContextSummarizationConfig(
-            max_tokens=2000,
+            max_context_tokens=2000,
             summarization_threshold=0.75,
+            max_unsummarized_messages=15,
             min_messages_after_summary=4,
             summarization_prompt="Custom prompt",
         )
 
-        self.assertEqual(config.max_tokens, 2000)
+        self.assertEqual(config.max_context_tokens, 2000)
         self.assertEqual(config.summarization_threshold, 0.75)
+        self.assertEqual(config.max_unsummarized_messages, 15)
         self.assertEqual(config.min_messages_after_summary, 4)
         self.assertEqual(config.summary_prompt, "Custom prompt")
 

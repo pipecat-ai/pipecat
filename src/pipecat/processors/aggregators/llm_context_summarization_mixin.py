@@ -49,10 +49,16 @@ class ContextSummarizationConfig:
     to manage token limits in long-running conversations.
 
     Attributes:
-        max_tokens: Maximum context size in tokens before compression is considered.
-        summarization_threshold: Percentage of max_tokens at which to trigger
-            summarization (0.5 = 50%). For example, with max_tokens=8000 and
-            threshold=0.5, summarization triggers at 4000 tokens.
+        max_context_tokens: Maximum allowed context size in tokens. The context
+            is kept within this limit through periodic summarization.
+        summarization_threshold: Trigger summarization when estimated context
+            usage exceeds this fraction of max_context_tokens (0.5 = 50%).
+            For example, with max_context_tokens=8000 and threshold=0.5,
+            summarization triggers at 4000 tokens.
+        max_unsummarized_messages: Maximum number of new messages that can
+            accumulate since the last summary before triggering a new
+            summarization. This ensures regular compression even if token
+            limits are not reached.
         min_messages_after_summary: Number of recent messages to preserve
             uncompressed after each summarization. These messages maintain
             immediate conversational context.
@@ -60,9 +66,10 @@ class ContextSummarizationConfig:
             summaries. If None, uses DEFAULT_SUMMARIZATION_PROMPT.
     """
 
-    max_tokens: int = 8000
-    summarization_threshold: float = 0.5
-    min_messages_after_summary: int = 6
+    max_context_tokens: int = 8000
+    summarization_threshold: float = 0.8
+    max_unsummarized_messages: int = 20
+    min_messages_after_summary: int = 4
     summarization_prompt: Optional[str] = None
 
     @property

@@ -769,16 +769,16 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
     def _should_summarize(self) -> bool:
         """Determine if context summarization should be triggered.
 
-        Evaluates whether the current context has reached the configured token
-        threshold and has enough new messages since the last summarization to
-        warrant compression.
+        Evaluates whether the current context has reached either the token
+        threshold or message count threshold that warrants compression.
 
         Returns:
             True if all conditions are met:
             - Summarization is enabled
             - No summarization currently in progress
-            - Token count exceeds threshold (max_tokens * summarization_threshold)
-            - Sufficient messages accumulated since last summary
+            - AND either:
+              - Token count exceeds threshold (max_context_tokens * summarization_threshold)
+              - OR message count exceeds max_unsummarized_messages since last summary
         """
         logger.debug(f"{self}: Checking if context summarization is needed")
 
@@ -794,38 +794,51 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
         total_tokens = self.estimate_context_tokens(self._context)
         num_messages = len(self._context.messages)
 
-        # Check if we've reached the threshold percentage
-        threshold = int(
-            self._summarization_config.max_tokens
+        # Check if we've reached the token threshold
+        token_threshold = int(
+            self._summarization_config.max_context_tokens
             * self._summarization_config.summarization_threshold
+        )
+
+        token_threshold_exceeded = total_tokens >= token_threshold
+
+        # Check if we've exceeded max unsummarized messages
+        if self._last_summarized_index >= 0:
+            # Count messages since last summary
+            messages_since_summary = len(self._context.messages) - 1 - self._last_summarized_index
+        else:
+            # Never summarized - count all messages
+            messages_since_summary = len(self._context.messages)
+
+        message_threshold_exceeded = (
+            messages_since_summary >= self._summarization_config.max_unsummarized_messages
         )
 
         logger.debug(
             f"{self}: Context has {num_messages} messages, "
-            f"~{total_tokens} tokens (threshold: {threshold} tokens, "
+            f"~{total_tokens} tokens (token threshold: {token_threshold}, "
             f"{self._summarization_config.summarization_threshold * 100}% of "
-            f"{self._summarization_config.max_tokens})"
+            f"{self._summarization_config.max_context_tokens}), "
+            f"{messages_since_summary} messages since last summary "
+            f"(message threshold: {self._summarization_config.max_unsummarized_messages})"
         )
 
-        if total_tokens < threshold:
-            logger.debug(f"{self}: Not enough tokens to trigger summarization")
+        # Trigger if either threshold is exceeded
+        if not token_threshold_exceeded and not message_threshold_exceeded:
+            logger.debug(
+                f"{self}: Neither token threshold nor message threshold exceeded, skipping summarization"
+            )
             return False
 
-        # Check if we have enough messages after last summary
-        if self._last_summarized_index >= 0:
-            messages_since_summary = len(self._context.messages) - 1 - self._last_summarized_index
-            logger.debug(
-                f"{self}: {messages_since_summary} messages since last summary "
-                f"(min required: {self._summarization_config.min_messages_after_summary})"
+        reason = []
+        if token_threshold_exceeded:
+            reason.append(f"~{total_tokens} tokens (>{token_threshold} threshold)")
+        if message_threshold_exceeded:
+            reason.append(
+                f"{messages_since_summary} messages (>{self._summarization_config.max_unsummarized_messages} threshold)"
             )
-            if messages_since_summary < self._summarization_config.min_messages_after_summary:
-                logger.debug(f"{self}: Not enough messages since last summary")
-                return False
 
-        logger.info(
-            f"{self}: ✓ Summarization needed - {num_messages} messages, "
-            f"~{total_tokens} tokens (>{threshold} threshold)"
-        )
+        logger.info(f"{self}: ✓ Summarization needed - {', '.join(reason)}")
         return True
 
     async def _request_summarization(self):

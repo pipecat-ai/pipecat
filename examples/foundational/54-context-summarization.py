@@ -92,10 +92,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             enable_context_summarization=True,
             # Optional: customize context summarization behavior
-            # Using low token limits to demonstrate the feature quickly
+            # Using low limits to demonstrate the feature quickly
             context_summarization_config=ContextSummarizationConfig(
-                max_tokens=500,  # Very low limit for demo purposes
+                max_context_tokens=500,  # Keep context within 500 tokens
                 summarization_threshold=0.8,  # Trigger at 80% (400 tokens)
+                max_unsummarized_messages=10,  # Or when 10 new messages accumulate
                 min_messages_after_summary=2,  # Keep last 2 messages uncompressed
             ),
         ),
