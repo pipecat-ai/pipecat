@@ -10,6 +10,7 @@ from typing import List
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     InputAudioRawFrame,
+    SpeechControlParamsFrame,
     UserSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -52,7 +53,7 @@ class TestVADProcessor(unittest.IsolatedAsyncioTestCase):
         await run_test(
             processor,
             frames_to_send=[self._make_audio_frame()],
-            expected_down_frames=[InputAudioRawFrame],
+            expected_down_frames=[SpeechControlParamsFrame, InputAudioRawFrame],
         )
 
     async def test_pushes_started_speaking_frame(self):
@@ -60,14 +61,16 @@ class TestVADProcessor(unittest.IsolatedAsyncioTestCase):
         analyzer = MockVADAnalyzer([VADState.QUIET, VADState.SPEAKING])
         processor = VADProcessor(vad_analyzer=analyzer)
 
+        # Audio frames are forwarded first, then VAD processes and broadcasts VAD frames
         await run_test(
             processor,
             frames_to_send=[self._make_audio_frame(), self._make_audio_frame()],
             expected_down_frames=[
+                SpeechControlParamsFrame,
+                InputAudioRawFrame,
                 InputAudioRawFrame,
                 VADUserStartedSpeakingFrame,
                 UserSpeakingFrame,
-                InputAudioRawFrame,
             ],
         )
 
@@ -76,15 +79,17 @@ class TestVADProcessor(unittest.IsolatedAsyncioTestCase):
         analyzer = MockVADAnalyzer([VADState.SPEAKING, VADState.QUIET])
         processor = VADProcessor(vad_analyzer=analyzer)
 
+        # Audio frames are forwarded first, then VAD processes and broadcasts VAD frames
         await run_test(
             processor,
             frames_to_send=[self._make_audio_frame(), self._make_audio_frame()],
             expected_down_frames=[
+                SpeechControlParamsFrame,
+                InputAudioRawFrame,
                 VADUserStartedSpeakingFrame,
                 UserSpeakingFrame,
                 InputAudioRawFrame,
                 VADUserStoppedSpeakingFrame,
-                InputAudioRawFrame,
             ],
         )
 
@@ -93,15 +98,17 @@ class TestVADProcessor(unittest.IsolatedAsyncioTestCase):
         analyzer = MockVADAnalyzer([VADState.SPEAKING, VADState.SPEAKING])
         processor = VADProcessor(vad_analyzer=analyzer)
 
+        # Audio frames are forwarded first, then VAD processes and broadcasts VAD frames
         await run_test(
             processor,
             frames_to_send=[self._make_audio_frame(), self._make_audio_frame()],
             expected_down_frames=[
+                SpeechControlParamsFrame,
+                InputAudioRawFrame,
                 VADUserStartedSpeakingFrame,
                 UserSpeakingFrame,
                 InputAudioRawFrame,
                 UserSpeakingFrame,
-                InputAudioRawFrame,
             ],
         )
 
@@ -113,7 +120,7 @@ class TestVADProcessor(unittest.IsolatedAsyncioTestCase):
         await run_test(
             processor,
             frames_to_send=[self._make_audio_frame()],
-            expected_down_frames=[InputAudioRawFrame],
+            expected_down_frames=[SpeechControlParamsFrame, InputAudioRawFrame],
         )
 
     async def test_no_vad_frames_on_stopping_state(self):
@@ -124,7 +131,7 @@ class TestVADProcessor(unittest.IsolatedAsyncioTestCase):
         await run_test(
             processor,
             frames_to_send=[self._make_audio_frame()],
-            expected_down_frames=[InputAudioRawFrame],
+            expected_down_frames=[SpeechControlParamsFrame, InputAudioRawFrame],
         )
 
     async def test_no_vad_frames_when_quiet(self):
@@ -135,7 +142,7 @@ class TestVADProcessor(unittest.IsolatedAsyncioTestCase):
         await run_test(
             processor,
             frames_to_send=[self._make_audio_frame(), self._make_audio_frame()],
-            expected_down_frames=[InputAudioRawFrame, InputAudioRawFrame],
+            expected_down_frames=[SpeechControlParamsFrame, InputAudioRawFrame, InputAudioRawFrame],
         )
 
 

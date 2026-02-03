@@ -93,8 +93,10 @@ class VADProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
+        # Forward the frame first, then let VAD controller process. This ensures:
+        # 1. StartFrame reaches downstream before SpeechControlParamsFrame is broadcast
+        # 2. Audio flows through immediately while VAD detection happens after
+        await self.push_frame(frame, direction)
+
         # Let the VAD controller handle the frame
         await self._vad_controller.process_frame(frame)
-
-        # Always forward the frame
-        await self.push_frame(frame, direction)
