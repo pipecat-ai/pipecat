@@ -12,6 +12,7 @@ from loguru import logger
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import Frame, InputImageRawFrame, LLMRunFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -40,7 +41,6 @@ transport_params = {
         video_in_enabled=True,
         video_out_enabled=True,
         video_out_is_live=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -49,7 +49,6 @@ transport_params = {
         video_in_enabled=True,
         video_out_enabled=True,
         video_out_is_live=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -121,6 +120,7 @@ async def run_bot(pipecat_transport):
             user_turn_strategies=UserTurnStrategies(
                 stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
             ),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         ),
     )
 

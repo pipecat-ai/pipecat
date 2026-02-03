@@ -97,3 +97,7 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             context_aggregator.assistant().messages[-1]["content"], self.expected_response
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

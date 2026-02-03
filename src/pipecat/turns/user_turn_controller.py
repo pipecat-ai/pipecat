@@ -11,6 +11,7 @@ from typing import Optional, Type
 
 from pipecat.frames.frames import (
     Frame,
+    InterimTranscriptionFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -156,7 +157,7 @@ class UserTurnController(BaseObject):
             await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
-        elif isinstance(frame, TranscriptionFrame):
+        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_transcription(frame)
 
         for strategy in self._user_turn_strategies.start or []:
@@ -209,8 +210,8 @@ class UserTurnController(BaseObject):
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
-    async def _handle_transcription(self, frame: TranscriptionFrame):
-        # We have creceived a transcription, let's reset the user turn timeout.
+    async def _handle_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
+        # We have received a transcription, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
     async def _on_push_frame(

@@ -33,7 +33,14 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --group dev --extra anthropic --extra aws --extra google --extra langchain --extra livekit --extra websocket
+          uv sync --group dev \
+            --extra anthropic \
+            --extra aws \
+            --extra google \
+            --extra langchain \
+            --extra livekit \
+            --extra piper \
+            --extra websocket
 
       - name: Run tests with coverage
         run: |

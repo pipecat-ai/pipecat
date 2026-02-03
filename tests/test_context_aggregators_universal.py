@@ -566,3 +566,55 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The pending text should be emitted on EndFrame
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
+
+    async def test_turn_completion_markers_stripped_from_transcript(self):
+        """Turn completion markers should be stripped from assistant transcript."""
+        from pipecat.turns.user_turn_completion_mixin import (
+            USER_TURN_COMPLETE_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+        )
+
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        # Send text with a turn completion marker
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame(f"{USER_TURN_COMPLETE_MARKER} Hello from Pipecat!"),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # The marker should be stripped from the transcript
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hello from Pipecat!")
+
+        # Test incomplete markers are also stripped
+        stop_messages.clear()
+        context2 = LLMContext()
+        aggregator2 = LLMAssistantAggregator(context2)
+
+        @aggregator2.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped2(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame(USER_TURN_INCOMPLETE_SHORT_MARKER),
+            LLMFullResponseEndFrame(),
+        ]
+        await run_test(aggregator2, frames_to_send=frames_to_send)
+
+        # The incomplete marker should be stripped (resulting in empty content)
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "")
+
+
+if __name__ == "__main__":
+    unittest.main()

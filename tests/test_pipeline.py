@@ -528,3 +528,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         except asyncio.CancelledError:
             assert error_received
+
+
+if __name__ == "__main__":
+    unittest.main()

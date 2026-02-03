@@ -422,7 +422,7 @@ class BaseOpenAILLMService(LLMService):
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+                await self._push_llm_text(chunk.choices[0].delta.content)
 
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript
@@ -492,8 +492,11 @@ class BaseOpenAILLMService(LLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
                 await self._process_context(context)
-            except httpx.TimeoutException:
+            except httpx.TimeoutException as e:
                 await self._call_event_handler("on_completion_timeout")
+                await self.push_error(error_msg="LLM completion timeout", exception=e)
+            except Exception as e:
+                await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())

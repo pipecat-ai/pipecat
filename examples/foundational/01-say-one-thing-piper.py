@@ -16,7 +16,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.piper.tts import PiperTTSService
+from pipecat.services.piper.tts import PiperHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -24,9 +24,8 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 load_dotenv(override=True)
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(audio_out_enabled=True),
     "twilio": lambda: FastAPIWebsocketParams(audio_out_enabled=True),
@@ -39,7 +38,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
-        tts = PiperTTSService(
+        tts = PiperHttpTTSService(
             base_url=os.getenv("PIPER_BASE_URL"), aiohttp_session=session, sample_rate=24000
         )
 

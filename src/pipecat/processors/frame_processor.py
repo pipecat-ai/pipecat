@@ -14,7 +14,6 @@ management, and frame flow control mechanisms.
 import asyncio
 import dataclasses
 import traceback
-from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
@@ -775,20 +774,21 @@ class FrameProcessor(BaseObject):
         """Broadcasts a frame of the specified class upstream and downstream.
 
         This method creates two instances of the given frame class using the
-        provided keyword arguments and pushes them upstream and downstream.
+        provided keyword arguments (without deep-copying them) and pushes them
+        upstream and downstream.
 
         Args:
             frame_cls: The class of the frame to be broadcasted.
             **kwargs: Keyword arguments to be passed to the frame's constructor.
         """
-        await self.push_frame(frame_cls(**deepcopy(kwargs)))
-        await self.push_frame(frame_cls(**deepcopy(kwargs)), FrameDirection.UPSTREAM)
+        await self.push_frame(frame_cls(**kwargs))
+        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
 
     async def broadcast_frame_instance(self, frame: Frame):
         """Broadcasts a frame instance upstream and downstream.
 
-        This method creates two new frame instances copying all fields from the
-        original frame except `id` and `name`, which get fresh values.
+        This method creates two new frame instances shallow-copying all fields
+        from the original frame except `id` and `name`, which get fresh values.
 
         Args:
             frame: The frame instance to broadcast.
@@ -806,13 +806,13 @@ class FrameProcessor(BaseObject):
             if not f.init and f.name not in ("id", "name")
         }
 
-        new_frame = frame_cls(**deepcopy(init_fields))
-        for k, v in deepcopy(extra_fields).items():
+        new_frame = frame_cls(**init_fields)
+        for k, v in extra_fields.items():
             setattr(new_frame, k, v)
         await self.push_frame(new_frame)
 
-        new_frame = frame_cls(**deepcopy(init_fields))
-        for k, v in deepcopy(extra_fields).items():
+        new_frame = frame_cls(**init_fields)
+        for k, v in extra_fields.items():
             setattr(new_frame, k, v)
         await self.push_frame(new_frame, FrameDirection.UPSTREAM)
 

@@ -113,7 +113,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         audio collected during that confirmation window, so we let the analyzer know
         when this value has changed.
         """
-        self._turn_analyzer.update_vad_start_secs(frame.vad_params.start_secs)
+        if frame.vad_params:
+            self._turn_analyzer.update_vad_start_secs(frame.vad_params.start_secs)
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""

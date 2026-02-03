@@ -18,6 +18,7 @@ from loguru import logger
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    AggregatedTextFrame,
     EndFrame,
     Frame,
     LLMContextFrame,
@@ -153,13 +154,19 @@ class IVRProcessor(FrameProcessor):
             # Process text through the pattern aggregator
             async for result in self._aggregator.aggregate(frame.text):
                 # Push aggregated text that doesn't contain XML patterns
-                await self.push_frame(LLMTextFrame(result.text), direction)
+                await self.push_frame(
+                    AggregatedTextFrame(text=result.text, aggregated_by=result.type),
+                    direction,
+                )
 
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             # Flush any remaining text from the aggregator
             remaining = await self._aggregator.flush()
             if remaining:
-                await self.push_frame(LLMTextFrame(remaining.text), direction)
+                await self.push_frame(
+                    AggregatedTextFrame(text=remaining.text, aggregated_by=remaining.type),
+                    direction,
+                )
             # Push the end frame
             await self.push_frame(frame, direction)
 

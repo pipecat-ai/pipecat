@@ -336,6 +336,7 @@ class SmallWebRTCClient:
                 format="RGB",
             )
             image_frame.transport_source = video_source
+            image_frame.pts = frame.pts
 
             del frame  # free original VideoFrame
             del image_bytes  # reference kept in image_frame
@@ -387,6 +388,7 @@ class SmallWebRTCClient:
                         sample_rate=resampled_frame.sample_rate,
                         num_channels=self._audio_in_channels,
                     )
+                    audio_frame.pts = frame.pts
                     del pcm_bytes  # reference kept in audio_frame
 
                     yield audio_frame
@@ -401,6 +403,7 @@ class SmallWebRTCClient:
                     sample_rate=frame.sample_rate,
                     num_channels=self._audio_in_channels,
                 )
+                audio_frame.pts = frame.pts
                 del pcm_bytes  # reference kept in audio_frame
 
                 yield audio_frame

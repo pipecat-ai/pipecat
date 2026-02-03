@@ -38,3 +38,7 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.audio, audio_frame.audio)
         self.assertEqual(frame.sample_rate, audio_frame.sample_rate)
         self.assertEqual(frame.num_channels, audio_frame.num_channels)
+
+
+if __name__ == "__main__":
+    unittest.main()

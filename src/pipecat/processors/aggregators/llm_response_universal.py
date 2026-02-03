@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Literal, Optional, Set, Type
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer
+from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     CancelFrame,
@@ -45,12 +47,14 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    LLMUpdateSettingsFrame,
     SpeechControlParamsFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
     UserImageRawFrame,
+    UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -62,11 +66,12 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
+from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
@@ -86,12 +91,23 @@ class LLMUserAggregatorParams:
             If set, the aggregator will emit an `on_user_turn_idle` event when the user
             has been idle (not speaking) for this duration. Set to None to disable
             idle detection.
+        vad_analyzer: Voice Activity Detection analyzer instance.
+        filter_incomplete_user_turns: Whether to filter out incomplete user turns.
+            When enabled, the LLM outputs a turn completion marker at the start of
+            each response: ✓ (complete), ○ (incomplete short), or ◐ (incomplete long).
+            Incomplete responses are suppressed and timeouts trigger re-prompting.
+        user_turn_completion_config: Configuration for turn completion behavior including
+            custom instructions, timeouts, and prompts. Only used when
+            filter_incomplete_user_turns is True.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
     user_idle_timeout: Optional[float] = None
+    vad_analyzer: Optional[VADAnalyzer] = None
+    filter_incomplete_user_turns: bool = False
+    user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
 
 
 @dataclass
@@ -385,6 +401,23 @@ class LLMUserAggregator(LLMContextAggregator):
                 "on_user_turn_idle", self._on_user_turn_idle
             )
 
+        # VAD controller
+        self._vad_controller: Optional[VADController] = None
+        if self._params.vad_analyzer:
+            self._vad_controller = VADController(self._params.vad_analyzer)
+            self._vad_controller.add_event_handler("on_speech_started", self._on_vad_speech_started)
+            self._vad_controller.add_event_handler("on_speech_stopped", self._on_vad_speech_stopped)
+            self._vad_controller.add_event_handler(
+                "on_speech_activity", self._on_vad_speech_activity
+            )
+            self._vad_controller.add_event_handler("on_push_frame", self._on_push_frame)
+            self._vad_controller.add_event_handler("on_broadcast_frame", self._on_broadcast_frame)
+
+        # NOTE(aleix): Probably just needed temporarily. This was added to
+        # prevent processing self-queued frames (SpeechControlParamsFrame)
+        # pushed by strategies.
+        self._self_queued_frames = set()
+
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -401,6 +434,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if await self._maybe_mute_frame(frame):
             return
+
+        if self._vad_controller:
+            await self._vad_controller.process_frame(frame)
 
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
@@ -463,6 +499,24 @@ class LLMUserAggregator(LLMContextAggregator):
 
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
+
+        # Enable incomplete turn filtering on the LLM if configured
+        if self._params.filter_incomplete_user_turns:
+            # Get config or use defaults
+            config = self._params.user_turn_completion_config or UserTurnCompletionConfig()
+
+            # Enable the feature on the LLM with config
+            await self.push_frame(
+                LLMUpdateSettingsFrame(
+                    settings={
+                        "filter_incomplete_user_turns": True,
+                        "user_turn_completion_config": config,
+                    }
+                )
+            )
+
+            # Auto-inject turn completion instructions into context
+            self._context.add_message({"role": "system", "content": config.completion_instructions})
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
@@ -529,6 +583,9 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_context_frame()
 
     async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
+        if frame.id in self._self_queued_frames:
+            return
+
         if not frame.turn_params:
             return
 
@@ -568,13 +625,47 @@ class LLMUserAggregator(LLMContextAggregator):
             )
         )
 
+    async def _internal_queue_frame(
+        self,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        callback: Optional[FrameCallback] = None,
+    ):
+        """Queues the given frame to ourselves."""
+        self._self_queued_frames.add(frame.id)
+        await self.queue_frame(frame, direction, callback)
+
+    async def _queued_broadcast_frame(self, frame_cls: Type[Frame], **kwargs):
+        """Broadcasts a frame upstream and queues it for internal processing.
+
+        Queues the frame so it flows through `process_frame` and is handled
+        internally (e.g. by the `UserTurnController`). The upstream frame is
+        pushed directly.
+
+        Args:
+            frame_cls: The class of the frame to be broadcasted.
+            **kwargs: Keyword arguments to be passed to the frame's constructor.
+
+        """
+        await self._internal_queue_frame(frame_cls(**kwargs))
+        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
+
     async def _on_push_frame(
         self, controller, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
-        await self.push_frame(frame, direction)
+        await self._internal_queue_frame(frame, direction)
 
     async def _on_broadcast_frame(self, controller, frame_cls: Type[Frame], **kwargs):
-        await self.broadcast_frame(frame_cls, **kwargs)
+        await self._queued_broadcast_frame(frame_cls, **kwargs)
+
+    async def _on_vad_speech_started(self, controller):
+        await self._queued_broadcast_frame(VADUserStartedSpeakingFrame)
+
+    async def _on_vad_speech_stopped(self, controller):
+        await self._queued_broadcast_frame(VADUserStoppedSpeakingFrame)
+
+    async def _on_vad_speech_activity(self, controller):
+        await self._queued_broadcast_frame(UserSpeakingFrame)
 
     async def _on_user_turn_started(
         self,
@@ -1074,12 +1165,39 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _trigger_assistant_turn_stopped(self):
         aggregation = await self.push_aggregation()
         if aggregation:
+            # Strip turn completion markers from the transcript
+            content = self._maybe_strip_turn_completion_markers(aggregation)
             message = AssistantTurnStoppedMessage(
-                content=aggregation, timestamp=self._assistant_turn_start_timestamp
+                content=content, timestamp=self._assistant_turn_start_timestamp
             )
             await self._call_event_handler("on_assistant_turn_stopped", message)
 
             self._assistant_turn_start_timestamp = ""
+
+    def _maybe_strip_turn_completion_markers(self, text: str) -> str:
+        """Strip turn completion markers from assistant transcript.
+
+        These markers (✓, ○, ◐) are used internally for turn completion
+        detection and shouldn't appear in the final transcript.
+        """
+        from pipecat.turns.user_turn_completion_mixin import (
+            USER_TURN_COMPLETE_MARKER,
+            USER_TURN_INCOMPLETE_LONG_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+        )
+
+        marker_found = False
+        for marker in (
+            USER_TURN_COMPLETE_MARKER,
+            USER_TURN_INCOMPLETE_SHORT_MARKER,
+            USER_TURN_INCOMPLETE_LONG_MARKER,
+        ):
+            if marker in text:
+                text = text.replace(marker, "")
+                marker_found = True
+
+        # Only strip whitespace if we removed a marker
+        return text.strip() if marker_found else text
 
 
 class LLMContextAggregatorPair:

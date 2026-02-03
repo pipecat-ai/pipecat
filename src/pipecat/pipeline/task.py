@@ -49,7 +49,7 @@ from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.processors.frameworks.rtvi import RTVIObserverParams, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams, RTVIProcessor
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
@@ -315,13 +315,32 @@ class PipelineTask(BasePipelineTask):
 
         # RTVI support
         self._rtvi = None
-        if enable_rtvi:
+        external_rtvi = self._find_processor(pipeline, RTVIProcessor)
+        external_observer_found = any(isinstance(o, RTVIObserver) for o in observers)
+
+        if external_rtvi and not external_observer_found:
+            logger.error(
+                f"{self}: RTVIProcessor found in pipeline but no RTVIObserver in observers. "
+                "Make sure to add both."
+            )
+        elif not external_rtvi and external_observer_found:
+            logger.error(
+                f"{self}: RTVIObserver found in observers but no RTVIProcessor in pipeline. "
+                "Make sure to add both."
+            )
+        elif external_rtvi and external_observer_found:
+            logger.warning(
+                f"{self}: RTVIProcessor and RTVIObserver found, skipping default ones. "
+                "They are both added by default, no need to add them yourself."
+            )
+        elif enable_rtvi:
             self._rtvi = rtvi_processor or RTVIProcessor()
-            observers.append(self._rtvi.create_rtvi_observer(params=rtvi_observer_params))
 
             @self.rtvi.event_handler("on_client_ready")
             async def on_client_ready(rtvi: RTVIProcessor):
                 await rtvi.set_bot_ready()
+
+            observers.append(self._rtvi.create_rtvi_observer(params=rtvi_observer_params))
 
         # This is the idle event. When selected frames are pushed from any
         # processor we consider the pipeline is not idle. We use an observer
@@ -1012,7 +1031,7 @@ class PipelineTask(BasePipelineTask):
         start_metadata = {}
 
         # NOTE(aleix): Remove when OpenAILLMContext/LLMUserContextAggregator is removed.
-        if self._find_deprecated_openaillmcontext(self._pipeline):
+        if self._find_processor(self._pipeline, LLMUserContextAggregator):
             start_metadata["deprecated_openaillmcontext"] = True
 
         # Update with user provided metadata.
@@ -1020,12 +1039,15 @@ class PipelineTask(BasePipelineTask):
 
         return start_metadata
 
-    def _find_deprecated_openaillmcontext(self, processor: FrameProcessor) -> bool:
-        """Check whether there is a deprecated LLMUserContextAggregator in the pipeline."""
-        if isinstance(processor, LLMUserContextAggregator):
-            return True
+    def _find_processor(
+        self, processor: FrameProcessor, processor_type: Type[FrameProcessor]
+    ) -> Optional[FrameProcessor]:
+        """Recursively find a processor of the given type in the pipeline."""
+        if isinstance(processor, processor_type):
+            return processor
 
         for p in processor.processors:
-            if self._find_deprecated_openaillmcontext(p):
-                return True
-        return False
+            found = self._find_processor(p, processor_type)
+            if found:
+                return found
+        return None

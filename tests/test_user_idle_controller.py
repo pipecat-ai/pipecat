@@ -214,3 +214,7 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(third_count, second_count)
 
         await controller.cleanup()
+
+
+if __name__ == "__main__":
+    unittest.main()
