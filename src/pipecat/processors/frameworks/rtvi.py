@@ -44,7 +44,10 @@ from pipecat.frames.frames import (
     EndTaskFrame,
     ErrorFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
@@ -655,7 +658,7 @@ class RTVILLMFunctionCallStartMessage(BaseModel):
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["llm-function-call-start"] = "llm-function-call-start"
+    type: Literal["llm-function-call-started"] = "llm-function-call-started"
     data: RTVILLMFunctionCallStartMessageData
 
 
@@ -669,6 +672,52 @@ class RTVILLMFunctionCallResultData(BaseModel):
     tool_call_id: str
     arguments: dict
     result: dict | str
+
+
+class RTVILLMFunctionCallInProgressMessageData(BaseModel):
+    """Data for LLM function call in-progress notification.
+
+    Contains function call details including name, ID, and arguments.
+    """
+
+    function_name: str
+    tool_call_id: str
+    args: Mapping[str, Any]
+
+
+class RTVILLMFunctionCallInProgressMessage(BaseModel):
+    """Message notifying that an LLM function call is in progress.
+
+    Sent when the LLM function call execution begins.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["llm-function-call-in-progress"] = "llm-function-call-in-progress"
+    data: RTVILLMFunctionCallInProgressMessageData
+
+
+class RTVILLMFunctionCallStoppedMessageData(BaseModel):
+    """Data for LLM function call stopped notification.
+
+    Contains details about the function call that stopped, including
+    whether it was cancelled or completed with a result.
+    """
+
+    function_name: str
+    tool_call_id: str
+    cancelled: bool
+    result: Optional[Any] = None
+
+
+class RTVILLMFunctionCallStoppedMessage(BaseModel):
+    """Message notifying that an LLM function call has stopped.
+
+    Sent when a function call completes (with result) or is cancelled.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["llm-function-call-stopped"] = "llm-function-call-stopped"
+    data: RTVILLMFunctionCallStoppedMessageData
 
 
 class RTVIBotLLMStartedMessage(BaseModel):
@@ -1139,6 +1188,42 @@ class RTVIObserver(BaseObserver):
                 await self._handle_aggregated_llm_text(frame)
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            for function_call in frame.function_calls:
+                message = RTVILLMFunctionCallStartMessage(
+                    data=RTVILLMFunctionCallStartMessageData(
+                        function_name=function_call.function_name
+                    )
+                )
+                await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            message = RTVILLMFunctionCallInProgressMessage(
+                data=RTVILLMFunctionCallInProgressMessageData(
+                    function_name=frame.function_name,
+                    tool_call_id=frame.tool_call_id,
+                    args=frame.arguments,
+                )
+            )
+            await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallCancelFrame):
+            message = RTVILLMFunctionCallStoppedMessage(
+                data=RTVILLMFunctionCallStoppedMessageData(
+                    function_name=frame.function_name,
+                    tool_call_id=frame.tool_call_id,
+                    cancelled=True,
+                )
+            )
+            await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallResultFrame):
+            message = RTVILLMFunctionCallStoppedMessage(
+                data=RTVILLMFunctionCallStoppedMessageData(
+                    function_name=frame.function_name,
+                    tool_call_id=frame.tool_call_id,
+                    cancelled=False,
+                    result=frame.result if frame.result else None,
+                )
+            )
+            await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVIServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
