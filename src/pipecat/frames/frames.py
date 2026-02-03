@@ -1865,15 +1865,20 @@ class LLMFullResponseEndFrame(ControlFrame):
 
 @dataclass
 class LLMContextSummaryRequestFrame(ControlFrame):
-    """Frame requesting context summarization from LLM service.
+    """Frame requesting context summarization from an LLM service.
 
-    Sent to LLM service when summarization is needed.
+    Sent by aggregators to LLM services when conversation context needs to be
+    compressed. The LLM service generates a summary of older messages while
+    preserving recent conversation history.
 
     Parameters:
-        request_id: Unique ID to match request/response.
-        context: Full context to process.
-        min_messages_to_keep: Keep this many recent messages.
-        summarization_prompt: Prompt for summarization.
+        request_id: Unique identifier to match this request with its response.
+            Used to handle async responses and avoid race conditions.
+        context: The full LLM context containing all messages to analyze.
+        min_messages_to_keep: Number of recent messages to preserve uncompressed.
+            These messages will not be included in the summary.
+        summarization_prompt: System prompt instructing the LLM how to generate
+            the summary.
     """
 
     request_id: str
@@ -1884,15 +1889,19 @@ class LLMContextSummaryRequestFrame(ControlFrame):
 
 @dataclass
 class LLMContextSummaryResultFrame(ControlFrame):
-    """Frame containing context summarization result.
+    """Frame containing the result of context summarization.
 
-    Sent by LLM service back after summarization.
+    Sent by LLM services back to aggregators after generating a summary.
+    Contains the compressed summary text and metadata about what was summarized.
 
     Parameters:
-        request_id: ID from request for matching.
-        summary: Generated summary text.
-        last_summarized_index: Index of last summarized message.
-        error: Error message if summarization failed.
+        request_id: Identifier matching the original request. Used to correlate
+            async responses.
+        summary: The generated summary text. Will be inserted as a system
+            message in the compressed context.
+        last_summarized_index: Index (0-based) of the last message that was
+            included in the summary. Messages after this index are preserved.
+        error: Error message if summarization failed, None on success.
     """
 
     request_id: str

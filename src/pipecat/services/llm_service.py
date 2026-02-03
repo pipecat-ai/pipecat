@@ -380,10 +380,14 @@ class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, A
                 await self._cancel_function_call(function_name)
 
     async def _handle_summary_request(self, frame: LLMContextSummaryRequestFrame):
-        """Handle context summarization request.
+        """Handle context summarization request from aggregator.
+
+        Processes a summarization request by generating a compressed summary
+        of conversation history. Broadcasts the result back to the aggregator
+        for context reconstruction.
 
         Args:
-            frame: The summary request frame.
+            frame: The summary request frame containing context and parameters.
         """
         try:
             logger.debug(f"{self}: Processing summarization request {frame.request_id}")
@@ -397,17 +401,31 @@ class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, A
         except Exception as e:
             await self.push_error(f"Error generating context summary: {e}", exception=e)
             await self.broadcast_frame(
-                LLMContextSummaryResultFrame, summary="", last_summarized_index=-1, error=str(e)
+                LLMContextSummaryResultFrame,
+                request_id=frame.request_id,
+                summary="",
+                last_summarized_index=-1,
+                error=str(e),
             )
 
     async def _generate_summary(self, frame: LLMContextSummaryRequestFrame) -> tuple[str, int]:
-        """Generate summary from context.
+        """Generate a compressed summary of conversation context.
+
+        Uses the mixin's message selection logic to identify which messages
+        to summarize, formats them as a transcript, and invokes the LLM to
+        generate a concise summary.
 
         Args:
-            frame: The summary request frame.
+            frame: The summary request frame containing context and configuration.
 
         Returns:
-            Tuple of (summary text, last_summarized_index)
+            Tuple of (summary text, last_summarized_index). Returns ("", -1)
+            if there are no messages to summarize or if the service doesn't
+            support run_inference().
+
+        Note:
+            Requires the service to implement run_inference() method for
+            synchronous LLM calls.
         """
         logger.debug(f"{self}: Processing summarization request {frame.request_id}")
 

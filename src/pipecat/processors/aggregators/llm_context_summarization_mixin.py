@@ -43,13 +43,21 @@ The conversation transcript follows. Generate only the summary, no other text.""
 
 @dataclass
 class ContextSummarizationConfig:
-    """Configuration for context summarization.
+    """Configuration for context summarization behavior.
+
+    Controls when and how conversation context is automatically compressed
+    to manage token limits in long-running conversations.
 
     Attributes:
-        max_tokens: Maximum tokens before compression
-        summarization_threshold: Trigger at this % of max (0.5 = 50%)
-        min_messages_after_summary: Recent messages to keep uncompressed
-        summarization_prompt: Custom prompt (uses DEFAULT_SUMMARIZATION_PROMPT if None)
+        max_tokens: Maximum context size in tokens before compression is considered.
+        summarization_threshold: Percentage of max_tokens at which to trigger
+            summarization (0.5 = 50%). For example, with max_tokens=8000 and
+            threshold=0.5, summarization triggers at 4000 tokens.
+        min_messages_after_summary: Number of recent messages to preserve
+            uncompressed after each summarization. These messages maintain
+            immediate conversational context.
+        summarization_prompt: Custom prompt for the LLM to use when generating
+            summaries. If None, uses DEFAULT_SUMMARIZATION_PROMPT.
     """
 
     max_tokens: int = 8000
@@ -59,7 +67,11 @@ class ContextSummarizationConfig:
 
     @property
     def summary_prompt(self) -> str:
-        """Get the summarization prompt to use."""
+        """Get the summarization prompt to use.
+
+        Returns:
+            The custom prompt if set, otherwise the default summarization prompt.
+        """
         return self.summarization_prompt or DEFAULT_SUMMARIZATION_PROMPT
 
 
@@ -77,10 +89,27 @@ class MessagesToSummarize:
 
 
 class ContextSummarizationMixin:
-    """Mixin providing context summarization capabilities.
+    """Mixin providing context summarization capabilities for LLM processing.
 
-    This mixin can be used by both aggregators and LLM services to provide
-    consistent context summarization behavior.
+    This mixin enables automatic conversation context compression when token
+    limits are approached. It provides shared functionality for both aggregators
+    (which decide when to summarize) and LLM services (which generate summaries).
+
+    Key features:
+    - Token estimation using word-count heuristics
+    - Smart message selection (preserves system messages and recent context)
+    - Function call awareness (avoids summarizing incomplete tool interactions)
+    - Flexible transcript formatting for summarization
+
+    Usage:
+        Include this mixin in classes that need summarization capabilities:
+
+        class MyAggregator(ContextSummarizationMixin, BaseAggregator):
+            pass
+
+    Note:
+        Token estimation uses a rough heuristic (word_count * 1.3). Services
+        can override `_estimate_tokens()` for more accurate tokenization.
     """
 
     def _estimate_tokens(self, text: str) -> int:
@@ -97,17 +126,25 @@ class ContextSummarizationMixin:
         """
         if not text:
             return 0
-        words = re.split(r"[^\w]+", text)
+        # Split on non-word characters and filter out empty strings
+        words = [w for w in re.split(r"[^\w]+", text) if w]
         return int(len(words) * 1.3)
 
     def estimate_context_tokens(self, context: LLMContext) -> int:
         """Estimate total token count for a context.
 
+        Calculates an approximate token count by analyzing all messages,
+        including text content, tool calls, and structural overhead.
+
         Args:
-            context: LLM context to estimate
+            context: LLM context to estimate.
 
         Returns:
-            Estimated total token count
+            Estimated total token count including:
+            - Message content (text, images)
+            - Tool calls and their arguments
+            - Tool results
+            - Structural overhead (~10 tokens per message)
         """
         total = 0
 
@@ -147,14 +184,19 @@ class ContextSummarizationMixin:
         return total
 
     def _get_function_calls_in_progress_index(self, messages: List[dict], start_idx: int) -> int:
-        """Check if there are function calls without results starting from an index.
+        """Find the earliest message index with incomplete function calls.
+
+        Scans messages to identify function/tool calls that haven't received
+        their results yet. This prevents summarizing incomplete tool interactions
+        which would break the request-response pairing.
 
         Args:
-            messages: List of messages to check
-            start_idx: Index to start checking from
+            messages: List of messages to check.
+            start_idx: Index to start checking from.
 
         Returns:
-            Index of first message with function call in progress, or -1 if none
+            Index of first message with function call in progress, or -1 if all
+            function calls are complete.
         """
         # Track tool call IDs mapped to their message index
         pending_tool_calls: dict[str, int] = {}
@@ -188,26 +230,30 @@ class ContextSummarizationMixin:
     def get_messages_to_summarize(
         self, context: LLMContext, min_messages_to_keep: int
     ) -> MessagesToSummarize:
-        """Determine which messages to summarize.
+        """Determine which messages should be included in summarization.
 
-        This method identifies which messages should be included in the summary while:
-        - Preserving the first system message
-        - Keeping the last N messages uncompressed
-        - Avoiding summarization of function calls that are in progress
+        Intelligently selects messages for summarization while preserving:
+        - The first system message (defines assistant behavior)
+        - The last N messages (maintains immediate conversation context)
+        - Incomplete function call sequences (preserves tool interaction integrity)
+
+        Args:
+            context: The LLM context containing all messages.
+            min_messages_to_keep: Number of recent messages to exclude from
+                summarization.
 
         Returns:
-            MessagesToSummarize with messages to summarize and last index
+            MessagesToSummarize containing the messages to summarize and the
+            index of the last message included.
         """
         messages = context.messages
         if len(messages) <= min_messages_to_keep:
             return MessagesToSummarize(messages=[], last_summarized_index=-1)
 
-        # Find first system message
-        first_system_index = -1
-        for i, msg in enumerate(messages):
-            if msg.get("role") == "system":
-                first_system_index = i
-                break
+        # Find first system message index
+        first_system_index = next(
+            (i for i, msg in enumerate(messages) if msg.get("role") == "system"), -1
+        )
 
         # Get messages to keep (last N messages)
         keep_start_index = len(messages) - min_messages_to_keep

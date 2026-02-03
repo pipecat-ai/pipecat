@@ -105,8 +105,12 @@ class LLMUserAggregatorParams:
         user_turn_completion_config: Configuration for turn completion behavior including
             custom instructions, timeouts, and prompts. Only used when
             filter_incomplete_user_turns is True.
-        enable_context_summarization: Enable context summarization (disabled by default).
+        enable_context_summarization: Enable automatic context summarization when token
+            limits are approached (disabled by default). When enabled, older conversation
+            messages are automatically compressed into summaries to manage context size.
         context_summarization_config: Configuration for context summarization behavior.
+            Controls thresholds, message preservation, and summarization prompts. If None
+            and summarization is enabled, uses default configuration values.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
@@ -763,10 +767,18 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
     # Context summarization methods
 
     def _should_summarize(self) -> bool:
-        """Check if context summarization should be triggered.
+        """Determine if context summarization should be triggered.
+
+        Evaluates whether the current context has reached the configured token
+        threshold and has enough new messages since the last summarization to
+        warrant compression.
 
         Returns:
-            True if summarization should be triggered.
+            True if all conditions are met:
+            - Summarization is enabled
+            - No summarization currently in progress
+            - Token count exceeds threshold (max_tokens * summarization_threshold)
+            - Sufficient messages accumulated since last summary
         """
         logger.debug(f"{self}: Checking if context summarization is needed")
 
@@ -817,7 +829,11 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
         return True
 
     async def _request_summarization(self):
-        """Request context summarization from LLM service."""
+        """Request context summarization from LLM service.
+
+        Creates and broadcasts a summarization request frame to the LLM service.
+        Tracks the request ID to match async responses and prevent race conditions.
+        """
         # Generate unique request ID
         request_id = str(uuid.uuid4())
         min_keep = self._summarization_config.min_messages_after_summary
@@ -838,10 +854,14 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
         )
 
     async def _handle_summary_result(self, frame: LLMContextSummaryResultFrame):
-        """Handle context summarization result.
+        """Handle context summarization result from LLM service.
+
+        Processes the summary result by validating the request ID, checking for
+        errors, verifying context state hasn't changed, and applying the summary
+        to compress the context.
 
         Args:
-            frame: The summary result frame.
+            frame: The summary result frame containing the generated summary.
         """
         # Check if this is the result we're waiting for
         if frame.request_id != self._pending_summary_request_id:
@@ -866,13 +886,18 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
         await self._apply_summary(frame.summary, frame.last_summarized_index)
 
     def _validate_summary_context(self, last_summarized_index: int) -> bool:
-        """Validate that context is still valid for applying summary.
+        """Validate that context state is still valid for applying summary.
+
+        Checks if the context has changed since the summarization request was
+        made. This prevents applying stale summaries when messages have been
+        added or removed during the async summarization process.
 
         Args:
             last_summarized_index: The index of the last summarized message.
 
         Returns:
-            True if context is valid for summary application.
+            True if the context state is still consistent with the summary and
+            it's safe to apply the compression.
         """
         if last_summarized_index < 0:
             return False
@@ -890,20 +915,24 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
         return True
 
     async def _apply_summary(self, summary: str, last_summarized_index: int):
-        """Apply summary to context.
+        """Apply summary to compress the conversation context.
+
+        Reconstructs the context with a compressed structure:
+        [first_system_message] + [summary_message] + [recent_messages]
+
+        This replaces the summarized messages with a single system message
+        containing the summary, preserving the first system prompt and all
+        messages after last_summarized_index.
 
         Args:
-            summary: The generated summary text.
-            last_summarized_index: The index of the last summarized message.
+            summary: The generated summary text to insert.
+            last_summarized_index: The index of the last message included in
+                the summary. Messages after this index are preserved.
         """
         messages = self._context.messages
 
-        # Find first system message
-        first_system_message = None
-        for msg in messages:
-            if msg.get("role") == "system":
-                first_system_message = msg
-                break
+        # Find first system message (if any)
+        first_system_message = next((msg for msg in messages if msg.get("role") == "system"), None)
 
         # Get messages after the last summarized index
         # These are the recent messages that were not included in the summary
