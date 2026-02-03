@@ -9,7 +9,9 @@ import unittest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    FunctionCallCancelFrame,
     FunctionCallFromLLM,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
@@ -614,6 +616,157 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The incomplete marker should be stripped (resulting in empty content)
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+
+    async def test_text_before_function_call(self):
+        """Test that assistant text is added to context before function call completes.
+
+        This verifies the fix for issue #3631: when an LLM returns both text content
+        and a tool call, the text should be in context when the tool call is processed,
+        not only after LLMFullResponseEndFrame.
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Let me check the weather for you."),
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        # Verify the text message is in context and appears before the tool_calls message
+        # Find the assistant text message and assistant tool_calls message
+        text_message_index = None
+        tool_calls_message_index = None
+
+        for i, msg in enumerate(context.messages):
+            if msg.get("role") == "assistant":
+                if msg.get("content") and not msg.get("tool_calls"):
+                    text_message_index = i
+                elif msg.get("tool_calls"):
+                    tool_calls_message_index = i
+
+        self.assertIsNotNone(text_message_index, "Assistant text message not found in context")
+        self.assertIsNotNone(
+            tool_calls_message_index, "Assistant tool_calls message not found in context"
+        )
+        self.assertLess(
+            text_message_index,
+            tool_calls_message_index,
+            f"Text message (index {text_message_index}) should appear before "
+            f"tool_calls message (index {tool_calls_message_index})",
+        )
+
+        # Verify the text content
+        self.assertEqual(
+            context.messages[text_message_index]["content"],
+            "Let me check the weather for you.",
+        )
+
+    async def test_text_before_function_call_cancelled(self):
+        """Test that assistant text is preserved in context when function call is cancelled.
+
+        This verifies that when a user interrupts during a function call:
+        1. The assistant's text (spoken before the tool call) is in context
+        2. The tool call message is in context
+        3. The tool result shows CANCELLED
+
+        Flow: LLM generates text + tool call -> TTS starts -> Tool starts ->
+              context updates with both -> Interrupt before tool completes
+        """
+        context = LLMContext()
+        aggregator = LLMAssistantAggregator(context)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Let me look that up for you."),
+            FunctionCallInProgressFrame(
+                function_name="search_database",
+                tool_call_id="2",
+                arguments={"query": "test"},
+                cancel_on_interruption=True,  # This tool can be cancelled
+            ),
+            SleepFrame(),
+            # User interrupts - tool call gets cancelled
+            FunctionCallCancelFrame(
+                function_name="search_database",
+                tool_call_id="2",
+            ),
+            SleepFrame(),
+        ]
+        # When text is flushed before function call, it will emit context frames
+        expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        # Verify context state after cancellation:
+        # 1. Assistant text message should be present
+        # 2. Assistant tool_calls message should be present
+        # 3. Tool result message should show CANCELLED
+
+        text_message_index = None
+        tool_calls_message_index = None
+        tool_result_message_index = None
+
+        for i, msg in enumerate(context.messages):
+            role = msg.get("role")
+            if role == "assistant":
+                if msg.get("content") and not msg.get("tool_calls"):
+                    text_message_index = i
+                elif msg.get("tool_calls"):
+                    tool_calls_message_index = i
+            elif role == "tool":
+                tool_result_message_index = i
+
+        self.assertIsNotNone(text_message_index, "Assistant text message not found in context")
+        self.assertIsNotNone(
+            tool_calls_message_index, "Assistant tool_calls message not found in context"
+        )
+        self.assertIsNotNone(tool_result_message_index, "Tool result message not found in context")
+
+        # Verify ordering: text -> tool_calls -> tool result
+        self.assertLess(
+            text_message_index,
+            tool_calls_message_index,
+            "Text message should appear before tool_calls message",
+        )
+        self.assertLess(
+            tool_calls_message_index,
+            tool_result_message_index,
+            "Tool_calls message should appear before tool result message",
+        )
+
+        # Verify the text content
+        self.assertEqual(
+            context.messages[text_message_index]["content"],
+            "Let me look that up for you.",
+        )
+
+        # Verify the tool result shows CANCELLED
+        tool_result = context.messages[tool_result_message_index]
+        self.assertEqual(tool_result.get("tool_call_id"), "2")
+        self.assertEqual(tool_result.get("content"), "CANCELLED")
 
 
 if __name__ == "__main__":

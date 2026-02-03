@@ -937,6 +937,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
 
+        # Flush any accumulated text to context BEFORE adding the tool call.
+        # This ensures the assistant's text is in context when the tool executes,
+        # which is important for frameworks that rebuild context during tool calls.
+        # See: https://github.com/pipecat-ai/pipecat/issues/3631
+        await self.push_aggregation()
+
         # Update context with the in-progress function call
         self._context.add_message(
             {
