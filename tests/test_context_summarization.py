@@ -210,5 +210,271 @@ class TestContextSummarizationConfig(unittest.TestCase):
         self.assertEqual(config_with_custom.summary_prompt, "Custom")
 
 
+class TestFunctionCallHandling(unittest.TestCase):
+    """Tests for function call handling in summarization."""
+
+    def test_function_call_in_progress_not_summarized(self):
+        """Test that messages with function calls in progress are not summarized."""
+        mixin = ContextSummarizationMixin()
+        context = LLMContext()
+
+        # Add messages including a function call without result
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "What time is it?"})
+        context.add_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        # No tool result yet - function call is in progress
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        # Try to keep last 1 message
+        result = mixin.get_messages_to_summarize(context, 1)
+
+        # Should only get the first user message, stopping before the function call
+        self.assertEqual(len(result.messages), 1)
+        self.assertEqual(result.messages[0]["content"], "What time is it?")
+        self.assertEqual(result.last_summarized_index, 1)
+
+    def test_completed_function_call_can_be_summarized(self):
+        """Test that completed function calls can be summarized."""
+        mixin = ContextSummarizationMixin()
+        context = LLMContext()
+
+        # Add messages including a complete function call sequence
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "What time is it?"})
+        context.add_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        # Tool result completes the function call
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_123", "content": '{"time": "10:30 AM"}'}
+        )
+        context.add_message({"role": "assistant", "content": "It's 10:30 AM"})
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        # Try to keep last 1 message
+        result = mixin.get_messages_to_summarize(context, 1)
+
+        # Should get all messages except the last one (complete function call is included)
+        self.assertEqual(len(result.messages), 4)
+        self.assertEqual(result.messages[0]["content"], "What time is it?")
+        self.assertEqual(result.messages[-1]["content"], "It's 10:30 AM")
+        self.assertEqual(result.last_summarized_index, 4)
+
+    def test_multiple_function_calls_in_progress(self):
+        """Test handling of multiple function calls in progress."""
+        mixin = ContextSummarizationMixin()
+        context = LLMContext()
+
+        # Add messages with multiple function calls
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "Message 1"})
+        context.add_message({"role": "assistant", "content": "Response 1"})
+        context.add_message({"role": "user", "content": "What's the time and date?"})
+        context.add_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_time",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_date",
+                        "type": "function",
+                        "function": {"name": "get_date", "arguments": "{}"},
+                    },
+                ],
+            }
+        )
+        # Only one tool result - other call still in progress
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_time", "content": '{"time": "10:30 AM"}'}
+        )
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        # Try to keep last 1 message
+        result = mixin.get_messages_to_summarize(context, 1)
+
+        # Should stop before the function call that's in progress
+        # Messages to summarize: indices 1, 2, 3 (stops before index 4 where incomplete call is)
+        self.assertEqual(len(result.messages), 3)
+        self.assertEqual(result.last_summarized_index, 3)
+
+    def test_multiple_completed_function_calls(self):
+        """Test that multiple completed function calls can be summarized."""
+        mixin = ContextSummarizationMixin()
+        context = LLMContext()
+
+        # Add messages with multiple completed function calls
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "What's the time and date?"})
+        context.add_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_time",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_date",
+                        "type": "function",
+                        "function": {"name": "get_date", "arguments": "{}"},
+                    },
+                ],
+            }
+        )
+        # Both tool results provided
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_time", "content": '{"time": "10:30 AM"}'}
+        )
+        context.add_message(
+            {
+                "role": "tool",
+                "tool_call_id": "call_date",
+                "content": '{"date": "January 1, 2024"}',
+            }
+        )
+        context.add_message({"role": "assistant", "content": "It's 10:30 AM on January 1, 2024"})
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        # Try to keep last 1 message
+        result = mixin.get_messages_to_summarize(context, 1)
+
+        # Should get all messages except the last one (all function calls completed)
+        self.assertEqual(len(result.messages), 5)
+        self.assertEqual(result.last_summarized_index, 5)
+
+    def test_sequential_function_calls_mixed_completion(self):
+        """Test sequential function calls with mixed completion states."""
+        mixin = ContextSummarizationMixin()
+        context = LLMContext()
+
+        # Add messages with sequential function calls
+        context.add_message({"role": "system", "content": "System prompt"})
+
+        # First function call - completed
+        context.add_message({"role": "user", "content": "What time is it?"})
+        context.add_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"time": "10:30 AM"}'}
+        )
+        context.add_message({"role": "assistant", "content": "It's 10:30 AM"})
+
+        # Second function call - in progress
+        context.add_message({"role": "user", "content": "What's the date?"})
+        context.add_message(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {"name": "get_date", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        # No result for call_2 yet
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        # Try to keep last 1 message
+        result = mixin.get_messages_to_summarize(context, 1)
+
+        # Should get messages up to and including the first completed function call
+        # but stop before the second function call that's in progress
+        # Messages to summarize: indices 1, 2, 3, 4, 5 (stops before index 6 where incomplete call is)
+        self.assertEqual(len(result.messages), 5)
+        self.assertEqual(result.messages[-1]["content"], "What's the date?")
+        self.assertEqual(result.last_summarized_index, 5)
+
+    def test_function_call_formatting_in_transcript(self):
+        """Test that function calls are properly formatted in transcript."""
+        mixin = ContextSummarizationMixin()
+
+        messages = [
+            {"role": "user", "content": "What time is it?"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_123", "content": '{"time": "10:30 AM"}'},
+            {"role": "assistant", "content": "It's 10:30 AM"},
+        ]
+
+        transcript = mixin.format_messages_for_summary(messages)
+
+        # Check that function call is included
+        self.assertIn("TOOL_CALL: get_time({})", transcript)
+        # Check that tool result is included
+        self.assertIn('TOOL_RESULT[call_123]: {"time": "10:30 AM"}', transcript)
+
+    def test_no_function_calls(self):
+        """Test that summarization works normally without function calls."""
+        mixin = ContextSummarizationMixin()
+        context = LLMContext()
+
+        # Add normal conversation without function calls
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "Hello"})
+        context.add_message({"role": "assistant", "content": "Hi"})
+        context.add_message({"role": "user", "content": "How are you?"})
+        context.add_message({"role": "assistant", "content": "I'm good"})
+        context.add_message({"role": "user", "content": "Latest message"})
+
+        # Try to keep last 1 message
+        result = mixin.get_messages_to_summarize(context, 1)
+
+        # Should get all messages except the last one
+        self.assertEqual(len(result.messages), 4)
+        self.assertEqual(result.last_summarized_index, 4)
+
+
 if __name__ == "__main__":
     unittest.main()
