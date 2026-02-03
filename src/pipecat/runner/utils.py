@@ -161,7 +161,7 @@ async def parse_telephony_websocket(websocket: WebSocket):
             except json.JSONDecodeError:
                 first_message = {}
         except StopAsyncIteration:
-            logger.error("WebSocket closed without sending any messages")
+
             raise ValueError("WebSocket closed before receiving telephony handshake messages")
 
         # Second message
