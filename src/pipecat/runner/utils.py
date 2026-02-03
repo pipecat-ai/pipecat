@@ -96,6 +96,9 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
 async def parse_telephony_websocket(websocket: WebSocket):
     """Parse telephony WebSocket messages and return transport type and call data.
 
+    Args:
+        websocket: FastAPI WebSocket connection from telephony provider.
+
     Returns:
         tuple: (transport_type: str, call_data: dict)
 
@@ -135,6 +138,9 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "from": str,
                 "to": str,
             }
+
+    Raises:
+        ValueError: If WebSocket closes before sending any messages.
 
     Example usage::
 
