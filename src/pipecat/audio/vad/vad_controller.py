@@ -106,6 +106,8 @@ class VADController(BaseObject):
 
     async def _start(self, frame: StartFrame):
         self._vad_analyzer.set_sample_rate(frame.audio_in_sample_rate)
+        # Broadcast initial VAD params so other services (e.g. STT) can use them
+        await self.broadcast_frame(SpeechControlParamsFrame, vad_params=self._vad_analyzer.params)
 
     async def _handle_audio(self, frame: InputAudioRawFrame):
         """Process an audio chunk and emit speech events as needed.
