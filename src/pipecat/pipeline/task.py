@@ -15,7 +15,7 @@ import asyncio
 import importlib.util
 import os
 from pathlib import Path
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Set, Tuple, Type, TypeVar
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,6 +60,9 @@ HEARTBEAT_MONITOR_SECS = HEARTBEAT_SECS * 10
 IDLE_TIMEOUT_SECS = 300
 
 CANCEL_TIMEOUT_SECS = 20.0
+
+
+T = TypeVar("T")
 
 
 class IdleFrameObserver(BaseObserver):
@@ -333,14 +336,16 @@ class PipelineTask(BasePipelineTask):
                 f"{self}: RTVIProcessor and RTVIObserver found, skipping default ones. "
                 "They are both added by default, no need to add them yourself."
             )
+            self._rtvi = external_rtvi
         elif enable_rtvi:
             self._rtvi = rtvi_processor or RTVIProcessor()
+            observers.append(self._rtvi.create_rtvi_observer(params=rtvi_observer_params))
 
+        if self._rtvi:
+            # Automatically call RTVIProcessor.set_bot_ready()
             @self.rtvi.event_handler("on_client_ready")
             async def on_client_ready(rtvi: RTVIProcessor):
                 await rtvi.set_bot_ready()
-
-            observers.append(self._rtvi.create_rtvi_observer(params=rtvi_observer_params))
 
         # This is the idle event. When selected frames are pushed from any
         # processor we consider the pipeline is not idle. We use an observer
@@ -1039,9 +1044,7 @@ class PipelineTask(BasePipelineTask):
 
         return start_metadata
 
-    def _find_processor(
-        self, processor: FrameProcessor, processor_type: Type[FrameProcessor]
-    ) -> Optional[FrameProcessor]:
+    def _find_processor(self, processor: FrameProcessor, processor_type: Type[T]) -> Optional[T]:
         """Recursively find a processor of the given type in the pipeline."""
         if isinstance(processor, processor_type):
             return processor
