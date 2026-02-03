@@ -147,19 +147,28 @@ async def parse_telephony_websocket(websocket: WebSocket):
 
     try:
         # First message
-        first_message_raw = await start_data.__anext__()
-        logger.trace(f"First message: {first_message_raw}")
         try:
-            first_message = json.loads(first_message_raw)
-        except json.JSONDecodeError:
-            first_message = {}
+            first_message_raw = await start_data.__anext__()
+            logger.trace(f"First message: {first_message_raw}")
+            try:
+                first_message = json.loads(first_message_raw)
+            except json.JSONDecodeError:
+                first_message = {}
+        except StopAsyncIteration:
+            logger.error("WebSocket closed without sending any messages")
+            raise ValueError("WebSocket closed before receiving telephony handshake messages")
 
         # Second message
-        second_message_raw = await start_data.__anext__()
-        logger.trace(f"Second message: {second_message_raw}")
         try:
-            second_message = json.loads(second_message_raw)
-        except json.JSONDecodeError:
+            second_message_raw = await start_data.__anext__()
+            logger.trace(f"Second message: {second_message_raw}")
+            try:
+                second_message = json.loads(second_message_raw)
+            except json.JSONDecodeError:
+                second_message = {}
+        except StopAsyncIteration:
+            # Only one message received - use it for detection
+            logger.warning("Only received one WebSocket message, expected two")
             second_message = {}
 
         # Try auto-detection on both messages
