@@ -94,7 +94,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # Optional: customize context summarization behavior
             # Using low limits to demonstrate the feature quickly
             context_summarization_config=ContextSummarizationConfig(
-                max_context_tokens=500,  # Keep context within 500 tokens
+                max_context_tokens=1000,  # Keep context within 500 tokens
                 summarization_threshold=0.8,  # Trigger at 80% (400 tokens)
                 max_unsummarized_messages=10,  # Or when 10 new messages accumulate
                 min_messages_after_summary=2,  # Keep last 2 messages uncompressed

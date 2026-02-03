@@ -461,7 +461,10 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
         if self._vad_controller:
             await self._vad_controller.process_frame(frame)
 
-        if isinstance(frame, StartFrame):
+        if isinstance(frame, InterruptionFrame):
+            await self._handle_interruptions(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
             # processed by every processor before any other frame is processed.
             await self.push_frame(frame, direction)
@@ -763,6 +766,14 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""
+
+    async def _handle_interruptions(self, frame: InterruptionFrame):
+        # If an interruption happened before we received the summary response
+        # from the LLM, we need to cancel the pending summarization.
+        # Because maybe we will never receive the response frame again
+        if self._summarization_in_progress:
+            self._summarization_in_progress = False
+            self._pending_summary_request_id = None
 
     # Context summarization methods
 
