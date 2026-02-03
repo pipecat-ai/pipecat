@@ -17,7 +17,7 @@ import asyncio
 import base64
 import json
 import uuid
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Tuple
 
 import aiohttp
 import websockets
@@ -65,10 +65,12 @@ class InworldHttpTTSService(WordTTSService):
         Parameters:
             temperature: Temperature for speech synthesis.
             speaking_rate: Speaking rate for speech synthesis.
+            timestamp_transport_strategy: The strategy to use for timestamp transport.
         """
 
         temperature: Optional[float] = None
         speaking_rate: Optional[float] = None
+        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = None
 
     def __init__(
         self,
@@ -128,6 +130,8 @@ class InworldHttpTTSService(WordTTSService):
             self._settings["temperature"] = params.temperature
         if params.speaking_rate is not None:
             self._settings["audioConfig"]["speakingRate"] = params.speaking_rate
+        if params.timestamp_transport_strategy is not None:
+            self._settings["timestampTransportStrategy"] = params.timestamp_transport_strategy
 
         self._cumulative_time = 0.0
 
@@ -240,6 +244,8 @@ class InworldHttpTTSService(WordTTSService):
 
         # Use WORD timestamps for simplicity and correct spacing/capitalization
         payload["timestampType"] = self._timestamp_type
+        if "timestampTransportStrategy" in self._settings:
+            payload["timestampTransportStrategy"] = self._settings["timestampTransportStrategy"]
 
         request_id = str(uuid.uuid4())
         headers = {
@@ -427,6 +433,7 @@ class InworldTTSService(AudioContextWordTTSService):
                 flushing of buffered text to achieve minimal latency while
                 maintaining high quality audio output. If None (default),
                 automatically set based on aggregate_sentences.
+            timestamp_transport_strategy: The strategy to use for timestamp transport.
         """
 
         temperature: Optional[float] = None
@@ -434,7 +441,8 @@ class InworldTTSService(AudioContextWordTTSService):
         apply_text_normalization: Optional[str] = None
         max_buffer_delay_ms: Optional[int] = None
         buffer_char_threshold: Optional[int] = None
-        auto_mode: Optional[bool] = None
+        auto_mode: Optional[bool] = True
+        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = None
 
     def __init__(
         self,
@@ -494,6 +502,8 @@ class InworldTTSService(AudioContextWordTTSService):
             self._settings["audioConfig"]["speakingRate"] = params.speaking_rate
         if params.apply_text_normalization is not None:
             self._settings["applyTextNormalization"] = params.apply_text_normalization
+        if params.timestamp_transport_strategy is not None:
+            self._settings["timestampTransportStrategy"] = params.timestamp_transport_strategy
 
         if params.auto_mode is not None:
             self._settings["autoMode"] = params.auto_mode
@@ -815,12 +825,12 @@ class InworldTTSService(AudioContextWordTTSService):
                 if ctx_id:
                     await self.append_to_audio_context(ctx_id, frame)
 
-                # timestampInfo is inside audioChunk
-                timestamp_info = audio_chunk.get("timestampInfo")
-                if timestamp_info:
-                    word_times = self._calculate_word_times(timestamp_info)
-                    if word_times:
-                        await self.add_word_timestamps(word_times, ctx_id)
+            # timestampInfo is inside audioChunk
+            timestamp_info = audio_chunk.get("timestampInfo")
+            if timestamp_info:
+                word_times = self._calculate_word_times(timestamp_info)
+                if word_times:
+                    await self.add_word_timestamps(word_times, ctx_id)
 
             # Handle context created confirmation
             if "contextCreated" in result:
@@ -884,6 +894,10 @@ class InworldTTSService(AudioContextWordTTSService):
             create_config["applyTextNormalization"] = self._settings["applyTextNormalization"]
         if "autoMode" in self._settings:
             create_config["autoMode"] = self._settings["autoMode"]
+        if "timestampTransportStrategy" in self._settings:
+            create_config["timestampTransportStrategy"] = self._settings[
+                "timestampTransportStrategy"
+            ]
 
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.
