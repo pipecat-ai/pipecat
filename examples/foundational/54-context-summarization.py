@@ -7,14 +7,19 @@
 """Example demonstrating context summarization feature.
 
 This example shows how to enable and configure context summarization to automatically
-compress conversation history when token limits are approached.
+compress conversation history when token limits are approached. It also demonstrates
+that summarization correctly handles function calls, preserving incomplete function
+call sequences.
 """
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -34,6 +39,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -61,6 +67,14 @@ transport_params = {
 }
 
 
+# Tool functions for the LLM
+async def get_current_weather(params: FunctionCallParams):
+    """Get the current time in a readable format."""
+    logger.info("Tool called: get_current_weather")
+    await asyncio.sleep(5)  # Simulate some processing
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting bot")
 
@@ -73,14 +87,35 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
+    # Register tool functions
+    llm.register_function("get_current_weather", get_current_weather)
+
+    weather_function = FunctionSchema(
+        name="get_current_weather",
+        description="Get the current weather",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "format": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location.",
+            },
+        },
+        required=["location", "format"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function])
+
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way. You have access to tools to get the current weather - use them when relevant.",
         },
     ]
 
-    context = LLMContext(messages)
+    context = LLMContext(messages, tools=tools)
 
     # Create aggregators with summarization enabled
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
