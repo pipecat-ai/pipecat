@@ -292,7 +292,7 @@ class OjinVideoContinuousService(FrameProcessor):
 
         start_ts = time.perf_counter()
         next_frame_time = start_ts + self._frame_duration
-
+        initial_buffer_filled = False
         while True:
             # Check speaking state notifications
             await self._check_started_speaking()
@@ -310,6 +310,12 @@ class OjinVideoContinuousService(FrameProcessor):
 
             next_frame_time += self._frame_duration
 
+            if not initial_buffer_filled:
+                if len(self._video_frames) >= 12:
+                    initial_buffer_filled = True
+                else:
+                    continue
+
             # Determine which frame to play
             image_bytes: Optional[bytes] = None
             audio_bytes = silence_audio
@@ -320,7 +326,9 @@ class OjinVideoContinuousService(FrameProcessor):
                 image_bytes = video_frame.image_bytes
                 audio_bytes = video_frame.audio_bytes if video_frame.audio_bytes else silence_audio
                 self._last_played_image_bytes = image_bytes
-                logger.debug(f"Playing video frame {video_frame.frame_idx}")
+                logger.debug(
+                    f"Playing video frame {video_frame.frame_idx}, buffer left: {len(self._video_frames)}"
+                )
 
             elif self._last_played_image_bytes:
                 # Repeat last frame to avoid stutter
@@ -330,6 +338,23 @@ class OjinVideoContinuousService(FrameProcessor):
             else:
                 # No frame to show yet - just continue
                 continue
+
+            # frame buffer mechanism to keep it under control
+            # if (
+            #     len(self._video_frames) < 6
+            #     and audio_bytes == silence_audio
+            #     and next_frame_time < 50
+            # ):
+            #     next_frame_time += 0.01
+            #     logger.debug("Slowing down to fill up buffer")
+
+            # if (
+            #     len(self._video_frames) > 8
+            #     and audio_bytes == silence_audio
+            #     and next_frame_time > 30
+            # ):
+            #     next_frame_time -= 0.01
+            #     logger.debug("Speeding up to catch up")
 
             if image_bytes:
                 image_frame = OutputImageRawFrame(
