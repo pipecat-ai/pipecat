@@ -1585,33 +1585,6 @@ class RTVIProcessor(FrameProcessor):
         message = RTVILLMFunctionCallMessage(data=fn)
         await self.push_transport_message(message, exclude_none=False)
 
-    async def handle_function_call_start(
-        self, function_name: str, llm: FrameProcessor, context: OpenAILLMContext
-    ):
-        """Handle the start of a function call from the LLM.
-
-        .. deprecated:: 0.0.66
-            This method is deprecated and will be removed in a future version.
-            Use `RTVIProcessor.handle_function_call()` instead.
-
-        Args:
-            function_name: Name of the function being called.
-            llm: The LLM processor making the call.
-            context: The LLM context.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "Function `RTVIProcessor.handle_function_call_start()` is deprecated, use `RTVIProcessor.handle_function_call()` instead.",
-                DeprecationWarning,
-            )
-
-        fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
-        message = RTVILLMFunctionCallStartMessage(data=fn)
-        await self.push_transport_message(message, exclude_none=False)
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames through the RTVI processor.
 
