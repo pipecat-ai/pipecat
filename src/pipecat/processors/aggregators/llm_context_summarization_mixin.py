@@ -31,7 +31,7 @@ Your task:
    - Use clear, factual statements
    - Group related information
    - Prioritize information likely to be referenced later
-   - Keep it under 200 words
+   - Keep the summary concise to fit within the specified token budget
 
 3. Omit:
    - Greetings and small talk

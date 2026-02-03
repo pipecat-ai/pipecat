@@ -1877,6 +1877,8 @@ class LLMContextSummaryRequestFrame(ControlFrame):
         context: The full LLM context containing all messages to analyze.
         min_messages_to_keep: Number of recent messages to preserve uncompressed.
             These messages will not be included in the summary.
+        max_context_tokens: Maximum allowed context size in tokens. The LLM should
+            generate a summary that keeps the total context within this limit.
         summarization_prompt: System prompt instructing the LLM how to generate
             the summary.
     """
@@ -1884,6 +1886,7 @@ class LLMContextSummaryRequestFrame(ControlFrame):
     request_id: str
     context: "LLMContext"
     min_messages_to_keep: int
+    max_context_tokens: int
     summarization_prompt: str
 
 

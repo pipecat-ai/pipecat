@@ -863,6 +863,7 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
             request_id=request_id,
             context=self._context,
             min_messages_to_keep=min_keep,
+            max_context_tokens=self._summarization_config.max_context_tokens,
             summarization_prompt=self._summarization_config.summary_prompt,
         )
 

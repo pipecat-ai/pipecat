@@ -223,13 +223,17 @@ class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, A
         """
         return self.get_llm_adapter().create_llm_specific_message(message)
 
-    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+    ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Must be implemented by subclasses.
 
         Args:
             context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens/max_completion_tokens setting.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -455,7 +459,9 @@ class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, A
             },
             {
                 "role": "user",
-                "content": f"Conversation history: {transcript}",
+                "content": f"The maximum context size is {frame.max_context_tokens} tokens. "
+                f"Generate a summary that, when combined with recent messages, keeps the total context within this limit.\n\n"
+                f"Conversation history:\n{transcript}",
             },
         ]
         summary_context = LLMContext(messages=prompt_messages)
@@ -468,10 +474,37 @@ class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, A
             )
             return "", -1
 
-        logger.debug(f"{self}: Calling LLM to generate summary...")
+        # Calculate max_tokens for the summary
+        # Goal: keep total context within max_context_tokens
+        # After summarization: [system_message] + [summary] + [recent_messages]
+
+        # Estimate tokens for system message
+        first_system_msg = next(
+            (msg for msg in frame.context.messages if msg.get("role") == "system"), None
+        )
+        system_tokens = self._estimate_tokens(first_system_msg.get("content", "")) if first_system_msg else 0
+
+        # Estimate tokens for recent messages that will be kept
+        recent_messages = frame.context.messages[result.last_summarized_index + 1:]
+        recent_tokens = sum(
+            self._estimate_tokens(str(msg.get("content", ""))) + 10  # +10 for message overhead
+            for msg in recent_messages
+        )
+
+        # Calculate available tokens for summary (with 20% buffer for safety)
+        max_summary_tokens = int((frame.max_context_tokens - system_tokens - recent_tokens) * 0.8)
+        max_summary_tokens = max(100, max_summary_tokens)  # Ensure at least 100 tokens
+
+        logger.debug(
+            f"{self}: Token budget - max_context: {frame.max_context_tokens}, "
+            f"system: {system_tokens}, recent: {recent_tokens}, "
+            f"available for summary: {max_summary_tokens}"
+        )
+
+        logger.debug(f"{self}: Calling LLM to generate summary (max_tokens={max_summary_tokens})...")
 
         # Call run_inference to generate summary (returns Optional[str])
-        summary = await self.run_inference(summary_context)
+        summary = await self.run_inference(summary_context, max_tokens=max_summary_tokens)
 
         if not summary:
             logger.warning(f"{self}: LLM returned empty summary")
