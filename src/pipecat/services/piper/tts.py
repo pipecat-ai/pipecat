@@ -86,11 +86,12 @@ class PiperTTSService(TTSService):
         return True
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Piper.
 
         Args:
             text: The text to convert to speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech and status frames.
@@ -116,11 +117,12 @@ class PiperTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             async for frame in self._stream_audio_frames_from_iterator(
                 async_iterator(self._voice.synthesize(text)),
                 in_sample_rate=self._voice.config.sample_rate,
+                context_id=context_id,
             ):
                 await self.stop_ttfb_metrics()
                 yield frame
@@ -130,7 +132,7 @@ class PiperTTSService(TTSService):
         finally:
             logger.debug(f"{self}: Finished TTS [{text}]")
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
 
 # This assumes a running TTS service running:

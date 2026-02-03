@@ -539,6 +539,7 @@ class TTSService(AIService):
             strip_wav_header: Strip WAV header and parse source sample rate from it.
             in_sample_rate: Source sample rate for raw PCM data. Overrides
                 WAV-detected rate if both are provided.
+            context_id: Unique identifier for this TTS context.
 
         """
         buffer = bytearray()
