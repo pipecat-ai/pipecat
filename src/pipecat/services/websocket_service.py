@@ -36,7 +36,7 @@ class WebsocketService(ABC):
         """
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
         self._reconnect_on_error = reconnect_on_error
-        self._reconnect_lock = asyncio.Lock()
+        self._reconnect_in_progress: bool = False
         self._disconnecting: bool = False
 
     async def _verify_connection(self) -> bool:
@@ -73,11 +73,14 @@ class WebsocketService(ABC):
         max_retries: int = 3,
         report_error: Optional[Callable[[ErrorFrame], Awaitable[None]]] = None,
     ) -> bool:
-        async with self._reconnect_lock:
-            if await self._verify_connection():
-                return True
+        # Prevent concurrent reconnection attempts
+        if self._reconnect_in_progress:
+            logger.warning(f"{self} reconnect attempt aborted: already in progress")
+            return False
 
-            last_exception: Optional[Exception] = None
+        self._reconnect_in_progress = True
+        last_exception: Optional[Exception] = None
+        try:
             for attempt in range(1, max_retries + 1):
                 try:
                     logger.warning(f"{self} reconnecting, attempt {attempt}")
@@ -100,6 +103,8 @@ class WebsocketService(ABC):
             if report_error:
                 await report_error(ErrorFrame(fatal_msg, fatal=True))
             return False
+        finally:
+            self._reconnect_in_progress = False
 
     async def send_with_retry(self, message, report_error: Callable[[ErrorFrame], Awaitable[None]]):
         """Attempt to send a message, retrying after reconnect if necessary."""
