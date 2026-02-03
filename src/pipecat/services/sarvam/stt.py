@@ -6,7 +6,8 @@ can handle multiple audio formats for Indian language speech recognition.
 """
 
 import base64
-from typing import Literal, Optional
+from dataclasses import dataclass
+from typing import Dict, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -68,6 +69,60 @@ def language_to_sarvam_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass(frozen=True)
+class ModelConfig:
+    """Immutable configuration for a Sarvam STT model.
+
+    Attributes:
+        supports_prompt: Whether the model accepts prompt parameter.
+        supports_mode: Whether the model accepts mode parameter.
+        supports_language: Whether the model accepts language parameter.
+        default_language: Default language code (None = auto-detect).
+        default_mode: Default mode (None = not applicable).
+        use_translate_endpoint: Whether to use speech_to_text_translate_streaming endpoint.
+        use_translate_method: Whether to use translate() method instead of transcribe().
+    """
+
+    supports_prompt: bool
+    supports_mode: bool
+    supports_language: bool
+    default_language: Optional[str]
+    default_mode: Optional[str]
+    use_translate_endpoint: bool
+    use_translate_method: bool
+
+
+MODEL_CONFIGS: Dict[str, ModelConfig] = {
+    "saarika:v2.5": ModelConfig(
+        supports_prompt=False,
+        supports_mode=False,
+        supports_language=True,
+        default_language="unknown",
+        default_mode=None,
+        use_translate_endpoint=False,
+        use_translate_method=False,
+    ),
+    "saaras:v2.5": ModelConfig(
+        supports_prompt=True,
+        supports_mode=False,
+        supports_language=False,
+        default_language=None,  # Auto-detects language
+        default_mode=None,
+        use_translate_endpoint=True,
+        use_translate_method=True,
+    ),
+    "saaras:v3": ModelConfig(
+        supports_prompt=True,
+        supports_mode=True,
+        supports_language=True,
+        default_language="en-IN",
+        default_mode="transcribe",
+        use_translate_endpoint=False,
+        use_translate_method=False,
+    ),
+}
+
+
 class SarvamSTTService(STTService):
     """Sarvam speech-to-text service.
 
@@ -103,9 +158,6 @@ class SarvamSTTService(STTService):
         model: str = "saarika:v2.5",
         sample_rate: Optional[int] = None,
         input_audio_codec: str = "wav",
-        mode: Optional[
-            Literal["transcribe", "translate", "verbatim", "translit", "codemix"]
-        ] = None,
         params: Optional[InputParams] = None,
         **kwargs,
     ):
@@ -119,73 +171,44 @@ class SarvamSTTService(STTService):
                 - "saaras:v3": Advanced STT model (supports mode and prompts)
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
-            mode: Mode of operation for saaras:v3 models only. Options: transcribe, translate,
-                verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3.
             params: Configuration parameters for Sarvam STT service.
             **kwargs: Additional arguments passed to the parent STTService.
         """
         params = params or SarvamSTTService.InputParams()
-        # Allow mode to be passed directly or via params
-        if mode is not None and params.mode is None:
-            params = params.model_copy(update={"mode": mode})
 
-        # Validate allowed models
-        allowed_models = {"saarika:v2.5", "saaras:v3", "saaras:v2.5"}
-        if model not in allowed_models:
-            allowed_models_list = ", ".join(sorted(allowed_models))
-            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed_models_list}.")
+        # Get model configuration (validates model exists)
+        if model not in MODEL_CONFIGS:
+            allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
 
-        # Validate model-specific parameter restrictions
-        if "saarika" in model.lower():
-            # saarika models don't accept prompt or mode
-            if params.prompt is not None:
-                raise ValueError(
-                    f"Model '{model}' does not accept prompt parameter. "
-                    "Prompts are only supported for saaras models (v2.5 and v3)."
-                )
-            if params.mode is not None:
-                raise ValueError(
-                    f"Model '{model}' does not accept mode parameter. "
-                    "Mode is only supported for saaras:v3 model."
-                )
-        elif model.lower() == "saaras:v2.5":
-            # saaras:v2.5 supports prompt but not mode
-            if params.mode is not None:
-                raise ValueError(
-                    f"Model '{model}' does not accept mode parameter. "
-                    "Mode is only supported for saaras:v3 model."
-                )
-            if params.language is not None:
-                raise ValueError(
-                    f"Model '{model}' does not accept language parameter. "
-                    "saaras:v2.5 (STT-Translate) auto-detects language."
-                )
+        self._config = MODEL_CONFIGS[model]
+
+        # Validate parameters against model capabilities
+        if params.prompt is not None and not self._config.supports_prompt:
+            raise ValueError(f"Model '{model}' does not support prompt parameter.")
+        if params.mode is not None and not self._config.supports_mode:
+            raise ValueError(f"Model '{model}' does not support mode parameter.")
+        if params.language is not None and not self._config.supports_language:
+            raise ValueError(
+                f"Model '{model}' does not support language parameter (auto-detects language)."
+            )
 
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self.set_model_name(model)
         self._api_key = api_key
         self._language_code: Optional[Language] = params.language
-        # Set language string based on model type
-        # - saarika:v2.5: uses language_code or defaults to "unknown"
-        # - saaras:v2.5: auto-detects language (no language_code needed)
-        # - saaras:v3: uses language_code or defaults to "en-IN"
+
+        # Set language string: use provided language or model's default
         if params.language:
             self._language_string = language_to_sarvam_language(params.language)
-        elif "saarika" in model.lower():
-            self._language_string = "unknown"
-        elif model.lower() == "saaras:v2.5":
-            self._language_string = None  # STT-Translate auto-detects language
-        elif model.lower() == "saaras:v3":
-            self._language_string = "en-IN"
         else:
-            self._language_string = None
+            self._language_string = self._config.default_language
+
         self._prompt = params.prompt
-        # Set mode for saaras:v3, default to "transcribe"
-        if model.lower() == "saaras:v3":
-            self._mode = params.mode if params.mode is not None else "transcribe"
-        else:
-            self._mode = None
+
+        # Set mode: use provided mode or model's default
+        self._mode = params.mode if params.mode is not None else self._config.default_mode
 
         # Store connection parameters
         self._vad_signals = params.vad_signals
@@ -250,13 +273,12 @@ class SarvamSTTService(STTService):
             language: The language to use for speech recognition.
 
         Raises:
-            ValueError: If called on saaras:v2.5 model which auto-detects language.
+            ValueError: If called on a model that auto-detects language.
         """
-        # saaras:v2.5 (STT-Translate) auto-detects language
-        if self.model_name.lower() == "saaras:v2.5":
+        if not self._config.supports_language:
             raise ValueError(
-                f"Model '{self.model_name}' does not accept language parameter. "
-                "saaras:v2.5 (STT-Translate) auto-detects language."
+                f"Model '{self.model_name}' does not support language parameter "
+                "(auto-detects language)."
             )
 
         logger.info(f"Switching STT language to: [{language}]")
@@ -271,16 +293,12 @@ class SarvamSTTService(STTService):
         Args:
             prompt: Prompt text to guide transcription/translation style/context.
                    Pass None to clear/disable prompt.
-                   Only applicable to saaras models (v2.5 and v3).
+                   Only applicable to models that support prompts.
         """
-        # saarika models do not accept prompt parameter
-        if "saarika" in self.model_name.lower():
+        if not self._config.supports_prompt:
             if prompt is not None:
-                raise ValueError(
-                    f"Model '{self.model_name}' does not accept prompt parameter. "
-                    "Prompts are only supported for saaras models (v2.5 and v3)."
-                )
-            # If prompt is None and it's saarika, just silently return (no-op)
+                raise ValueError(f"Model '{self.model_name}' does not support prompt parameter.")
+            # If prompt is None and model doesn't support prompts, silently return (no-op)
             return
 
         logger.info(f"Updating {self.model_name} prompt.")
@@ -347,12 +365,10 @@ class SarvamSTTService(STTService):
                 "sample_rate": self.sample_rate,
             }
 
-            # Use appropriate method based on model type
-            if self.model_name.lower() == "saaras:v2.5":
-                # STT-Translate: auto-detects input language and returns translated text
+            # Use appropriate method based on model configuration
+            if self._config.use_translate_method:
                 await self._socket_client.translate(**method_kwargs)
             else:
-                # saarika:v2.5 and saaras:v3 use transcribe
                 await self._socket_client.transcribe(**method_kwargs)
 
         except Exception as e:
@@ -377,12 +393,12 @@ class SarvamSTTService(STTService):
                 "sample_rate": str(self.sample_rate),
             }
 
-            # Add language_code for models that require it (not saaras:v2.5 which auto-detects)
+            # Add language_code for models that support it
             if self._language_string is not None:
                 connect_kwargs["language_code"] = self._language_string
 
-            # Add mode for saaras:v3 only
-            if self.model_name.lower() == "saaras:v3" and self._mode is not None:
+            # Add mode for models that support it
+            if self._config.supports_mode and self._mode is not None:
                 connect_kwargs["mode"] = self._mode
 
             def _connect_with_sdk_headers(connect_fn, **kwargs):
@@ -394,15 +410,13 @@ class SarvamSTTService(STTService):
                         pass
                 return connect_fn(**kwargs)
 
-            # Choose the appropriate endpoint based on model
-            if self.model_name.lower() == "saaras:v2.5":
-                # STT-Translate: auto-detects input language and returns translated text
+            # Choose the appropriate endpoint based on model configuration
+            if self._config.use_translate_endpoint:
                 self._websocket_context = _connect_with_sdk_headers(
                     self._sarvam_client.speech_to_text_translate_streaming.connect,
                     **connect_kwargs,
                 )
             else:
-                # saarika:v2.5 and saaras:v3 use speech_to_text_streaming
                 self._websocket_context = _connect_with_sdk_headers(
                     self._sarvam_client.speech_to_text_streaming.connect,
                     **connect_kwargs,
@@ -411,8 +425,8 @@ class SarvamSTTService(STTService):
             # Enter the async context manager
             self._socket_client = await self._websocket_context.__aenter__()
 
-            # Set prompt if provided (only for saaras models, after connection)
-            if self._prompt is not None and "saaras" in self.model_name.lower():
+            # Set prompt if provided (only for models that support prompts)
+            if self._prompt is not None and self._config.supports_prompt:
                 await self._socket_client.set_prompt(self._prompt)
 
             # Register event handler for incoming messages
