@@ -83,7 +83,6 @@ class ResembleAITTSService(AudioContextWordTTSService):
         }
 
         self._websocket = None
-        self._request_id_counter = 0
         self._current_request_id = None
         self._receive_task = None
 
@@ -109,11 +108,12 @@ class ResembleAITTSService(AudioContextWordTTSService):
         """
         return True
 
-    def _build_msg(self, text: str = "") -> str:
+    def _build_msg(self, text: str = "", context_id: str = "") -> str:
         """Build a JSON message for the Resemble AI WebSocket API.
 
         Args:
             text: The text or SSML to synthesize.
+            context_id: Unique identifier for this TTS context.
 
         Returns:
             JSON string containing the request payload.
@@ -122,14 +122,13 @@ class ResembleAITTSService(AudioContextWordTTSService):
             "voice_uuid": self._voice_id,
             "data": text,
             "binary_response": False,  # Use JSON frames to get timestamps
-            "request_id": self._request_id_counter,
+            "request_id": context_id,
             "output_format": self._settings["output_format"],
             "sample_rate": self._settings["sample_rate"],
             "precision": self._settings["precision"],
             "no_audio_header": True,
         }
 
-        self._request_id_counter += 1
         return json.dumps(msg)
 
     async def start(self, frame: StartFrame):
@@ -311,6 +310,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
                         audio=chunk_to_send,
                         sample_rate=self.sample_rate,
                         num_channels=1,
+                        context_id=request_id_str,
                     )
                     await self.append_to_audio_context(request_id_str, frame)
 
@@ -328,7 +328,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
                             word_times.append((char, start_time))
 
                     if word_times:
-                        await self.add_word_timestamps(word_times)
+                        await self.add_word_timestamps(word_times, request_id_str)
 
             elif msg_type == "audio_end":
                 await self.stop_ttfb_metrics()
@@ -345,6 +345,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
                             audio=remaining,
                             sample_rate=self.sample_rate,
                             num_channels=1,
+                            context_id=request_id_str,
                         )
                         await self.append_to_audio_context(request_id_str, frame)
 
@@ -354,7 +355,9 @@ class ResembleAITTSService(AudioContextWordTTSService):
                 if request_id_str in self._playback_started:
                     del self._playback_started[request_id_str]
 
-                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
+                await self.add_word_timestamps(
+                    [("TTSStoppedFrame", 0), ("Reset", 0)], request_id_str
+                )
                 await self.remove_audio_context(request_id_str)
                 # Clear current request if this was it
                 if self._current_request_id == request_id:
@@ -374,7 +377,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
                 if request_id_str in self._playback_started:
                     del self._playback_started[request_id_str]
 
-                await self.push_frame(TTSStoppedFrame())
+                await self.push_frame(TTSStoppedFrame(context_id=request_id_str))
                 await self.stop_all_metrics()
                 await self.push_error(ErrorFrame(error=f"{self} error: {error_name} - {error_msg}"))
 
@@ -402,11 +405,12 @@ class ResembleAITTSService(AudioContextWordTTSService):
                 await self._connect_websocket()
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Resemble AI's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -419,22 +423,19 @@ class ResembleAITTSService(AudioContextWordTTSService):
 
             if not self._current_request_id:
                 await self.start_ttfb_metrics()
-                yield TTSStartedFrame()
-                # Track the current request_id we're processing
-                self._current_request_id = self._request_id_counter
+                self._current_request_id = context_id
+                yield TTSStartedFrame(context_id=context_id)
 
-            # Create audio context using request_id (converted to string)
-            request_id_str = str(self._request_id_counter)
-            await self.create_audio_context(request_id_str)
+            await self.create_audio_context(context_id)
 
-            msg = self._build_msg(text=text)
+            msg = self._build_msg(text=text, context_id=context_id)
 
             try:
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
