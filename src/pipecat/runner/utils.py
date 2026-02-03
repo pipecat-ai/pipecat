@@ -149,33 +149,31 @@ async def parse_telephony_websocket(websocket: WebSocket):
             user_id = call_data["body"]["user_id"]
     """
     # Read first two messages
-    start_data = websocket.iter_text()
+    message_stream = websocket.iter_text()
+    first_message = {}
+    second_message = {}
 
     try:
-        # First message
-        try:
-            first_message_raw = await start_data.__anext__()
-            logger.trace(f"First message: {first_message_raw}")
-            try:
-                first_message = json.loads(first_message_raw)
-            except json.JSONDecodeError:
-                first_message = {}
-        except StopAsyncIteration:
-            raise ValueError("WebSocket closed before receiving telephony handshake messages")
+        # First message - required
+        first_message_raw = await message_stream.__anext__()
+        logger.trace(f"First message: {first_message_raw}")
+        first_message = json.loads(first_message_raw) if first_message_raw else {}
+    except json.JSONDecodeError:
+        pass
+    except StopAsyncIteration:
+        raise ValueError("WebSocket closed before receiving telephony handshake messages")
 
-        # Second message
-        try:
-            second_message_raw = await start_data.__anext__()
-            logger.trace(f"Second message: {second_message_raw}")
-            try:
-                second_message = json.loads(second_message_raw)
-            except json.JSONDecodeError:
-                second_message = {}
-        except StopAsyncIteration:
-            # Only one message received - use it for detection
-            logger.warning("Only received one WebSocket message, expected two")
-            second_message = {}
+    try:
+        # Second message - optional, some providers may only send one
+        second_message_raw = await message_stream.__anext__()
+        logger.trace(f"Second message: {second_message_raw}")
+        second_message = json.loads(second_message_raw) if second_message_raw else {}
+    except json.JSONDecodeError:
+        pass
+    except StopAsyncIteration:
+        logger.warning("Only received one WebSocket message, expected two")
 
+    try:
         # Try auto-detection on both messages
         detected_type_first = _detect_transport_type_from_message(first_message)
         detected_type_second = _detect_transport_type_from_message(second_message)
