@@ -9,40 +9,36 @@
 import unittest
 
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_context_summarization_mixin import (
-    ContextSummarizationConfig,
-    ContextSummarizationMixin,
+from pipecat.utils.context.llm_context_summarization import (
+    LLMContextSummarizationConfig,
+    LLMContextSummarizationUtil,
 )
 
 
 class TestContextSummarizationMixin(unittest.TestCase):
-    """Tests for ContextSummarizationMixin."""
+    """Tests for LLMContextSummarizationUtil."""
 
     def test_estimate_tokens_simple_text(self):
         """Test token estimation with simple text."""
-        mixin = ContextSummarizationMixin()
-
         # Simple sentence: "Hello world" = 2 words * 1.3 = 2.6 -> 2 tokens
-        tokens = mixin._estimate_tokens("Hello world")
+        tokens = LLMContextSummarizationUtil.estimate_tokens("Hello world")
         self.assertEqual(tokens, 2)
 
         # More words: "This is a test message" = 5 words * 1.3 = 6.5 -> 6 tokens
-        tokens = mixin._estimate_tokens("This is a test message")
+        tokens = LLMContextSummarizationUtil.estimate_tokens("This is a test message")
         self.assertEqual(tokens, 6)
 
     def test_estimate_tokens_empty(self):
         """Test token estimation with empty text."""
-        mixin = ContextSummarizationMixin()
-        tokens = mixin._estimate_tokens("")
+        tokens = LLMContextSummarizationUtil.estimate_tokens("")
         self.assertEqual(tokens, 0)
 
     def test_estimate_context_tokens(self):
         """Test context token estimation."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Empty context
-        self.assertEqual(mixin.estimate_context_tokens(context), 0)
+        self.assertEqual(LLMContextSummarizationUtil.estimate_context_tokens(context), 0)
 
         # Add messages
         context.add_message({"role": "system", "content": "You are helpful"})  # ~4 words
@@ -53,13 +49,12 @@ class TestContextSummarizationMixin(unittest.TestCase):
         # Total content: ~7 words * 1.3 = ~9 tokens
         # Total overhead: 3 * 10 = 30 tokens
         # Expected: ~39 tokens
-        total = mixin.estimate_context_tokens(context)
+        total = LLMContextSummarizationUtil.estimate_context_tokens(context)
         self.assertGreater(total, 30)  # At least overhead
         self.assertLess(total, 50)  # Not too much
 
     def test_get_messages_to_summarize_basic(self):
         """Test basic message extraction for summarization."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add messages
@@ -72,7 +67,7 @@ class TestContextSummarizationMixin(unittest.TestCase):
         context.add_message({"role": "assistant", "content": "Response 3"})
 
         # Keep last 2 messages
-        result = mixin.get_messages_to_summarize(context, 2)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
 
         # Get first system message from context
         first_system = None
@@ -95,7 +90,6 @@ class TestContextSummarizationMixin(unittest.TestCase):
 
     def test_get_messages_to_summarize_no_system(self):
         """Test message extraction when there's no system message."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add messages without system prompt
@@ -105,7 +99,7 @@ class TestContextSummarizationMixin(unittest.TestCase):
         context.add_message({"role": "assistant", "content": "Response 2"})
 
         # Keep last 1 message
-        result = mixin.get_messages_to_summarize(context, 1)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
 
         # Get first system message from context
         first_system = None
@@ -123,7 +117,6 @@ class TestContextSummarizationMixin(unittest.TestCase):
 
     def test_get_messages_to_summarize_insufficient(self):
         """Test when there aren't enough messages to summarize."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add only 2 messages
@@ -131,7 +124,7 @@ class TestContextSummarizationMixin(unittest.TestCase):
         context.add_message({"role": "assistant", "content": "Response 1"})
 
         # Try to keep 2 messages (same as total)
-        result = mixin.get_messages_to_summarize(context, 2)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
 
         # Should return empty
         self.assertEqual(len(result.messages), 0)
@@ -139,7 +132,6 @@ class TestContextSummarizationMixin(unittest.TestCase):
 
     def test_format_messages_for_summary(self):
         """Test message formatting for summary."""
-        mixin = ContextSummarizationMixin()
 
         messages = [
             {"role": "user", "content": "Hello"},
@@ -147,7 +139,7 @@ class TestContextSummarizationMixin(unittest.TestCase):
             {"role": "user", "content": "How are you?"},
         ]
 
-        transcript = mixin.format_messages_for_summary(messages)
+        transcript = LLMContextSummarizationUtil.format_messages_for_summary(messages)
 
         self.assertIn("USER: Hello", transcript)
         self.assertIn("ASSISTANT: Hi there", transcript)
@@ -155,7 +147,6 @@ class TestContextSummarizationMixin(unittest.TestCase):
 
     def test_format_messages_with_list_content(self):
         """Test formatting messages with list content."""
-        mixin = ContextSummarizationMixin()
 
         messages = [
             {
@@ -167,17 +158,17 @@ class TestContextSummarizationMixin(unittest.TestCase):
             }
         ]
 
-        transcript = mixin.format_messages_for_summary(messages)
+        transcript = LLMContextSummarizationUtil.format_messages_for_summary(messages)
 
         self.assertIn("USER: First part Second part", transcript)
 
 
-class TestContextSummarizationConfig(unittest.TestCase):
-    """Tests for ContextSummarizationConfig."""
+class TestLLMContextSummarizationConfig(unittest.TestCase):
+    """Tests for LLMContextSummarizationConfig."""
 
     def test_default_config(self):
         """Test default configuration values."""
-        config = ContextSummarizationConfig()
+        config = LLMContextSummarizationConfig()
 
         self.assertEqual(config.max_context_tokens, 8000)
         self.assertEqual(config.summarization_threshold, 0.8)
@@ -187,7 +178,7 @@ class TestContextSummarizationConfig(unittest.TestCase):
 
     def test_custom_config(self):
         """Test custom configuration."""
-        config = ContextSummarizationConfig(
+        config = LLMContextSummarizationConfig(
             max_context_tokens=2000,
             summarization_threshold=0.75,
             max_unsummarized_messages=15,
@@ -203,10 +194,10 @@ class TestContextSummarizationConfig(unittest.TestCase):
 
     def test_summary_prompt_property(self):
         """Test summary_prompt property uses default when None."""
-        config = ContextSummarizationConfig()
+        config = LLMContextSummarizationConfig()
         self.assertIn("summarizing a conversation", config.summary_prompt.lower())
 
-        config_with_custom = ContextSummarizationConfig(summarization_prompt="Custom")
+        config_with_custom = LLMContextSummarizationConfig(summarization_prompt="Custom")
         self.assertEqual(config_with_custom.summary_prompt, "Custom")
 
 
@@ -215,7 +206,6 @@ class TestFunctionCallHandling(unittest.TestCase):
 
     def test_function_call_in_progress_not_summarized(self):
         """Test that messages with function calls in progress are not summarized."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add messages including a function call without result
@@ -238,7 +228,7 @@ class TestFunctionCallHandling(unittest.TestCase):
         context.add_message({"role": "user", "content": "Latest message"})
 
         # Try to keep last 1 message
-        result = mixin.get_messages_to_summarize(context, 1)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
 
         # Should only get the first user message, stopping before the function call
         self.assertEqual(len(result.messages), 1)
@@ -247,7 +237,6 @@ class TestFunctionCallHandling(unittest.TestCase):
 
     def test_completed_function_call_can_be_summarized(self):
         """Test that completed function calls can be summarized."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add messages including a complete function call sequence
@@ -274,7 +263,7 @@ class TestFunctionCallHandling(unittest.TestCase):
         context.add_message({"role": "user", "content": "Latest message"})
 
         # Try to keep last 1 message
-        result = mixin.get_messages_to_summarize(context, 1)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
 
         # Should get all messages except the last one (complete function call is included)
         self.assertEqual(len(result.messages), 4)
@@ -284,7 +273,6 @@ class TestFunctionCallHandling(unittest.TestCase):
 
     def test_multiple_function_calls_in_progress(self):
         """Test handling of multiple function calls in progress."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add messages with multiple function calls
@@ -317,7 +305,7 @@ class TestFunctionCallHandling(unittest.TestCase):
         context.add_message({"role": "user", "content": "Latest message"})
 
         # Try to keep last 1 message
-        result = mixin.get_messages_to_summarize(context, 1)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
 
         # Should stop before the function call that's in progress
         # Messages to summarize: indices 1, 2, 3 (stops before index 4 where incomplete call is)
@@ -326,7 +314,6 @@ class TestFunctionCallHandling(unittest.TestCase):
 
     def test_multiple_completed_function_calls(self):
         """Test that multiple completed function calls can be summarized."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add messages with multiple completed function calls
@@ -365,7 +352,7 @@ class TestFunctionCallHandling(unittest.TestCase):
         context.add_message({"role": "user", "content": "Latest message"})
 
         # Try to keep last 1 message
-        result = mixin.get_messages_to_summarize(context, 1)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
 
         # Should get all messages except the last one (all function calls completed)
         self.assertEqual(len(result.messages), 5)
@@ -373,7 +360,6 @@ class TestFunctionCallHandling(unittest.TestCase):
 
     def test_sequential_function_calls_mixed_completion(self):
         """Test sequential function calls with mixed completion states."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add messages with sequential function calls
@@ -418,7 +404,7 @@ class TestFunctionCallHandling(unittest.TestCase):
         context.add_message({"role": "user", "content": "Latest message"})
 
         # Try to keep last 1 message
-        result = mixin.get_messages_to_summarize(context, 1)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
 
         # Should get messages up to and including the first completed function call
         # but stop before the second function call that's in progress
@@ -429,7 +415,6 @@ class TestFunctionCallHandling(unittest.TestCase):
 
     def test_function_call_formatting_in_transcript(self):
         """Test that function calls are properly formatted in transcript."""
-        mixin = ContextSummarizationMixin()
 
         messages = [
             {"role": "user", "content": "What time is it?"},
@@ -448,7 +433,7 @@ class TestFunctionCallHandling(unittest.TestCase):
             {"role": "assistant", "content": "It's 10:30 AM"},
         ]
 
-        transcript = mixin.format_messages_for_summary(messages)
+        transcript = LLMContextSummarizationUtil.format_messages_for_summary(messages)
 
         # Check that function call is included
         self.assertIn("TOOL_CALL: get_time({})", transcript)
@@ -457,7 +442,6 @@ class TestFunctionCallHandling(unittest.TestCase):
 
     def test_no_function_calls(self):
         """Test that summarization works normally without function calls."""
-        mixin = ContextSummarizationMixin()
         context = LLMContext()
 
         # Add normal conversation without function calls
@@ -469,7 +453,7 @@ class TestFunctionCallHandling(unittest.TestCase):
         context.add_message({"role": "user", "content": "Latest message"})
 
         # Try to keep last 1 message
-        result = mixin.get_messages_to_summarize(context, 1)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 1)
 
         # Should get all messages except the last one
         self.assertEqual(len(result.messages), 4)

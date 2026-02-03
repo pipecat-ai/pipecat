@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Mixin providing context summarization capabilities for LLM services.
+"""Utility for context summarization in LLM services.
 
 This module provides reusable functionality for automatically compressing conversation
 context when token limits are approached, enabling efficient long-running conversations.
@@ -42,7 +42,7 @@ The conversation transcript follows. Generate only the summary, no other text.""
 
 
 @dataclass
-class ContextSummarizationConfig:
+class LLMContextSummarizationConfig:
     """Configuration for context summarization behavior.
 
     Controls when and how conversation context is automatically compressed
@@ -83,7 +83,7 @@ class ContextSummarizationConfig:
 
 
 @dataclass
-class MessagesToSummarize:
+class LLMMessagesToSummarize:
     """Result of get_messages_to_summarize operation.
 
     Attributes:
@@ -95,11 +95,11 @@ class MessagesToSummarize:
     last_summarized_index: int
 
 
-class ContextSummarizationMixin:
-    """Mixin providing context summarization capabilities for LLM processing.
+class LLMContextSummarizationUtil:
+    """Utility providing context summarization capabilities for LLM processing.
 
-    This mixin enables automatic conversation context compression when token
-    limits are approached. It provides shared functionality for both aggregators
+    This utility enables automatic conversation context compression when token
+    limits are approached. It provides functionality for both aggregators
     (which decide when to summarize) and LLM services (which generate summaries).
 
     Key features:
@@ -109,21 +109,23 @@ class ContextSummarizationMixin:
     - Flexible transcript formatting for summarization
 
     Usage:
-        Include this mixin in classes that need summarization capabilities:
+        Use the static methods directly on the class:
 
-        class MyAggregator(ContextSummarizationMixin, BaseAggregator):
-            pass
+        tokens = LLMContextSummarizationUtil.estimate_context_tokens(context)
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 4)
+        transcript = LLMContextSummarizationUtil.format_messages_for_summary(messages)
 
     Note:
         Token estimation uses a rough heuristic (word_count * 1.3). Services
-        can override `_estimate_tokens()` for more accurate tokenization.
+        can provide a custom tokenizer function for more accurate tokenization.
     """
 
-    def _estimate_tokens(self, text: str) -> int:
+    @staticmethod
+    def estimate_tokens(text: str) -> int:
         """Estimate token count for text using word count heuristic.
 
         This is a rough estimate: word_count * 1.3
-        Services can override this method to use more accurate tokenizers.
+        Services can provide custom tokenizer functions for more accurate tokenization.
 
         Args:
             text: Text to estimate tokens for
@@ -137,7 +139,8 @@ class ContextSummarizationMixin:
         words = [w for w in re.split(r"[^\w]+", text) if w]
         return int(len(words) * 1.3)
 
-    def estimate_context_tokens(self, context: LLMContext) -> int:
+    @staticmethod
+    def estimate_context_tokens(context: LLMContext) -> int:
         """Estimate total token count for a context.
 
         Calculates an approximate token count by analyzing all messages,
@@ -162,12 +165,14 @@ class ContextSummarizationMixin:
             # Message content
             content = message.get("content", "")
             if isinstance(content, str):
-                total += self._estimate_tokens(content)
+                total += LLMContextSummarizationUtil.estimate_tokens(content)
             elif isinstance(content, list):
                 for item in content:
                     if isinstance(item, dict):
                         if item.get("type") == "text":
-                            total += self._estimate_tokens(item.get("text", ""))
+                            total += LLMContextSummarizationUtil.estimate_tokens(
+                                item.get("text", "")
+                            )
                         elif item.get("type") == "image_url":
                             # Images are expensive, rough estimate
                             total += 100
@@ -180,7 +185,7 @@ class ContextSummarizationMixin:
                         if isinstance(tool_call, dict):
                             func = tool_call.get("function", {})
                             if isinstance(func, dict):
-                                total += self._estimate_tokens(
+                                total += LLMContextSummarizationUtil.estimate_tokens(
                                     func.get("name", "") + func.get("arguments", "")
                                 )
 
@@ -190,7 +195,8 @@ class ContextSummarizationMixin:
 
         return total
 
-    def _get_function_calls_in_progress_index(self, messages: List[dict], start_idx: int) -> int:
+    @staticmethod
+    def _get_function_calls_in_progress_index(messages: List[dict], start_idx: int) -> int:
         """Find the earliest message index with incomplete function calls.
 
         Scans messages to identify function/tool calls that haven't received
@@ -234,9 +240,10 @@ class ContextSummarizationMixin:
 
         return -1
 
+    @staticmethod
     def get_messages_to_summarize(
-        self, context: LLMContext, min_messages_to_keep: int
-    ) -> MessagesToSummarize:
+        context: LLMContext, min_messages_to_keep: int
+    ) -> LLMMessagesToSummarize:
         """Determine which messages should be included in summarization.
 
         Intelligently selects messages for summarization while preserving:
@@ -250,12 +257,12 @@ class ContextSummarizationMixin:
                 summarization.
 
         Returns:
-            MessagesToSummarize containing the messages to summarize and the
+            LLMMessagesToSummarize containing the messages to summarize and the
             index of the last message included.
         """
         messages = context.messages
         if len(messages) <= min_messages_to_keep:
-            return MessagesToSummarize(messages=[], last_summarized_index=-1)
+            return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
         # Find first system message index
         first_system_index = next(
@@ -275,11 +282,13 @@ class ContextSummarizationMixin:
         summary_end = keep_start_index
 
         if summary_start >= summary_end:
-            return MessagesToSummarize(messages=[], last_summarized_index=-1)
+            return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
         # Check for function calls in progress in the range we want to summarize
         original_summary_end = summary_end
-        function_call_start = self._get_function_calls_in_progress_index(messages, summary_start)
+        function_call_start = LLMContextSummarizationUtil._get_function_calls_in_progress_index(
+            messages, summary_start
+        )
         if function_call_start >= 0 and function_call_start < summary_end:
             # Stop summarization before the function call
             logger.debug(
@@ -297,16 +306,17 @@ class ContextSummarizationMixin:
                 )
 
         if summary_start >= summary_end:
-            return MessagesToSummarize(messages=[], last_summarized_index=-1)
+            return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
         messages_to_summarize = messages[summary_start:summary_end]
         last_summarized_index = summary_end - 1
 
-        return MessagesToSummarize(
+        return LLMMessagesToSummarize(
             messages=messages_to_summarize, last_summarized_index=last_summarized_index
         )
 
-    def format_messages_for_summary(self, messages: List[dict]) -> str:
+    @staticmethod
+    def format_messages_for_summary(messages: List[dict]) -> str:
         """Format messages as a transcript for summarization.
 
         Args:

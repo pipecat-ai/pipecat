@@ -51,9 +51,6 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMSpecificMessage,
 )
-from pipecat.processors.aggregators.llm_context_summarization_mixin import (
-    ContextSummarizationMixin,
-)
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -62,6 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
+from pipecat.utils.context.llm_context_summarization import LLMContextSummarizationUtil
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -148,7 +146,7 @@ class FunctionCallRunnerItem:
     run_llm: Optional[bool] = None
 
 
-class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, AIService):
+class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     """Base class for all LLM services.
 
     Handles function calling registration and execution with support for both
@@ -433,8 +431,10 @@ class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, A
         """
         logger.debug(f"{self}: Processing summarization request {frame.request_id}")
 
-        # Get messages to summarize using mixin method
-        result = self.get_messages_to_summarize(frame.context, frame.min_messages_to_keep)
+        # Get messages to summarize using utility method
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(
+            frame.context, frame.min_messages_to_keep
+        )
 
         if not result.messages:
             logger.debug(f"{self}: No messages to summarize")
@@ -446,7 +446,7 @@ class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, A
         )
 
         # Format messages as transcript
-        transcript = self.format_messages_for_summary(result.messages)
+        transcript = LLMContextSummarizationUtil.format_messages_for_summary(result.messages)
         transcript_length = len(transcript)
 
         logger.debug(f"{self}: Formatted transcript length: {transcript_length} characters")
@@ -483,13 +483,16 @@ class LLMService(ContextSummarizationMixin, UserTurnCompletionLLMServiceMixin, A
             (msg for msg in frame.context.messages if msg.get("role") == "system"), None
         )
         system_tokens = (
-            self._estimate_tokens(first_system_msg.get("content", "")) if first_system_msg else 0
+            LLMContextSummarizationUtil.estimate_tokens(first_system_msg.get("content", ""))
+            if first_system_msg
+            else 0
         )
 
         # Estimate tokens for recent messages that will be kept
         recent_messages = frame.context.messages[result.last_summarized_index + 1 :]
         recent_tokens = sum(
-            self._estimate_tokens(str(msg.get("content", ""))) + 10  # +10 for message overhead
+            LLMContextSummarizationUtil.estimate_tokens(str(msg.get("content", "")))
+            + 10  # +10 for message overhead
             for msg in recent_messages
         )
 

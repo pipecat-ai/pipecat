@@ -28,9 +28,6 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_context_summarization_mixin import (
-    ContextSummarizationConfig,
-)
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
@@ -46,6 +43,7 @@ from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.utils.context.llm_context_summarization import LLMContextSummarizationConfig
 
 load_dotenv(override=True)
 
@@ -128,7 +126,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_context_summarization=True,
             # Optional: customize context summarization behavior
             # Using low limits to demonstrate the feature quickly
-            context_summarization_config=ContextSummarizationConfig(
+            context_summarization_config=LLMContextSummarizationConfig(
                 max_context_tokens=1000,  # Keep context within 500 tokens
                 summarization_threshold=0.8,  # Trigger at 80% (400 tokens)
                 max_unsummarized_messages=10,  # Or when 10 new messages accumulate

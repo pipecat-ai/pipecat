@@ -68,10 +68,6 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
-from pipecat.processors.aggregators.llm_context_summarization_mixin import (
-    ContextSummarizationConfig,
-    ContextSummarizationMixin,
-)
 from pipecat.processors.frame_processor import FrameCallback, FrameDirection, FrameProcessor
 from pipecat.turns.user_idle_controller import UserIdleController
 from pipecat.turns.user_mute import BaseUserMuteStrategy
@@ -80,6 +76,10 @@ from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedPar
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
+from pipecat.utils.context.llm_context_summarization import (
+    LLMContextSummarizationConfig,
+    LLMContextSummarizationUtil,
+)
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
@@ -121,7 +121,7 @@ class LLMUserAggregatorParams:
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
     enable_context_summarization: bool = False
-    context_summarization_config: Optional[ContextSummarizationConfig] = None
+    context_summarization_config: Optional[LLMContextSummarizationConfig] = None
 
 
 @dataclass
@@ -311,7 +311,7 @@ class LLMContextAggregator(FrameProcessor):
         return concatenate_aggregated_text(self._aggregation)
 
 
-class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
+class LLMUserAggregator(LLMContextAggregator):
     """User LLM aggregator that aggregates user input during active user turns.
 
     This aggregator uses a turn controller and operates within turn boundaries
@@ -435,7 +435,7 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
         # Context summarization state
         self._summarization_enabled = self._params.enable_context_summarization
         self._summarization_config = (
-            self._params.context_summarization_config or ContextSummarizationConfig()
+            self._params.context_summarization_config or LLMContextSummarizationConfig()
         )
         self._summarization_in_progress = False
         self._last_summarized_index = -1
@@ -802,7 +802,7 @@ class LLMUserAggregator(ContextSummarizationMixin, LLMContextAggregator):
             return False
 
         # Estimate tokens in context
-        total_tokens = self.estimate_context_tokens(self._context)
+        total_tokens = LLMContextSummarizationUtil.estimate_context_tokens(self._context)
         num_messages = len(self._context.messages)
 
         # Check if we've reached the token threshold
