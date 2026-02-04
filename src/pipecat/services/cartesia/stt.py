@@ -128,7 +128,13 @@ class CartesiaSTTService(WebsocketSTTService):
     Provides real-time speech transcription through WebSocket connection
     to Cartesia's Live transcription service. Supports both interim and
     final transcriptions with configurable models and languages.
+
+    Class attributes:
+        _ttfs_p99_latency: P99 latency from speech end to final transcript
+            (0.55 seconds measured).
     """
+
+    _ttfs_p99_latency: float = 0.55
 
     def __init__(
         self,

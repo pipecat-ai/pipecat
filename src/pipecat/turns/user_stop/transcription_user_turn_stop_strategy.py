@@ -13,6 +13,7 @@ from typing import Optional
 from pipecat.frames.frames import (
     Frame,
     SpeechControlParamsFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -39,22 +40,17 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     """
 
-    def __init__(
-        self, *, user_resume_speaking_timeout: float = 0.6, _stt_timeout: float = 0.5, **kwargs
-    ):
+    def __init__(self, *, user_resume_speaking_timeout: float = 0.6, **kwargs):
         """Initialize the transcription-based user turn stop strategy.
 
         Args:
             user_resume_speaking_timeout: Time to wait for the user to potentially
-                say more after they pause speaking. Defaults to 0.5 seconds.
-            _stt_timeout: Internal P99 placeholder for STT latency. This is not
-                intended to be set by users - it will be wired to service-specific
-                values later. Defaults to 0.5 seconds.
+                say more after they pause speaking. Defaults to 0.6 seconds.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._user_resume_speaking_timeout = user_resume_speaking_timeout
-        self._stt_timeout: float = _stt_timeout
+        self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from SpeechControlParamsFrame
 
         self._text = ""
@@ -96,7 +92,9 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
             frame: The frame to be analyzed.
 
         """
-        if isinstance(frame, SpeechControlParamsFrame):
+        if isinstance(frame, STTMetadataFrame):
+            self._stt_timeout = frame.ttfs_p99_latency
+        elif isinstance(frame, SpeechControlParamsFrame):
             await self._handle_speech_control_params(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)

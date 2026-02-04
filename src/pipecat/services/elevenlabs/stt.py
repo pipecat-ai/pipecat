@@ -397,7 +397,13 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     By default, uses manual commit strategy where Pipecat's VAD controls when to
     commit transcript segments, providing consistency with other STT services.
+
+    Class attributes:
+        _ttfs_p99_latency: P99 latency from speech end to final transcript
+            (0.41 seconds measured).
     """
+
+    _ttfs_p99_latency: float = 0.41
 
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs Realtime STT API.

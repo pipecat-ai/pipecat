@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     MetricsFrame,
     SpeechControlParamsFrame,
     StartFrame,
+    STTMetadataFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
@@ -43,6 +44,12 @@ class STTService(AIService):
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
 
+    Class attributes:
+        _ttfs_p99_latency: P99 latency from speech end to final transcript in
+            seconds. Subclasses should override with measured values. This is
+            pushed downstream via STTMetadataFrame at pipeline start for downstream
+            processors (e.g., turn strategies) to optimize timing.
+
     Event handlers:
         on_connected: Called when connected to the STT service.
         on_disconnected: Called when disconnected from the STT service.
@@ -62,6 +69,10 @@ class STTService(AIService):
         async def on_connection_error(stt: STTService, error: str):
             logger.error(f"STT connection error: {error}")
     """
+
+    # P99 latency from speech end to final transcript (seconds).
+    # Subclasses should override with measured values for optimal timing.
+    _ttfs_p99_latency: Optional[float] = None
 
     def __init__(
         self,
@@ -254,7 +265,11 @@ class STTService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, StartFrame):
+            # Push StartFrame first, then metadata so downstream receives them in order
+            await self.push_frame(frame, direction)
+            await self._push_stt_metadata()
+        elif isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
@@ -313,6 +328,14 @@ class STTService(AIService):
                 self._last_transcription_time = None
 
         await super().push_frame(frame, direction)
+
+    async def _push_stt_metadata(self):
+        """Push STT metadata frame for downstream processors (e.g., turn strategies)."""
+        ttfs = self._ttfs_p99_latency
+        if ttfs is None:
+            ttfs = 1.0  # Conservative fallback
+            logger.warning(f"{self.name}: _ttfs_p99_latency not set, using default {ttfs}s")
+        await self.push_frame(STTMetadataFrame(service_name=self.name, ttfs_p99_latency=ttfs))
 
     async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
         """Handle speech control parameters frame to extract VAD stop_secs.

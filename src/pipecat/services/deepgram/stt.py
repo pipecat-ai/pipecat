@@ -49,7 +49,13 @@ class DeepgramSTTService(STTService):
 
     Provides real-time speech recognition using Deepgram's WebSocket API.
     Supports configurable models, languages, and various audio processing options.
+
+    Class attributes:
+        _ttfs_p99_latency: P99 latency from speech end to final transcript
+            (0.39 seconds measured).
     """
+
+    _ttfs_p99_latency: float = 0.39
 
     def __init__(
         self,

@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     MetricsFrame,
     SpeechControlParamsFrame,
     StartFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -39,19 +40,16 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     """
 
-    def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, _stt_timeout: float = 0.5, **kwargs):
+    def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, **kwargs):
         """Initialize the user turn stop strategy.
 
         Args:
             turn_analyzer: The turn detection analyzer instance to detect end of user turn.
-            _stt_timeout: Internal P99 placeholder for STT latency. This is not
-                intended to be set by users - it will be wired to service-specific
-                values later. Defaults to 0.5 seconds.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
         self._turn_analyzer = turn_analyzer
-        self._stt_timeout: float = _stt_timeout
+        self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from SpeechControlParamsFrame
 
         self._text = ""
@@ -96,6 +94,8 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         if isinstance(frame, StartFrame):
             await self._start(frame)
+        elif isinstance(frame, STTMetadataFrame):
+            self._stt_timeout = frame.ttfs_p99_latency
         elif isinstance(frame, SpeechControlParamsFrame):
             await self._handle_speech_control_params(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):

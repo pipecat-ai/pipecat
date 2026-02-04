@@ -9,6 +9,7 @@ import unittest
 
 from pipecat.frames.frames import (
     InterimTranscriptionFrame,
+    STTMetadataFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -19,6 +20,8 @@ from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, TranscriptionU
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
+# Use 0 STT timeout for deterministic test timing
+STT_TIMEOUT = 0.0
 
 
 class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
@@ -26,11 +29,20 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.task_manager = TaskManager()
         self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
-    async def test_ste(self):
+    async def _create_strategy(self, user_resume_speaking_timeout=AGGREGATION_TIMEOUT):
+        """Create strategy and configure STT timeout via metadata frame."""
         strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
+            user_resume_speaking_timeout=user_resume_speaking_timeout
         )
         await strategy.setup(self.task_manager)
+        # Set STT timeout via metadata frame (as would happen in real pipeline)
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=STT_TIMEOUT)
+        )
+        return strategy
+
+    async def test_ste(self):
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -57,10 +69,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_site(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -93,10 +102,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_st1iest2e(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -142,10 +148,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_siet(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -178,10 +181,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_sieit(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -222,10 +222,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_set(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -254,10 +251,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_seit(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -292,10 +286,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_st1et2(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -344,10 +335,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_set1t2(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -380,10 +368,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_siet1it2(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -428,10 +413,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_t(self):
         """Transcription without VAD - uses fallback timeout."""
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -450,10 +432,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
     async def test_it(self):
         """Interim + Transcription without VAD - uses fallback timeout."""
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
@@ -476,10 +455,7 @@ class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(should_start)
 
     async def test_sie_delay_it(self):
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=AGGREGATION_TIMEOUT, _stt_timeout=0.0
-        )
-        await strategy.setup(self.task_manager)
+        strategy = await self._create_strategy()
 
         should_start = None
 
