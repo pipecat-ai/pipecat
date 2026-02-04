@@ -18,6 +18,12 @@ from loguru import logger
 
 from pipecat.processors.aggregators.llm_context import LLMContext
 
+# Token estimation constants
+TOKEN_OVERHEAD_PER_MESSAGE = 10  # Estimated structural overhead per message
+IMAGE_TOKEN_ESTIMATE = 100  # Rough estimate for image content
+SUMMARY_TOKEN_BUFFER = 0.8  # Keep summary at 80% of available space for safety
+MIN_SUMMARY_TOKENS = 100  # Minimum tokens to allocate for summary
+
 DEFAULT_SUMMARIZATION_PROMPT = """You are summarizing a conversation between a user and an AI assistant.
 
 Your task:
@@ -173,13 +179,13 @@ class LLMContextSummarizationUtil:
             - Message content (text, images)
             - Tool calls and their arguments
             - Tool results
-            - Structural overhead (~10 tokens per message)
+            - Structural overhead (TOKEN_OVERHEAD_PER_MESSAGE per message)
         """
         total = 0
 
         for message in context.messages:
             # Role and structure overhead
-            total += 10
+            total += TOKEN_OVERHEAD_PER_MESSAGE
 
             # Message content
             content = message.get("content", "")
@@ -194,7 +200,7 @@ class LLMContextSummarizationUtil:
                             )
                         elif item.get("type") == "image_url":
                             # Images are expensive, rough estimate
-                            total += 100
+                            total += IMAGE_TOKEN_ESTIMATE
 
             # Tool calls
             if "tool_calls" in message:
@@ -210,9 +216,59 @@ class LLMContextSummarizationUtil:
 
             # Tool call ID
             if "tool_call_id" in message:
-                total += 10
+                total += TOKEN_OVERHEAD_PER_MESSAGE
 
         return total
+
+    @staticmethod
+    def calculate_max_summary_tokens(
+        context: LLMContext, last_summarized_index: int, max_context_tokens: int
+    ) -> int:
+        """Calculate maximum tokens available for a summary.
+
+        Determines how many tokens can be used for the summary while keeping
+        the total context within the specified limit. The calculation accounts
+        for the first system message and recent messages that will be preserved.
+
+        Formula:
+            available = max_context_tokens - system_tokens - recent_tokens
+            max_summary = available * SUMMARY_TOKEN_BUFFER
+            return max(MIN_SUMMARY_TOKENS, max_summary)
+
+        Args:
+            context: The LLM context containing all messages.
+            last_summarized_index: Index of the last message being summarized.
+                Messages after this index are considered "recent" and preserved.
+            max_context_tokens: Maximum allowed context size in tokens.
+
+        Returns:
+            Maximum number of tokens that can be used for the summary.
+            Always returns at least MIN_SUMMARY_TOKENS.
+        """
+        messages = context.messages
+
+        # Estimate tokens for first system message (will be preserved)
+        first_system_msg = next((msg for msg in messages if msg.get("role") == "system"), None)
+        system_tokens = (
+            LLMContextSummarizationUtil.estimate_tokens(first_system_msg.get("content", ""))
+            if first_system_msg
+            else 0
+        )
+
+        # Estimate tokens for recent messages that will be kept
+        recent_messages = messages[last_summarized_index + 1 :]
+        recent_tokens = sum(
+            LLMContextSummarizationUtil.estimate_tokens(str(msg.get("content", "")))
+            + TOKEN_OVERHEAD_PER_MESSAGE
+            for msg in recent_messages
+        )
+
+        # Calculate available tokens for summary (with buffer to stay under limit)
+        available_tokens = max_context_tokens - system_tokens - recent_tokens
+        max_summary_tokens = int(available_tokens * SUMMARY_TOKEN_BUFFER)
+
+        # Ensure at least minimum tokens
+        return max(MIN_SUMMARY_TOKENS, max_summary_tokens)
 
     @staticmethod
     def _get_function_calls_in_progress_index(messages: List[dict], start_idx: int) -> int:

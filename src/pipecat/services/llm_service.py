@@ -470,6 +470,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         logger.debug(f"{self}: Formatted transcript length: {transcript_length} characters")
 
+        # Calculate max_tokens for the summary using utility method
+        max_summary_tokens = LLMContextSummarizationUtil.calculate_max_summary_tokens(
+            frame.context, result.last_summarized_index, frame.max_context_tokens
+        )
+
+        logger.debug(
+            f"{self}: Calculated max_summary_tokens={max_summary_tokens} "
+            f"(max_context: {frame.max_context_tokens})"
+        )
+
         # Create summary context
         prompt_messages = [
             {
@@ -478,8 +488,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             },
             {
                 "role": "user",
-                "content": f"The maximum context size is {frame.max_context_tokens} tokens. "
-                f"Generate a summary that, when combined with recent messages, keeps the total context within this limit.\n\n"
+                "content": f"The maximum context size is {max_summary_tokens} tokens. "
+                f"Generate a summary that keeps the total context within this limit.\n\n"
                 f"Conversation history:\n{transcript}",
             },
         ]
@@ -492,38 +502,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 f"{self}: LLM service does not implement run_inference, skipping summarization"
             )
             return None, -1
-
-        # Calculate max_tokens for the summary
-        # Goal: keep total context within max_context_tokens
-        # After summarization: [system_message] + [summary] + [recent_messages]
-
-        # Estimate tokens for system message
-        first_system_msg = next(
-            (msg for msg in frame.context.messages if msg.get("role") == "system"), None
-        )
-        system_tokens = (
-            LLMContextSummarizationUtil.estimate_tokens(first_system_msg.get("content", ""))
-            if first_system_msg
-            else 0
-        )
-
-        # Estimate tokens for recent messages that will be kept
-        recent_messages = frame.context.messages[result.last_summarized_index + 1 :]
-        recent_tokens = sum(
-            LLMContextSummarizationUtil.estimate_tokens(str(msg.get("content", "")))
-            + 10  # +10 for message overhead
-            for msg in recent_messages
-        )
-
-        # Calculate available tokens for summary (with 20% buffer to keep it under our limit)
-        max_summary_tokens = int((frame.max_context_tokens - system_tokens - recent_tokens) * 0.8)
-        max_summary_tokens = max(100, max_summary_tokens)  # Ensure at least 100 tokens
-
-        logger.debug(
-            f"{self}: Token budget - max_context: {frame.max_context_tokens}, "
-            f"system: {system_tokens}, recent: {recent_tokens}, "
-            f"available for summary: {max_summary_tokens}"
-        )
 
         logger.debug(
             f"{self}: Calling LLM to generate summary (max_tokens={max_summary_tokens})..."
