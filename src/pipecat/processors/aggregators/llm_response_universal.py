@@ -554,11 +554,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._cleanup()
 
     async def _cleanup(self):
-        # Cancel pending summarization
-        if self._summarization_in_progress:
-            self._summarization_in_progress = False
-            self._pending_summary_request_id = None
-
+        await self._clear_summarization()
         await self._user_turn_controller.cleanup()
 
         if self._user_idle_controller:
@@ -566,6 +562,12 @@ class LLMUserAggregator(LLMContextAggregator):
 
         for s in self._params.user_mute_strategies:
             await s.cleanup()
+
+    async def _clear_summarization(self):
+        # Cancel pending summarization
+        if self._summarization_in_progress:
+            self._summarization_in_progress = False
+            self._pending_summary_request_id = None
 
     async def _maybe_mute_frame(self, frame: Frame):
         should_mute_frame = self._user_is_muted and isinstance(
@@ -770,9 +772,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # If an interruption happened before we received the summary response
         # from the LLM, we need to cancel the pending summarization.
         # Because maybe we will never receive the response frame again
-        if self._summarization_in_progress:
-            self._summarization_in_progress = False
-            self._pending_summary_request_id = None
+        await self._clear_summarization()
 
     # Context summarization methods
 
@@ -887,8 +887,7 @@ class LLMUserAggregator(LLMContextAggregator):
             return
 
         # Clear pending state
-        self._summarization_in_progress = False
-        self._pending_summary_request_id = None
+        await self._clear_summarization()
 
         # Check for errors
         if frame.error:
