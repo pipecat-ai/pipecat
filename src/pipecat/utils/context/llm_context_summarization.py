@@ -10,7 +10,6 @@ This module provides reusable functionality for automatically compressing conver
 context when token limits are approached, enabling efficient long-running conversations.
 """
 
-import re
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -139,10 +138,11 @@ class LLMContextSummarizationUtil:
     (which decide when to summarize) and LLM services (which generate summaries).
 
     Key features:
-    - Token estimation using word-count heuristics
+    - Token estimation using character-count heuristics (chars // 4)
     - Smart message selection (preserves system messages and recent context)
     - Function call awareness (avoids summarizing incomplete tool interactions)
     - Flexible transcript formatting for summarization
+    - Maximum summary token calculation with safety buffers
 
     Usage:
         Use the static methods directly on the class:
@@ -150,30 +150,33 @@ class LLMContextSummarizationUtil:
         tokens = LLMContextSummarizationUtil.estimate_context_tokens(context)
         result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 4)
         transcript = LLMContextSummarizationUtil.format_messages_for_summary(messages)
+        max_tokens = LLMContextSummarizationUtil.calculate_max_summary_tokens(...)
 
     Note:
-        Token estimation uses a rough heuristic (word_count * 1.3). Services
-        can provide a custom tokenizer function for more accurate tokenization.
+        Token estimation uses the industry-standard heuristic of 1 token ≈ 4 characters.
     """
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
-        """Estimate token count for text using word count heuristic.
+        """Estimate token count for text using character count heuristic.
 
-        This is a rough estimate: word_count * 1.3
-        Services can provide custom tokenizer functions for more accurate tokenization.
+        Uses the industry-standard approximation of 1 token ≈ 4 characters.
+        This works well across different content types (prose, code, etc.)
+        and languages.
+
+        Note:
+            For more accurate token counts, use the model's official tokenizer.
+            This is a rough estimate suitable for threshold checks and budgeting.
 
         Args:
             text: Text to estimate tokens for
 
         Returns:
-            Estimated token count
+            Estimated token count (characters // 4)
         """
         if not text:
             return 0
-        # Split on non-word characters and filter out empty strings
-        words = [w for w in re.split(r"[^\w]+", text) if w]
-        return int(len(words) * 1.3)
+        return len(text) // 4
 
     @staticmethod
     def estimate_context_tokens(context: LLMContext) -> int:

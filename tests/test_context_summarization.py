@@ -20,13 +20,13 @@ class TestContextSummarizationMixin(unittest.TestCase):
 
     def test_estimate_tokens_simple_text(self):
         """Test token estimation with simple text."""
-        # Simple sentence: "Hello world" = 2 words * 1.3 = 2.6 -> 2 tokens
+        # Simple sentence: "Hello world" = 11 chars / 4 = 2.75 -> 2 tokens
         tokens = LLMContextSummarizationUtil.estimate_tokens("Hello world")
         self.assertEqual(tokens, 2)
 
-        # More words: "This is a test message" = 5 words * 1.3 = 6.5 -> 6 tokens
+        # More words: "This is a test message" = 22 chars / 4 = 5.5 -> 5 tokens
         tokens = LLMContextSummarizationUtil.estimate_tokens("This is a test message")
-        self.assertEqual(tokens, 6)
+        self.assertEqual(tokens, 5)
 
     def test_estimate_tokens_empty(self):
         """Test token estimation with empty text."""
