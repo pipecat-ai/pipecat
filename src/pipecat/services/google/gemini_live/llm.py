@@ -1464,7 +1464,7 @@ class GeminiLiveLLMService(LLMService):
 
         adapter: GeminiLLMAdapter = self.get_llm_adapter()
         messages = adapter.get_llm_invocation_params(
-            self._context, strip_function_messages=True
+            self._context, convert_function_messages_to_text=True
         ).get("messages", [])
         if not messages:
             return
@@ -1495,9 +1495,9 @@ class GeminiLiveLLMService(LLMService):
         # in the right format
         context = LLMContext(messages=messages_list)
         adapter: GeminiLLMAdapter = self.get_llm_adapter()
-        messages = adapter.get_llm_invocation_params(context, strip_function_messages=True).get(
-            "messages", []
-        )
+        messages = adapter.get_llm_invocation_params(
+            context, convert_function_messages_to_text=True
+        ).get("messages", [])
 
         if not messages:
             return
