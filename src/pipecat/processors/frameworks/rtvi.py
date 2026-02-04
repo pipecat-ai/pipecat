@@ -87,7 +87,7 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.string import match_endofsentence
 
-RTVI_PROTOCOL_VERSION = "1.1.0"
+RTVI_PROTOCOL_VERSION = "1.2.0"
 
 RTVI_MESSAGE_LABEL = "rtvi-ai"
 RTVIMessageLiteral = Literal["rtvi-ai"]
