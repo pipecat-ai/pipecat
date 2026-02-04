@@ -247,7 +247,17 @@ class RTVIFile(BaseModel):
     format: str  # Mime format of the file, e.g., 'application/pdf'
     name: Optional[str] = None
     source: RTVIFileBytes | RTVIFileUrl
-    customOpts: Optional[dict] = None  # ex. 'detail' in openAI or 'citations' in Bedrock
+
+
+class RTVISendFileOptions(BaseModel):
+    """Options for sending text input to the LLM.
+
+    Contains options for how the pipeline should process the text input.
+    """
+
+    run_immediately: bool = True
+    audio_response: bool = True
+    custom_options: Optional[dict] = None  # ex. 'detail' in openAI or 'citations' in Bedrock
 
 
 class RTVISendFileData(BaseModel):
@@ -258,7 +268,7 @@ class RTVISendFileData(BaseModel):
 
     content: str  # Text to accompany the file
     file: RTVIFile
-    options: Optional[RTVISendTextOptions] = None
+    options: Optional[RTVISendFileOptions] = None
 
 
 class RTVIAppendToContextData(BaseModel):
@@ -584,6 +594,7 @@ _all_definitions = [
     ("FileBytes", RTVIFileBytes),
     ("FileUrl", RTVIFileUrl),
     ("File", RTVIFile),
+    ("SendFileOptions", RTVISendFileOptions),
     ("SendFileData", RTVISendFileData),
     ("AppendToContextData", RTVIAppendToContextData),
     ("AppendToContext", RTVIAppendToContext),
