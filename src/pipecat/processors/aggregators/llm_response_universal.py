@@ -79,6 +79,7 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserT
 from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationConfig,
     LLMContextSummarizationUtil,
+    LLMSummarizedMessage,
 )
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
@@ -809,7 +810,6 @@ class LLMUserAggregator(LLMContextAggregator):
             self._summarization_config.max_context_tokens
             * self._summarization_config.summarization_threshold
         )
-
         token_threshold_exceeded = total_tokens >= token_threshold
 
         # Check if we've exceeded max unsummarized messages
@@ -907,7 +907,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         Checks if the context has changed since the summarization request was
         made. This prevents applying stale summaries when messages have been
-        added or removed during the async summarization process.
+        removed during the async summarization process.
 
         Args:
             last_summarized_index: The index of the last summarized message.
@@ -931,18 +931,18 @@ class LLMUserAggregator(LLMContextAggregator):
 
         return True
 
-    async def _apply_summary(self, summary: str, last_summarized_index: int):
+    async def _apply_summary(self, summary: "LLMSummarizedMessage", last_summarized_index: int):
         """Apply summary to compress the conversation context.
 
         Reconstructs the context with a compressed structure:
         [first_system_message] + [summary_message] + [recent_messages]
 
-        This replaces the summarized messages with a single system message
-        containing the summary, preserving the first system prompt and all
-        messages after last_summarized_index.
+        The summary message uses provider-specific formatting (role and content)
+        as determined by the LLM service's adapter.
 
         Args:
-            summary: The generated summary text to insert.
+            summary: The formatted summary message from the LLM service adapter.
+                Contains provider-appropriate role and formatted content.
             last_summarized_index: The index of the last message included in
                 the summary. Messages after this index are preserved.
         """
@@ -955,8 +955,8 @@ class LLMUserAggregator(LLMContextAggregator):
         # These are the recent messages that were not included in the summary
         recent_messages = messages[last_summarized_index + 1 :]
 
-        # Create summary message
-        summary_message = {"role": "system", "content": f"<summary>{summary}</summary>"}
+        # Create summary message using provider-formatted summary
+        summary_message = {"role": summary.role, "content": summary.content}
 
         # Rebuild context using last_summarized_index
         # Structure: [first_system] + [summary] + [messages after last_summarized_index]

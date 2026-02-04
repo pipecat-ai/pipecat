@@ -24,6 +24,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     LLMStandardMessage,
 )
+from pipecat.utils.context.llm_context_summarization import LLMSummarizedMessage
 
 
 class AWSBedrockLLMInvocationParams(TypedDict):
@@ -93,6 +94,22 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                             item["image"]["source"]["bytes"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
+
+    def format_summary_message(self, summary: str) -> LLMSummarizedMessage:
+        """Format a conversation summary as a user message for AWS Bedrock.
+
+        AWS Bedrock requires summary messages to use 'user' role since system
+        messages can only appear at the start of conversations.
+
+        Args:
+            summary: The raw summary text to format.
+
+        Returns:
+            LLMSummarizedMessage with 'user' role and formatted content.
+        """
+        return LLMSummarizedMessage(
+            role="user", content=f"Here's a summary of the conversation so far:\n{summary}"
+        )
 
     @dataclass
     class ConvertedMessages:

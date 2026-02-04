@@ -18,6 +18,7 @@ from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
+from pipecat.utils.context.llm_context_summarization import LLMSummarizedMessage
 
 
 class Role(Enum):
@@ -105,6 +106,19 @@ class AWSNovaSonicLLMAdapter(BaseLLMAdapter[AWSNovaSonicLLMInvocationParams]):
             List of messages in a format ready for logging about AWS Nova Sonic.
         """
         return self._from_universal_context_messages(self.get_messages(context)).messages
+
+    def format_summary_message(self, summary: str) -> LLMSummarizedMessage:
+        """Format a conversation summary as a user message for AWS Nova Sonic.
+
+        Args:
+            summary: The raw summary text to format.
+
+        Returns:
+            LLMSummarizedMessage with 'user' role and formatted content.
+        """
+        return LLMSummarizedMessage(
+            role="user", content=f"Here's a summary of the conversation so far:\n{summary}"
+        )
 
     @dataclass
     class ConvertedMessages:

@@ -40,6 +40,7 @@ from pipecat.utils.utils import obj_count, obj_id
 if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.utils.context.llm_context_summarization import LLMSummarizedMessage
 
 
 class DeprecatedKeypadEntry:
@@ -1903,20 +1904,20 @@ class LLMContextSummaryResultFrame(ControlFrame):
     """Frame containing the result of context summarization.
 
     Sent by LLM services back to aggregators after generating a summary.
-    Contains the compressed summary text and metadata about what was summarized.
+    Contains the formatted summary message and metadata about what was summarized.
 
     Parameters:
         request_id: Identifier matching the original request. Used to correlate
             async responses.
-        summary: The generated summary text. Will be inserted as a system
-            message in the compressed context.
+        summary: The formatted summary message ready to be inserted into context.
+            Contains provider-appropriate role and formatted content.
         last_summarized_index: Index (0-based) of the last message that was
             included in the summary. Messages after this index are preserved.
         error: Error message if summarization failed, None on success.
     """
 
     request_id: str
-    summary: str
+    summary: "LLMSummarizedMessage"
     last_summarized_index: int
     error: Optional[str] = None
 

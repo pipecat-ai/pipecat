@@ -59,7 +59,10 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
-from pipecat.utils.context.llm_context_summarization import LLMContextSummarizationUtil
+from pipecat.utils.context.llm_context_summarization import (
+    LLMContextSummarizationUtil,
+    LLMSummarizedMessage,
+)
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -385,8 +388,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         """Handle context summarization request from aggregator.
 
         Processes a summarization request by generating a compressed summary
-        of conversation history. Broadcasts the result back to the aggregator
-        for context reconstruction.
+        of conversation history. Uses the adapter to format the summary
+        according to the provider's requirements. Broadcasts the result back
+        to the aggregator for context reconstruction.
 
         Args:
             frame: The summary request frame containing context and parameters.
@@ -394,6 +398,18 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         try:
             logger.debug(f"{self}: Processing summarization request {frame.request_id}")
             summary, last_index = await self._generate_summary(frame)
+
+            # Check if summary generation failed
+            if summary is None:
+                await self.broadcast_frame(
+                    LLMContextSummaryResultFrame,
+                    request_id=frame.request_id,
+                    summary=LLMSummarizedMessage(role="system", content=""),
+                    last_summarized_index=-1,
+                    error="Failed to generate summary",
+                )
+                return
+
             await self.broadcast_frame(
                 LLMContextSummaryResultFrame,
                 request_id=frame.request_id,
@@ -405,25 +421,28 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self.broadcast_frame(
                 LLMContextSummaryResultFrame,
                 request_id=frame.request_id,
-                summary="",
+                summary=LLMSummarizedMessage(role="system", content=""),
                 last_summarized_index=-1,
                 error=str(e),
             )
 
-    async def _generate_summary(self, frame: LLMContextSummaryRequestFrame) -> tuple[str, int]:
+    async def _generate_summary(
+        self, frame: LLMContextSummaryRequestFrame
+    ) -> tuple["LLMSummarizedMessage | None", int]:
         """Generate a compressed summary of conversation context.
 
         Uses the mixin's message selection logic to identify which messages
         to summarize, formats them as a transcript, and invokes the LLM to
-        generate a concise summary.
+        generate a concise summary. The summary is formatted according to the
+        LLM provider's requirements using the adapter.
 
         Args:
             frame: The summary request frame containing context and configuration.
 
         Returns:
-            Tuple of (summary text, last_summarized_index). Returns ("", -1)
-            if there are no messages to summarize or if the service doesn't
-            support run_inference().
+            Tuple of (formatted summary message, last_summarized_index).
+            Returns (None, -1) if there are no messages to summarize or if
+            the service doesn't support run_inference().
 
         Note:
             Requires the service to implement run_inference() method for
@@ -438,7 +457,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         if not result.messages:
             logger.debug(f"{self}: No messages to summarize")
-            return "", -1
+            return None, -1
 
         logger.debug(
             f"{self}: Generating summary for {len(result.messages)} messages "
@@ -472,7 +491,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             logger.warning(
                 f"{self}: LLM service does not implement run_inference, skipping summarization"
             )
-            return "", -1
+            return None, -1
 
         # Calculate max_tokens for the summary
         # Goal: keep total context within max_context_tokens
@@ -511,20 +530,28 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         )
 
         # Call run_inference to generate summary (returns Optional[str])
-        summary = await self.run_inference(summary_context, max_tokens=max_summary_tokens)
+        summary_text = await self.run_inference(summary_context, max_tokens=max_summary_tokens)
 
-        if not summary:
+        if not summary_text:
             logger.warning(f"{self}: LLM returned empty summary")
-            return "", -1
+            return None, -1
 
-        summary = summary.strip()
+        summary_text = summary_text.strip()
 
         logger.info(
-            f"{self}: Generated summary of {len(summary)} characters "
+            f"{self}: Generated summary of {len(summary_text)} characters "
             f"for {len(result.messages)} messages"
         )
 
-        return summary, result.last_summarized_index
+        # Format the summary using the adapter to get provider-specific formatting
+        formatted_summary = self.get_llm_adapter().format_summary_message(summary_text)
+
+        logger.debug(
+            f"{self}: Formatted summary with role='{formatted_summary.role}' "
+            f"(content length: {len(formatted_summary.content)} chars)"
+        )
+
+        return formatted_summary, result.last_summarized_index
 
     def register_function(
         self,

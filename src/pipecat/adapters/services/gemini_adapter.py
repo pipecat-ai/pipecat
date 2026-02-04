@@ -22,6 +22,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     LLMStandardMessage,
 )
+from pipecat.utils.context.llm_context_summarization import LLMSummarizedMessage
 
 try:
     from google.genai.types import Blob, Content, FileData, FunctionCall, FunctionResponse, Part
@@ -157,6 +158,22 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 logger.debug(f"Error: {e}")
             messages_for_logging.append(obj)
         return messages_for_logging
+
+    def format_summary_message(self, summary: str) -> LLMSummarizedMessage:
+        """Format a conversation summary as a user message for Gemini.
+
+        Gemini requires summary messages to use 'user' role since system
+        instructions are separate from the message flow.
+
+        Args:
+            summary: The raw summary text to format.
+
+        Returns:
+            LLMSummarizedMessage with 'user' role and formatted content.
+        """
+        return LLMSummarizedMessage(
+            role="user", content=f"Here's a summary of the conversation so far:\n{summary}"
+        )
 
     @dataclass
     class ConvertedMessages:
