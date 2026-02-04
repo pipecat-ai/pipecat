@@ -77,10 +77,7 @@ from pipecat.metrics.metrics import (
     TTSUsageMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
@@ -581,6 +578,9 @@ class RTVILLMFunctionCallMessageData(BaseModel):
     """Data for LLM function call notification.
 
     Contains function call details including name, ID, and arguments.
+
+    .. deprecated:: 0.0.102
+        Use ``RTVILLMFunctionCallInProgressMessageData`` instead.
     """
 
     function_name: str
@@ -592,6 +592,10 @@ class RTVILLMFunctionCallMessage(BaseModel):
     """Message notifying of an LLM function call.
 
     Sent when the LLM makes a function call.
+
+    .. deprecated:: 0.0.102
+        Use ``RTVILLMFunctionCallInProgressMessage`` with the
+        ``llm-function-call-in-progress`` event type instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -1652,7 +1656,20 @@ class RTVIProcessor(FrameProcessor):
 
         Args:
             params: The function call parameters.
+
+        .. deprecated:: 0.0.102
+            This method is deprecated. Function call events are now automatically
+            sent by ``RTVIObserver`` using the ``llm-function-call-in-progress`` event.
+            Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
         """
+        import warnings
+
+        warnings.warn(
+            "handle_function_call is deprecated. Function call events are now "
+            "automatically sent by RTVIObserver using llm-function-call-in-progress.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         fn = RTVILLMFunctionCallMessageData(
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
