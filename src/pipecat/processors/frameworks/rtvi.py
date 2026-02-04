@@ -13,6 +13,7 @@ and frame observation for the RTVI protocol.
 
 import asyncio
 import base64
+import os
 import time
 from dataclasses import dataclass
 from typing import (
@@ -907,6 +908,7 @@ class RTVIProcessor(FrameProcessor):
         *,
         config: Optional[RTVIConfig] = None,
         transport: Optional[BaseTransport] = None,
+        uploads_folder: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the RTVI processor.
@@ -914,10 +916,14 @@ class RTVIProcessor(FrameProcessor):
         Args:
             config: Initial RTVI configuration.
             transport: Transport layer for communication.
+            uploads_folder: Path to folder where client uploads (e.g. POST /files) are
+                stored; required for send-file with /files/ URLs. Use
+                runner_uploads_folder() when using the development runner.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
         self._config = config or RTVIConfig(config=[])
+        self._folder = uploads_folder or ""
 
         self._bot_ready = False
         self._client_ready = False
@@ -1414,16 +1420,42 @@ class RTVIProcessor(FrameProcessor):
         """Handle a send-file message from the client."""
         file = data.file
         source = None
-        if file.source.type == "bytes":
+        type = file.source.type
+        opts = data.options if data.options is not None else RTVI.SendFileOptions()
+
+        if type == "bytes":
             source = file.source.bytes
-        elif file.source.type == "url":
-            source = file.source.url
+        elif type == "url":
+            if file.source.url.startswith("/files/"):
+                if not self._folder:
+                    logger.warning(
+                        "Send-file with /files/ URL requires uploads_folder on RTVIProcessor "
+                        "(e.g. uploads_folder=runner_uploads_folder())."
+                    )
+                    return
+                # read bytes from file system, encode to base64, then delete the file
+                type = "bytes"
+                file_path = os.path.join(self._folder, file.source.url.removeprefix("/files/"))
+                with open(file_path, "rb") as f:
+                    raw_bytes = f.read()
+                    encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
+                    source = f"data:{file.format};base64,{encoded_image}"
+                try:
+                    os.remove(file_path)
+                except OSError as e:
+                    logger.warning(f"Failed to remove uploaded file {file_path}: {e}")
+            else:
+                source = file.source.url
         else:
-            logger.warning(f"Unsupported file source type: {file.source.type}")
+            logger.warning(f"Unsupported file source type: {type}")
             return
 
-        if file.source.type == "bytes" and file.format.startswith("image/"):
-            size = [file.source.width or 0, file.source.height or 0]
+        if type == "bytes" and file.format.startswith("image/"):
+            # Only access width/height if the original source is RTVIFileBytes (not RTVIFileUrl)
+            if file.source.type == "bytes":
+                size = [file.source.width or 0, file.source.height or 0]
+            else:
+                size = [0, 0]
             file_frame = UserImageRawFrame(
                 text=data.content,
                 image=source,
@@ -1435,14 +1467,15 @@ class RTVIProcessor(FrameProcessor):
             file_frame = UserFileRawFrame(
                 text=data.content,
                 file=source,
-                type=file.source.type,
+                type=type,
                 format=file.format,
-                custom_options=file.customOpts,
+                custom_options=opts.custom_options,
                 append_to_context=True,
             )
-        opts = data.options if data.options is not None else RTVI.SendTextOptions()
+
         if opts.run_immediately:
             await self.interrupt_bot()
+
         cur_llm_skip_tts = self._llm_skip_tts
         should_skip_tts = not opts.audio_response
         toggle_skip_tts = cur_llm_skip_tts != should_skip_tts
