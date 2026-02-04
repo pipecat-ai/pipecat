@@ -46,6 +46,13 @@ class OjinVideoInitializedFrame(Frame):
     session_data: Optional[dict] = None
 
 
+@dataclass
+class OjinLatencyFrame(Frame):
+    """Frame indicating that the service has been initialized."""
+
+    latency: float
+
+
 class OjinBotStartedSpeakingFrame(Frame):
     """Frame sent after X seconds of receiving TTS audio."""
 
@@ -87,6 +94,7 @@ class OjinVideoContinuousSettings:
     # Speaking notification delays
     started_speaking_delay_s: float = field(default=0.5)  # Delay before sending StartedSpeaking
     stopped_speaking_delay_s: float = field(default=0.5)  # Delay before sending StoppedSpeaking
+    frame_debugging_enabled: bool = field(default=False)
 
 
 class OjinVideoContinuousService(FrameProcessor):
@@ -127,6 +135,7 @@ class OjinVideoContinuousService(FrameProcessor):
 
         # Playback state
         self.fps = 25
+
         self._current_frame_idx = -1
         self._played_frame_idx = -1
         self._last_played_image_bytes: Optional[bytes] = None
@@ -147,6 +156,7 @@ class OjinVideoContinuousService(FrameProcessor):
 
         # Speaking state tracking
         self._first_tts_received_at: Optional[float] = None
+        self._latency_start_ts: Optional[float] = None
         self._tts_empty_since: Optional[float] = None
         self._bot_speaking = False
 
@@ -217,13 +227,15 @@ class OjinVideoContinuousService(FrameProcessor):
         # Track first TTS audio for started speaking notification
         if self._first_tts_received_at is None:
             self._first_tts_received_at = time.perf_counter()
-            logger.debug("First TTS audio received, starting speaking timer")
+            # logger.debug("First TTS audio received, starting speaking timer")
 
+        if self._latency_start_ts is None:
+            self._latency_start_ts = time.perf_counter()
         # Reset empty timer since we have audio
         self._tts_empty_since = None
 
         # Send audio to server immediately
-        logger.debug(f"Sending TTS audio to server, size: {len(resampled_audio)} bytes")
+        # logger.debug(f"Sending TTS audio to server, size: {len(resampled_audio)} bytes")
         await self._client.send_message(
             OjinAudioInputMessage(
                 audio_int16_bytes=resampled_audio,
@@ -269,7 +281,16 @@ class OjinVideoContinuousService(FrameProcessor):
             )
 
             self._video_frames.append(video_frame)
-            logger.debug(f"Received video frame {frame_idx}, is_final={message.is_final_response}")
+            if self._settings.frame_debugging_enabled:
+                logger.debug(
+                    f"Received video frame {frame_idx}, is_final={message.is_final_response}"
+                )
+            if self._latency_start_ts is not None and video_frame.frame_idx == 1:
+                latency = time.perf_counter() - self._latency_start_ts
+                self._latency_start_ts = None
+                await self.push_frame(
+                    OjinLatencyFrame(latency=latency), direction=FrameDirection.DOWNSTREAM
+                )
 
         elif isinstance(message, ErrorResponseMessage):
             logger.error(f"Received error response: {message.payload.code}")
@@ -326,9 +347,11 @@ class OjinVideoContinuousService(FrameProcessor):
                 image_bytes = video_frame.image_bytes
                 audio_bytes = video_frame.audio_bytes if video_frame.audio_bytes else silence_audio
                 self._last_played_image_bytes = image_bytes
-                logger.debug(
-                    f"Playing video frame {video_frame.frame_idx}, buffer left: {len(self._video_frames)}"
-                )
+
+                if self._settings.frame_debugging_enabled:
+                    logger.debug(
+                        f"Playing video frame {video_frame.frame_idx}, buffer left: {len(self._video_frames)}"
+                    )
 
             elif self._last_played_image_bytes:
                 # Repeat last frame to avoid stutter
@@ -406,7 +429,7 @@ class OjinVideoContinuousService(FrameProcessor):
         elapsed = time.perf_counter() - self._first_tts_received_at
         if elapsed >= self._settings.started_speaking_delay_s:
             self._bot_speaking = True
-            logger.info(f"Bot started speaking after {elapsed:.3f}s")
+            # logger.info(f"Bot started speaking after {elapsed:.3f}s")
             await self.push_frame(OjinBotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
             await self.push_frame(OjinBotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
 
@@ -425,6 +448,6 @@ class OjinVideoContinuousService(FrameProcessor):
             self._bot_speaking = False
             self._first_tts_received_at = None  # Reset for next speech
             self._tts_empty_since = None
-            logger.info(f"Bot stopped speaking after {elapsed:.3f}s of silence")
+            # logger.info(f"Bot stopped speaking after {elapsed:.3f}s of silence")
             await self.push_frame(OjinBotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
             await self.push_frame(OjinBotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
