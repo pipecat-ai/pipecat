@@ -630,6 +630,18 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             LLMFullResponseStartFrame(),
             LLMTextFrame("Let me check the weather for you."),
+            # LLMFullResponseEndFrame is sent BEFORE function calls to flush text to context
+            LLMFullResponseEndFrame(),
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        context=context,
+                        tool_call_id="1",
+                        function_name="get_weather",
+                        arguments={"location": "Los Angeles"},
+                    )
+                ]
+            ),
             FunctionCallInProgressFrame(
                 function_name="get_weather",
                 tool_call_id="1",
@@ -643,7 +655,6 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
                 arguments={"location": "Los Angeles"},
                 result={"conditions": "Sunny"},
             ),
-            LLMFullResponseEndFrame(),
         ]
         expected_down_frames = [LLMContextFrame, LLMContextAssistantTimestampFrame]
         await run_test(
@@ -698,6 +709,18 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             LLMFullResponseStartFrame(),
             LLMTextFrame("Let me look that up for you."),
+            # LLMFullResponseEndFrame is sent BEFORE function calls to flush text to context
+            LLMFullResponseEndFrame(),
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        context=context,
+                        tool_call_id="2",
+                        function_name="search_database",
+                        arguments={"query": "test"},
+                    )
+                ]
+            ),
             FunctionCallInProgressFrame(
                 function_name="search_database",
                 tool_call_id="2",

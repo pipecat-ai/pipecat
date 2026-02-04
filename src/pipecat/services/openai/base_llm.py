@@ -456,7 +456,20 @@ class BaseOpenAILLMService(LLMService):
                     )
                 )
 
+            # Push LLMFullResponseEndFrame BEFORE running function calls.
+            # This ensures the aggregator flushes any accumulated text to context
+            # before tool calls are processed, so text appears before tool_calls
+            # in the conversation history.
+            await self.stop_processing_metrics()
+            await self.push_frame(LLMFullResponseEndFrame())
+
             await self.run_function_calls(function_calls)
+
+            # Return True to indicate we already pushed the end frame
+            return True
+
+        # Return False to indicate the caller should push the end frame
+        return False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
@@ -488,15 +501,17 @@ class BaseOpenAILLMService(LLMService):
             await self.push_frame(frame, direction)
 
         if context:
+            end_frame_pushed = False
             try:
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self.start_processing_metrics()
-                await self._process_context(context)
+                end_frame_pushed = await self._process_context(context)
             except httpx.TimeoutException as e:
                 await self._call_event_handler("on_completion_timeout")
                 await self.push_error(error_msg="LLM completion timeout", exception=e)
             except Exception as e:
                 await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
             finally:
-                await self.stop_processing_metrics()
-                await self.push_frame(LLMFullResponseEndFrame())
+                if not end_frame_pushed:
+                    await self.stop_processing_metrics()
+                    await self.push_frame(LLMFullResponseEndFrame())

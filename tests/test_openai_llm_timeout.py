@@ -4,17 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Unit tests for OpenAI LLM error handling."""
+"""Unit tests for OpenAI LLM service."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
 from pipecat.frames.frames import (
+    FunctionCallsStartedFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -161,3 +163,130 @@ async def test_openai_llm_emits_error_frame_on_exception():
         assert "Error during completion" in pushed_errors[0]["error_msg"]
         assert "API Error" in pushed_errors[0]["error_msg"]
         assert isinstance(pushed_errors[0]["exception"], RuntimeError)
+
+
+def _create_mock_chunk(content=None, tool_call_id=None, tool_call_name=None, tool_call_args=None):
+    """Create a mock ChatCompletionChunk for testing."""
+    chunk = MagicMock()
+    chunk.usage = None
+    chunk.model = "gpt-4"
+    chunk.choices = [MagicMock()]
+    chunk.choices[0].delta = MagicMock()
+
+    if content is not None:
+        chunk.choices[0].delta.content = content
+        chunk.choices[0].delta.tool_calls = None
+    elif tool_call_id is not None:
+        chunk.choices[0].delta.content = None
+        tool_call = MagicMock()
+        tool_call.index = 0
+        tool_call.id = tool_call_id
+        tool_call.function = MagicMock()
+        tool_call.function.name = tool_call_name
+        tool_call.function.arguments = tool_call_args
+        chunk.choices[0].delta.tool_calls = [tool_call]
+    else:
+        chunk.choices[0].delta.content = None
+        chunk.choices[0].delta.tool_calls = None
+
+    return chunk
+
+
+async def _mock_stream(chunks):
+    """Create an async generator from a list of chunks."""
+    for chunk in chunks:
+        yield chunk
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_text_before_tool_call_frame_order():
+    """Test that LLMFullResponseEndFrame is pushed BEFORE FunctionCallsStartedFrame.
+
+    When the LLM returns both text content and tool calls, the frame order must be:
+    1. LLMFullResponseStartFrame
+    2. LLMTextFrame(s) - text content as it streams
+    3. LLMFullResponseEndFrame - flushes text to context
+    4. FunctionCallsStartedFrame - tool call processing begins
+
+    This ensures the aggregator adds assistant text to context before tool calls
+    are processed, fixing issue #3631.
+    """
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(model="gpt-4")
+        service._client = AsyncMock()
+
+        # Track pushed frames in order
+        pushed_frames = []
+
+        async def mock_push_frame(frame, direction=FrameDirection.DOWNSTREAM):
+            pushed_frames.append(frame)
+
+        service.push_frame = mock_push_frame
+        service._call_event_handler = AsyncMock()
+        service.start_processing_metrics = AsyncMock()
+        service.stop_processing_metrics = AsyncMock()
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+
+        # Track when run_function_calls is called relative to other frames
+        run_function_calls_called_at_index = None
+        original_run_function_calls = service.run_function_calls
+
+        async def mock_run_function_calls(function_calls):
+            nonlocal run_function_calls_called_at_index
+            # Record the index when this is called (after frames already pushed)
+            run_function_calls_called_at_index = len(pushed_frames)
+            # Push a marker frame so we can verify ordering
+            pushed_frames.append(FunctionCallsStartedFrame(function_calls=function_calls))
+
+        service.run_function_calls = mock_run_function_calls
+
+        # Create mock chunks simulating: text content followed by tool call
+        chunks = [
+            _create_mock_chunk(content="Let me "),
+            _create_mock_chunk(content="check the weather."),
+            _create_mock_chunk(
+                tool_call_id="call_123",
+                tool_call_name="get_weather",
+                tool_call_args='{"location": "LA"}',
+            ),
+        ]
+
+        # Mock the streaming method to return our chunks
+        service._stream_chat_completions_universal_context = AsyncMock(
+            return_value=_mock_stream(chunks)
+        )
+
+        # Create context and process
+        context = LLMContext(messages=[{"role": "user", "content": "What's the weather?"}])
+        frame = LLMContextFrame(context=context)
+
+        await service.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+        # Find indices of key frames
+        text_indices = [i for i, f in enumerate(pushed_frames) if isinstance(f, LLMTextFrame)]
+        end_frame_indices = [
+            i for i, f in enumerate(pushed_frames) if isinstance(f, LLMFullResponseEndFrame)
+        ]
+        function_started_indices = [
+            i for i, f in enumerate(pushed_frames) if isinstance(f, FunctionCallsStartedFrame)
+        ]
+
+        # Verify all expected frames are present
+        assert len(text_indices) > 0, "Expected LLMTextFrame(s) to be pushed"
+        assert len(end_frame_indices) == 1, "Expected exactly one LLMFullResponseEndFrame"
+        assert len(function_started_indices) == 1, "Expected exactly one FunctionCallsStartedFrame"
+
+        # Verify ordering: all text frames before end frame, end frame before function started
+        last_text_index = max(text_indices)
+        end_frame_index = end_frame_indices[0]
+        function_started_index = function_started_indices[0]
+
+        assert last_text_index < end_frame_index, (
+            f"LLMTextFrame (index {last_text_index}) should come before "
+            f"LLMFullResponseEndFrame (index {end_frame_index})"
+        )
+        assert end_frame_index < function_started_index, (
+            f"LLMFullResponseEndFrame (index {end_frame_index}) should come before "
+            f"FunctionCallsStartedFrame (index {function_started_index})"
+        )

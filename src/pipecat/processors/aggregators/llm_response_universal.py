@@ -929,6 +929,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
         logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
+
+        # Flush any pending text to context BEFORE tool calls are added.
+        # This ensures assistant text appears before tool_calls in context,
+        # even if LLMFullResponseEndFrame hasn't been processed yet.
+        await self.push_aggregation()
+
         for function_call in frame.function_calls:
             self._function_calls_in_progress[function_call.tool_call_id] = None
 
@@ -936,10 +942,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         logger.debug(
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
-
-        # Flush any accumulated text to context BEFORE adding the tool call.
-        # This ensures the assistant's text is in context when the tool executes.
-        await self.push_aggregation()
 
         # Update context with the in-progress function call
         self._context.add_message(
@@ -1012,6 +1014,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 run_llm = not bool(self._function_calls_in_progress)
 
         if run_llm:
+            # Flush any pending text before triggering LLM to ensure complete context
+            await self.push_aggregation()
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Call the `on_context_updated` callback once the function call result
