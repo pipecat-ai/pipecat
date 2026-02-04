@@ -7,9 +7,9 @@
 import unittest
 from typing import List
 
-from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 from pipecat.audio.vad.vad_controller import VADController
-from pipecat.frames.frames import Frame, InputAudioRawFrame, StartFrame
+from pipecat.frames.frames import Frame, InputAudioRawFrame, SpeechControlParamsFrame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection
 
 
@@ -184,6 +184,26 @@ class TestVADController(unittest.IsolatedAsyncioTestCase):
         analyzer.set_next_state(VADState.STOPPING)
         await controller.process_frame(audio_frame)
         self.assertEqual(events_triggered, [])
+
+    async def test_start_frame_broadcasts_vad_params(self):
+        """Test that StartFrame triggers broadcast of SpeechControlParamsFrame with VAD params."""
+        analyzer = MockVADAnalyzer()
+        controller = VADController(analyzer)
+
+        broadcast_calls: List[tuple] = []
+
+        @controller.event_handler("on_broadcast_frame")
+        async def on_broadcast_frame(_controller, frame_cls, **kwargs):
+            broadcast_calls.append((frame_cls, kwargs))
+
+        start_frame = StartFrame(audio_in_sample_rate=16000, audio_out_sample_rate=16000)
+        await controller.process_frame(start_frame)
+
+        # Should have broadcast SpeechControlParamsFrame with VAD params
+        self.assertEqual(len(broadcast_calls), 1)
+        self.assertEqual(broadcast_calls[0][0], SpeechControlParamsFrame)
+        self.assertIn("vad_params", broadcast_calls[0][1])
+        self.assertIsInstance(broadcast_calls[0][1]["vad_params"], VADParams)
 
 
 if __name__ == "__main__":

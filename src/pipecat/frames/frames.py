@@ -1751,7 +1751,7 @@ class BotInterruptionFrame(InterruptionTaskFrame):
 
 
 @dataclass
-class EndFrame(ControlFrame):
+class EndFrame(ControlFrame, UninterruptibleFrame):
     """Frame indicating pipeline has ended and should shut down.
 
     Indicates that a pipeline has ended and frame processors and pipelines
@@ -1759,6 +1759,10 @@ class EndFrame(ControlFrame):
     sending frames to its output channel(s) and close all its threads. Note,
     that this is a control frame, which means it will be received in the order it
     was sent.
+
+    This frame is marked as UninterruptibleFrame to ensure it is not lost when
+    an InterruptionFrame is processed. Terminal frames must survive interruption
+    to guarantee proper pipeline shutdown.
 
     Parameters:
         reason: Optional reason for pushing an end frame.
@@ -1771,12 +1775,16 @@ class EndFrame(ControlFrame):
 
 
 @dataclass
-class StopFrame(ControlFrame):
+class StopFrame(ControlFrame, UninterruptibleFrame):
     """Frame indicating pipeline should stop but keep processors running.
 
     Indicates that a pipeline should be stopped but that the pipeline
     processors should be kept in a running state. This is normally queued from
     the pipeline task.
+
+    This frame is marked as UninterruptibleFrame to ensure it is not lost when
+    an InterruptionFrame is processed. Terminal frames must survive interruption
+    to guarantee proper pipeline control.
     """
 
     pass
