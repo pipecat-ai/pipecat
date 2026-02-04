@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     RequestMetadataFrame,
     ServiceMetadataFrame,
     ServiceSwitcherFrame,
+    StartFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
@@ -125,7 +126,11 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         self.strategy = strategy
 
     class ServiceSwitcherFilter(FunctionFilter):
-        """An internal filter that allows frames to pass through to the wrapped service only if it's the active service."""
+        """An internal filter that gates frame flow based on active service.
+
+        Two filters "sandwich" each service (one upstream, one downstream),
+        allowing frames through only when the wrapped service is active.
+        """
 
         def __init__(
             self,
@@ -142,6 +147,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             """
             self._wrapped_service = wrapped_service
             self._active_service = active_service
+            self._startup_complete = False
 
             async def filter(_: Frame) -> bool:
                 return self._wrapped_service == self._active_service
@@ -152,20 +158,23 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             """Process a frame through the filter, handling special internal filter-updating frames."""
             if isinstance(frame, ServiceSwitcher.ServiceSwitcherFilterFrame):
                 old_active = self._active_service
+                old_startup_complete = self._startup_complete
                 self._active_service = frame.active_service
+                self._startup_complete = True  # True after StartFrame is released
                 # Two ServiceSwitcherFilters "sandwich" a service. Push the
                 # frame only to update the other side of the sandwich, but
                 # otherwise don't let it leave the sandwich.
                 if direction == self._direction:
                     await self.push_frame(frame, direction)
-                # If this is the upstream filter and the wrapped service is
-                # becoming active, request metadata. This happens AFTER
-                # _active_service is updated, ensuring the resulting
-                # STTMetadataFrame passes through.
+                # If this is the upstream filter for the active service, request
+                # metadata when: (1) startup just completed, or (2) service became
+                # active. Startup triggers metadata request because ParallelPipeline
+                # synchronizes StartFrame release, so we must request metadata after
+                # to maintain ordering for downstream processors.
                 elif (
                     self._direction == FrameDirection.UPSTREAM
                     and self._wrapped_service == frame.active_service
-                    and old_active != self._wrapped_service
+                    and (not old_startup_complete or old_active != self._wrapped_service)
                 ):
                     await self.push_frame(RequestMetadataFrame(), FrameDirection.UPSTREAM)
                 return
@@ -177,14 +186,11 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                     await self.push_frame(frame, direction)
                 return
 
-            # Special case: ServiceMetadataFrame must be filtered in BOTH directions
-            # because services push it downstream in response to StartFrame (which
-            # always passes through). Without this, inactive services' metadata
-            # would leak out since the filter after the service only filters
-            # upstream frames.
+            # Special case: ServiceMetadataFrame must be filtered in BOTH directions.
+            # Block if: (1) from inactive service, or (2) during startup (before
+            # StartFrame is released) to prevent ordering issues.
             if isinstance(frame, ServiceMetadataFrame):
-                if self._wrapped_service != self._active_service:
-                    # Block metadata from inactive services
+                if self._wrapped_service != self._active_service or not self._startup_complete:
                     return
                 await self.push_frame(frame, direction)
                 return
@@ -193,7 +199,12 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
     @dataclass
     class ServiceSwitcherFilterFrame(ControlFrame):
-        """An internal frame used by ServiceSwitcher to filter frames based on active service."""
+        """An internal frame used to update filter state.
+
+        Sent on startup (after StartFrame is released) and on service switch.
+        Updates active service and marks startup as complete, then triggers
+        metadata emission from the active service.
+        """
 
         active_service: FrameProcessor
 
@@ -223,6 +234,25 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                 direction=FrameDirection.UPSTREAM,
             ),
         ]
+
+    async def _parallel_push_frame(self, frame: Frame, direction: FrameDirection):
+        """Push frames while handling StartFrame completion for metadata ordering.
+
+        When StartFrame is released (after all branches have processed it),
+        we send a filter frame to mark startup as complete and trigger metadata
+        emission. This ensures ServiceMetadataFrame arrives after StartFrame.
+        """
+        await super()._parallel_push_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            # StartFrame has been released. Send filter frame to mark startup
+            # complete and trigger metadata from the active service.
+            await super().process_frame(
+                ServiceSwitcher.ServiceSwitcherFilterFrame(
+                    active_service=self.strategy.active_service
+                ),
+                FrameDirection.DOWNSTREAM,
+            )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame, handling frames which affect service switching.
