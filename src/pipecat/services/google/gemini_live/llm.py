@@ -1003,6 +1003,7 @@ class GeminiLiveLLMService(LLMService):
                     "Tools provided both at init time and in context; using context-provided value."
                 )
             if system_instruction or tools:
+                self._session_resumption_handle = None
                 await self._reconnect()
 
             # Initialize our bookkeeping of already-completed tool calls in
@@ -1039,13 +1040,10 @@ class GeminiLiveLLMService(LLMService):
             )  # Take a static snapshot guaranteed not to change
 
             if self._context_update_requires_reconnect(diff, messages_programmatically_edited):
-                # Reconnect
-                logger.debug("Context update requires reconnect. Reconnecting...")
+                logger.debug("Context update requires reconnect.")
 
-                # TODO: necessary?
+                # Reconnect
                 self._session_resumption_handle = None
-
-                # Reconnect
                 await self._reconnect()
 
                 # Initialize our bookkeeping of already-completed tool calls in
@@ -1055,8 +1053,9 @@ class GeminiLiveLLMService(LLMService):
                 # Trigger "initial" response with new connection
                 await self._create_initial_response()
             else:
+                logger.debug("Context update does not require reconnect.")
+
                 # Send results for newly-completed function calls, if any.
-                logger.debug("Checking for newly-completed function call results...")
                 await self._process_completed_function_calls(send_new_results=True)
 
     def _context_update_requires_reconnect(
@@ -1077,23 +1076,26 @@ class GeminiLiveLLMService(LLMService):
         # 2. If the tools available to the model were changed
         # 3. If messages were appended programmatically by the user, e.g. with
         #    LLMMessagesAppendFrame (NOT if they originated from Gemini Live
-        #    itself, since the service is already aware of those)
+        #    itself, since the remote service's internal bookkeeping is already
+        #    aware of those)
         #
         # Note that *ideally* in this 3rd case we would just send the newly
         # appended messages without reconnecting, but in all my testing so far,
-        # I haven't been able to get that to work reliably.
-        # TODO: add more detail about what's been attempted.
+        # I haven't been able to get that to work as reliably as I'd like.
+        # (Commments in the Gemini Live Python SDK also warn against
+        # programmatically sending new messages after the initial conversation
+        # history seeding is done and the voice chat has begun.)
         if (
             diff.history_edited
             or diff.tools_diff.has_changes()
             or (diff.messages_appended and messages_programmatically_edited)
         ):
             if diff.history_edited:
-                print("[pk] Context diff: history edited.")
+                logger.debug("Context update: history edited.")
             if diff.tools_diff.has_changes():
-                print("[pk] Context diff: tools changed.")
+                logger.debug("Context update: tools changed.")
             if diff.messages_appended and messages_programmatically_edited:
-                print(f"[pk] Context diff: messages appended: {diff.messages_appended}")
+                logger.debug(f"Context update: messages programmatically appended.")
             return True
 
         return False
