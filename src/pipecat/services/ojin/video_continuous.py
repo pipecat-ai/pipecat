@@ -348,13 +348,9 @@ class OjinVideoContinuousService(FrameProcessor):
             #     next_frame_time += 0.01
             #     logger.debug("Slowing down to fill up buffer")
 
-            # if (
-            #     len(self._video_frames) > 8
-            #     and audio_bytes == silence_audio
-            #     and next_frame_time > 30
-            # ):
-            #     next_frame_time -= 0.01
-            #     logger.debug("Speeding up to catch up")
+            if len(self._video_frames) > 12 and audio_bytes == silence_audio:
+                next_frame_time -= 0.01
+                logger.debug("Speeding up to catch up")
 
             if image_bytes:
                 image_frame = OutputImageRawFrame(
