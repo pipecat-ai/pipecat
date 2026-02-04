@@ -308,9 +308,10 @@ def _setup_webrtc_routes(app: FastAPI, args: argparse.Namespace):
         # Use original filename only for format/mime in response
         original_name = Path(file.filename or "").name
         media_type, _ = mimetypes.guess_type(original_name, strict=False)
+        # Return the file as a URL that can be used in the client, matching the format of RTVIFile
         return {
             "name": original_name,
-            "source": f"/files/{safe_name}",
+            "source": {"type": "url", "url": f"/files/{safe_name}"},
             "format": media_type,
         }
 
