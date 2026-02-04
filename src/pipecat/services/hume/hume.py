@@ -21,6 +21,7 @@ from hume.empathic_voice.chat.socket_client import (
 from loguru import logger
 from websockets import ConnectionClosed
 
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AggregationType,
     CancelFrame,
@@ -100,6 +101,7 @@ class HumeSTSService(LLMService):
         self.system_prompt = system_prompt
         self._context: OpenAIRealtimeLLMContext | None = None
         self._hume_context: Context | None = None
+        self._resampler = create_stream_resampler()
         self._time_to_first_audio_list = []
         self._start_frame_cls = start_frame_cls or HumeStartFrame
 
@@ -133,14 +135,13 @@ class HumeSTSService(LLMService):
 
         elif isinstance(frame, InputAudioRawFrame):
             if self._connection:
-                encoded_audio = base64.b64encode(frame.audio).decode("utf-8")
-                input = AudioInput(data=encoded_audio)
-                while True:
-                    try:
-                        await self._connection.send_audio_input(input)
-                        break
-                    except ConnectionClosed:
-                        await self.reset_conversation()
+                audio = await self._resampler.resample(frame.audio, frame.sample_rate, 16000)
+                # logger.debug(
+                #     f"Sending audio to Hume, size: {len(audio)} bytes, sample rate: {frame.sample_rate} target_rate: 16000"
+                # )
+                await self._connection._send(audio)
+            # else:
+            #     logger.debug(f"Not connection with hume but receiving audio input")
             if self._audio_passthrough:
                 await self.push_frame(frame, direction)
 
