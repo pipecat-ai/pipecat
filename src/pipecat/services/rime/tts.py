@@ -98,8 +98,8 @@ class RimeTTSService(AudioContextWordTTSService):
         *,
         api_key: str,
         voice_id: str,
-        url: str = "wss://users.rime.ai/ws2",
-        model: str = "mistv2",
+        url: str = "wss://users-ws.rime.ai/ws3",
+        model: str = "arcana",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
@@ -383,7 +383,7 @@ class RimeTTSService(AudioContextWordTTSService):
         async for message in self._get_websocket():
             msg = json.loads(message)
 
-            if not msg or not self.audio_context_available(msg["contextId"]):
+            if not msg or not self.audio_context_available(msg.get("contextId")):
                 continue
 
             context_id = msg["contextId"]
@@ -626,20 +626,18 @@ class RimeHttpTTSService(TTSService):
 class RimeNonJsonTTSService(InterruptibleTTSService):
     """Pipecat TTS service for Rime's non-JSON WebSocket API.
 
+    .. deprecated:: 0.0.102
+        Arcana now supports JSON WebSocket with word-level timestamps via the
+        ``wss://users-ws.rime.ai/ws3`` endpoint. Use :class:`RimeTTSService`
+        with ``model="arcana"`` instead.
+
     This service enables Text-to-Speech synthesis over WebSocket endpoints
     that require plain text (not JSON) messages and return raw audio bytes.
-    It is designed for use with TTS models like Arcana, which currently do
-    not support JSON-based WebSocket protocols (though this may change in
-    the future).
 
     Limitations:
         - Does not support word-level timestamps or context IDs.
         - Intended specifically for integrations where the TTS provider only
           accepts and returns non-JSON messages.
-
-    Note:
-        - Arcana and similar models may add JSON WebSocket support in the
-          future. This service focuses on the current plain text protocol.
     """
 
     class InputParams(BaseModel):
