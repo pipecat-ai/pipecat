@@ -425,7 +425,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
     ) -> tuple["LLMSummarizedMessage | None", int]:
         """Generate a compressed summary of conversation context.
 
-        Uses the mixin's message selection logic to identify which messages
+        Uses the message selection logic to identify which messages
         to summarize, formats them as a transcript, and invokes the LLM to
         generate a concise summary. The summary is formatted according to the
         LLM provider's requirements using the adapter.
@@ -488,17 +488,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 f"{self}: LLM service does not implement run_inference, skipping summarization"
             )
             return None, -1
-
-        logger.debug(
-            f"{self}: Calling LLM to generate summary (max_tokens={max_summary_tokens})..."
-        )
-
-        # Call run_inference to generate summary (returns Optional[str])
         summary_text = await self.run_inference(summary_context, max_tokens=max_summary_tokens)
         if not summary_text:
             logger.warning(f"{self}: LLM returned empty summary")
             return None, -1
-
         summary_text = summary_text.strip()
         logger.info(
             f"{self}: Generated summary of {len(summary_text)} characters "
