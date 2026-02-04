@@ -208,11 +208,14 @@ class LLMContextSummarizationUtil:
             elif isinstance(content, list):
                 for item in content:
                     if isinstance(item, dict):
-                        if item.get("type") == "text":
+                        item_type = item.get("type", "")
+                        # Text content
+                        if item_type == "text":
                             total += LLMContextSummarizationUtil.estimate_tokens(
                                 item.get("text", "")
                             )
-                        elif item.get("type") == "image_url":
+                        # Image content
+                        elif item_type in ("image_url", "image"):
                             # Images are expensive, rough estimate
                             total += IMAGE_TOKEN_ESTIMATE
 
@@ -358,9 +361,6 @@ class LLMContextSummarizationUtil:
             (i for i, msg in enumerate(messages) if msg.get("role") == "system"), -1
         )
 
-        # Get messages to keep (last N messages)
-        keep_start_index = len(messages) - min_messages_to_keep
-
         # Messages to summarize are between first system and recent messages
         # We exclude the first system message itself
         if first_system_index >= 0:
@@ -368,13 +368,13 @@ class LLMContextSummarizationUtil:
         else:
             summary_start = 0
 
-        summary_end = keep_start_index
+        # Get messages to keep (last N messages)
+        summary_end = len(messages) - min_messages_to_keep
 
         if summary_start >= summary_end:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
 
         # Check for function calls in progress in the range we want to summarize
-        original_summary_end = summary_end
         function_call_start = LLMContextSummarizationUtil._get_function_calls_in_progress_index(
             messages, summary_start
         )
@@ -384,10 +384,9 @@ class LLMContextSummarizationUtil:
                 f"ContextSummarization: Found function call in progress at index {function_call_start}, "
                 f"stopping summary before it (was going to summarize up to {summary_end})"
             )
-            summary_end = function_call_start
-
             # Count how many messages we're skipping
-            skipped_messages = original_summary_end - summary_end
+            skipped_messages = summary_end - function_call_start
+            summary_end = function_call_start
             if skipped_messages > 0:
                 logger.info(
                     f"ContextSummarization: Skipping {skipped_messages} messages with "
