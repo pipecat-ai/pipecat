@@ -13,6 +13,8 @@ from pipecat.frames.frames import (
     ControlFrame,
     Frame,
     ManuallySwitchServiceFrame,
+    RequestMetadataFrame,
+    ServiceMetadataFrame,
     ServiceSwitcherFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -149,12 +151,42 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         async def process_frame(self, frame, direction):
             """Process a frame through the filter, handling special internal filter-updating frames."""
             if isinstance(frame, ServiceSwitcher.ServiceSwitcherFilterFrame):
+                old_active = self._active_service
                 self._active_service = frame.active_service
                 # Two ServiceSwitcherFilters "sandwich" a service. Push the
                 # frame only to update the other side of the sandwich, but
                 # otherwise don't let it leave the sandwich.
                 if direction == self._direction:
                     await self.push_frame(frame, direction)
+                # If this is the upstream filter and the wrapped service is
+                # becoming active, request metadata. This happens AFTER
+                # _active_service is updated, ensuring the resulting
+                # STTMetadataFrame passes through.
+                elif (
+                    self._direction == FrameDirection.UPSTREAM
+                    and self._wrapped_service == frame.active_service
+                    and old_active != self._wrapped_service
+                ):
+                    await self.push_frame(RequestMetadataFrame(), FrameDirection.UPSTREAM)
+                return
+
+            # RequestMetadataFrame is internal to ServiceSwitcher - only let it
+            # through to the active service and don't let it leave.
+            if isinstance(frame, RequestMetadataFrame):
+                if direction == self._direction and self._wrapped_service == self._active_service:
+                    await self.push_frame(frame, direction)
+                return
+
+            # Special case: ServiceMetadataFrame must be filtered in BOTH directions
+            # because services push it downstream in response to StartFrame (which
+            # always passes through). Without this, inactive services' metadata
+            # would leak out since the filter after the service only filters
+            # upstream frames.
+            if isinstance(frame, ServiceMetadataFrame):
+                if self._wrapped_service != self._active_service:
+                    # Block metadata from inactive services
+                    return
+                await self.push_frame(frame, direction)
                 return
 
             await super().process_frame(frame, direction)

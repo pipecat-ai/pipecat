@@ -1681,6 +1681,19 @@ class STTMetadataFrame(ServiceMetadataFrame):
     ttfs_p99_latency: float
 
 
+@dataclass
+class RequestMetadataFrame(ControlFrame):
+    """Request services to re-emit their metadata frames.
+
+    Used by ServiceSwitcher when switching active services to ensure
+    downstream processors receive updated metadata from the newly active service.
+    Services that receive this frame should re-push their metadata frame
+    (e.g., STTMetadataFrame for STT services).
+    """
+
+    pass
+
+
 #
 # Task frames
 #
