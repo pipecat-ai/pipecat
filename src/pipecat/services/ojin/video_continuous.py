@@ -157,6 +157,7 @@ class OjinVideoContinuousService(FrameProcessor):
         # Speaking state tracking
         self._first_tts_received_at: Optional[float] = None
         self._latency_start_ts: Optional[float] = None
+        self._latency: Optional[float] = None
         self._tts_empty_since: Optional[float] = None
         self._bot_speaking = False
 
@@ -285,12 +286,18 @@ class OjinVideoContinuousService(FrameProcessor):
                 logger.debug(
                     f"Received video frame {frame_idx}, is_final={message.is_final_response}"
                 )
-            if self._latency_start_ts is not None and video_frame.frame_idx == 1:
-                latency = time.perf_counter() - self._latency_start_ts
+            if (
+                self._latency_start_ts is not None
+                and video_frame.frame_idx == 1
+                and self._latency is None
+            ):
+                self._latency = time.perf_counter() - self._latency_start_ts
                 self._latency_start_ts = None
                 await self.push_frame(
-                    OjinLatencyFrame(latency=latency), direction=FrameDirection.DOWNSTREAM
+                    OjinLatencyFrame(latency=self._latency), direction=FrameDirection.DOWNSTREAM
                 )
+            elif self._latency is not None and video_frame.frame_idx == 0:
+                self._latency = None
 
         elif isinstance(message, ErrorResponseMessage):
             logger.error(f"Received error response: {message.payload.code}")
