@@ -244,7 +244,7 @@ class ImageRawFrame:
     format: Optional[str]
 
 
-FileSourceType = Literal["bytes", "url"]  # TODO: Add support for "id"
+FileSourceType = Literal["bytes", "url"]
 
 
 @dataclass

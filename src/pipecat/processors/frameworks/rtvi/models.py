@@ -258,7 +258,17 @@ class File(BaseModel):
     format: str  # Mime format of the file, e.g., 'application/pdf'
     name: Optional[str] = None
     source: FileBytes | FileUrl
-    customOpts: Optional[dict] = None  # ex. 'detail' in openAI or 'citations' in Bedrock
+
+
+class SendFileOptions(BaseModel):
+    """Options for sending text input to the LLM.
+
+    Contains options for how the pipeline should process the text input.
+    """
+
+    run_immediately: bool = True
+    audio_response: bool = True
+    custom_options: Optional[dict] = None  # ex. 'detail' in openAI or 'citations' in Bedrock
 
 
 class SendFileData(BaseModel):
@@ -269,7 +279,7 @@ class SendFileData(BaseModel):
 
     content: str  # Text to accompany the file
     file: File
-    options: Optional[SendTextOptions] = None
+    options: Optional[SendFileOptions] = None
 
 
 class AppendToContextData(BaseModel):
