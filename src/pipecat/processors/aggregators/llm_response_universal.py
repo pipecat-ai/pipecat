@@ -438,7 +438,6 @@ class LLMUserAggregator(LLMContextAggregator):
             self._params.context_summarization_config or LLMContextSummarizationConfig()
         )
         self._summarization_in_progress = False
-        self._last_summarized_index = -1
         self._pending_summary_request_id: Optional[str] = None
 
     async def cleanup(self):
@@ -814,13 +813,7 @@ class LLMUserAggregator(LLMContextAggregator):
         token_threshold_exceeded = total_tokens >= token_threshold
 
         # Check if we've exceeded max unsummarized messages
-        if self._last_summarized_index >= 0:
-            # Count messages since last summary
-            messages_since_summary = len(self._context.messages) - 1 - self._last_summarized_index
-        else:
-            # Never summarized - count all messages
-            messages_since_summary = len(self._context.messages)
-
+        messages_since_summary = len(self._context.messages) - 1
         message_threshold_exceeded = (
             messages_since_summary >= self._summarization_config.max_unsummarized_messages
         )
@@ -977,15 +970,11 @@ class LLMUserAggregator(LLMContextAggregator):
         # Update context
         self._context.set_messages(new_messages)
 
-        # Update last summarized index
-        # New index is the summary message position in the new context
-        # first_system (if exists) is at index 0, summary is at index 1 (or 0 if no first_system)
-        self._last_summarized_index = 1 if first_system_message else 0
-
         logger.info(
             f"{self}: Applied context summary "
             f"(reduced from {len(messages)} to {len(new_messages)} messages)"
         )
+        logger.debug(f"{self}: New context: {self._context.messages}")
 
 
 class LLMAssistantAggregator(LLMContextAggregator):
