@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -152,6 +153,7 @@ class SonioxSTTService(WebsocketSTTService):
         sample_rate: Optional[int] = None,
         params: Optional[SonioxInputParams] = None,
         vad_force_turn_endpoint: bool = False,
+        ttfs_p99_latency: Optional[float] = SONIOX_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Soniox STT service.
@@ -163,9 +165,11 @@ class SonioxSTTService(WebsocketSTTService):
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
             vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox. If disabled, Soniox will detect the end of the speech.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
         params = params or SonioxInputParams()
 
         self._api_key = api_key

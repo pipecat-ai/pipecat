@@ -17,6 +17,7 @@ from openai import AsyncOpenAI
 from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.services.stt_latency import WHISPER_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -115,6 +116,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         include_prob_metrics: bool = False,
+        ttfs_p99_latency: Optional[float] = WHISPER_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Whisper STT service.
@@ -129,9 +131,11 @@ class BaseWhisperSTTService(SegmentedSTTService):
             include_prob_metrics: If True, enables probability metrics in API response.
                 Each service implements this differently (see child classes).
                 Defaults to False.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        super().__init__(**kwargs)
+        super().__init__(ttfs_p99_latency=ttfs_p99_latency, **kwargs)
         self.set_model_name(model)
         self._client = self._create_client(api_key, base_url)
         self._language = self.language_to_service_language(language or Language.EN)
