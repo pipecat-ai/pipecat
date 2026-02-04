@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -51,6 +51,8 @@ class DeepgramTTSService(WebsocketTTSService):
     message for conversational AI use cases.
     """
 
+    SUPPORTED_ENCODINGS = ("linear16", "mulaw", "alaw")
+
     def __init__(
         self,
         *,
@@ -68,10 +70,24 @@ class DeepgramTTSService(WebsocketTTSService):
             voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
             base_url: WebSocket base URL for Deepgram API. Defaults to "wss://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
-            encoding: Audio encoding format. Defaults to "linear16".
+            encoding: Audio encoding format. Defaults to "linear16". Must be one of SUPPORTED_ENCODINGS.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService class.
+
+        Raises:
+            ValueError: If encoding is not in SUPPORTED_ENCODINGS.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        if encoding.lower() not in self.SUPPORTED_ENCODINGS:
+            raise ValueError(
+                f"Unsupported encoding '{encoding}'. Must be one of {', '.join(self.SUPPORTED_ENCODINGS)} for WebSocket TTS."
+            )
+
+        super().__init__(
+            sample_rate=sample_rate,
+            pause_frame_processing=True,
+            push_stop_frames=True,
+            append_trailing_space=True,
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._base_url = base_url
@@ -132,6 +148,8 @@ class DeepgramTTSService(WebsocketTTSService):
 
     async def _connect(self):
         """Connect to Deepgram WebSocket and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -139,6 +157,8 @@ class DeepgramTTSService(WebsocketTTSService):
 
     async def _disconnect(self):
         """Disconnect from Deepgram WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -164,6 +184,11 @@ class DeepgramTTSService(WebsocketTTSService):
             headers = {"Authorization": f"Token {self._api_key}"}
 
             self._websocket = await websocket_connect(url, additional_headers=headers)
+
+            headers = {
+                k: v for k, v in self._websocket.response.headers.items() if k.startswith("dg-")
+            }
+            logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -231,7 +256,6 @@ class DeepgramTTSService(WebsocketTTSService):
                         logger.trace(f"Received Flushed: {msg}")
                         # Flushed indicates the end of audio generation for the current buffer
                         # This happens after flush_audio() is called
-                        await self.push_frame(TTSStoppedFrame())
                     elif msg_type == "Cleared":
                         logger.trace(f"Received Cleared: {msg}")
                         # Buffer has been cleared after interruption
@@ -286,7 +310,7 @@ class DeepgramTTSService(WebsocketTTSService):
             speak_msg = {"type": "Speak", "text": text}
             await self._get_websocket().send(json.dumps(speak_msg))
 
-            # The actual audio frames will be handled in _receive_messages
+            # The audio frames will be handled in _receive_messages
             yield None
 
         except Exception as e:

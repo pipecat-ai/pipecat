@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -118,3 +118,7 @@ class TestWakeCheckFilter(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
         assert received_down[-1].text == "Phrase 1"
+
+
+if __name__ == "__main__":
+    unittest.main()

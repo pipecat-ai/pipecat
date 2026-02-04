@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -127,7 +127,7 @@ class VADAnalyzer(ABC):
         pass
 
     @abstractmethod
-    def voice_confidence(self, buffer) -> float:
+    def voice_confidence(self, buffer: bytes) -> float:
         """Calculate voice activity confidence for the given audio buffer.
 
         Args:

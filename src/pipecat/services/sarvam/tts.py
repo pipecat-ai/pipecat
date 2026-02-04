@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024–2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -245,6 +246,7 @@ class SarvamHttpTTSService(TTSService):
             headers = {
                 "api-subscription-key": self._api_key,
                 "Content-Type": "application/json",
+                **sdk_headers(),
             }
 
             url = f"{self._base_url}/text-to-speech"
@@ -514,9 +516,11 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame and flush audio if it's the end of a full response."""
-        if isinstance(frame, LLMFullResponseEndFrame):
+        await super().process_frame(frame, direction)
+
+        # When the LLM finishes responding, flush any remaining text in Sarvam's buffer
+        if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
-        return await super().process_frame(frame, direction)
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Update service settings and reconnect if voice changed."""
@@ -528,6 +532,8 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         """Connect to Sarvam WebSocket and start background tasks."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -540,6 +546,8 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         try:
             # First, set a flag to prevent new operations
             self._disconnecting = True
@@ -574,6 +582,7 @@ class SarvamTTSService(InterruptibleTTSService):
                 self._websocket_url,
                 additional_headers={
                     "api-subscription-key": self._api_key,
+                    **sdk_headers(),
                 },
             )
             logger.debug("Connected to Sarvam TTS Websocket")

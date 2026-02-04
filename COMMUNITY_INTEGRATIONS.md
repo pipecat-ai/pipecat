@@ -79,7 +79,7 @@ Once your PR is submitted, post in the `#community-integrations` Discord channel
 
 **Examples:**
 
-- [RivaSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/riva/stt.py)
+- [NvidiaSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/nvidia/stt.py)
 - [FalSTTService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/fal/stt.py)
 
 #### Key requirements:

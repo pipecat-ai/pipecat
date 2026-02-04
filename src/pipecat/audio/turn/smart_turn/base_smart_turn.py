@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -19,16 +19,14 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, BaseTurnParams, EndOfTurnState
 from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
 
 # Default timing parameters
 STOP_SECS = 3
-PRE_SPEECH_MS = 0
+PRE_SPEECH_MS = 500
 MAX_DURATION_SECONDS = 8  # Max allowed segment duration
-USE_ONLY_LAST_VAD_SEGMENT = True
 
 
 class SmartTurnParams(BaseTurnParams):
@@ -43,8 +41,6 @@ class SmartTurnParams(BaseTurnParams):
     stop_secs: float = STOP_SECS
     pre_speech_ms: float = PRE_SPEECH_MS
     max_duration_secs: float = MAX_DURATION_SECONDS
-    # not exposing this for now yet until the model can handle it.
-    # use_only_last_vad_segment: bool = USE_ONLY_LAST_VAD_SEGMENT
 
 
 class SmartTurnTimeoutException(Exception):
@@ -82,6 +78,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         # Thread executor that will run the model. We only need one thread per
         # analyzer because one analyzer just handles one audio stream.
         self._executor = ThreadPoolExecutor(max_workers=1)
+        self._vad_start_secs: float = 0.0
 
     @property
     def speech_triggered(self) -> bool:
@@ -160,10 +157,14 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         state, result = await loop.run_in_executor(
             self._executor, self._process_speech_segment, self._audio_buffer
         )
-        if state == EndOfTurnState.COMPLETE or USE_ONLY_LAST_VAD_SEGMENT:
+        if state == EndOfTurnState.COMPLETE:
             self._clear(state)
         logger.debug(f"End of Turn result: {state}")
         return state, result
+
+    def update_vad_start_secs(self, vad_start_secs: float):
+        """Store the new vad_start_secs value."""
+        self._vad_start_secs = vad_start_secs
 
     def clear(self):
         """Reset the turn analyzer to its initial state."""
@@ -185,7 +186,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             return state, None
 
         # Extract recent audio segment for prediction
-        start_time = self._speech_start_time - (self._params.pre_speech_ms / 1000)
+        effective_pre_speech_ms = self._params.pre_speech_ms + (self._vad_start_secs * 1000)
+        start_time = self._speech_start_time - (effective_pre_speech_ms / 1000)
         start_index = 0
         for i, (t, _) in enumerate(audio_buffer):
             if t >= start_time:

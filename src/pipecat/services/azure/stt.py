@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -116,7 +116,6 @@ class AzureSTTService(STTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
             if self._audio_stream:
                 self._audio_stream.write(audio)
             yield None
@@ -191,7 +190,6 @@ class AzureSTTService(STTService):
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
     def _on_handle_recognized(self, event):

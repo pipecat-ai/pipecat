@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -213,12 +213,14 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
             generation_config: Generation configuration for Sonic-3 models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
+            pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = []
         generation_config: Optional[GenerationConfig] = None
+        pronunciation_dict_id: Optional[str] = None
 
     def __init__(
         self,
@@ -296,10 +298,11 @@ class CartesiaTTSService(AudioContextWordTTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "speed": params.speed,
             "emotion": params.emotion,
             "generation_config": params.generation_config,
+            "pronunciation_dict_id": params.pronunciation_dict_id,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -389,10 +392,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
         Returns:
             List of (word, start_time) tuples processed for the language.
         """
-        current_language = self._settings.get("language", "en")
+        current_language = self._settings.get("language")
 
-        # Check if this is a CJK language
-        if self._is_cjk_language(current_language):
+        # Check if this is a CJK language (if language is None, treat as non-CJK)
+        if current_language and self._is_cjk_language(current_language):
             # For CJK languages, combine all characters in this message into one word
             # using the first character's start time
             if words and starts:
@@ -431,10 +434,12 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "model_id": self.model_name,
             "voice": voice_config,
             "output_format": self._settings["output_format"],
-            "language": self._settings["language"],
             "add_timestamps": add_timestamps,
             "use_original_timestamps": False if self.model_name == "sonic" else True,
         }
+
+        if self._settings["language"]:
+            msg["language"] = self._settings["language"]
 
         if self._settings["speed"]:
             msg["speed"] = self._settings["speed"]
@@ -443,6 +448,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
             msg["generation_config"] = self._settings["generation_config"].model_dump(
                 exclude_none=True
             )
+
+        if self._settings["pronunciation_dict_id"]:
+            msg["pronunciation_dict_id"] = self._settings["pronunciation_dict_id"]
 
         return json.dumps(msg)
 
@@ -475,12 +483,16 @@ class CartesiaTTSService(AudioContextWordTTSService):
         await self._disconnect()
 
     async def _connect(self):
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -554,7 +566,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self.add_word_timestamps(processed_timestamps)
             elif msg["type"] == "chunk":
                 await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+                await self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,
@@ -636,12 +648,14 @@ class CartesiaHttpTTSService(TTSService):
 
             generation_config: Generation configuration for Sonic-3 models. Includes volume,
                 speed (numeric), and emotion (string) parameters.
+            pronunciation_dict_id: The ID of the pronunciation dictionary to use for custom pronunciations.
         """
 
         language: Optional[Language] = Language.EN
         speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = Field(default_factory=list)
         generation_config: Optional[GenerationConfig] = None
+        pronunciation_dict_id: Optional[str] = None
 
     def __init__(
         self,
@@ -686,10 +700,11 @@ class CartesiaHttpTTSService(TTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "speed": params.speed,
             "emotion": params.emotion,
             "generation_config": params.generation_config,
+            "pronunciation_dict_id": params.pronunciation_dict_id,
         }
         self.set_voice(voice_id)
         self.set_model_name(model)
@@ -777,8 +792,10 @@ class CartesiaHttpTTSService(TTSService):
                 "transcript": text,
                 "voice": voice_config,
                 "output_format": self._settings["output_format"],
-                "language": self._settings["language"],
             }
+
+            if self._settings["language"]:
+                payload["language"] = self._settings["language"]
 
             if self._settings["speed"]:
                 payload["speed"] = self._settings["speed"]
@@ -787,6 +804,9 @@ class CartesiaHttpTTSService(TTSService):
                 payload["generation_config"] = self._settings["generation_config"].model_dump(
                     exclude_none=True
                 )
+
+            if self._settings["pronunciation_dict_id"]:
+                payload["pronunciation_dict_id"] = self._settings["pronunciation_dict_id"]
 
             yield TTSStartedFrame()
 

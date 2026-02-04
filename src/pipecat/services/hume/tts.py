@@ -1,4 +1,4 @@
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 
@@ -8,11 +8,14 @@ import base64
 import os
 from typing import Any, AsyncGenerator, Optional
 
+import httpx
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
-    ErrorFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     InterruptionFrame,
     StartFrame,
@@ -26,11 +29,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     from hume import AsyncHumeClient
-    from hume.tts import (
-        FormatPcm,
-        PostedUtterance,
-        PostedUtteranceVoiceWithId,
-    )
+    from hume.tts import FormatPcm, PostedUtterance, PostedUtteranceVoiceWithId
     from hume.tts.types import TimestampMessage
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
     logger.error(f"Exception: {e}")
@@ -39,6 +38,12 @@ except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
 
 
 HUME_SAMPLE_RATE = 48_000  # Hume TTS streams at 48 kHz
+
+# Tracking headers for Hume API requests
+DEFAULT_HEADERS = {
+    "X-Hume-Client-Name": "pipecat",
+    "X-Hume-Client-Version": pipecat_version(),
+}
 
 
 class HumeTTSService(WordTTSService):
@@ -104,7 +109,11 @@ class HumeTTSService(WordTTSService):
             **kwargs,
         )
 
-        self._client = AsyncHumeClient(api_key=api_key)
+        # Create a custom httpx.AsyncClient with tracking headers
+        # Headers are included in all requests made by the Hume SDK
+        self._http_client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
+
+        self._client = AsyncHumeClient(api_key=api_key, httpx_client=self._http_client)
         self._params = params or HumeTTSService.InputParams()
 
         # Store voice in the base class (mirrors other services)
@@ -137,6 +146,26 @@ class HumeTTSService(WordTTSService):
         """Reset internal state variables."""
         self._cumulative_time = 0.0
         self._started = False
+
+    async def stop(self, frame: EndFrame) -> None:
+        """Stop the service and cleanup resources.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        if hasattr(self, "_http_client") and self._http_client:
+            await self._http_client.aclose()
+
+    async def cancel(self, frame: CancelFrame) -> None:
+        """Cancel the service and cleanup resources.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        if hasattr(self, "_http_client") and self._http_client:
+            await self._http_client.aclose()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
@@ -215,7 +244,7 @@ class HumeTTSService(WordTTSService):
 
         # Start TTS sequence if not already started
         if not self._started:
-            self.start_word_timestamps()
+            await self.start_word_timestamps()
             yield TTSStartedFrame()
             self._started = True
 

@@ -15,9 +15,16 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
+    Frame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.sarvam._sdk import sdk_headers
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -74,14 +81,14 @@ class SarvamSTTService(STTService):
             language: Target language for transcription. Defaults to None (required for saarika models).
             prompt: Optional prompt to guide translation style/context for STT-Translate models.
                    Only applicable to saaras (STT-Translate) models. Defaults to None.
-            vad_signals: Enable VAD signals in response. Defaults to True.
-            high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to False.
+            vad_signals: Enable VAD signals in response. Defaults to None.
+            high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to None.
         """
 
         language: Optional[Language] = None
         prompt: Optional[str] = None
-        vad_signals: bool = True
-        high_vad_sensitivity: bool = False
+        vad_signals: bool = None
+        high_vad_sensitivity: bool = None
 
     def __init__(
         self,
@@ -125,7 +132,7 @@ class SarvamSTTService(STTService):
 
         self.set_model_name(model)
         self._api_key = api_key
-        self._language_code = params.language
+        self._language_code: Optional[Language] = params.language
         # For saarika models, default to "unknown" if language is not provided
         if params.language:
             self._language_string = language_to_sarvam_language(params.language)
@@ -141,10 +148,20 @@ class SarvamSTTService(STTService):
         self._input_audio_codec = input_audio_codec
 
         # Initialize Sarvam SDK client
+        self._sdk_headers = sdk_headers()
+        # NOTE: We avoid passing non-standard kwargs here because different sarvamai
+        # versions expose different constructor signatures (static type checkers
+        # complain otherwise). We instead inject headers best-effort below.
         self._sarvam_client = AsyncSarvamAI(api_subscription_key=api_key)
+        for attr in ("default_headers", "_default_headers", "headers", "_headers"):
+            d = getattr(self._sarvam_client, attr, None)
+            if isinstance(d, dict):
+                d.update(self._sdk_headers)
+                break
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        logger.info(f"Sarvam STT initialized with SDK headers: {self._sdk_headers}")
 
     def language_to_service_language(self, language: Language) -> str:
         """Convert pipecat Language enum to Sarvam's language code.
@@ -164,6 +181,22 @@ class SarvamSTTService(STTService):
             True, as Sarvam service supports metrics generation.
         """
         return True
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames.
+
+        Handles VAD frames for TTFB tracking when using Pipecat's VAD
+        instead of Sarvam's built-in VAD.
+        """
+        await super().process_frame(frame, direction)
+
+        # Only handle VAD frames when not using Sarvam's VAD signals
+        if not self._vad_signals:
+            if isinstance(frame, VADUserStartedSpeakingFrame):
+                await self._start_metrics()
+            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                if self._socket_client:
+                    await self._socket_client.flush()
 
     async def set_language(self, language: Language):
         """Set the recognition language and reconnect.
@@ -297,17 +330,28 @@ class SarvamSTTService(STTService):
                 "sample_rate": str(self.sample_rate),
             }
 
+            def _connect_with_sdk_headers(connect_fn, **kwargs):
+                # Different SDK versions may use different kwarg names.
+                for header_kw in ("headers", "additional_headers", "extra_headers"):
+                    try:
+                        return connect_fn(**kwargs, **{header_kw: self._sdk_headers})
+                    except TypeError:
+                        pass
+                return connect_fn(**kwargs)
+
             # Choose the appropriate service based on model
             if "saarika" in self.model_name.lower():
                 # STT service - requires language_code
                 connect_kwargs["language_code"] = self._language_string
-                self._websocket_context = self._sarvam_client.speech_to_text_streaming.connect(
-                    **connect_kwargs
+                self._websocket_context = _connect_with_sdk_headers(
+                    self._sarvam_client.speech_to_text_streaming.connect,
+                    **connect_kwargs,
                 )
             else:
                 # STT-Translate service - auto-detects input language and returns translated text
-                self._websocket_context = (
-                    self._sarvam_client.speech_to_text_translate_streaming.connect(**connect_kwargs)
+                self._websocket_context = _connect_with_sdk_headers(
+                    self._sarvam_client.speech_to_text_translate_streaming.connect,
+                    **connect_kwargs,
                 )
 
             # Enter the async context manager
@@ -390,12 +434,18 @@ class SarvamSTTService(STTService):
                 logger.debug(f"VAD Signal: {signal}, Occurred at: {timestamp}")
 
                 if signal == "START_SPEECH":
-                    await self.start_metrics()
+                    await self._start_metrics()
                     logger.debug("User started speaking")
                     await self._call_event_handler("on_speech_started")
+                    await self.broadcast_frame(UserStartedSpeakingFrame)
+                    await self.push_interruption_task_frame_and_wait()
+
+                elif signal == "END_SPEECH":
+                    logger.debug("User stopped speaking")
+                    await self._call_event_handler("on_speech_stopped")
+                    await self.broadcast_frame(UserStoppedSpeakingFrame)
 
             elif message.type == "data":
-                await self.stop_ttfb_metrics()
                 transcript = message.data.transcript
                 language_code = message.data.language_code
                 # Prefer language from message (auto-detected for translate models). Fallback to configured.
@@ -457,7 +507,6 @@ class SarvamSTTService(STTService):
         }
         return mapping.get(language_code, Language.HI_IN)
 
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        await self.start_ttfb_metrics()
+    async def _start_metrics(self):
+        """Start processing metrics collection."""
         await self.start_processing_metrics()

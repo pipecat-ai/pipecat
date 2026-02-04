@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -304,7 +304,11 @@ class SmallWebRTCClient:
             try:
                 frame = await asyncio.wait_for(video_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
-                if self._webrtc_connection.is_connected():
+                if (
+                    self._webrtc_connection.is_connected()
+                    and video_track
+                    and video_track.is_enabled()
+                ):
                     logger.warning("Timeout: No video frame received within the specified time.")
                     # self._webrtc_connection.ask_to_renegotiate()
                 frame = None
@@ -332,6 +336,7 @@ class SmallWebRTCClient:
                 format="RGB",
             )
             image_frame.transport_source = video_source
+            image_frame.pts = frame.pts
 
             del frame  # free original VideoFrame
             del image_bytes  # reference kept in image_frame
@@ -354,7 +359,11 @@ class SmallWebRTCClient:
             try:
                 frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
-                if self._webrtc_connection.is_connected():
+                if (
+                    self._webrtc_connection.is_connected()
+                    and self._audio_input_track
+                    and self._audio_input_track.is_enabled()
+                ):
                     logger.warning("Timeout: No audio frame received within the specified time.")
                 frame = None
             except MediaStreamError:
@@ -379,6 +388,7 @@ class SmallWebRTCClient:
                         sample_rate=resampled_frame.sample_rate,
                         num_channels=self._audio_in_channels,
                     )
+                    audio_frame.pts = frame.pts
                     del pcm_bytes  # reference kept in audio_frame
 
                     yield audio_frame
@@ -393,6 +403,7 @@ class SmallWebRTCClient:
                     sample_rate=frame.sample_rate,
                     num_channels=self._audio_in_channels,
                 )
+                audio_frame.pts = frame.pts
                 del pcm_bytes  # reference kept in audio_frame
 
                 yield audio_frame
@@ -672,7 +683,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                                 format=video_frame.format,
                                 text=request_text,
                                 append_to_context=add_to_context,
-                                # Deprecated fields below.
                                 request=request_frame,
                             )
                             image_frame.transport_source = video_source
@@ -691,8 +701,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             message: The application message to process.
         """
         logger.debug(f"Received app message inside SmallWebRTCInputTransport  {message}")
-        frame = InputTransportMessageFrame(message=message)
-        await self.push_frame(frame)
+        await self.broadcast_frame(InputTransportMessageFrame, message=message)
 
     # Add this method similar to DailyInputTransport.request_participant_image
     async def request_participant_image(self, frame: UserImageRequestFrame):

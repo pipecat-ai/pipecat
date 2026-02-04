@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,7 +10,7 @@ This module provides an OpenPipe-specific implementation of the OpenAI LLM servi
 enabling integration with OpenPipe's fine-tuning and monitoring capabilities.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from loguru import logger
 

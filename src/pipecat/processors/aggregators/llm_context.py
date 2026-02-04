@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -78,12 +78,29 @@ class LLMContext:
         from OpenAILLMContext to LLMContext. New user code should use
         LLMContext directly.
 
+        .. deprecated:: 0.0.99
+            `from_openai_context()` is deprecated and will be removed in a future version.
+            Directly use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
+
         Args:
             openai_context: The OpenAI LLM context to convert.
 
         Returns:
             New LLMContext instance with converted messages and settings.
         """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "from_openai_context() (likely invoked by create_context_aggregator()) is deprecated and will be removed in a future version. "
+                "Directly use the universal LLMContext and LLMContextAggregatorPair instead. "
+                "See OpenAILLMContext docstring for migration guide.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         # Convert tools to ToolsSchema if needed.
         # If the tools are already a ToolsSchema, this is a no-op.
         # Otherwise, we wrap them in a shim ToolsSchema.
@@ -150,21 +167,29 @@ class LLMContext:
 
         Args:
             role: The role of this message (defaults to "user").
-            format: Image format (e.g., 'RGB', 'RGBA').
+            format: Image format (e.g., 'RGB', 'RGBA', or, if already encoded,
+                the MIME type like 'image/jpeg').
             size: Image dimensions as (width, height) tuple.
             image: Raw image bytes.
             text: Optional text to include with the image.
         """
+        # Format is a mime type: image is already encoded
+        image_already_encoded = format.startswith("image/")
 
         def encode_image():
-            buffer = io.BytesIO()
-            Image.frombytes(format, size, image).save(buffer, format="JPEG")
-            encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            if image_already_encoded:
+                bytes = image
+            else:
+                # Encode to JPEG
+                buffer = io.BytesIO()
+                Image.frombytes(format, size, image).save(buffer, format="JPEG")
+                bytes = buffer.getvalue()
+            encoded_image = base64.b64encode(bytes).decode("utf-8")
             return encoded_image
 
         encoded_image = await asyncio.to_thread(encode_image)
 
-        url = f"data:image/jpeg;base64,{encoded_image}"
+        url = f"data:{format if image_already_encoded else 'image/jpeg'};base64,{encoded_image}"
 
         return LLMContext.create_image_url_message(role=role, url=url, text=text)
 
@@ -179,13 +204,12 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
+        content = [{"type": "text", "text": text}]
 
-        async def encode_audio():
+        def encode_audio():
             sample_rate = audio_frames[0].sample_rate
             num_channels = audio_frames[0].num_channels
 
-            content = []
-            content.append({"type": "text", "text": text})
             data = b"".join(frame.audio for frame in audio_frames)
 
             with io.BytesIO() as buffer:
@@ -195,7 +219,7 @@ class LLMContext:
                     wf.setframerate(sample_rate)
                     wf.writeframes(data)
 
-            encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                encoded_audio = base64.b64encode(buffer.getvalue()).decode("utf-8")
             return encoded_audio
 
         encoded_audio = await asyncio.to_thread(encode_audio)
@@ -334,18 +358,26 @@ class LLMContext:
         self._tool_choice = tool_choice
 
     async def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: Optional[str] = None
+        self,
+        *,
+        format: str,
+        size: tuple[int, int],
+        image: bytes,
+        text: Optional[str] = None,
+        role: str = "user",
     ):
         """Add a message containing an image frame.
 
         Args:
-            format: Image format (e.g., 'RGB', 'RGBA').
+            format: Image format (e.g., 'RGB', 'RGBA', or, if already encoded,
+                the MIME type like 'image/jpeg').
             size: Image dimensions as (width, height) tuple.
             image: Raw image bytes.
             text: Optional text to include with the image.
+            role: The role of this message (defaults to "user").
         """
         message = await LLMContext.create_image_message(
-            format=format, size=size, image=image, text=text
+            role=role, format=format, size=size, image=image, text=text
         )
         self.add_message(message)
 

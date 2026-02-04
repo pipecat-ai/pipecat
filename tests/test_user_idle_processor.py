@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -218,3 +218,7 @@ class TestUserIdleProcessor(unittest.IsolatedAsyncioTestCase):
         )
 
         assert callback_called.is_set(), "Idle callback not called after bot speech"
+
+
+if __name__ == "__main__":
+    unittest.main()

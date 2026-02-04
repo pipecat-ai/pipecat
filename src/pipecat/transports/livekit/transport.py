@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -539,11 +539,14 @@ class LiveKitTransportClient:
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
             logger.info(f"Video track subscribed: {track.sid} from participant {participant.sid}")
             self._video_tracks[participant.sid] = track
-            video_stream = rtc.VideoStream(track)
-            self._task_manager.create_task(
-                self._process_video_stream(video_stream, participant.sid),
-                f"{self}::_process_video_stream",
-            )
+            # Only process video stream if video input is enabled to prevent
+            # unbounded queue growth when there is no consumer for video frames.
+            if self._params.video_in_enabled:
+                video_stream = rtc.VideoStream(track)
+                self._task_manager.create_task(
+                    self._process_video_stream(video_stream, participant.sid),
+                    f"{self}::_process_video_stream",
+                )
             await self._callbacks.on_video_track_subscribed(participant.sid)
 
     async def _async_on_track_unsubscribed(

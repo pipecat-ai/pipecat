@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,6 +10,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_core.language_models import FakeStreamingListLLM
 
 from pipecat.frames.frames import (
+    InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -18,12 +19,11 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-)
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.processors.frameworks.langchain import LangchainProcessor
@@ -72,13 +72,17 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         )
 
         frames_to_send = [
-            UserStartedSpeakingFrame(),
+            VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hi World", user_id="user", timestamp="now"),
             SleepFrame(),
-            UserStoppedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            SleepFrame(sleep=1.0),
         ]
         expected_down_frames = [
+            VADUserStartedSpeakingFrame,
             UserStartedSpeakingFrame,
+            InterruptionFrame,
+            VADUserStoppedSpeakingFrame,
             UserStoppedSpeakingFrame,
             LLMContextFrame,
             LLMContextAssistantTimestampFrame,
@@ -93,3 +97,7 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             context_aggregator.assistant().messages[-1]["content"], self.expected_response
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

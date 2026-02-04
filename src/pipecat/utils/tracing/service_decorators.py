@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -186,7 +186,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     add_tts_span_attributes(
                         span=span,
                         service_name=service_class_name,
-                        model=getattr(self, "model_name", "unknown"),
+                        model=getattr(self, "model_name") or "unknown",
                         voice_id=getattr(self, "_voice_id", "unknown"),
                         text=text,
                         settings=getattr(self, "_settings", {}),
@@ -303,7 +303,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         add_stt_span_attributes(
                             span=current_span,
                             service_name=service_class_name,
-                            model=getattr(self, "model_name", settings.get("model", "unknown")),
+                            model=getattr(self, "model_name") or settings.get("model", "unknown"),
                             transcript=transcript,
                             is_final=is_final,
                             language=str(language) if language else None,
@@ -483,7 +483,10 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Add all available attributes to the span
                             attribute_kwargs = {
                                 "service_name": service_class_name,
-                                "model": getattr(self, "model_name", "unknown"),
+                                "model": getattr(self, "_full_model_name", None)
+                                or getattr(self, "model_name", None)
+                                or params.get("model")
+                                or "unknown",
                                 "stream": True,  # Most LLM services use streaming
                                 "parameters": params,
                             }
@@ -582,8 +585,10 @@ def traced_gemini_live(operation: str) -> Callable:
                 ) as current_span:
                     try:
                         # Base service attributes
-                        model_name = getattr(
-                            self, "model_name", getattr(self, "_model_name", "unknown")
+                        model_name = (
+                            getattr(self, "model_name", None)
+                            or getattr(self, "_model_name", None)
+                            or "unknown"
                         )
                         voice_id = getattr(self, "_voice_id", None)
                         language_code = getattr(self, "_language_code", None)
@@ -887,8 +892,10 @@ def traced_openai_realtime(operation: str) -> Callable:
                 ) as current_span:
                     try:
                         # Base service attributes
-                        model_name = getattr(
-                            self, "model_name", getattr(self, "_model_name", "unknown")
+                        model_name = (
+                            getattr(self, "model_name", None)
+                            or getattr(self, "_model_name", None)
+                            or "unknown"
                         )
 
                         # Operation-specific attribute collection

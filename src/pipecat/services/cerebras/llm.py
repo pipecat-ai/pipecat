@@ -1,12 +1,10 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Cerebras LLM service implementation using OpenAI-compatible interface."""
-
-from typing import List
 
 from loguru import logger
 

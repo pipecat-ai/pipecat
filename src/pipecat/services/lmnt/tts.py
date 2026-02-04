@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -175,6 +175,8 @@ class LmntTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         """Connect to LMNT WebSocket and start receive task."""
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -182,6 +184,8 @@ class LmntTTSService(InterruptibleTTSService):
 
     async def _disconnect(self):
         """Disconnect from LMNT WebSocket and clean up tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None

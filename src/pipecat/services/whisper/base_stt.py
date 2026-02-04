@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -204,11 +204,9 @@ class BaseWhisperSTTService(SegmentedSTTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
             response = await self._transcribe(audio)
 
-            await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
 
             text = response.text.strip()

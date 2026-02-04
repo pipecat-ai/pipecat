@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,12 +7,14 @@
 """OpenAI Realtime LLM service implementation with WebSocket support."""
 
 import base64
+import io
 import json
 import time
 from dataclasses import dataclass
 from typing import Optional
 
 from loguru import logger
+from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_realtime_adapter import (
@@ -23,9 +25,9 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InputAudioRawFrame,
+    InputImageRawFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -107,6 +109,8 @@ class OpenAIRealtimeLLMService(LLMService):
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
+        start_video_paused: bool = False,
+        video_frame_detail: str = "auto",
         send_transcription_frames: Optional[bool] = None,
         **kwargs,
     ):
@@ -123,6 +127,11 @@ class OpenAIRealtimeLLMService(LLMService):
                 These are session-level settings that can be updated during the session
                 (except for voice and model). If None, uses default SessionProperties.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
+            start_video_paused: Whether to start with video input paused. Defaults to False.
+            video_frame_detail: Detail level for video processing. Can be "auto", "low", or "high".
+                This sets the image_detail parameter in the OpenAI Realtime API.
+                "auto" lets the model decide, "low" is faster and uses fewer tokens,
+                "high" provides more detail. Defaults to "auto".
             send_transcription_frames: Whether to emit transcription frames.
 
                 .. deprecated:: 0.0.92
@@ -157,6 +166,9 @@ class OpenAIRealtimeLLMService(LLMService):
             session_properties or events.SessionProperties()
         )
         self._audio_input_paused = start_audio_paused
+        self._video_input_paused = start_video_paused
+        self._video_frame_detail = video_frame_detail
+        self._last_sent_time = 0
         self._websocket = None
         self._receive_task = None
         self._context: LLMContext = None
@@ -193,6 +205,25 @@ class OpenAIRealtimeLLMService(LLMService):
             paused: True to pause audio input, False to resume.
         """
         self._audio_input_paused = paused
+
+    def set_video_input_paused(self, paused: bool):
+        """Set whether video input is paused.
+
+        Args:
+            paused: True to pause video input, False to resume.
+        """
+        self._video_input_paused = paused
+
+    def set_video_frame_detail(self, detail: str):
+        """Set the detail level for video processing.
+
+        Args:
+            detail: Detail level - "auto", "low", or "high".
+        """
+        if detail not in ["auto", "low", "high"]:
+            logger.warning(f"Invalid video detail '{detail}', must be 'auto', 'low', or 'high'")
+            return
+        self._video_frame_detail = detail
 
     def _is_modality_enabled(self, modality: str) -> bool:
         """Check if a specific modality is enabled, "text" or "audio"."""
@@ -380,6 +411,9 @@ class OpenAIRealtimeLLMService(LLMService):
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
+        elif isinstance(frame, InputImageRawFrame):
+            if not self._video_input_paused:
+                await self._send_user_video(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
         elif isinstance(frame, UserStartedSpeakingFrame):
@@ -565,6 +599,14 @@ class OpenAIRealtimeLLMService(LLMService):
         # note: ttfb is faster by 1/2 RTT than ttfb as measured for other services, since we're getting
         # this event from the server
         await self.stop_ttfb_metrics()
+
+        if self._current_audio_response and self._current_audio_response.item_id != evt.item_id:
+            logger.warning(
+                f"Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
+            )
+            logger.debug("Forcing previous audio response to None")
+            self._current_audio_response = None
+
         if not self._current_audio_response:
             self._current_audio_response = CurrentAudioResponse(
                 item_id=evt.item_id,
@@ -690,10 +732,26 @@ class OpenAIRealtimeLLMService(LLMService):
         # We receive audio transcript deltas (as opposed to text deltas) when
         # the output modality is "audio" (the default)
         if evt.delta:
-            frame = TTSTextFrame(evt.delta, aggregated_by=AggregationType.SENTENCE)
-            # OpenAI Realtime text already includes any necessary inter-chunk spaces
-            frame.includes_inter_frame_spaces = True
-            await self.push_frame(frame)
+            await self._push_output_transcript_text_frames(evt.delta)
+
+    async def _push_output_transcript_text_frames(self, text: str):
+        # In a typical "cascade" LLM + TTS setup, LLMTextFrames would not
+        # proceed beyond the TTS service. Therefore, since a speech-to-speech
+        # service like OpenAI Realtime combines both LLM and TTS functionality,
+        # you might think we wouldn't need to push LLMTextFrames at all.
+        # However, RTVI relies on LLMTextFrames being pushed to trigger its
+        # "bot-llm-text" event. So here we push an LLMTextFrame, too, but avoid
+        # appending it to context to avoid context message duplication.
+
+        # Push LLMTextFrame
+        llm_text_frame = LLMTextFrame(text)
+        llm_text_frame.append_to_context = False
+        await self.push_frame(llm_text_frame)
+
+        # Push TTSTextFrame
+        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame.includes_inter_frame_spaces = True
+        await self.push_frame(tts_text_frame)
 
     async def _handle_evt_function_call_arguments_done(self, evt):
         """Handle completion of function call arguments.
@@ -736,13 +794,13 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
+        await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.push_interruption_task_frame_and_wait()
-        await self.push_frame(UserStartedSpeakingFrame())
 
     async def _handle_evt_speech_stopped(self, evt):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
         """Maybe handle an error event related to retrieving a conversation item.
@@ -848,6 +906,49 @@ class OpenAIRealtimeLLMService(LLMService):
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
+    async def _send_user_video(self, frame: InputImageRawFrame):
+        """Send user video frame to OpenAI Realtime API.
+
+        Args:
+            frame: The InputImageRawFrame to send.
+        """
+        if self._video_input_paused or self._disconnecting or not self._websocket:
+            return
+
+        now = time.time()
+        if now - self._last_sent_time < 1:
+            return  # Ignore if less than 1 second has passed
+
+        self._last_sent_time = now  # Update last sent time
+        logger.trace(f"Sending video frame to OpenAI Realtime: {frame}")
+
+        # Convert video frame to JPEG format and encode as base64
+        buffer = io.BytesIO()
+        Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
+        data = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        # Create data URI for the video frame
+        data_uri = f"data:image/jpeg;base64,{data}"
+
+        # Create a conversation item with the video frame
+        item = events.ConversationItem(
+            type="message",
+            role="user",
+            content=[
+                events.ItemContent(
+                    type="input_image",
+                    image_url=data_uri,
+                    detail=self._video_frame_detail,
+                )
+            ],
+        )
+
+        # Send the conversation item
+        try:
+            await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+        except Exception as e:
+            await self.push_error(error_msg=f"Send error: {e}")
+
     async def _send_tool_result(self, tool_call_id: str, result: str):
         item = events.ConversationItem(
             type="function_call_output",
@@ -882,6 +983,11 @@ class OpenAIRealtimeLLMService(LLMService):
             OpenAIContextAggregatorPair: A pair of context aggregators, one for
             the user and one for the assistant, encapsulated in an
             OpenAIContextAggregatorPair.
+
+        .. deprecated:: 0.0.99
+            `create_context_aggregator()` is deprecated and will be removed in a future version.
+            Use the universal `LLMContext` and `LLMContextAggregatorPair` instead.
+            See `OpenAILLMContext` docstring for migration guide.
         """
         # Log warning about transcription frame direction change in 0.0.92.
         # We're putting this warning here rather than in the constructor so
@@ -915,7 +1021,7 @@ class OpenAIRealtimeLLMService(LLMService):
             "  context = LLMContext(messages, tools)\n"
             "  context_aggregator = LLMContextAggregatorPair(context)\n"
         )
-
+        # from_openai_context handles deprecation warning already
         context = LLMContext.from_openai_context(context)
         assistant_params.expect_stripped_words = False
         return LLMContextAggregatorPair(

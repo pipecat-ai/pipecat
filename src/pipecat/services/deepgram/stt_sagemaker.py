@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -26,8 +26,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
@@ -363,9 +363,6 @@ class DeepgramSageMakerSTTService(STTService):
         if not transcript.strip():
             return
 
-        # Stop TTFB metrics on first transcript
-        await self.stop_ttfb_metrics()
-
         is_final = parsed.get("is_final", False)
         speech_final = parsed.get("speech_final", False)
 
@@ -417,9 +414,8 @@ class DeepgramSageMakerSTTService(STTService):
         """
         pass
 
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        await self.start_ttfb_metrics()
+    async def _start_metrics(self):
+        """Start processing metrics collection."""
         await self.start_processing_metrics()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -432,9 +428,9 @@ class DeepgramSageMakerSTTService(STTService):
         await super().process_frame(frame, direction)
 
         # Start metrics when user starts speaking (if VAD is not provided by Deepgram)
-        if isinstance(frame, UserStartedSpeakingFrame):
-            await self.start_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._start_metrics()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize message to Deepgram when user stops speaking
             # This tells Deepgram to flush any remaining audio and return final results
             if self._client and self._client.is_active:

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -25,6 +25,8 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
+    InputTransportMessageUrgentFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -214,6 +216,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
                 if isinstance(frame, InputAudioRawFrame):
                     await self.push_audio_frame(frame)
+                elif isinstance(frame, InputTransportMessageFrame):
+                    await self.broadcast_frame(frame)
                 else:
                     await self.push_frame(frame)
         except Exception as e:

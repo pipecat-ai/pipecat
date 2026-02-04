@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     CancelFrame,
     ControlFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
@@ -760,7 +759,11 @@ class DailyTransportClient(EventHandler):
             # Increment leave counter if we successfully joined.
             self._leave_counter += 1
 
-            logger.info(f"Joined {self._room_url}")
+            participant_id = data.get("participants", {}).get("local", {}).get("id")
+            meeting_id = data.get("meetingSession", {}).get("id")
+            logger.info(
+                f"Joined {self._room_url}. Participant ID: {participant_id}, Meeting ID: {meeting_id}"
+            )
 
             await self._callbacks.on_joined(data)
 
@@ -808,6 +811,11 @@ class DailyTransportClient(EventHandler):
                     "camera": {
                         "sendSettings": {
                             "maxQuality": "low",
+                            **(
+                                {"preferredCodec": self._params.video_out_codec}
+                                if self._params.video_out_codec
+                                else {}
+                            ),
                             "encodings": {
                                 "low": {
                                     "maxBitrate": self._params.video_out_bitrate,
@@ -1725,8 +1733,9 @@ class DailyInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = DailyInputTransportMessageFrame(message=message, participant_id=sender)
-        await self.push_frame(frame)
+        await self.broadcast_frame(
+            DailyInputTransportMessageFrame, message=message, participant_id=sender
+        )
 
     #
     # Audio in
@@ -1844,7 +1853,6 @@ class DailyInputTransport(BaseInputTransport):
                 format=video_frame.color_format,
                 text=request_frame.text if request_frame else None,
                 append_to_context=request_frame.append_to_context if request_frame else None,
-                # Deprecated fields below.
                 request=request_frame,
             )
             frame.transport_source = video_source
@@ -2651,6 +2659,7 @@ class DailyTransport(BaseTransport):
 
         text = message["text"]
         timestamp = message["timestamp"]
+        track_type = message.get("trackType", None)
         raw_response = message.get("rawResponse", {})
         is_final = raw_response.get("is_final", False)
         try:
@@ -2669,6 +2678,7 @@ class DailyTransport(BaseTransport):
                 language,
                 result=message,
             )
+        frame.transport_source = track_type
 
         if self._input:
             await self._input.push_transcription_frame(frame)

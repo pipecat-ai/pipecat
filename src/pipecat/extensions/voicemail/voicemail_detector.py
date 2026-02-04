@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -37,11 +37,15 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.services.llm_service import LLMService
-from pipecat.sync.base_notifier import BaseNotifier
-from pipecat.sync.event_notifier import EventNotifier
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+from pipecat.utils.sync.base_notifier import BaseNotifier
+from pipecat.utils.sync.event_notifier import EventNotifier
 
 
 class NotifierGate(FrameProcessor):
@@ -252,7 +256,8 @@ class ClassificationProcessor(FrameProcessor):
         self._voicemail_notifier = voicemail_notifier
         self._voicemail_response_delay = voicemail_response_delay
 
-        # Register the voicemail detected event
+        # Register the conversation and voicemail detected events
+        self._register_event_handler("on_conversation_detected")
         self._register_event_handler("on_voicemail_detected")
 
         # Aggregation state for collecting complete LLM responses
@@ -317,11 +322,13 @@ class ClassificationProcessor(FrameProcessor):
             # User started speaking - set the voicemail event
             if self._voicemail_detected:
                 self._voicemail_event.set()
+            await self.push_frame(frame, direction)
 
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # User stopped speaking - clear the voicemail event
             if self._voicemail_detected:
                 self._voicemail_event.clear()
+            await self.push_frame(frame, direction)
 
         else:
             # Pass all non-LLM frames through
@@ -350,6 +357,7 @@ class ClassificationProcessor(FrameProcessor):
             logger.info(f"{self}: CONVERSATION detected")
             await self._gate_notifier.notify()  # Close the classifier gate
             await self._conversation_notifier.notify()  # Release buffered TTS frames
+            await self._call_event_handler("on_conversation_detected")
 
         elif "VOICEMAIL" in response:
             # Voicemail detected - trigger voicemail handling
@@ -539,6 +547,9 @@ class VoicemailDetector(ParallelPipeline):
         custom_prompt = "Your custom classification logic here. " + VoicemailDetector.CLASSIFIER_RESPONSE_INSTRUCTION
 
     Events:
+        on_conversation_detected: Triggered when a human conversation is detected. The
+            event handler receives one argument: the ClassificationProcessor instance
+            which can be used to push frames.
         on_voicemail_detected: Triggered when voicemail is detected after the configured
             delay. The event handler receives one argument: the ClassificationProcessor
             instance which can be used to push frames.
@@ -616,7 +627,10 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
 
         # Create the LLM context and aggregators for conversation management
         self._context = LLMContext(self._messages)
-        self._context_aggregator = LLMContextAggregatorPair(self._context)
+        self._context_aggregator = LLMContextAggregatorPair(
+            self._context,
+            user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies()),
+        )
 
         # Create notification system for coordinating between components
         self._gate_notifier = EventNotifier()  # Signals classification completion
@@ -701,7 +715,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             event_name: The name of the event to handle.
             handler: The function to call when the event occurs.
         """
-        if event_name == "on_voicemail_detected":
+        if event_name in ("on_conversation_detected", "on_voicemail_detected"):
             self._classification_processor.add_event_handler(event_name, handler)
         else:
             super().add_event_handler(event_name, handler)
