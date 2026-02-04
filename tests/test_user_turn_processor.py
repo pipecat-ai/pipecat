@@ -26,7 +26,15 @@ TRANSCRIPTION_TIMEOUT = 0.1
 
 class TestUserTurnProcessor(unittest.IsolatedAsyncioTestCase):
     async def test_default_user_turn_strategies(self):
-        user_turn_processor = UserTurnProcessor(user_turn_strategies=UserTurnStrategies())
+        user_turn_processor = UserTurnProcessor(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[
+                    TranscriptionUserTurnStopStrategy(
+                        user_resume_speaking_timeout=TRANSCRIPTION_TIMEOUT
+                    )
+                ],
+            )
+        )
 
         should_start = None
         should_stop = None
@@ -48,6 +56,8 @@ class TestUserTurnProcessor(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
+            # Wait for user_resume_speaking_timeout to elapse
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
         ]
         expected_down_frames = [
             VADUserStartedSpeakingFrame,
@@ -109,7 +119,11 @@ class TestUserTurnProcessor(unittest.IsolatedAsyncioTestCase):
     async def test_user_turn_stop_timeout_transcription(self):
         user_turn_processor = UserTurnProcessor(
             user_turn_strategies=UserTurnStrategies(
-                stop=[TranscriptionUserTurnStopStrategy(timeout=TRANSCRIPTION_TIMEOUT)],
+                stop=[
+                    TranscriptionUserTurnStopStrategy(
+                        user_resume_speaking_timeout=TRANSCRIPTION_TIMEOUT
+                    )
+                ],
             ),
             user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
         )
@@ -135,13 +149,13 @@ class TestUserTurnProcessor(unittest.IsolatedAsyncioTestCase):
 
         pipeline = Pipeline([user_turn_processor])
 
+        # Transcript arrives before VAD stop, then we wait for user_resume_speaking_timeout
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
-            VADUserStoppedSpeakingFrame(),
-            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT - 0.1),
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
-            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT - 0.1),
-            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT),
+            VADUserStoppedSpeakingFrame(),
+            # Wait for user_resume_speaking_timeout (TRANSCRIPTION_TIMEOUT=0.1s) to elapse
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
         ]
         await run_test(
             pipeline,
