@@ -397,6 +397,15 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         """
         logger.debug(f"{self}: Processing summarization request {frame.request_id}")
 
+        # Create a background task to generate the summary without blocking
+        self.create_task(self._generate_summary_task(frame))
+
+    async def _generate_summary_task(self, frame: LLMContextSummaryRequestFrame):
+        """Background task to generate summary without blocking the pipeline.
+
+        Args:
+            frame: The summary request frame containing context and parameters.
+        """
         summary = LLMSummarizedMessage(role="system", content="")
         last_index = -1
         error = None

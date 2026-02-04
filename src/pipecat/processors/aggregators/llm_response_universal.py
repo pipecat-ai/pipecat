@@ -969,10 +969,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # Update context
         self._context.set_messages(new_messages)
 
-        logger.info(
-            f"{self}: Applied context summary "
-            f"(reduced from {len(messages)} to {len(new_messages)} messages)"
-        )
+        logger.info(f"{self}: Applied context summary")
         logger.debug(f"{self}: New context: {self._context.messages}")
 
 
