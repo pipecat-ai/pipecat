@@ -57,6 +57,10 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     )
 
 
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
 async def get_news(params: FunctionCallParams):
     await params.result_callback(
         {
@@ -67,10 +71,6 @@ async def get_news(params: FunctionCallParams):
             ],
         }
     )
-
-
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
-    await params.result_callback({"name": "The Golden Dragon"})
 
 
 weather_function = FunctionSchema(
@@ -90,13 +90,6 @@ weather_function = FunctionSchema(
     required=["location", "format"],
 )
 
-get_news_function = FunctionSchema(
-    name="get_news",
-    description="Get the current news.",
-    properties={},
-    required=[],
-)
-
 restaurant_function = FunctionSchema(
     name="get_restaurant_recommendation",
     description="Get a restaurant recommendation",
@@ -107,6 +100,13 @@ restaurant_function = FunctionSchema(
         },
     },
     required=["location"],
+)
+
+get_news_function = FunctionSchema(
+    name="get_news",
+    description="Get the current news.",
+    properties={},
+    required=[],
 )
 
 # Create tools schema
@@ -215,8 +215,9 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
 
-        # Add a new tool at runtime after a delay.
+        # Add a new tool (get_news) at runtime after a delay
         await asyncio.sleep(15)
+        logger.info(f"Adding new tool get_news at runtime...")
         new_tools = ToolsSchema(
             standard_tools=[weather_function, restaurant_function, get_news_function]
         )

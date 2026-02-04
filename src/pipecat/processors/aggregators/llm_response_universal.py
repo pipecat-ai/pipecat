@@ -472,11 +472,13 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
-            # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
-            # services (like OpenAI Realtime) may need to know about tool
-            # changes; unlike text-based LLM services they won't just "pick up
-            # the change" on the next LLM run, as the LLM is continuously
-            # running.
+            # Push the LLMSetToolsFrame as well, since some realtime (aka
+            # speech-to-speech) LLM services (like OpenAI Realtime) may need to
+            # be directly be informed of tool changes; unlike text-based LLM
+            # services they can't necessarily rely on "picking up the change"
+            # from the context on the next LLM run, as the LLM is continuously
+            # running and they may need to apply the change sooner than the
+            # next context frame.
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)

@@ -965,12 +965,10 @@ class GeminiLiveLLMService(LLMService):
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMSetToolsFrame):
-            # TODO: you are here - setting tools doesn't work yet (requires reconnection)
-            # Do we have reference to previous tools to compare?
-            # New tools should already have been set on the context by the user aggregator.
-            # LLMSetToolsFrame without a user aggregator is not supported.
-            # If tools have changed, update context snapshot.
-            # await self._update_settings()
+            # We actually don't need to do anything here; the next time we get
+            # a context frame (like after a user transcription is appended),
+            # we'll detect that tools have changed and reconnect then to apply
+            # the new tools.
             pass
         else:
             await self.push_frame(frame, direction)
