@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     TranscriptionFrame,
@@ -619,9 +620,26 @@ class GrokRealtimeLLMService(LLMService):
     async def _handle_evt_audio_transcript_delta(self, evt):
         """Handle audio transcript delta event."""
         if evt.delta:
-            frame = TTSTextFrame(evt.delta, aggregated_by=AggregationType.SENTENCE)
-            frame.includes_inter_frame_spaces = True
-            await self.push_frame(frame)
+            await self._push_output_transcript_text_frames(evt.delta)
+
+    async def _push_output_transcript_text_frames(self, text: str):
+        # In a typical "cascade" LLM + TTS setup, LLMTextFrames would not
+        # proceed beyond the TTS service. Therefore, since a speech-to-speech
+        # service like Grok Realtime combines both LLM and TTS functionality,
+        # you might think we wouldn't need to push LLMTextFrames at all.
+        # However, RTVI relies on LLMTextFrames being pushed to trigger its
+        # "bot-llm-text" event. So here we push an LLMTextFrame, too, but avoid
+        # appending it to context to avoid context message duplication.
+
+        # Push LLMTextFrame
+        llm_text_frame = LLMTextFrame(text)
+        llm_text_frame.append_to_context = False
+        await self.push_frame(llm_text_frame)
+
+        # Push TTSTextFrame
+        tts_text_frame = TTSTextFrame(text, aggregated_by=AggregationType.SENTENCE)
+        tts_text_frame.includes_inter_frame_spaces = True
+        await self.push_frame(tts_text_frame)
 
     async def _handle_evt_function_call_arguments_done(self, evt):
         """Handle function call arguments done event."""
@@ -659,7 +677,7 @@ class GrokRealtimeLLMService(LLMService):
         """Handle speech stopped event from VAD."""
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _handle_evt_error(self, evt):
         """Handle error event."""
@@ -734,6 +752,14 @@ class GrokRealtimeLLMService(LLMService):
 
     async def _send_user_audio(self, frame):
         """Send user audio to Grok."""
+        # Don't send audio if conversation setup is still pending, as it can
+        # lead to errors. For example: audio sent before conversation setup
+        # will be interpreted as having Grok's default sample rate (24000),
+        # and if that differs from the sample rate we eventually set through
+        # the conversation setup, Grok will error out.
+        if self._llm_needs_conversation_setup:
+            return
+
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 

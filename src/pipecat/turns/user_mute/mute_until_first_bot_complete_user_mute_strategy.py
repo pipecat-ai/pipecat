@@ -7,7 +7,7 @@
 """User mute strategy that mutes the user until the bot completes its first speech."""
 
 from pipecat.frames.frames import BotStoppedSpeakingFrame, Frame
-from pipecat.turns.mute.base_user_mute_strategy import BaseUserMuteStrategy
+from pipecat.turns.user_mute.base_user_mute_strategy import BaseUserMuteStrategy
 
 
 class MuteUntilFirstBotCompleteUserMuteStrategy(BaseUserMuteStrategy):
@@ -51,6 +51,5 @@ class MuteUntilFirstBotCompleteUserMuteStrategy(BaseUserMuteStrategy):
         return not self._first_speech_handled
 
     async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
-        self._bot_speaking = False
         if not self._first_speech_handled:
             self._first_speech_handled = True

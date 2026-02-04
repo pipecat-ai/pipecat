@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import ErrorFrame, Frame, LLMContextFrame, LLMMessagesFrame
+from pipecat.frames.frames import Frame, LLMContextFrame, LLMMessagesFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -121,7 +121,6 @@ class Mem0MemoryService(FrameProcessor):
         try:
             logger.debug(f"Storing {len(messages)} messages in Mem0")
             params = {
-                "async_mode": True,
                 "messages": messages,
                 "metadata": {"platform": "pipecat"},
                 "output_format": "v1.1",

@@ -263,7 +263,7 @@ def _setup_webrtc_routes(
         """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
 
         # Prepare runner arguments with the callback to run your bot
-        async def webrtc_connection_callback(connection):
+        async def webrtc_connection_callback(connection: SmallWebRTCConnection):
             bot_module = _get_bot_module()
 
             runner_args = SmallWebRTCRunnerArguments(
@@ -406,13 +406,7 @@ def _setup_whatsapp_routes(app: FastAPI):
         return
 
     try:
-        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
-
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-        from pipecat.transports.smallwebrtc.request_handler import (
-            SmallWebRTCRequest,
-            SmallWebRTCRequestHandler,
-        )
         from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
         from pipecat.transports.whatsapp.client import WhatsAppClient
     except ImportError as e:

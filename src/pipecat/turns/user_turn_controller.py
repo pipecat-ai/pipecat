@@ -12,6 +12,8 @@ from typing import Optional, Type
 from pipecat.frames.frames import (
     Frame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -80,7 +82,7 @@ class UserTurnController(BaseObject):
 
         self._task_manager: Optional[BaseTaskManager] = None
 
-        self._vad_user_speaking = False
+        self._user_speaking = False
 
         self._user_turn = False
         self._user_turn_stop_timeout_event = asyncio.Event()
@@ -146,7 +148,11 @@ class UserTurnController(BaseObject):
             frame: The frame to be processed.
 
         """
-        if isinstance(frame, VADUserStartedSpeakingFrame):
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
@@ -179,14 +185,26 @@ class UserTurnController(BaseObject):
         for s in self._user_turn_strategies.stop or []:
             await s.cleanup()
 
+    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
+        self._user_speaking = True
+
+        # The user started talking, let's reset the user turn timeout.
+        self._user_turn_stop_timeout_event.set()
+
+    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
+        self._user_speaking = False
+
+        # The user stopped talking, let's reset the user turn timeout.
+        self._user_turn_stop_timeout_event.set()
+
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
-        self._vad_user_speaking = True
+        self._user_speaking = True
 
         # The user started talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
 
     async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
-        self._vad_user_speaking = False
+        self._user_speaking = False
 
         # The user stopped talking, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
@@ -233,6 +251,10 @@ class UserTurnController(BaseObject):
         self._user_turn = True
         self._user_turn_stop_timeout_event.set()
 
+        # Reset all user turn start strategies to start fresh.
+        for s in self._user_turn_strategies.start or []:
+            await s.reset()
+
         await self._call_event_handler("on_user_turn_started", strategy, params)
 
     async def _trigger_user_turn_stop(
@@ -260,7 +282,7 @@ class UserTurnController(BaseObject):
                 )
                 self._user_turn_stop_timeout_event.clear()
             except asyncio.TimeoutError:
-                if self._user_turn and not self._vad_user_speaking:
+                if self._user_turn and not self._user_speaking:
                     await self._call_event_handler("on_user_turn_stop_timeout")
                     await self._trigger_user_turn_stop(
                         None, UserTurnStoppedParams(enable_user_speaking_frames=True)

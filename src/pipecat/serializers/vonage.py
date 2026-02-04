@@ -34,8 +34,7 @@ class VonageFrameSerializer(FrameSerializer):
     WebSocket streaming protocol.
 
     Note:
-    Ref docs:
-        https://developer.vonage.com/en/video/guides/audio-connector
+        Ref docs: https://developer.vonage.com/en/video/guides/audio-connector
     """
 
     class InputParams(BaseModel):

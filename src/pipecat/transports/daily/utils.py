@@ -10,11 +10,11 @@ Methods that wrap the Daily API to create rooms, check room URLs, and get meetin
 """
 
 import time
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 import aiohttp
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class DailyRoomSipParams(BaseModel):
@@ -77,7 +77,7 @@ class TranscriptionBucketConfig(BaseModel):
     allow_api_access: bool = False
 
 
-class DailyRoomProperties(BaseModel, extra="allow"):
+class DailyRoomProperties(BaseModel):
     """Properties for configuring a Daily room.
 
     Reference: https://docs.daily.co/reference/rest-api/rooms/create-room#properties
@@ -100,6 +100,8 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         start_video_off: Whether video is off by default.
     """
 
+    model_config = ConfigDict(extra="allow")
+
     exp: Optional[float] = None
     enable_chat: bool = False
     enable_prejoin_ui: bool = False
@@ -113,7 +115,7 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     recordings_bucket: Optional[RecordingsBucketConfig] = None
     transcription_bucket: Optional[TranscriptionBucketConfig] = None
     sip: Optional[DailyRoomSipParams] = None
-    sip_uri: Optional[dict] = None
+    sip_uri: Optional[Dict[str, Any]] = None
     start_video_off: bool = False
 
     @property
@@ -203,7 +205,7 @@ class DailyMeetingTokenProperties(BaseModel):
     enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
     enable_prejoin_ui: Optional[bool] = None
     start_cloud_recording: Optional[bool] = None
-    permissions: Optional[dict] = None
+    permissions: Optional[Dict[str, Any]] = None
 
 
 class DailyMeetingTokenParams(BaseModel):

@@ -403,7 +403,7 @@ class BaseOutputTransport(FrameProcessor):
             # Last time a BotSpeakingFrame was pushed.
             self._bot_speaking_frame_time = 0
             # How often a BotSpeakingFrame should be pushed (value should be
-            # lower than the audio chunks).
+            # greater than the audio chunks to have any effect).
             self._bot_speaking_frame_period = 0.2
             # Last time the bot actually spoke.
             self._bot_speech_last_time = 0
@@ -644,8 +644,7 @@ class BaseOutputTransport(FrameProcessor):
 
             diff_time = time.time() - self._bot_speaking_frame_time
             if diff_time >= self._bot_speaking_frame_period:
-                await self._transport.push_frame(BotSpeakingFrame())
-                await self._transport.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                await self._transport.broadcast_frame(BotSpeakingFrame)
                 self._bot_speaking_frame_time = time.time()
 
             self._bot_speech_last_time = time.time()

@@ -34,7 +34,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.mute import (
+from pipecat.turns.user_mute import (
     FunctionCallUserMuteStrategy,
     MuteUntilFirstBotCompleteUserMuteStrategy,
 )
@@ -160,6 +160,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @user_aggregator.event_handler("on_user_mute_started")
+    async def on_user_mute_started(aggregator):
+        logger.info(f"User mute started")
+
+    @user_aggregator.event_handler("on_user_mute_stopped")
+    async def on_user_mute_stopped(aggregator):
+        logger.info(f"User mute stopped")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

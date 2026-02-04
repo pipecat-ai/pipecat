@@ -53,8 +53,6 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.grok.realtime.events import (
     SessionProperties,
-    WebSearchTool,
-    XSearchTool,
 )
 from pipecat.services.grok.realtime.llm import GrokRealtimeLLMService
 from pipecat.services.llm_service import FunctionCallParams

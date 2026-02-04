@@ -148,11 +148,11 @@ class AIService(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            await self.start(frame)
-        elif isinstance(frame, CancelFrame):
-            await self.cancel(frame)
+            await self._start(frame)
         elif isinstance(frame, EndFrame):
-            await self.stop(frame)
+            await self._stop(frame)
+        elif isinstance(frame, CancelFrame):
+            await self._cancel(frame)
 
     async def process_generator(self, generator: AsyncGenerator[Frame | None, None]):
         """Process frames from an async generator.
@@ -169,3 +169,21 @@ class AIService(FrameProcessor):
                     await self.push_error_frame(f)
                 else:
                     await self.push_frame(f)
+
+    async def _start(self, frame: StartFrame):
+        try:
+            await self.start(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")
+
+    async def _stop(self, frame: EndFrame):
+        try:
+            await self.stop(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")
+
+    async def _cancel(self, frame: CancelFrame):
+        try:
+            await self.cancel(frame)
+        except Exception as e:
+            logger.error(f"{self}: exception processing {frame}: {e}")

@@ -41,8 +41,11 @@ dependencies = [
 ]
 
 [project.urls]
+Homepage = "https://pipecat.ai"
+Documentation = "https://docs.pipecat.ai/"
 Source = "https://github.com/pipecat-ai/pipecat"
-Website = "https://pipecat.ai"
+Issues = "https://github.com/pipecat-ai/pipecat/issues"
+Changelog = "https://github.com/pipecat-ai/pipecat/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 aic = [ "aic-sdk~=1.2.0" ]
@@ -53,6 +56,7 @@ aws = [ "aioboto3~=15.5.0", "pipecat-ai[websockets-base]" ]
 aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.2.0; python_version>='3.12'" ]
 azure = [ "azure-cognitiveservices-speech~=1.44.0"]
 cartesia = [ "cartesia~=2.0.3", "pipecat-ai[websockets-base]" ]
+camb = [ "camb-sdk>=1.5.4" ]
 cerebras = []
 daily = [ "daily-python~=0.23.0" ]
 deepgram = [ "deepgram-sdk~=4.7.0", "pipecat-ai[websockets-base]" ]
@@ -96,7 +100,7 @@ qwen = []
 remote-smart-turn = []
 rime = [ "pipecat-ai[websockets-base]" ]
 riva = [ "pipecat-ai[nvidia]" ]
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.122.0", "pipecat-ai-small-webrtc-prebuilt>=2.0.4"]
+runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.0.4"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.21", "pipecat-ai[websockets-base]" ]
@@ -112,7 +116,7 @@ together = []
 tracing = [ "opentelemetry-sdk>=1.33.0", "opentelemetry-api>=1.33.0", "opentelemetry-instrumentation>=0.54b0" ]
 ultravox = [ "pipecat-ai[websockets-base]" ]
 webrtc = [ "aiortc>=1.14.0,<2", "opencv-python>=4.11.0.86,<5" ]
-websocket = [ "pipecat-ai[websockets-base]", "fastapi>=0.115.6,<0.122.0" ]
+websocket = [ "pipecat-ai[websockets-base]", "fastapi>=0.115.6,<0.128.0" ]
 websockets-base = [ "websockets>=13.1,<16.0" ]
 whisper = [ "faster-whisper~=1.1.1" ]
 

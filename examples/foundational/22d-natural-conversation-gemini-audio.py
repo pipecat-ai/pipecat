@@ -451,7 +451,7 @@ class CompletenessCheck(FrameProcessor):
             logger.debug("Completeness check YES")
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
-            await self.push_frame(UserStoppedSpeakingFrame())
+            await self.broadcast_frame(UserStoppedSpeakingFrame)
             await self._audio_accumulator.reset()
             await self._notifier.notify()
         elif isinstance(frame, TextFrame):
