@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -49,13 +50,7 @@ class DeepgramSTTService(STTService):
 
     Provides real-time speech recognition using Deepgram's WebSocket API.
     Supports configurable models, languages, and various audio processing options.
-
-    Class attributes:
-        _ttfs_p99_latency: P99 latency from speech end to final transcript
-            (0.39 seconds measured).
     """
-
-    _ttfs_p99_latency: float = 0.39
 
     def __init__(
         self,
@@ -67,6 +62,7 @@ class DeepgramSTTService(STTService):
         live_options: Optional[LiveOptions] = None,
         addons: Optional[Dict] = None,
         should_interrupt: bool = True,
+        ttfs_p99_latency: Optional[float] = DEEPGRAM_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Deepgram STT service.
@@ -87,13 +83,15 @@ class DeepgramSTTService(STTService):
                 .. deprecated:: 0.0.99
                     This parameter will be removed along with `vad_events` support.
 
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Defaults to 0.39s (measured). Override for custom deployments.
             **kwargs: Additional arguments passed to the parent STTService.
 
         Note:
             The `vad_events` option in LiveOptions is deprecated as of version 0.0.99 and will be removed in a future version. Please use the Silero VAD instead.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         if url:
             import warnings

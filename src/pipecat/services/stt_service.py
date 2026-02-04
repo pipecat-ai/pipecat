@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
@@ -44,12 +45,6 @@ class STTService(AIService):
     Provides common functionality for STT services including audio passthrough,
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
-
-    Class attributes:
-        _ttfs_p99_latency: P99 latency from speech end to final transcript in
-            seconds. Subclasses should override with measured values. This is
-            pushed downstream via STTMetadataFrame at pipeline start for downstream
-            processors (e.g., turn strategies) to optimize timing.
 
     Event handlers:
         on_connected: Called when connected to the STT service.
@@ -71,17 +66,13 @@ class STTService(AIService):
             logger.error(f"STT connection error: {error}")
     """
 
-    # P99 latency from speech end to final transcript (seconds).
-    # Subclasses should override with measured values for optimal timing.
-    _ttfs_p99_latency: Optional[float] = None
-
     def __init__(
         self,
+        *,
         audio_passthrough=True,
-        # STT input sample rate
         sample_rate: Optional[int] = None,
-        # STT TTFB timeout - time to wait after VAD stop before reporting TTFB
         stt_ttfb_timeout: float = 2.0,
+        ttfs_p99_latency: Optional[float] = None,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -97,6 +88,10 @@ class STTService(AIService):
                 request to first response byte). Since STT receives continuous audio, we measure
                 from when the user stops speaking to when the final transcript arrives—capturing
                 the latency that matters for voice AI applications.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                This is broadcast via STTMetadataFrame at pipeline start for downstream
+                processors (e.g., turn strategies) to optimize timing. Subclasses provide
+                measured defaults; pass a value here to override for your deployment.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -107,6 +102,7 @@ class STTService(AIService):
         self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
+        self._ttfs_p99_latency = ttfs_p99_latency
 
         # STT TTFB tracking state
         self._stt_ttfb_timeout = stt_ttfb_timeout
@@ -337,8 +333,8 @@ class STTService(AIService):
         """Push STT metadata frame for downstream processors (e.g., turn strategies)."""
         ttfs = self._ttfs_p99_latency
         if ttfs is None:
-            ttfs = 1.0  # Conservative fallback
-            logger.warning(f"{self.name}: _ttfs_p99_latency not set, using default {ttfs}s")
+            ttfs = DEFAULT_TTFS_P99
+            logger.warning(f"{self.name}: ttfs_p99_latency not set, using default {ttfs}s")
         await self.push_frame(STTMetadataFrame(service_name=self.name, ttfs_p99_latency=ttfs))
 
     async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):

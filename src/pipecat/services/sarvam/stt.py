@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
+from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -98,6 +99,7 @@ class SarvamSTTService(STTService):
         sample_rate: Optional[int] = None,
         input_audio_codec: str = "wav",
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Sarvam STT service.
@@ -108,6 +110,8 @@ class SarvamSTTService(STTService):
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
         """
         params = params or SarvamSTTService.InputParams()
@@ -128,7 +132,7 @@ class SarvamSTTService(STTService):
                     "Prompts are only supported for STT-Translate models"
                 )
 
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         self.set_model_name(model)
         self._api_key = api_key
