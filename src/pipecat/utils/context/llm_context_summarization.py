@@ -97,6 +97,17 @@ class LLMContextSummarizationConfig:
     min_messages_after_summary: int = 4
     summarization_prompt: Optional[str] = None
 
+    def __post_init__(self):
+        """Validate configuration parameters."""
+        if self.max_context_tokens <= 0:
+            raise ValueError("max_context_tokens must be positive")
+        if not 0.0 < self.summarization_threshold <= 1.0:
+            raise ValueError("summarization_threshold must be between 0 and 1")
+        if self.max_unsummarized_messages < 1:
+            raise ValueError("max_unsummarized_messages must be at least 1")
+        if self.min_messages_after_summary < 0:
+            raise ValueError("min_messages_after_summary must be positive")
+
     @property
     def summary_prompt(self) -> str:
         """Get the summarization prompt to use.
