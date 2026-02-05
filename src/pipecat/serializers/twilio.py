@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     StartFrame,
 )
+from pipecat.processors.frameworks.rtvi import RTVI_MESSAGE_LABEL
 from pipecat.serializers.base_serializer import FrameSerializer
 
 
@@ -54,6 +55,7 @@ class TwilioFrameSerializer(FrameSerializer):
         twilio_sample_rate: int = 8000
         sample_rate: Optional[int] = None
         auto_hang_up: bool = True
+        ignore_rtvi_messages: Optional[bool] = True
 
     def __init__(
         self,
@@ -167,6 +169,11 @@ class TwilioFrameSerializer(FrameSerializer):
 
             return json.dumps(answer)
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if (
+                self._params.ignore_rtvi_messages
+                and frame.message.get("label") == RTVI_MESSAGE_LABEL
+            ):
+                return None
             return json.dumps(frame.message)
 
         # Return None for unhandled frames
