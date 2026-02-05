@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.utils.tracing.conversation_context_provider import get_current_conversation_context
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -32,7 +33,6 @@ from pipecat.utils.tracing.service_attributes import (
     add_stt_span_attributes,
     add_tts_span_attributes,
 )
-from pipecat.utils.tracing.conversation_context_provider import get_current_conversation_context
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_context_provider import get_current_turn_context
 
