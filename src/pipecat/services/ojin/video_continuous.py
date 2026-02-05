@@ -66,7 +66,7 @@ class OjinBotStoppedSpeakingFrame(Frame):
 
 
 OJIN_PERSONA_SAMPLE_RATE = 16000
-SPEECH_FILTER_AMOUNT = 1000.0
+SPEECH_FILTER_AMOUNT = 5.0
 SPEECH_MOUTH_OPENING_SCALE = 1.0
 
 
@@ -380,7 +380,9 @@ class OjinVideoService(FrameProcessor):
 
             if len(self._video_frames) > 12 and audio_bytes == silence_audio:
                 next_frame_time -= 0.01
-                logger.debug("Speeding up to catch up")
+                logger.debug(
+                    f"Speeding up to catch up buffer: {len(self._video_frames)}, target: 12"
+                )
 
             if image_bytes:
                 image_frame = OutputImageRawFrame(

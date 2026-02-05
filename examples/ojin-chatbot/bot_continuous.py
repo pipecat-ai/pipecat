@@ -24,7 +24,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.hume.hume import HumeSTSService
 from pipecat.services.ojin.video_continuous import (
-    OjinFirstFramePlayedFrame,
+    OjinBotStartedSpeakingFrame,
     OjinVideoInitializedFrame,
     OjinVideoService,
     OjinVideoSettings,
