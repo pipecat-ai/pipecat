@@ -1530,7 +1530,6 @@ class GeminiLiveLLMService(LLMService):
 
     @traced_gemini_live(operation="llm_setup")
     async def _handle_session_ready(self, session: AsyncSession):
-        print("[pk] Handling session ready...")
         """Handle the session being ready."""
         self._session = session
         # If we were just waititng for the session to be ready to run the LLM,

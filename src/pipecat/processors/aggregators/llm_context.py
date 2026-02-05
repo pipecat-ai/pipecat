@@ -486,7 +486,6 @@ class LLMContext:
         result.tools_diff = self._compute_tools_diff(other)
 
         # Compare tool_choice
-        # print("[pk] comparing tool choices: ", self._tool_choice, other._tool_choice, type(self._tool_choice), type(other._tool_choice), self._tool_choice == other._tool_choice, self._tool_choice != other._tool_choice)
         # (For some reason if they're both NOT_GIVEN, equality check returns False?)
         if not self._tool_choice and not other._tool_choice:
             result.tool_choice_changed = False
