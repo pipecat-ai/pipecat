@@ -4606,6 +4606,9 @@ tracing = [
 ultravox = [
     { name = "websockets" },
 ]
+voiceai = [
+    { name = "websockets" },
+]
 webrtc = [
     { name = "aiortc" },
     { name = "opencv-python" },
@@ -4727,6 +4730,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'sarvam'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'soniox'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'ultravox'" },
+    { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'voiceai'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'websocket'" },
     { name = "pipecat-ai-krisp", marker = "extra == 'krisp'", specifier = "~=0.4.0" },
     { name = "pipecat-ai-small-webrtc-prebuilt", marker = "extra == 'runner'", specifier = ">=2.0.4" },
@@ -4762,7 +4766,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "kokoro", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "piper", "playht", "qwen", "remote-smart-turn", "resembleai", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "kokoro", "krisp", "langchain", "livekit", "lmnt", "local", "local-smart-turn", "local-smart-turn-v3", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "piper", "playht", "qwen", "remote-smart-turn", "resembleai", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "voiceai", "webrtc", "websocket", "websockets-base", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
