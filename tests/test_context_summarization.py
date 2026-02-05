@@ -7,8 +7,11 @@
 """Tests for context summarization feature."""
 
 import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from pipecat.frames.frames import LLMContextSummaryRequestFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.services.llm_service import LLMService
 from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationConfig,
     LLMContextSummarizationUtil,
@@ -458,6 +461,142 @@ class TestFunctionCallHandling(unittest.TestCase):
         # Should get all messages except the last one
         self.assertEqual(len(result.messages), 4)
         self.assertEqual(result.last_summarized_index, 4)
+
+
+class TestSummaryGenerationExceptions(unittest.IsolatedAsyncioTestCase):
+    """Tests for summary generation exception handling."""
+
+    async def test_generate_summary_raises_on_no_messages(self):
+        """Test that _generate_summary raises RuntimeError when there are no messages to summarize."""
+        llm_service = LLMService()
+        context = LLMContext()
+
+        # Add only one message (system), which isn't enough to summarize
+        context.add_message({"role": "system", "content": "System prompt"})
+
+        frame = LLMContextSummaryRequestFrame(
+            request_id="test",
+            context=context,
+            min_messages_to_keep=1,
+            max_context_tokens=1000,
+            summarization_prompt="Summarize this",
+        )
+
+        with self.assertRaises(RuntimeError) as cm:
+            await llm_service._generate_summary(frame)
+
+        self.assertEqual(str(cm.exception), "No messages to summarize")
+
+    async def test_generate_summary_raises_on_no_run_inference(self):
+        """Test that _generate_summary raises RuntimeError when run_inference is not implemented."""
+        # Create a minimal LLM service - base class raises NotImplementedError
+        llm_service = LLMService()
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "Message 1"})
+        context.add_message({"role": "assistant", "content": "Response 1"})
+        context.add_message({"role": "user", "content": "Message 2"})
+
+        frame = LLMContextSummaryRequestFrame(
+            request_id="test",
+            context=context,
+            min_messages_to_keep=1,
+            max_context_tokens=1000,
+            summarization_prompt="Summarize this",
+        )
+
+        with self.assertRaises(RuntimeError) as cm:
+            await llm_service._generate_summary(frame)
+
+        self.assertIn("does not implement run_inference", str(cm.exception))
+        self.assertIn("LLMService", str(cm.exception))
+
+    async def test_generate_summary_raises_on_empty_response(self):
+        """Test that _generate_summary raises RuntimeError when LLM returns empty summary."""
+        llm_service = LLMService()
+        # Mock run_inference to return None
+        llm_service.run_inference = AsyncMock(return_value=None)
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "Message 1"})
+        context.add_message({"role": "assistant", "content": "Response 1"})
+        context.add_message({"role": "user", "content": "Message 2"})
+
+        frame = LLMContextSummaryRequestFrame(
+            request_id="test",
+            context=context,
+            min_messages_to_keep=1,
+            max_context_tokens=1000,
+            summarization_prompt="Summarize this",
+        )
+
+        with self.assertRaises(RuntimeError) as cm:
+            await llm_service._generate_summary(frame)
+
+        self.assertEqual(str(cm.exception), "LLM returned empty summary")
+
+    async def test_generate_summary_task_handles_exceptions(self):
+        """Test that _generate_summary_task properly handles exceptions from _generate_summary."""
+        llm_service = LLMService()
+
+        # Mock broadcast_frame to capture the result
+        broadcast_calls = []
+        async def mock_broadcast(frame_class, **kwargs):
+            broadcast_calls.append((frame_class, kwargs))
+        llm_service.broadcast_frame = mock_broadcast
+
+        # Mock push_error
+        llm_service.push_error = AsyncMock()
+
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})
+
+        frame = LLMContextSummaryRequestFrame(
+            request_id="test_123",
+            context=context,
+            min_messages_to_keep=1,
+            max_context_tokens=1000,
+            summarization_prompt="Summarize this",
+        )
+
+        # Execute the task
+        await llm_service._generate_summary_task(frame)
+
+        # Verify broadcast_frame was called with error
+        self.assertEqual(len(broadcast_calls), 1)
+        frame_class, kwargs = broadcast_calls[0]
+        self.assertEqual(kwargs["request_id"], "test_123")
+        self.assertEqual(kwargs["summary"], "")
+        self.assertEqual(kwargs["last_summarized_index"], -1)
+        self.assertEqual(kwargs["error"], "No messages to summarize")
+
+        # Verify push_error was called
+        llm_service.push_error.assert_called_once()
+
+    async def test_generate_summary_success(self):
+        """Test that _generate_summary returns successfully with valid input."""
+        llm_service = LLMService()
+        # Mock run_inference to return a summary
+        llm_service.run_inference = AsyncMock(return_value="This is a summary of the conversation")
+
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "Message 1"})
+        context.add_message({"role": "assistant", "content": "Response 1"})
+        context.add_message({"role": "user", "content": "Message 2"})
+
+        frame = LLMContextSummaryRequestFrame(
+            request_id="test",
+            context=context,
+            min_messages_to_keep=1,
+            max_context_tokens=1000,
+            summarization_prompt="Summarize this",
+        )
+
+        summary, last_index = await llm_service._generate_summary(frame)
+
+        self.assertEqual(summary, "This is a summary of the conversation")
+        self.assertGreater(last_index, -1)
+        self.assertEqual(last_index, 1)  # Should be the index of the last summarized message
 
 
 if __name__ == "__main__":

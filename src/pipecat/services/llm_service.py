@@ -411,9 +411,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         try:
             summary, last_index = await self._generate_summary(frame)
-            # Check if summary generation failed
-            if last_index == -1:
-                error = "Failed to generate summary"
         except Exception as e:
             error = f"Error generating context summary: {e}"
             await self.push_error(error, exception=e)
@@ -439,8 +436,10 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         Returns:
             Tuple of (formatted summary message, last_summarized_index).
-            Returns (None, -1) if there are no messages to summarize or if
-            the service doesn't support run_inference().
+
+        Raises:
+            RuntimeError: If there are no messages to summarize, the service doesn't
+                support run_inference(), or the LLM returns an empty summary.
 
         Note:
             Requires the service to implement run_inference() method for
@@ -453,7 +452,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         if not result.messages:
             logger.debug(f"{self}: No messages to summarize")
-            return "", -1
+            raise RuntimeError("No messages to summarize")
 
         logger.debug(
             f"{self}: Generating summary for {len(result.messages)} messages "
@@ -487,15 +486,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
 
         # Generate summary using run_inference
         # This will be overridden by each LLM service implementation
-        if not hasattr(self, "run_inference"):
-            logger.warning(
-                f"{self}: LLM service does not implement run_inference, skipping summarization"
+        try:
+            summary_text = await self.run_inference(summary_context, max_tokens=max_summary_tokens)
+        except NotImplementedError:
+            raise RuntimeError(
+                f"LLM service {self.__class__.__name__} does not implement run_inference"
             )
-            return "", -1
-        summary_text = await self.run_inference(summary_context, max_tokens=max_summary_tokens)
+
         if not summary_text:
-            logger.warning(f"{self}: LLM returned empty summary")
-            return "", -1
+            raise RuntimeError("LLM returned empty summary")
+
         summary_text = summary_text.strip()
         logger.info(
             f"{self}: Generated summary of {len(summary_text)} characters "
