@@ -55,6 +55,10 @@ Transport Input → Pipeline Source → [Processor1] → [Processor2] → ... �
 
 - **Services** (`src/pipecat/services/`): 60+ AI provider integrations (STT, TTS, LLM, etc.). Extend base classes: `AIService`, `LLMService`, `STTService`, `TTSService`, `VisionService`.
 
+- **Serializers** (`src/pipecat/serializers/`): Convert frames to/from wire formats for WebSocket transports. `FrameSerializer` base class defines `serialize()` and `deserialize()`. Telephony serializers (Twilio, Plivo, Vonage, Telnyx, Exotel, Genesys) handle provider-specific protocols and audio encoding (e.g., μ-law).
+
+- **RTVI** (`src/pipecat/processors/frameworks/rtvi.py`): Real-Time Voice Interface protocol bridging clients and the pipeline. `RTVIProcessor` handles incoming client messages (text input, audio, function call results). `RTVIObserver` converts pipeline frames to outgoing messages: user/bot speaking events, transcriptions, LLM/TTS lifecycle, function calls, metrics, and audio levels.
+
 ### Important Patterns
 
 - **Context Aggregation**: `LLMContext` accumulates messages for LLM calls; `UserResponse` aggregates user input
@@ -68,7 +72,7 @@ Transport Input → Pipeline Source → [Processor1] → [Processor2] → ... �
 
 - **Uninterruptible Frames**: These are frames that will not be removed from internal queues even if there's an interruption. For example, `EndFrame` and `StopFrame`.
 
-- **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to exectue fast..
+- **Events**: Most classes in Pipecat have `BaseObject` as the very base class. `BaseObject` has support for events. Events can run in the background in an async task (default) or synchronously (`sync=True`) if we want immediate action. Synchronous event handlers need to exectue fast.
 
 ### Key Directories
 
@@ -79,6 +83,7 @@ Transport Input → Pipeline Source → [Processor1] → [Processor2] → ... �
 | `src/pipecat/pipeline/`   | Pipeline orchestration                             |
 | `src/pipecat/services/`   | AI service integrations (60+ providers)            |
 | `src/pipecat/transports/` | Transport layer (Daily, LiveKit, WebSocket, Local) |
+| `src/pipecat/serializers/`| Frame serialization for WebSocket protocols        |
 | `src/pipecat/audio/`      | VAD, filters, mixers, turn detection, DTMF         |
 | `src/pipecat/turns/`      | User turn management                               |
 
