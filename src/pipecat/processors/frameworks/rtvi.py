@@ -14,7 +14,8 @@ and frame observation for the RTVI protocol.
 import asyncio
 import base64
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import (
     Any,
     Awaitable,
@@ -44,7 +45,10 @@ from pipecat.frames.frames import (
     EndTaskFrame,
     ErrorFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
@@ -73,10 +77,7 @@ from pipecat.metrics.metrics import (
     TTSUsageMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
@@ -86,7 +87,7 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.string import match_endofsentence
 
-RTVI_PROTOCOL_VERSION = "1.1.0"
+RTVI_PROTOCOL_VERSION = "1.2.0"
 
 RTVI_MESSAGE_LABEL = "rtvi-ai"
 RTVIMessageLiteral = Literal["rtvi-ai"]
@@ -577,6 +578,9 @@ class RTVILLMFunctionCallMessageData(BaseModel):
     """Data for LLM function call notification.
 
     Contains function call details including name, ID, and arguments.
+
+    .. deprecated:: 0.0.102
+        Use ``RTVILLMFunctionCallInProgressMessageData`` instead.
     """
 
     function_name: str
@@ -588,6 +592,10 @@ class RTVILLMFunctionCallMessage(BaseModel):
     """Message notifying of an LLM function call.
 
     Sent when the LLM makes a function call.
+
+    .. deprecated:: 0.0.102
+        Use ``RTVILLMFunctionCallInProgressMessage`` with the
+        ``llm-function-call-in-progress`` event type instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -642,10 +650,11 @@ class RTVIAppendToContext(BaseModel):
 class RTVILLMFunctionCallStartMessageData(BaseModel):
     """Data for LLM function call start notification.
 
-    Contains the function name being called.
+    Contains the function name being called. Fields may be omitted based on
+    the configured function_call_report_level for security.
     """
 
-    function_name: str
+    function_name: Optional[str] = None
 
 
 class RTVILLMFunctionCallStartMessage(BaseModel):
@@ -655,7 +664,7 @@ class RTVILLMFunctionCallStartMessage(BaseModel):
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["llm-function-call-start"] = "llm-function-call-start"
+    type: Literal["llm-function-call-started"] = "llm-function-call-started"
     data: RTVILLMFunctionCallStartMessageData
 
 
@@ -669,6 +678,54 @@ class RTVILLMFunctionCallResultData(BaseModel):
     tool_call_id: str
     arguments: dict
     result: dict | str
+
+
+class RTVILLMFunctionCallInProgressMessageData(BaseModel):
+    """Data for LLM function call in-progress notification.
+
+    Contains function call details including name, ID, and arguments.
+    Fields may be omitted based on the configured function_call_report_level for security.
+    """
+
+    tool_call_id: str
+    function_name: Optional[str] = None
+    args: Optional[Mapping[str, Any]] = None
+
+
+class RTVILLMFunctionCallInProgressMessage(BaseModel):
+    """Message notifying that an LLM function call is in progress.
+
+    Sent when the LLM function call execution begins.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["llm-function-call-in-progress"] = "llm-function-call-in-progress"
+    data: RTVILLMFunctionCallInProgressMessageData
+
+
+class RTVILLMFunctionCallStoppedMessageData(BaseModel):
+    """Data for LLM function call stopped notification.
+
+    Contains details about the function call that stopped, including
+    whether it was cancelled or completed with a result.
+    Fields may be omitted based on the configured function_call_report_level for security.
+    """
+
+    tool_call_id: str
+    cancelled: bool
+    function_name: Optional[str] = None
+    result: Optional[Any] = None
+
+
+class RTVILLMFunctionCallStoppedMessage(BaseModel):
+    """Message notifying that an LLM function call has stopped.
+
+    Sent when a function call completes (with result) or is cancelled.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["llm-function-call-stopped"] = "llm-function-call-stopped"
+    data: RTVILLMFunctionCallStoppedMessageData
 
 
 class RTVIBotLLMStartedMessage(BaseModel):
@@ -915,6 +972,24 @@ class RTVIServerMessageFrame(SystemFrame):
         return f"{self.name}(data: {self.data})"
 
 
+class RTVIFunctionCallReportLevel(str, Enum):
+    """Level of detail to include in function call RTVI events.
+
+    Controls what information is exposed in function call events for security.
+
+    Values:
+        DISABLED: No events emitted for this function call.
+        NONE: Events only with tool_call_id, no function name or metadata (most secure).
+        NAME: Events with function name, no arguments or results.
+        FULL: Events with function name, arguments, and results.
+    """
+
+    DISABLED = "disabled"
+    NONE = "none"
+    NAME = "name"
+    FULL = "full"
+
+
 @dataclass
 class RTVIObserverParams:
     """Parameters for configuring RTVI Observer behavior.
@@ -943,6 +1018,22 @@ class RTVIObserverParams:
             transformed text. To register, provide a list of tuples of
             (aggregation_type | '*', transform_function).
         audio_level_period_secs: How often audio levels should be sent if enabled.
+        function_call_report_level: Controls what information is exposed in function call
+            events for security. A dict mapping function names to levels, where ``"*"``
+            sets the default level for unlisted functions::
+
+                function_call_report_level={
+                    "*": RTVIFunctionCallReportLevel.DISABLED,  # Default: no events
+                    "get_weather": RTVIFunctionCallReportLevel.FULL,  # Expose everything
+                }
+
+            Levels:
+                - DISABLED: No events emitted for this function.
+                - NONE: Events with tool_call_id only (most secure when events needed).
+                - NAME: Adds function name to events.
+                - FULL: Adds function name, arguments, and results.
+
+            Defaults to ``{"*": RTVIFunctionCallReportLevel.NONE}``.
     """
 
     bot_output_enabled: bool = True
@@ -967,6 +1058,9 @@ class RTVIObserverParams:
         ]
     ] = None
     audio_level_period_secs: float = 0.15
+    function_call_report_level: Dict[str, RTVIFunctionCallReportLevel] = field(
+        default_factory=lambda: {"*": RTVIFunctionCallReportLevel.NONE}
+    )
 
 
 class RTVIObserver(BaseObserver):
@@ -1055,6 +1149,21 @@ class RTVIObserver(BaseObserver):
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
+    def _get_function_call_report_level(self, function_name: str) -> RTVIFunctionCallReportLevel:
+        """Get the report level for a specific function call.
+
+        Args:
+            function_name: The name of the function to get the report level for.
+
+        Returns:
+            The report level for the function. Looks up the function name first,
+            then falls back to "*" key, then NONE.
+        """
+        levels = self._params.function_call_report_level
+        if function_name in levels:
+            return levels[function_name]
+        return levels.get("*", RTVIFunctionCallReportLevel.NONE)
+
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""
         message = RTVISystemLogMessage(data=RTVITextMessageData(text=message))
@@ -1139,6 +1248,62 @@ class RTVIObserver(BaseObserver):
                 await self._handle_aggregated_llm_text(frame)
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            for function_call in frame.function_calls:
+                report_level = self._get_function_call_report_level(function_call.function_name)
+                if report_level == RTVIFunctionCallReportLevel.DISABLED:
+                    continue
+                data = RTVILLMFunctionCallStartMessageData()
+                if report_level in (
+                    RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
+                    data.function_name = function_call.function_name
+                message = RTVILLMFunctionCallStartMessage(data=data)
+                await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            report_level = self._get_function_call_report_level(frame.function_name)
+            if report_level != RTVIFunctionCallReportLevel.DISABLED:
+                data = RTVILLMFunctionCallInProgressMessageData(tool_call_id=frame.tool_call_id)
+                if report_level in (
+                    RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
+                    data.function_name = frame.function_name
+                if report_level == RTVIFunctionCallReportLevel.FULL:
+                    data.args = frame.arguments
+                message = RTVILLMFunctionCallInProgressMessage(data=data)
+                await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallCancelFrame):
+            report_level = self._get_function_call_report_level(frame.function_name)
+            if report_level != RTVIFunctionCallReportLevel.DISABLED:
+                data = RTVILLMFunctionCallStoppedMessageData(
+                    tool_call_id=frame.tool_call_id,
+                    cancelled=True,
+                )
+                if report_level in (
+                    RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
+                    data.function_name = frame.function_name
+                message = RTVILLMFunctionCallStoppedMessage(data=data)
+                await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallResultFrame):
+            report_level = self._get_function_call_report_level(frame.function_name)
+            if report_level != RTVIFunctionCallReportLevel.DISABLED:
+                data = RTVILLMFunctionCallStoppedMessageData(
+                    tool_call_id=frame.tool_call_id,
+                    cancelled=False,
+                )
+                if report_level in (
+                    RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
+                    data.function_name = frame.function_name
+                if report_level == RTVIFunctionCallReportLevel.FULL:
+                    data.result = frame.result if frame.result else None
+                message = RTVILLMFunctionCallStoppedMessage(data=data)
+                await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVIServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
@@ -1491,40 +1656,26 @@ class RTVIProcessor(FrameProcessor):
 
         Args:
             params: The function call parameters.
+
+        .. deprecated:: 0.0.102
+            This method is deprecated. Function call events are now automatically
+            sent by ``RTVIObserver`` using the ``llm-function-call-in-progress`` event.
+            Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
         """
+        import warnings
+
+        warnings.warn(
+            "handle_function_call is deprecated. Function call events are now "
+            "automatically sent by RTVIObserver using llm-function-call-in-progress.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         fn = RTVILLMFunctionCallMessageData(
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
             args=params.arguments,
         )
         message = RTVILLMFunctionCallMessage(data=fn)
-        await self.push_transport_message(message, exclude_none=False)
-
-    async def handle_function_call_start(
-        self, function_name: str, llm: FrameProcessor, context: OpenAILLMContext
-    ):
-        """Handle the start of a function call from the LLM.
-
-        .. deprecated:: 0.0.66
-            This method is deprecated and will be removed in a future version.
-            Use `RTVIProcessor.handle_function_call()` instead.
-
-        Args:
-            function_name: Name of the function being called.
-            llm: The LLM processor making the call.
-            context: The LLM context.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "Function `RTVIProcessor.handle_function_call_start()` is deprecated, use `RTVIProcessor.handle_function_call()` instead.",
-                DeprecationWarning,
-            )
-
-        fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
-        message = RTVILLMFunctionCallStartMessage(data=fn)
         await self.push_transport_message(message, exclude_none=False)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
