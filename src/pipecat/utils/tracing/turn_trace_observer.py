@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Dict, Optional
 
 from loguru import logger
 
+from pipecat.frames.frames import StartFrame
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.utils.tracing.conversation_context_provider import ConversationContextProvider
@@ -81,13 +82,15 @@ class TurnTraceObserver(BaseObserver):
     async def on_push_frame(self, data: FramePushed):
         """Process a frame without modifying it.
 
-        This observer doesn't need to process individual frames as it
-        relies on turn start/end events from the turn tracker.
+        Handles StartFrame to begin conversation tracing early, ensuring
+        that any spans created before Turn 1 (e.g., from flow initialization)
+        are properly attached to the conversation trace.
 
         Args:
             data: The frame push event data.
         """
-        pass
+        if isinstance(data.frame, StartFrame) and not self._conversation_span:
+            self.start_conversation_tracing(self._conversation_id)
 
     def start_conversation_tracing(self, conversation_id: Optional[str] = None):
         """Start a new conversation span.
@@ -159,8 +162,6 @@ class TurnTraceObserver(BaseObserver):
         if not is_tracing_available() or not self._tracer:
             return
 
-        # If this is the first turn and no conversation span exists yet,
-        # start the conversation tracing (will generate ID if needed)
         if turn_number == 1 and not self._conversation_span:
             self.start_conversation_tracing(self._conversation_id)
 

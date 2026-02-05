@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.utils.tracing.conversation_context_provider import get_current_conversation_context
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -58,7 +59,8 @@ def _noop_decorator(func):
 def _get_parent_service_context(self):
     """Get the parent service span context (internal use only).
 
-    This looks for the service span that was created when the service was initialized.
+    This looks for the service span that was created when the service was initialized,
+    or falls back to the conversation context if available.
 
     Args:
         self: The service instance.
@@ -73,7 +75,12 @@ def _get_parent_service_context(self):
     if hasattr(self, "_span") and self._span:
         return trace.set_span_in_context(self._span)
 
-    # If we can't find a stored span, default to current context
+    # Fall back to conversation context if available
+    conversation_context = get_current_conversation_context()
+    if conversation_context:
+        return conversation_context
+
+    # Last resort: use current context (may create orphan spans)
     return context_api.get_current()
 
 
