@@ -541,8 +541,10 @@ class TestSummaryGenerationExceptions(unittest.IsolatedAsyncioTestCase):
 
         # Mock broadcast_frame to capture the result
         broadcast_calls = []
+
         async def mock_broadcast(frame_class, **kwargs):
             broadcast_calls.append((frame_class, kwargs))
+
         llm_service.broadcast_frame = mock_broadcast
 
         # Mock push_error
