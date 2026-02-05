@@ -18,7 +18,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.elevenlabs.stt import ElevenLabsSTTService
+from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -51,29 +51,25 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    async with aiohttp.ClientSession() as session:
-        stt = ElevenLabsSTTService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            aiohttp_session=session,
-        )
+    stt = ElevenLabsRealtimeSTTService(api_key=os.getenv("ELEVENLABS_API_KEY"))
 
-        tl = TranscriptionLogger()
+    tl = TranscriptionLogger()
 
-        pipeline = Pipeline([transport.input(), stt, tl])
+    pipeline = Pipeline([transport.input(), stt, tl])
 
-        task = PipelineTask(
-            pipeline,
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+    task = PipelineTask(
+        pipeline,
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await task.cancel()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await task.cancel()
 
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-        await runner.run(task)
+    await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):
