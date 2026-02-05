@@ -23,7 +23,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.ojin.video import OjinVideoService, OjinVideoServiceSettings
+from pipecat.services.ojin.video import OjinVideoService, OjinVideoSettings
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 # Ensure we can import sibling 'utils' package when running from the 'mock' subdir
@@ -135,7 +135,7 @@ async def main():
     )
 
     persona = OjinVideoService(
-        OjinVideoServiceSettings(
+        OjinVideoSettings(
             ws_url=os.getenv("OJIN_REALTIME_API_URL", "wss://models.ojin.ai/realtime"),
             api_key=os.getenv("OJIN_API_KEY", ""),
             config_id=os.getenv("OJIN_CONFIG_ID", ""),

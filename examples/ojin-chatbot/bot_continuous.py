@@ -25,9 +25,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.hume.hume import HumeSTSService
 from pipecat.services.ojin.video_continuous import (
     OjinFirstFramePlayedFrame,
-    OjinVideoContinuousService,
-    OjinVideoContinuousSettings,
     OjinVideoInitializedFrame,
+    OjinVideoService,
+    OjinVideoSettings,
 )
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
@@ -140,8 +140,8 @@ async def main():
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
-    persona = OjinVideoContinuousService(
-        OjinVideoContinuousSettings(
+    persona = OjinVideoService(
+        OjinVideoSettings(
             api_key=os.getenv("OJIN_API_KEY", ""),
             config_id=os.getenv("OJIN_CONFIG_ID", ""),
             ws_url=os.getenv("OJIN_WS_URL", "wss://models.ojin.ai/realtime"),

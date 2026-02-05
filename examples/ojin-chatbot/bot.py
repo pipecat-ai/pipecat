@@ -24,9 +24,9 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.hume.hume import HumeSTSService
 from pipecat.services.ojin.video import (
+    OjinVideoInitializedFrame,
     OjinVideoService,
-    OjinVideoServiceInitializedFrame,
-    OjinVideoServiceSettings,
+    OjinVideoSettings,
 )
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
@@ -126,7 +126,7 @@ async def main():
         api_key=os.getenv("HUME_API_KEY", ""),
         config_id=os.getenv("HUME_CONFIG_ID", ""),
         model=os.getenv("HUME_MODEL", "evi"),
-        start_frame_cls=OjinVideoServiceInitializedFrame,
+        start_frame_cls=OjinVideoInitializedFrame,
     )
 
     messages = [
@@ -140,7 +140,7 @@ async def main():
     context_aggregator = llm.create_context_aggregator(context)
 
     persona = OjinVideoService(
-        OjinVideoServiceSettings(
+        OjinVideoSettings(
             api_key=os.getenv("OJIN_API_KEY", ""),
             config_id=os.getenv("OJIN_CONFIG_ID", ""),
         )

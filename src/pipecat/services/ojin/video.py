@@ -35,19 +35,19 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 @dataclass
-class OjinVideoServiceInitializedFrame(Frame):
+class OjinVideoInitializedFrame(Frame):
     """Frame indicating that the persona has been initialized and can now output frames."""
 
     session_data: Optional[dict] = None
 
 
-class OjinFirstFramePlayedFrame(Frame):
+class OjinBotStartedSpeakingFrame(Frame):
     """Frame indicating that the first frame has been played."""
 
     pass
 
 
-class OjinLastFramePlayedFrame(Frame):
+class OjinBotStoppedSpeakingFrame(Frame):
     """Frame indicating that the last frame has been played."""
 
     pass
@@ -84,7 +84,7 @@ class VideoFrame:
 
 
 @dataclass
-class OjinVideoServiceSettings:
+class OjinVideoSettings:
     """Settings for Ojin Video Service service."""
 
     api_key: str = field(default="")
@@ -118,7 +118,7 @@ class OjinVideoService(FrameProcessor):
 
     def __init__(
         self,
-        settings: OjinVideoServiceSettings,
+        settings: OjinVideoSettings,
         client: IOjinClient | None = None,
     ) -> None:
         super().__init__()
@@ -317,9 +317,7 @@ class OjinVideoService(FrameProcessor):
                     self._run_loop_task = self.create_task(self._run_loop())
 
                     # Notify that we're ready
-                    initialized_frame = OjinVideoServiceInitializedFrame(
-                        session_data=self._session_data
-                    )
+                    initialized_frame = OjinVideoInitializedFrame(session_data=self._session_data)
                     await self.push_frame(
                         initialized_frame,
                         direction=FrameDirection.DOWNSTREAM,
@@ -388,8 +386,8 @@ class OjinVideoService(FrameProcessor):
             case OjinVideoServiceState.IDLE:
                 # Push last frame played if we're coming from SPEAKING state
                 if old_state == OjinVideoServiceState.SPEAKING:
-                    await self.push_frame(OjinLastFramePlayedFrame(), FrameDirection.UPSTREAM)
-                    await self.push_frame(OjinLastFramePlayedFrame(), FrameDirection.DOWNSTREAM)
+                    await self.push_frame(OjinBotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+                    await self.push_frame(OjinBotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
                 self._num_speech_frames_played = 0
                 self._last_played_image_bytes = None  # Clear for next speech session
         self._state = state
@@ -484,8 +482,8 @@ class OjinVideoService(FrameProcessor):
                     logger.info(
                         f"Time to first video frame played: {self._first_frame_played_timestamp - self._tts_started_timestamp}s"
                     )
-                    await self.push_frame(OjinFirstFramePlayedFrame(), FrameDirection.UPSTREAM)
-                    await self.push_frame(OjinFirstFramePlayedFrame(), FrameDirection.DOWNSTREAM)
+                    await self.push_frame(OjinBotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+                    await self.push_frame(OjinBotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
                 # Check if this was the last speech frame
                 if (

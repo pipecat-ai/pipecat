@@ -10,9 +10,9 @@ from pipecat.services.ojin.tts import (
     OjinTTSServiceSettings,
 )
 from pipecat.services.ojin.video import (
+    OjinVideoInitializedFrame,
     OjinVideoService,
-    OjinVideoServiceInitializedFrame,
-    OjinVideoServiceSettings,
+    OjinVideoSettings,
 )
 
 __all__ = [
@@ -20,6 +20,6 @@ __all__ = [
     "OjinTTSServiceInitializedFrame",
     "OjinTTSServiceSettings",
     "OjinVideoService",
-    "OjinVideoServiceInitializedFrame",
-    "OjinVideoServiceSettings",
+    "OjinVideoInitializedFrame",
+    "OjinVideoSettings",
 ]

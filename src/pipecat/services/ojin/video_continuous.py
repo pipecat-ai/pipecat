@@ -81,7 +81,7 @@ class VideoFrame:
 
 
 @dataclass
-class OjinVideoContinuousSettings:
+class OjinVideoSettings:
     """Settings for Ojin Video Continuous Service."""
 
     api_key: str = field(default="")
@@ -97,7 +97,7 @@ class OjinVideoContinuousSettings:
     frame_debugging_enabled: bool = field(default=False)
 
 
-class OjinVideoContinuousService(FrameProcessor):
+class OjinVideoService(FrameProcessor):
     """Continuous audio streaming service.
 
     Sends TTS audio to the server on-demand:
@@ -108,11 +108,11 @@ class OjinVideoContinuousService(FrameProcessor):
 
     def __init__(
         self,
-        settings: OjinVideoContinuousSettings,
+        settings: OjinVideoSettings,
         client: IOjinClient | None = None,
     ) -> None:
         super().__init__()
-        logger.debug(f"OjinVideoContinuousService initialized with settings {settings}")
+        logger.debug(f"OjinVideoService initialized with settings {settings}")
 
         self._settings = settings
         if client is None:
@@ -148,7 +148,7 @@ class OjinVideoContinuousService(FrameProcessor):
         self._playback_task: Optional[asyncio.Task] = None
 
         # Server tracking
-        self._server_fps_tracker = FPSTracker("OjinVideoContinuousService")
+        self._server_fps_tracker = FPSTracker("OjinVideoService")
 
         # Frame timing
         self._frame_duration = 1.0 / self.fps
@@ -423,7 +423,7 @@ class OjinVideoContinuousService(FrameProcessor):
             await self._client.close()
             self._client = None
 
-        logger.debug(f"OjinVideoContinuousService {self._settings.config_id} stopped")
+        logger.debug(f"OjinVideoService {self._settings.config_id} stopped")
 
     async def _check_started_speaking(self):
         """Check if we should send StartedSpeaking frame."""
