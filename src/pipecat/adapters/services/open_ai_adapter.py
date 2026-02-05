@@ -25,7 +25,6 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
-from pipecat.utils.context.llm_context_summarization import LLMSummarizedMessage
 
 
 class OpenAILLMInvocationParams(TypedDict):
@@ -110,19 +109,6 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                 msg["data"] = "..."
             msgs.append(msg)
         return msgs
-
-    def format_summary_message(self, summary: str) -> LLMSummarizedMessage:
-        """Format a conversation summary as a system message for OpenAI.
-
-        Args:
-            summary: The raw summary text to format.
-
-        Returns:
-            LLMSummarizedMessage with 'system' role and formatted content.
-        """
-        return LLMSummarizedMessage(
-            role="system", content=f"Here's a summary of the conversation so far:\n{summary}"
-        )
 
     def _from_universal_context_messages(
         self, messages: List[LLMContextMessage]

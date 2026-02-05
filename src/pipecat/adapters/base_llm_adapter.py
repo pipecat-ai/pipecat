@@ -22,7 +22,6 @@ from pipecat.processors.aggregators.llm_context import (
     LLMSpecificMessage,
     NotGiven,
 )
-from pipecat.utils.context.llm_context_summarization import LLMSummarizedMessage
 
 # Should be a TypedDict
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=dict[str, Any])
@@ -89,22 +88,6 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         Returns:
             List of messages in a format ready for logging about this
             provider.
-        """
-        pass
-
-    @abstractmethod
-    def format_summary_message(self, summary: str) -> "LLMSummarizedMessage":
-        """Format a conversation summary as a message for this LLM provider.
-
-        Different providers require different message roles for summaries:
-        - OpenAI: Uses 'system' role
-        - Anthropic, Google, AWS: Use 'user' role
-
-        Args:
-            summary: The raw summary text to format.
-
-        Returns:
-            LLMSummarizedMessage with provider-appropriate role and formatted content.
         """
         pass
 

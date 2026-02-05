@@ -47,25 +47,6 @@ The conversation transcript follows. Generate only the summary, no other text.""
 
 
 @dataclass
-class LLMSummarizedMessage:
-    """A formatted summary message ready to be inserted into LLM context.
-
-    Contains a conversation summary formatted according to the LLM provider's
-    requirements. Different providers use different roles for summary messages:
-    - OpenAI: Uses 'system' role
-    - Anthropic, Google, AWS: Use 'user' role
-
-    Attributes:
-        role: The message role ('system' or 'user').
-        content: The formatted summary content including any provider-specific
-            wrapping text.
-    """
-
-    role: str
-    content: str
-
-
-@dataclass
 class LLMContextSummarizationConfig:
     """Configuration for context summarization behavior.
 
