@@ -570,7 +570,7 @@ class TestSummaryGenerationExceptions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["request_id"], "test_123")
         self.assertEqual(kwargs["summary"], "")
         self.assertEqual(kwargs["last_summarized_index"], -1)
-        self.assertEqual(kwargs["error"], "No messages to summarize")
+        self.assertEqual(kwargs["error"], "Error generating context summary: No messages to summarize")
 
         # Verify push_error was called
         llm_service.push_error.assert_called_once()
