@@ -501,7 +501,7 @@ class InworldTTSService(AudioContextWordTTSService):
 
         # Track cumulative time across generations for monotonic timestamps within a turn.
         # When auto_mode is enabled, the server controls generations and timestamps reset
-        # to 0 after each generation, as indicated by a "flushCompleted" message. We 
+        # to 0 after each generation, as indicated by a "flushCompleted" message. We
         # add _cumulative_time to maintain monotonically increasing timestamps.
         self._cumulative_time = 0.0
         # Track the end time of the last word in the current generation
