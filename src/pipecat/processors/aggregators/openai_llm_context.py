@@ -114,6 +114,7 @@ class OpenAILLMContext:
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
         self._tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = tools
         self._llm_adapter: Optional[BaseLLMAdapter] = None
+        self._reasoning_details_by_tool_call_id: Dict[str, List[Any]] = {}
 
     def get_llm_adapter(self) -> Optional[BaseLLMAdapter]:
         """Get the current LLM adapter.
@@ -207,6 +208,16 @@ class OpenAILLMContext:
             List of all messages in the conversation history.
         """
         return self._messages
+
+    def set_reasoning_details(self, tool_call_id: str, details: List[Any]):
+        if details:
+            self._reasoning_details_by_tool_call_id[tool_call_id] = details
+
+    def get_reasoning_details(self, tool_call_id: str) -> Optional[List[Any]]:
+        return self._reasoning_details_by_tool_call_id.get(tool_call_id)
+
+    def clear_reasoning_details(self, tool_call_id: str):
+        self._reasoning_details_by_tool_call_id.pop(tool_call_id, None)
 
     def get_messages_json(self) -> str:
         """Get messages as a formatted JSON string.
