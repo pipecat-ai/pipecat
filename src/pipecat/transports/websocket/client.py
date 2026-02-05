@@ -300,7 +300,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
         if isinstance(frame, InputAudioRawFrame) and self._params.audio_in_enabled:
             await self.push_audio_frame(frame)
         elif isinstance(frame, InputTransportMessageFrame):
-            await self.broadcast_frame(frame)
+            await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
         else:
             await self.push_frame(frame)
 
