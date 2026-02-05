@@ -38,7 +38,7 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
-    from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
+    from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -826,6 +826,25 @@ class LLMMessagesUpdateFrame(DataFrame):
     """
 
     messages: List[dict]
+    run_llm: Optional[bool] = None
+
+
+@dataclass
+class LLMMessagesTransformFrame(DataFrame):
+    """Frame containing a transform function to modify the current context's LLM messages.
+
+    A frame containing a transform function that takes the context's current list
+    of LLM messages and returns a modified list.
+
+    Only compatible with LLMContext and not the deprecated OpenAILLMContext.
+
+    Parameters:
+        transform: A function that takes a list of messages and returns a
+            modified list.
+        run_llm: Whether the context update should be sent to the LLM.
+    """
+
+    transform: Callable[[List["LLMContextMessage"]], List["LLMContextMessage"]]
     run_llm: Optional[bool] = None
 
 

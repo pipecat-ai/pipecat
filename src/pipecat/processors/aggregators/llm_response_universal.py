@@ -16,7 +16,7 @@ import json
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Set, Type
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Type
 
 from loguru import logger
 
@@ -40,6 +40,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
     LLMRunFrame,
     LLMSetToolChoiceFrame,
@@ -270,6 +271,17 @@ class LLMContextAggregator(FrameProcessor):
         """
         self._context.set_messages(messages)
 
+    def transform_messages(
+        self, transform: Callable[[List[LLMContextMessage]], List[LLMContextMessage]]
+    ):
+        """Transform the context messages using a provided function.
+
+        Args:
+            transform: A function that takes the current list of messages and returns
+                a modified list of messages to set in the context.
+        """
+        self._context.transform_messages(transform)
+
     def set_tools(self, tools: ToolsSchema | NotGiven):
         """Set tools in the context.
 
@@ -470,6 +482,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self._handle_llm_messages_append(frame)
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
+        elif isinstance(frame, LLMMessagesTransformFrame):
+            await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
             # Push the LLMSetToolsFrame as well, since some realtime (aka
@@ -596,6 +610,15 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
         self.set_messages(frame.messages)
+        # Mark the context as programmatically edited. This flag is stored as a
+        # runtime attribute on the shared context object so that both user and
+        # assistant aggregators can see it.
+        self._context._pipecat_messages_programmatically_edited = True
+        if frame.run_llm:
+            await self.push_context_frame()
+
+    async def _handle_llm_messages_transform(self, frame: LLMMessagesTransformFrame):
+        self.transform_messages(frame.transform)
         # Mark the context as programmatically edited. This flag is stored as a
         # runtime attribute on the shared context object so that both user and
         # assistant aggregators can see it.
@@ -888,6 +911,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_llm_messages_append(frame)
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
+        elif isinstance(frame, LLMMessagesTransformFrame):
+            await self._handle_llm_messages_transform(frame)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
@@ -943,6 +968,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Mark the context as programmatically edited. This flag is stored as
         # a runtime attribute on the shared context object so that both user
         # and assistant aggregators can see it.
+        self._context._pipecat_messages_programmatically_edited = True
+        if frame.run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
+
+    async def _handle_llm_messages_transform(self, frame: LLMMessagesTransformFrame):
+        self.transform_messages(frame.transform)
+        # Mark the context as programmatically edited. This flag is stored as a
+        # runtime attribute on the shared context object so that both user and
+        # assistant aggregators can see it.
         self._context._pipecat_messages_programmatically_edited = True
         if frame.run_llm:
             await self.push_context_frame(FrameDirection.UPSTREAM)
