@@ -84,7 +84,12 @@ class RawAudioTrack(AudioStreamTrack):
         Args:
             sample_rate: The audio sample rate in Hz.
             num_10ms_chunks: Number of 10ms chunks per output frame (default 1).
+
+        Raises:
+            ValueError: If num_10ms_chunks is not a positive integer.
         """
+        if num_10ms_chunks < 1:
+            raise ValueError(f"num_10ms_chunks must be a positive integer, got {num_10ms_chunks}")
         super().__init__()
         self._sample_rate = sample_rate
         self._num_10ms_chunks = num_10ms_chunks

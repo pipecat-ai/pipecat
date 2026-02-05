@@ -137,3 +137,17 @@ class TestRawAudioTrack:
         for sample_rate, num_chunks, expected_bytes in test_cases:
             track = RawAudioTrack(sample_rate=sample_rate, num_10ms_chunks=num_chunks)
             assert track._bytes_per_chunk == expected_bytes
+
+    def test_invalid_num_10ms_chunks_zero(self):
+        """Test that num_10ms_chunks=0 raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            RawAudioTrack(sample_rate=16000, num_10ms_chunks=0)
+
+        assert "positive integer" in str(exc_info.value)
+
+    def test_invalid_num_10ms_chunks_negative(self):
+        """Test that negative num_10ms_chunks raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            RawAudioTrack(sample_rate=16000, num_10ms_chunks=-1)
+
+        assert "positive integer" in str(exc_info.value)
