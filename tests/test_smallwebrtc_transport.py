@@ -115,15 +115,16 @@ class TestRawAudioTrack:
         num_chunks = 4  # 40ms
         track = RawAudioTrack(sample_rate=sample_rate, num_10ms_chunks=num_chunks)
 
-        # Initial timestamp should be 0
-        assert track._timestamp == 0
+        # Receive first frame and check its timestamp
+        frame1 = await track.recv()
+        first_pts = frame1.pts
 
-        # Receive one frame (silence is fine)
-        await track.recv()
+        # Receive second frame
+        frame2 = await track.recv()
 
-        # Timestamp should advance by samples_per_chunk
+        # Timestamp should advance by samples_per_chunk between frames
         expected_samples = int(sample_rate * 40 / 1000)  # 640 samples
-        assert track._timestamp == expected_samples
+        assert frame2.pts - first_pts == expected_samples
 
     def test_different_sample_rates(self):
         """Test chunk size calculation at different sample rates."""
