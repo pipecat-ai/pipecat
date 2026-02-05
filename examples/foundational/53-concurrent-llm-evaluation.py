@@ -12,7 +12,6 @@ from loguru import logger
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
@@ -95,7 +94,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # across multiple parallel aggregators. The VADProcessor emits
     # VADUserStartedSpeakingFrame and VADUserStoppedSpeakingFrame which the
     # UserTurnProcessor needs to manage turn lifecycle.
-    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)))
+    vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
 
     # We use this external user turn processor. This processor will push
     # UserStartedSpeakingFrame and UserStoppedSpeakingFrame as well as
