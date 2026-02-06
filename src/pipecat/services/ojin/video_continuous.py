@@ -66,7 +66,7 @@ class OjinBotStoppedSpeakingFrame(Frame):
 
 
 OJIN_PERSONA_SAMPLE_RATE = 16000
-SPEECH_FILTER_AMOUNT = 5.0
+SPEECH_FILTER_AMOUNT = 0.1
 SPEECH_MOUTH_OPENING_SCALE = 1.0
 
 
@@ -321,6 +321,7 @@ class OjinVideoService(FrameProcessor):
         start_ts = time.perf_counter()
         next_frame_time = start_ts + self._frame_duration
         initial_buffer_filled = False
+        is_silence = False
         while True:
             # Check speaking state notifications
             await self._check_started_speaking()
@@ -343,7 +344,7 @@ class OjinVideoService(FrameProcessor):
             next_frame_time += self._frame_duration
 
             if not initial_buffer_filled:
-                if len(self._video_frames) >= 12:
+                if len(self._video_frames) >= 7:
                     initial_buffer_filled = True
                 else:
                     continue
@@ -358,7 +359,7 @@ class OjinVideoService(FrameProcessor):
                 image_bytes = video_frame.image_bytes
                 audio_bytes = video_frame.audio_bytes if video_frame.audio_bytes else silence_audio
                 self._last_played_image_bytes = image_bytes
-
+                is_silence = False
                 if self._settings.frame_debugging_enabled:
                     logger.debug(
                         f"Playing video frame {video_frame.frame_idx}, buffer left: {len(self._video_frames)}"
@@ -368,7 +369,7 @@ class OjinVideoService(FrameProcessor):
                 # Repeat last frame to avoid stutter
                 logger.debug("frame miss")
                 image_bytes = self._last_played_image_bytes
-
+                is_silence = True
             else:
                 # No frame to show yet - just continue
                 continue
@@ -382,10 +383,11 @@ class OjinVideoService(FrameProcessor):
             #     next_frame_time += 0.01
             #     logger.debug("Slowing down to fill up buffer")
 
-            if len(self._video_frames) > 12 and audio_bytes == silence_audio:
-                next_frame_time -= 0.01
+            if len(self._video_frames) > 7 and is_silence:
+                speedup = min((len(self._video_frames) - 7) / 50.0, 0.15)  # Limit to 15% speedup
+                next_frame_time -= speedup
                 logger.debug(
-                    f"Speeding up to catch up buffer: {len(self._video_frames)}, target: 12"
+                    f"Speeding up to catch up buffer: {len(self._video_frames)}, target: 7"
                 )
 
             if image_bytes:
