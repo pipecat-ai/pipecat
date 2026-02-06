@@ -195,7 +195,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(...)
 
     context = LLMContext(messages)
-    user_agg, assistant_agg = LLMContextAggregatorPair(...)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(...)
 
     pipeline = Pipeline([...])
     task = PipelineTask(pipeline, params=..., observers=[...])
