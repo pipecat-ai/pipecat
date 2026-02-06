@@ -97,7 +97,7 @@ class AnamVideoService(AIService):
             session: HTTP client session for API requests.
             api_base_url: Base URL for the Anam API.
             ice_servers: Custom ICE servers for WebRTC (optional).
-            enable_turnkey: Whether to enable turnkey mode for all-in-one solutions.
+            enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
             **kwargs: Additional arguments passed to parent AIService.
         """
         super().__init__(**kwargs)
