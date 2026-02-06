@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.stt_latency import DEEPGRAM_FLUX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -117,7 +116,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         flux_encoding: str = "linear16",
         params: Optional[InputParams] = None,
         should_interrupt: bool = True,
-        ttfs_p99_latency: Optional[float] = DEEPGRAM_FLUX_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT service.
@@ -132,8 +130,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             params: InputParams instance containing detailed API configuration options.
                 If None, default parameters will be used.
             should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
-            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
-                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent WebsocketSTTService class.
 
         Examples:
@@ -168,7 +164,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         super().__init__(
             sample_rate=sample_rate,
             reconnect_on_error=False,
-            ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
 
