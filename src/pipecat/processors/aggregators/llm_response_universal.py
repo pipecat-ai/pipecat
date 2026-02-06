@@ -842,7 +842,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 f"{messages_since_summary} messages (>={self._summarization_config.max_unsummarized_messages} threshold)"
             )
 
-        logger.info(f"{self}: ✓ Summarization needed - {', '.join(reason)}")
+        logger.debug(f"{self}: ✓ Summarization needed - {', '.join(reason)}")
         return True
 
     async def _request_summarization(self):
@@ -957,7 +957,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # Create summary message using provider-formatted summary
         summary_message = {
             "role": "system",
-            "content": f"Here's a summary of the conversation so far:\n{summary}",
+            "content": f"Conversation summary:\n{summary}",
         }
 
         # Rebuild context using last_summarized_index
