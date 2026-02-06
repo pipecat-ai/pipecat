@@ -351,8 +351,8 @@ class AnamVideoService(AIService):
     async def _on_connection_established(self) -> None:
         """Handle connection established event.
 
-        Audio pushed before this point has been discarded.
-        Synchronise with live point by flushing stale audio in prior buffers here.
+        Audio pushed before this point has been discarded in the SDK to limit latency build up.
+        Synchronise with live point by flushing stale audio in prior buffers here, if necessary.
         """
         logger.info("Anam connection established")
 
@@ -426,7 +426,7 @@ class AnamVideoService(AIService):
             frame: The user audio frame to process (InputAudioRawFrame).
             direction: The direction of frame processing.
         """
-        if self._client is None:
+        if self._client is None or self._client._streaming_client is None:
             return
 
         try:
