@@ -11,6 +11,7 @@ including data frames, system frames, and control frames for audio, video, text,
 and LLM processing.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -1118,15 +1119,29 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
 
 @dataclass
 class InterruptionFrame(SystemFrame):
-    """Frame indicating user started speaking (interruption detected).
+    """Frame pushed to interrupt the pipeline.
 
-    Emitted by the BaseInputTransport to indicate that a user has started
-    speaking (i.e. is interrupting). This is similar to
-    UserStartedSpeakingFrame except that it should be pushed concurrently
-    with other frames (so the order is not guaranteed).
+    This frame is used to interrupt the pipeline. For example, when a user
+    starts speaking to cancel any in-progress bot output. It can also be pushed
+    by any processor.
+
+    Parameters:
+        event: Optional event set when the frame has fully traversed the
+            pipeline.
+
     """
 
-    pass
+    event: Optional[asyncio.Event] = None
+
+    def complete(self):
+        """Signal that this interruption has been fully processed.
+
+        Called automatically when the frame reaches the pipeline sink, or
+        manually when the frame is consumed before reaching it (e.g. when
+        the user is muted).
+        """
+        if self.event:
+            self.event.set()
 
 
 @dataclass
@@ -1706,15 +1721,19 @@ class StopTaskFrame(TaskFrame):
 
 @dataclass
 class InterruptionTaskFrame(TaskFrame):
-    """Frame indicating the bot should be interrupted.
+    """Frame indicating the pipeline should be interrupted.
 
-    Emitted when the bot should be interrupted. This will mainly cause the
-    same actions as if the user interrupted except that the
-    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
-    This frame should be pushed upstream.
+    This frame should be pushed upstream to indicate the pipeline should be
+    interrupted. The pipeline task converts this into an `InterruptionFrame` and
+    sends it downstream. The `event` is passed to the `InterruptionFrame` so it
+    can signal when the interruption has fully traversed the pipeline.
+
+    Parameters:
+        event: Optional event passed to the corresponding `InterruptionFrame`.
+
     """
 
-    pass
+    event: Optional[asyncio.Event] = None
 
 
 @dataclass
