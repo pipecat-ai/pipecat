@@ -406,11 +406,10 @@ class TestServiceSwitcherMetadata(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=[],
         )
 
-        # Both services should have pushed metadata internally (in response to
-        # StartFrame), but only the active service's metadata should have been
-        # requested via RequestMetadataFrame after startup completed
-        self.assertEqual(self.service1.metadata_push_count, 2)  # StartFrame + RequestMetadataFrame
-        self.assertEqual(self.service2.metadata_push_count, 1)  # Only StartFrame (blocked)
+        # Both services push metadata internally on StartFrame, but only the
+        # active service's metadata passes through the filter
+        self.assertEqual(self.service1.metadata_push_count, 1)  # StartFrame (passes filter)
+        self.assertEqual(self.service2.metadata_push_count, 1)  # StartFrame (blocked by filter)
 
     async def test_metadata_emitted_on_service_switch(self):
         """Test that switching services triggers metadata emission from the new active service."""

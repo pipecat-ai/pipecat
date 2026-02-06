@@ -16,7 +16,6 @@ from pipecat.frames.frames import (
     RequestMetadataFrame,
     ServiceMetadataFrame,
     ServiceSwitcherFrame,
-    StartFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
@@ -128,8 +127,15 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     class ServiceSwitcherFilter(FunctionFilter):
         """An internal filter that gates frame flow based on active service.
 
-        Two filters "sandwich" each service (one upstream, one downstream),
-        allowing frames through only when the wrapped service is active.
+        Two filters "sandwich" each service, allowing frames through only
+        when the wrapped service is active. The pipeline layout is::
+
+            DownstreamFilter → Service → UpstreamFilter
+
+        The filter names refer to which *direction* of frame flow they
+        filter, not their physical position: the downstream filter sits
+        *before* the service (filtering frames flowing into it) and the
+        upstream filter sits *after* it (filtering frames flowing back out).
         """
 
         def __init__(
@@ -143,11 +149,12 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             Args:
                 wrapped_service: The service that this filter wraps.
                 active_service: The currently active service.
-                direction: The direction of frame flow to filter.
+                direction: The direction of frame flow this filter gates
+                    (DOWNSTREAM for the filter before the service,
+                    UPSTREAM for the filter after it).
             """
             self._wrapped_service = wrapped_service
             self._active_service = active_service
-            self._startup_complete = False
 
             async def filter(_: Frame) -> bool:
                 return self._wrapped_service == self._active_service
@@ -158,40 +165,39 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             """Process a frame through the filter, handling special internal filter-updating frames."""
             if isinstance(frame, ServiceSwitcher.ServiceSwitcherFilterFrame):
                 old_active = self._active_service
-                old_startup_complete = self._startup_complete
                 self._active_service = frame.active_service
-                self._startup_complete = True  # True after StartFrame is released
-                # Two ServiceSwitcherFilters "sandwich" a service. Push the
-                # frame only to update the other side of the sandwich, but
-                # otherwise don't let it leave the sandwich.
+                # Two ServiceSwitcherFilters "sandwich" a service. The
+                # frame enters via the downstream filter first. Push it
+                # through so the upstream filter also updates its state.
                 if direction == self._direction:
                     await self.push_frame(frame, direction)
-                # If this is the upstream filter for the active service, request
-                # a metadata broadcast from the service when: (1) startup just
-                # completed, or (2) service became active. Startup triggers metadata
-                # request because ParallelPipeline synchronizes StartFrame release,
-                # so we must request metadata after to maintain ordering for downstream
-                # processors.
+                # This is the upstream filter (the second to update). At
+                # this point both filters know the new active service, so
+                # it's safe to request metadata — the resulting
+                # ServiceMetadataFrame will pass both filters on its way
+                # out. Only do this for the newly active service's sandwich.
                 elif (
                     self._direction == FrameDirection.UPSTREAM
                     and self._wrapped_service == frame.active_service
-                    and (not old_startup_complete or old_active != self._wrapped_service)
+                    and old_active != self._wrapped_service
                 ):
                     await self.push_frame(RequestMetadataFrame(), FrameDirection.UPSTREAM)
                 return
 
-            # RequestMetadataFrame is internal to ServiceSwitcher - only let it
-            # through to the active service and don't let it leave.
+            # RequestMetadataFrame is pushed upstream by the upstream filter
+            # (above) and consumed by the service. Guard against services
+            # that don't consume it: only forward in the filter's own
+            # direction (so it can reach the service) and only for the
+            # active service. Block in all other cases to prevent it from
+            # escaping the sandwich.
             if isinstance(frame, RequestMetadataFrame):
                 if direction == self._direction and self._wrapped_service == self._active_service:
                     await self.push_frame(frame, direction)
                 return
 
-            # Special case: ServiceMetadataFrame must be filtered in BOTH directions.
-            # Block if: (1) from inactive service, or (2) during startup (before
-            # StartFrame is released) to prevent ordering issues.
+            # Block ServiceMetadataFrame from inactive services.
             if isinstance(frame, ServiceMetadataFrame):
-                if self._wrapped_service != self._active_service or not self._startup_complete:
+                if self._wrapped_service != self._active_service:
                     return
                 await self.push_frame(frame, direction)
                 return
@@ -200,11 +206,11 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
     @dataclass
     class ServiceSwitcherFilterFrame(ControlFrame):
-        """An internal frame used to update filter state.
+        """An internal frame used to update filter state on service switch.
 
-        Sent on startup (after StartFrame is released) and on service switch.
-        Updates active service and marks startup as complete, then triggers
-        metadata emission from the active service.
+        Sent when a service switch occurs to update the active service in
+        the sandwich filters and trigger metadata emission from the newly
+        active service.
         """
 
         active_service: FrameProcessor
@@ -222,6 +228,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     def _make_pipeline_definition(
         service: FrameProcessor, strategy: ServiceSwitcherStrategy
     ) -> Any:
+        # Layout: DownstreamFilter → Service → UpstreamFilter
         return [
             ServiceSwitcher.ServiceSwitcherFilter(
                 wrapped_service=service,
@@ -235,25 +242,6 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                 direction=FrameDirection.UPSTREAM,
             ),
         ]
-
-    async def _parallel_push_frame(self, frame: Frame, direction: FrameDirection):
-        """Push frames while handling StartFrame completion for metadata ordering.
-
-        When StartFrame is released (after all branches have processed it),
-        we send a filter frame to mark startup as complete and trigger metadata
-        emission. This ensures ServiceMetadataFrame arrives after StartFrame.
-        """
-        await super()._parallel_push_frame(frame, direction)
-
-        if isinstance(frame, StartFrame):
-            # StartFrame has been released. Send filter frame to mark startup
-            # complete and trigger metadata from the active service.
-            await super().process_frame(
-                ServiceSwitcher.ServiceSwitcherFilterFrame(
-                    active_service=self.strategy.active_service
-                ),
-                FrameDirection.DOWNSTREAM,
-            )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame, handling frames which affect service switching.

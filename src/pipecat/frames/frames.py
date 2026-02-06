@@ -1699,7 +1699,7 @@ class STTMetadataFrame(ServiceMetadataFrame):
 
 
 @dataclass
-class RequestMetadataFrame(SystemFrame):
+class RequestMetadataFrame(ControlFrame):
     """Request services to re-emit their metadata frames.
 
     Used by ServiceSwitcher when switching active services to ensure
