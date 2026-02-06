@@ -91,7 +91,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
-        avatar_id = os.getenv("ANAM_AVATAR_ID").strip().strip('"')
+        avatar_id = os.getenv("ANAM_AVATAR_ID", "").strip().strip('"')
         logger.info(f"Avatar ID: {avatar_id}")
         logger.info(f"Persona config: {PersonaConfig(avatar_id=avatar_id)}")
 
@@ -100,6 +100,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             persona_config=PersonaConfig(avatar_id=avatar_id),
             session=session,
             api_base_url="https://api.anam.ai",
+            api_version="v1",
         )
         logger.info(f"{anam}")
 
@@ -129,7 +130,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
-                anam,  # Turnkey Avatar
+                anam,  # Video Avatar (returns synchronised audio/video)
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]

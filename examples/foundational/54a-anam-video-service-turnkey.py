@@ -81,9 +81,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         anam = AnamVideoService(
             api_key=os.getenv("ANAM_API_KEY"),
+            enable_turnkey=True,
             persona_config=PersonaConfig(persona_id=persona_id),
             session=session,
             api_base_url="https://api.anam.ai",
+            api_version="v1",
         )
         logger.info(f"{anam}")
 
@@ -109,7 +111,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                anam,  # Turnkey Avatar
+                anam,  # Video Avatar (sends user audio to Anam and returns synchronised audio/video)
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]

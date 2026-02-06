@@ -64,7 +64,7 @@ class AnamVideoService(AIService):
     - Real-time avatar animation based on audio input
     - Voice activity detection for natural interactions
     - Interrupt handling for more natural conversations
-    - Audio resampling for optimal quality
+    - Audio resampling for optimal playback quality
     - Automatic session management
 
     Args:
@@ -72,8 +72,10 @@ class AnamVideoService(AIService):
         persona_id: ID of the persona to use (simple setup).
         persona_config: Full persona configuration (advanced setup).
         session: HTTP client session for API requests.
+        ice_servers: Custom ICE servers for WebRTC (optional).\
+        enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
         api_base_url: Base URL for the Anam API.
-        ice_servers: Custom ICE servers for WebRTC (optional).
+        api_version: API version to use.
     """
 
     def __init__(
@@ -83,8 +85,10 @@ class AnamVideoService(AIService):
         persona_id: Optional[str] = None,
         persona_config: Optional[PersonaConfig] = None,
         session: aiohttp.ClientSession,
-        api_base_url: Optional[str] = None,
         ice_servers: Optional[list[dict]] = None,
+        enable_turnkey: bool = False,
+        api_base_url: Optional[str] = None,
+        api_version: Optional[str] = None,
         **kwargs,
     ) -> None:
         """Initialize the Anam video service.
@@ -94,8 +98,10 @@ class AnamVideoService(AIService):
             persona_id: ID of the persona to use (simple setup).
             persona_config: Full persona configuration (advanced setup).
             session: HTTP client session for API requests.
-            api_base_url: Base URL for the Anam API.
             ice_servers: Custom ICE servers for WebRTC (optional).
+            enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
+            api_base_url: Base URL for the Anam API.
+            api_version: API version to use.
             **kwargs: Additional arguments passed to parent AIService.
         """
         super().__init__(**kwargs)
@@ -103,8 +109,10 @@ class AnamVideoService(AIService):
         self._session = session
         self._persona_id = persona_id
         self._persona_config = persona_config
-        self._api_base_url = api_base_url
         self._ice_servers = ice_servers
+        self._is_turnkey_session = enable_turnkey
+        self._api_base_url = api_base_url
+        self._api_version = api_version
 
         self._client: Optional[AnamClient] = None
         self._anam_session = None
@@ -141,11 +149,10 @@ class AnamVideoService(AIService):
 
         # Create client options
         # Enable audio input for turnkey solutions (Anam handles STT)
-        # disable_input_audio=False allows sending audio via send_user_audio()
         options = ClientOptions(
-            disable_input_audio=False,  # Enable audio input for send_user_audio()
             api_base_url=self._api_base_url or "https://api.anam.ai",
             ice_servers=self._ice_servers,
+            api_version=self._api_version,
         )
 
         # Initialize Anam client
@@ -243,7 +250,8 @@ class AnamVideoService(AIService):
         - StartFrame: Forwards after initialization
         - EndFrame: Forwards after cleanup
         - CancelFrame: Forwards after cancellation
-        - TTSAudioRawFrame: Processes audio for avatar speech
+        - TTSAudioRawFrame: Processes audio for avatar speech (not pushed downstream)
+        - InputAudioRawFrame: Processes user audio (not pushed downstream for turnkey)
         - InterruptionFrame: Handles interruptions
         - Other frames: Forwards them through the pipeline
 
@@ -252,34 +260,29 @@ class AnamVideoService(AIService):
             direction: The direction of frame processing (input/output).
         """
         await super().process_frame(frame, direction)
-        # TODO: SEB clean up this mess.
 
-        if isinstance(frame, StartFrame):
-            # StartFrame is handled by super().process_frame() which calls start(),
-            # but we need to forward it downstream so the transport receives it
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            # EndFrame and CancelFrame are handled by super().process_frame() which calls
-            # stop()/cancel(), but we need to forward them downstream
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, InterruptionFrame):
-            await self._handle_interruption()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSAudioRawFrame):
+        # Handle frames that should not be pushed downstream
+        if isinstance(frame, TTSAudioRawFrame):
+            # Anam synchronises TTS with video frames for synchronised playback.
             await self._handle_audio_frame(frame)
-        elif isinstance(frame, InputAudioRawFrame):
+            return
+
+        if isinstance(frame, InputAudioRawFrame) and self._is_turnkey_session:
+            # Anam handles STT internally, so don't push raw audio downstream for turnkey sessions.
             await self._handle_user_audio_frame(frame, direction)
-        elif isinstance(frame, OutputTransportReadyFrame):
-            # Mark transport as ready so we can start sending video/audio frames
+            return
+
+        # Handle frames that need processing before being pushed downstream
+        if isinstance(frame, InterruptionFrame):
+            await self._handle_interruption()
+        if isinstance(frame, OutputTransportReadyFrame):
             self._transport_ready = True
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSStartedFrame):
+        if isinstance(frame, TTSStartedFrame):
             await self.start_ttfb_metrics()
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            # We constantly receive audio through WebRTC, but most of the time it is silence.
-            # As soon as we receive actual audio, the base output transport will create a
-            # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
+        if isinstance(frame, BotStartedSpeakingFrame):
             await self.stop_ttfb_metrics()
+
+        # Push frames downstream
         await self.push_frame(frame, direction)
 
     def can_generate_metrics(self) -> bool:
@@ -346,7 +349,11 @@ class AnamVideoService(AIService):
             self._audio_task = None
 
     async def _on_connection_established(self) -> None:
-        """Handle connection established event."""
+        """Handle connection established event.
+
+        Audio pushed before this point has been discarded in the SDK to limit latency build up.
+        Synchronise with live point by flushing stale audio in prior buffers here, if necessary.
+        """
         logger.info("Anam connection established")
 
     async def _on_connection_closed(self, code: str, reason: Optional[str]) -> None:
@@ -419,13 +426,11 @@ class AnamVideoService(AIService):
             frame: The user audio frame to process (InputAudioRawFrame).
             direction: The direction of frame processing.
         """
-        if not self._client or not self._client._streaming_client:
-            logger.warning("Anam client not initialized - cannot send user audio")
+        if self._client is None or self._client._streaming_client is None:
             return
 
         try:
-            # Send raw audio samples directly to SDK
-            # SDK handles resampling/conversion to WebRTC format (48kHz mono)
+            # Send raw audio samples to SDK for WebRTC transport to Anam's service
             self._client._streaming_client.send_user_audio(
                 audio_bytes=frame.audio,
                 sample_rate=frame.sample_rate,
