@@ -27,6 +27,10 @@ uv run pytest tests/test_name.py::test_function_name
 # Preview changelog
 towncrier build --draft --version Unreleased
 
+# Lint and format check
+uv run ruff check
+uv run ruff format --check
+
 # Update dependencies (after editing pyproject.toml)
 uv lock && uv sync
 ```
@@ -122,24 +126,6 @@ class MyService(LLMService):
         super().__init__(**kwargs)
 ```
 
-## Changelog
-
-Every user-facing PR needs a changelog fragment in `changelog/`:
-
-```
-changelog/<PR_number>.<type>.md
-```
-
-Types: `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`, `other`
-
-Content format (include the `-`):
-
-```markdown
-- Added support for new feature X.
-```
-
-Skip changelog for: documentation-only, internal refactoring, test-only, CI changes.
-
 ## Service Implementation
 
 When adding a new service:
@@ -151,3 +137,7 @@ When adding a new service:
 5. Push `ErrorFrame` on failures
 6. Add metrics tracking via `MetricsData` if relevant
 7. Follow the pattern of existing services in `src/pipecat/services/`
+
+## Pull Requests
+
+After creating a PR, use `/changelog <pr_number>` to generate the changelog file and `/pr-description <pr_number>` to update the PR description.
