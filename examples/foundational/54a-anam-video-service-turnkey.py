@@ -111,7 +111,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                anam,  # Turnkey Avatar
+                anam,  # Video Avatar (sends user audio to Anam and returns synchronised audio/video)
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]

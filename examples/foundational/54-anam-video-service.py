@@ -130,7 +130,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
-                anam,  #  Avatar
+                anam,  # Video Avatar (returns synchronised audio/video)
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]

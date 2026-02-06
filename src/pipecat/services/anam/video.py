@@ -72,8 +72,10 @@ class AnamVideoService(AIService):
         persona_id: ID of the persona to use (simple setup).
         persona_config: Full persona configuration (advanced setup).
         session: HTTP client session for API requests.
+        ice_servers: Custom ICE servers for WebRTC (optional).\
+        enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
         api_base_url: Base URL for the Anam API.
-        ice_servers: Custom ICE servers for WebRTC (optional).
+        api_version: API version to use.
     """
 
     def __init__(
@@ -83,9 +85,10 @@ class AnamVideoService(AIService):
         persona_id: Optional[str] = None,
         persona_config: Optional[PersonaConfig] = None,
         session: aiohttp.ClientSession,
-        api_base_url: Optional[str] = None,
         ice_servers: Optional[list[dict]] = None,
         enable_turnkey: bool = False,
+        api_base_url: Optional[str] = None,
+        api_version: Optional[str] = None,
         **kwargs,
     ) -> None:
         """Initialize the Anam video service.
@@ -95,9 +98,10 @@ class AnamVideoService(AIService):
             persona_id: ID of the persona to use (simple setup).
             persona_config: Full persona configuration (advanced setup).
             session: HTTP client session for API requests.
-            api_base_url: Base URL for the Anam API.
             ice_servers: Custom ICE servers for WebRTC (optional).
             enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
+            api_base_url: Base URL for the Anam API.
+            api_version: API version to use.
             **kwargs: Additional arguments passed to parent AIService.
         """
         super().__init__(**kwargs)
@@ -105,9 +109,10 @@ class AnamVideoService(AIService):
         self._session = session
         self._persona_id = persona_id
         self._persona_config = persona_config
-        self._api_base_url = api_base_url
         self._ice_servers = ice_servers
         self._is_turnkey_session = enable_turnkey
+        self._api_base_url = api_base_url
+        self._api_version = api_version
 
         self._client: Optional[AnamClient] = None
         self._anam_session = None
@@ -147,6 +152,7 @@ class AnamVideoService(AIService):
         options = ClientOptions(
             api_base_url=self._api_base_url or "https://api.anam.ai",
             ice_servers=self._ice_servers,
+            api_version=self._api_version,
         )
 
         # Initialize Anam client
@@ -346,7 +352,7 @@ class AnamVideoService(AIService):
         """Handle connection established event.
 
         Audio pushed before this point has been discarded.
-        Synchronise with live piont by flushing stale audio in prior buffers here.
+        Synchronise with live point by flushing stale audio in prior buffers here.
         """
         logger.info("Anam connection established")
 
