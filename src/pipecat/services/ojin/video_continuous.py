@@ -336,6 +336,10 @@ class OjinVideoService(FrameProcessor):
             while time.perf_counter() < next_frame_time:
                 pass
 
+            silence_audio = b"\x00" * int(
+                self._audio_bytes_per_frame * (time.perf_counter() - now) / self._frame_duration
+            )
+
             next_frame_time += self._frame_duration
 
             if not initial_buffer_filled:
