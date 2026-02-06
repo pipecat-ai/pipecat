@@ -53,7 +53,7 @@ class LLMContextSummarizationConfig:
     Controls when and how conversation context is automatically compressed
     to manage token limits in long-running conversations.
 
-    Attributes:
+    Parameters:
         max_context_tokens: Maximum allowed context size in tokens. When this
             limit is reached, summarization is triggered to compress the context.
         max_unsummarized_messages: Maximum number of new messages that can
@@ -95,7 +95,7 @@ class LLMContextSummarizationConfig:
 class LLMMessagesToSummarize:
     """Result of get_messages_to_summarize operation.
 
-    Attributes:
+    Parameters:
         messages: Messages to include in the summary
         last_summarized_index: Index of the last message being summarized
     """

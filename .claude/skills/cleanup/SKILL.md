@@ -244,7 +244,7 @@ def get_audio_info(self) -> Tuple[int, int]:
 class AudioInfo:
     """Audio configuration information.
 
-    Attributes:
+    Parameters:
         sample_rate: Sample rate in Hz.
         num_channels: Number of audio channels.
     """
