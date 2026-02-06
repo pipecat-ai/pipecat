@@ -64,7 +64,7 @@ class AnamVideoService(AIService):
     - Real-time avatar animation based on audio input
     - Voice activity detection for natural interactions
     - Interrupt handling for more natural conversations
-    - Audio resampling for optimal quality
+    - Audio resampling for optimal playback quality
     - Automatic session management
 
     Args:
@@ -85,6 +85,7 @@ class AnamVideoService(AIService):
         session: aiohttp.ClientSession,
         api_base_url: Optional[str] = None,
         ice_servers: Optional[list[dict]] = None,
+        enable_turnkey: bool = False,
         **kwargs,
     ) -> None:
         """Initialize the Anam video service.
@@ -96,6 +97,7 @@ class AnamVideoService(AIService):
             session: HTTP client session for API requests.
             api_base_url: Base URL for the Anam API.
             ice_servers: Custom ICE servers for WebRTC (optional).
+            enable_turnkey: Whether to enable turnkey mode for all-in-one solutions.
             **kwargs: Additional arguments passed to parent AIService.
         """
         super().__init__(**kwargs)
@@ -105,6 +107,7 @@ class AnamVideoService(AIService):
         self._persona_config = persona_config
         self._api_base_url = api_base_url
         self._ice_servers = ice_servers
+        self._is_turnkey_session = enable_turnkey
 
         self._client: Optional[AnamClient] = None
         self._anam_session = None
@@ -258,8 +261,8 @@ class AnamVideoService(AIService):
             await self._handle_audio_frame(frame)
             return
 
-        if isinstance(frame, InputAudioRawFrame):
-            # Anam handles STT internally, so downstream processors don't need raw audio.
+        if isinstance(frame, InputAudioRawFrame) and self._is_turnkey_session:
+            # Anam handles STT internally, so don't push raw audio downstream for turnkey sessions.
             await self._handle_user_audio_frame(frame, direction)
             return
 

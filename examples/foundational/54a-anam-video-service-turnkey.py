@@ -81,6 +81,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         anam = AnamVideoService(
             api_key=os.getenv("ANAM_API_KEY"),
+            enable_turnkey=True,
             persona_config=PersonaConfig(persona_id=persona_id),
             session=session,
             api_base_url="https://api.anam.ai",
