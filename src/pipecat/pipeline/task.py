@@ -864,7 +864,7 @@ class PipelineTask(BasePipelineTask):
             # pipeline. This is in case the push task is blocked waiting for a
             # pipeline-ending frame to finish traversing the pipeline.
             logger.debug(f"{self}: received interruption task frame {frame}")
-            await self._pipeline.queue_frame(InterruptionFrame())
+            await self._pipeline.queue_frame(InterruptionFrame(event=frame.event))
         elif isinstance(frame, ErrorFrame):
             await self._call_event_handler("on_pipeline_error", frame)
             if frame.fatal:
@@ -903,6 +903,8 @@ class PipelineTask(BasePipelineTask):
             self._pipeline_end_event.set()
         elif isinstance(frame, CancelFrame):
             self._pipeline_end_event.set()
+        elif isinstance(frame, InterruptionFrame):
+            frame.complete()
         elif isinstance(frame, HeartbeatFrame):
             await self._heartbeat_queue.put(frame)
 
