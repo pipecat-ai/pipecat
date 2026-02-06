@@ -394,7 +394,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         item = events.ConversationItem(
             type="function_call_output",
             call_id=frame.tool_call_id,
-            output=json.dumps(frame.result),
+            output=json.dumps(frame.result, ensure_ascii=False),
         )
         await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 
