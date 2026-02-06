@@ -1270,9 +1270,15 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
 @dataclass
 class VADUserStartedSpeakingFrame(SystemFrame):
-    """Frame emitted when VAD definitively detects user started speaking."""
+    """Frame emitted when VAD definitively detects user started speaking.
 
-    pass
+    Parameters:
+        start_secs: The VAD start_secs duration that was used to confirm the user
+            started speaking. This represents the speech duration that had to
+            elapse before the VAD determined speech began.
+    """
+
+    start_secs: float = 0.0
 
 
 @dataclass

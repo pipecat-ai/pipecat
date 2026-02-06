@@ -96,8 +96,6 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self._start(frame)
         elif isinstance(frame, STTMetadataFrame):
             self._stt_timeout = frame.ttfs_p99_latency
-        elif isinstance(frame, SpeechControlParamsFrame):
-            await self._handle_speech_control_params(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
@@ -112,15 +110,6 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._turn_analyzer.set_sample_rate(frame.audio_in_sample_rate)
         await self.broadcast_frame(SpeechControlParamsFrame, turn_params=self._turn_analyzer.params)
 
-    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
-        """Handle speech control parameters for VAD and turn analyzer configuration.
-
-        Updates the turn analyzer with VAD start delay.
-        """
-        if frame.vad_params:
-            # Sync Smart Turn pre-speech buffering with VAD start delay
-            self._turn_analyzer.update_vad_start_secs(frame.vad_params.start_secs)
-
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""
         state = self._turn_analyzer.append_audio(frame.audio, self._vad_user_speaking)
@@ -132,8 +121,10 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             self._turn_complete = True
             await self._maybe_trigger_user_turn_stopped()
 
-    async def _handle_vad_user_started_speaking(self, _: VADUserStartedSpeakingFrame):
+    async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle when the VAD indicates the user is speaking."""
+        # Sync Smart Turn pre-speech buffering with VAD start delay
+        self._turn_analyzer.update_vad_start_secs(frame.start_secs)
         self._turn_complete = False
         self._vad_user_speaking = True
         self._vad_stopped_time = None

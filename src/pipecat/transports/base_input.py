@@ -497,7 +497,12 @@ class BaseInputTransport(FrameProcessor):
             and new_vad_state != VADState.STOPPING
         ):
             if new_vad_state == VADState.SPEAKING:
-                await self.push_frame(VADUserStartedSpeakingFrame())
+                start_secs = (
+                    self._params.vad_analyzer.params.start_secs
+                    if self._params.vad_analyzer
+                    else 0.0
+                )
+                await self.push_frame(VADUserStartedSpeakingFrame(start_secs=start_secs))
             elif new_vad_state == VADState.QUIET:
                 stop_secs = (
                     self._params.vad_analyzer.params.stop_secs if self._params.vad_analyzer else 0.0
@@ -582,7 +587,12 @@ class BaseInputTransport(FrameProcessor):
                 or not self._params.turn_analyzer.speech_triggered
             )
             if new_vad_state == VADState.SPEAKING:
-                await self.push_frame(VADUserStartedSpeakingFrame())
+                start_secs = (
+                    self._params.vad_analyzer.params.start_secs
+                    if self._params.vad_analyzer
+                    else 0.0
+                )
+                await self.push_frame(VADUserStartedSpeakingFrame(start_secs=start_secs))
                 if can_create_user_frames:
                     interruption_state = VADState.SPEAKING
             elif new_vad_state == VADState.QUIET:
