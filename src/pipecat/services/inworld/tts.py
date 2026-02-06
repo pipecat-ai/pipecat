@@ -414,6 +414,11 @@ class InworldTTSService(AudioContextWordTTSService):
             apply_text_normalization: Whether to apply text normalization.
             max_buffer_delay_ms: Maximum buffer delay in milliseconds.
             buffer_char_threshold: Buffer character threshold.
+            auto_mode: Whether to use auto mode. Recommended when texts are sent
+                in full sentences/phrases. When enabled, the server controls
+                flushing of buffered text to achieve minimal latency while
+                maintaining high quality audio output. If None (default),
+                automatically set based on aggregate_sentences.
         """
 
         temperature: Optional[float] = None
@@ -421,6 +426,7 @@ class InworldTTSService(AudioContextWordTTSService):
         apply_text_normalization: Optional[str] = None
         max_buffer_delay_ms: Optional[int] = None
         buffer_char_threshold: Optional[int] = None
+        auto_mode: Optional[bool] = None
 
     def __init__(
         self,
@@ -432,6 +438,7 @@ class InworldTTSService(AudioContextWordTTSService):
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
         params: InputParams = None,
+        aggregate_sentences: bool = True,
         **kwargs: Any,
     ):
         """Initialize the Inworld WebSocket TTS service.
@@ -444,6 +451,7 @@ class InworldTTSService(AudioContextWordTTSService):
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
             params: Input parameters for Inworld WebSocket TTS configuration.
+            aggregate_sentences: Whether to aggregate sentences before synthesis.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(
@@ -451,6 +459,7 @@ class InworldTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            aggregate_sentences=aggregate_sentences,
             **kwargs,
         )
 
@@ -475,6 +484,11 @@ class InworldTTSService(AudioContextWordTTSService):
         if params.apply_text_normalization is not None:
             self._settings["applyTextNormalization"] = params.apply_text_normalization
 
+        if params.auto_mode is not None:
+            self._settings["autoMode"] = params.auto_mode
+        else:
+            self._settings["autoMode"] = aggregate_sentences
+
         self._buffer_settings = {
             "maxBufferDelayMs": params.max_buffer_delay_ms,
             "bufferCharThreshold": params.buffer_char_threshold,
@@ -484,6 +498,14 @@ class InworldTTSService(AudioContextWordTTSService):
         self._keepalive_task = None
         self._context_id = None
         self._started = False
+
+        # Track cumulative time across generations for monotonic timestamps within a turn.
+        # When auto_mode is enabled, the server controls generations and timestamps reset
+        # to 0 after each generation, as indicated by a "flushCompleted" message. We
+        # add _cumulative_time to maintain monotonically increasing timestamps.
+        self._cumulative_time = 0.0
+        # Track the end time of the last word in the current generation
+        self._generation_end_time = 0.0
 
         self.set_voice(voice_id)
         self.set_model_name(model)
@@ -545,27 +567,50 @@ class InworldTTSService(AudioContextWordTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
+            logger.trace(
+                f"{self}: Resetting timestamp tracking due to {type(frame).__name__} - "
+                f"cumulative_time was {self._cumulative_time}"
+            )
+            self._cumulative_time = 0.0
+            self._generation_end_time = 0.0
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)])
 
     def _calculate_word_times(self, timestamp_info: Dict[str, Any]) -> List[Tuple[str, float]]:
         """Calculate word timestamps from Inworld WebSocket API response.
 
+        Adds cumulative time offset to maintain monotonically increasing timestamps
+        across multiple generations within an agent turn. Also tracks the generation
+        end time for updating cumulative time on flush.
+
         Args:
             timestamp_info: The timestamp information from Inworld API.
 
         Returns:
-            A list of (word, timestamp) tuples.
+            List of (word, timestamp) tuples with cumulative offset applied.
         """
         word_times: List[Tuple[str, float]] = []
 
         alignment = timestamp_info.get("wordAlignment", {})
         words = alignment.get("words", [])
         start_times = alignment.get("wordStartTimeSeconds", [])
+        end_times = alignment.get("wordEndTimeSeconds", [])
 
         if words and start_times and len(words) == len(start_times):
             for i, word in enumerate(words):
-                word_times.append((word, start_times[i]))
+                word_start = self._cumulative_time + start_times[i]
+                word_times.append((word, word_start))
+
+            # Track cumulative end time for this generation
+            if end_times and len(end_times) > 0:
+                self._generation_end_time = self._cumulative_time + end_times[-1]
+
+            logger.trace(
+                f"{self}: Word timestamps - raw_start_times={start_times}, "
+                f"cumulative_offset={self._cumulative_time}, "
+                f"adjusted_times={[t for _, t in word_times]}, "
+                f"generation_end_time={self._generation_end_time}"
+            )
 
         return word_times
 
@@ -590,6 +635,8 @@ class InworldTTSService(AudioContextWordTTSService):
 
         self._context_id = None
         self._started = False
+        self._cumulative_time = 0.0
+        self._generation_end_time = 0.0
         logger.trace(f"{self}: Interruption handled, context reset to None")
 
     def _get_websocket(self):
@@ -679,6 +726,8 @@ class InworldTTSService(AudioContextWordTTSService):
             self._started = False
             self._context_id = None
             self._websocket = None
+            self._cumulative_time = 0.0
+            self._generation_end_time = 0.0
             await self._call_event_handler("on_disconnected")
 
     async def _receive_messages(self):
@@ -765,9 +814,13 @@ class InworldTTSService(AudioContextWordTTSService):
             if "contextCreated" in result:
                 logger.trace(f"{self}: Context created on server: {ctx_id}")
 
-            # Handle flush completion - context is still valid, just acknowledge it
+            # Handle flush completion, which indicates the end of a generation
             if "flushCompleted" in result:
-                logger.trace(f"{self}: Flush completed for context {ctx_id}")
+                logger.trace(
+                    f"{self}: Generation completed - updating cumulative_time: "
+                    f"{self._cumulative_time} -> {self._generation_end_time}"
+                )
+                self._cumulative_time = self._generation_end_time
 
             # Handle context closed - context no longer exists on server
             if "contextClosed" in result:
@@ -818,6 +871,8 @@ class InworldTTSService(AudioContextWordTTSService):
             create_config["temperature"] = self._settings["temperature"]
         if "applyTextNormalization" in self._settings:
             create_config["applyTextNormalization"] = self._settings["applyTextNormalization"]
+        if "autoMode" in self._settings:
+            create_config["autoMode"] = self._settings["autoMode"]
 
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.

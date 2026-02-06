@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import unittest
 
 from pipecat.frames.frames import (
@@ -14,6 +15,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -326,6 +328,33 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_returned_frames,
         )
+
+    async def test_interruption_frame_completed_when_muted(self):
+        """Test that InterruptionFrame.complete() is called when the frame is
+        suppressed due to muting, so push_interruption_task_frame_and_wait()
+        doesn't hang."""
+        filter = STTMuteFilter(config=STTMuteConfig(strategies={STTMuteStrategy.ALWAYS}))
+
+        event = asyncio.Event()
+
+        frames_to_send = [
+            BotStartedSpeakingFrame(),
+            InterruptionFrame(event=event),
+            BotStoppedSpeakingFrame(),
+        ]
+
+        expected_returned_frames = [
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+        ]
+
+        await run_test(
+            filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+        self.assertTrue(event.is_set(), "InterruptionFrame.complete() should be called when muted")
 
 
 if __name__ == "__main__":

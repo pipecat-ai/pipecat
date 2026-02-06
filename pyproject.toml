@@ -29,7 +29,7 @@ dependencies = [
     "nltk>=3.9.1,<4",
     "numpy>=1.26.4,<3",
     "Pillow>=11.1.0,<12",
-    "protobuf~=5.29.3",
+    "protobuf~=5.29.6",
     "pydantic>=2.10.6,<3",
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
@@ -103,7 +103,7 @@ remote-smart-turn = []
 resembleai = [ "pipecat-ai[websockets-base]" ]
 rime = [ "pipecat-ai[websockets-base]" ]
 riva = [ "pipecat-ai[nvidia]" ]
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.0.4"]
+runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.1.0"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.21", "pipecat-ai[websockets-base]" ]

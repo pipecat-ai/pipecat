@@ -449,9 +449,7 @@ class BaseInputTransport(FrameProcessor):
                 if not audio_received:
                     continue
 
-                logger.warning(
-                    f"{self}: audio not received for more than {AUDIO_INPUT_TIMEOUT_SECS}"
-                )
+                logger.debug(f"{self}: audio not received for more than {AUDIO_INPUT_TIMEOUT_SECS}")
 
                 ###################################################################
                 # DEPRECATED.

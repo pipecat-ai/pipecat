@@ -106,7 +106,7 @@ class DeepgramSTTService(STTService):
             model="nova-3-general",
             channels=1,
             interim_results=True,
-            smart_format=True,
+            smart_format=False,
             punctuate=True,
             profanity_filter=True,
             vad_events=False,

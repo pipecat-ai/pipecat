@@ -313,7 +313,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 if isinstance(frame, InputAudioRawFrame):
                     await self.push_audio_frame(frame)
                 elif isinstance(frame, InputTransportMessageFrame):
-                    await self.broadcast_frame(frame)
+                    await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
                 else:
                     await self.push_frame(frame)
         except Exception as e:

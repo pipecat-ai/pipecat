@@ -191,7 +191,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         base_url: str = "https://api.elevenlabs.io",
-        model: str = "scribe_v1",
+        model: str = "scribe_v2",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         **kwargs,
@@ -202,7 +202,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             api_key: ElevenLabs API key for authentication.
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             base_url: Base URL for ElevenLabs API.
-            model: Model ID for transcription. Defaults to "scribe_v1".
+            model: Model ID for transcription. Defaults to "scribe_v2".
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
             **kwargs: Additional arguments passed to SegmentedSTTService.
