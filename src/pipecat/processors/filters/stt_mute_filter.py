@@ -234,6 +234,12 @@ class STTMuteFilter(FrameProcessor):
                 await self.push_frame(frame, direction)
             else:
                 logger.trace(f"{frame.__class__.__name__} suppressed - STT currently muted")
+
+                # When muted, the InterruptionFrame won't propagate further
+                # and will never reach the pipeline sink. Complete it here so
+                # push_interruption_task_frame_and_wait() doesn't hang.
+                if isinstance(frame, InterruptionFrame):
+                    frame.complete()
         else:
             # Pass all other frames through
             await self.push_frame(frame, direction)
