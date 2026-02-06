@@ -149,7 +149,7 @@ class CartesiaSTTService(WebsocketSTTService):
             sample_rate: Audio sample rate in Hz. Defaults to 16000.
             live_options: Configuration options for transcription service.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
-                Defaults to 0.55s (measured). Override for custom deployments.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)

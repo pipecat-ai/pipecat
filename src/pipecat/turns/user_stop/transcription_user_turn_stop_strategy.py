@@ -39,16 +39,16 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
     """
 
-    def __init__(self, *, user_resume_speaking_timeout: float = 0.6, **kwargs):
+    def __init__(self, *, user_speech_timeout: float = 0.6, **kwargs):
         """Initialize the transcription-based user turn stop strategy.
 
         Args:
-            user_resume_speaking_timeout: Time to wait for the user to potentially
+            user_speech_timeout: Time to wait for the user to potentially
                 say more after they pause speaking. Defaults to 0.6 seconds.
             **kwargs: Additional keyword arguments.
         """
         super().__init__(**kwargs)
-        self._user_resume_speaking_timeout = user_resume_speaking_timeout
+        self._user_speech_timeout = user_speech_timeout
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
         self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
 
@@ -154,9 +154,9 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
 
         # If transcript is already finalized, we don't need to wait for STT
         if self._transcript_finalized:
-            return self._user_resume_speaking_timeout
+            return self._user_speech_timeout
 
-        return max(effective_stt_wait, self._user_resume_speaking_timeout)
+        return max(effective_stt_wait, self._user_speech_timeout)
 
     async def _timeout_handler(self, timeout: float):
         """Wait for the timeout then trigger user turn stopped if conditions met.
@@ -180,17 +180,17 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         - User is not currently speaking
         - We have transcription text
         - Either the timeout has elapsed OR we have a finalized transcript
-          and user_resume_speaking_timeout has elapsed
+          and user_speech_timeout has elapsed
         """
         if self._vad_user_speaking or not self._text:
             return
 
-        # For finalized transcripts, check if user_resume_speaking_timeout has elapsed.
+        # For finalized transcripts, check if user_speech_timeout has elapsed.
         # If elapsed, trigger user turn stopped immediately. Else, wait for user resume
         # speaking timeout.
         if self._transcript_finalized and self._vad_stopped_time is not None:
             elapsed = time.time() - self._vad_stopped_time
-            if elapsed >= self._user_resume_speaking_timeout:
+            if elapsed >= self._user_speech_timeout:
                 # Cancel any remaining timeout since we're triggering now
                 if self._timeout_task:
                     await self.task_manager.cancel_task(self._timeout_task)

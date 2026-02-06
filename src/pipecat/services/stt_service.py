@@ -330,7 +330,7 @@ class STTService(AIService):
         if ttfs is None:
             ttfs = DEFAULT_TTFS_P99
             logger.warning(f"{self.name}: ttfs_p99_latency not set, using default {ttfs}s")
-        await self.push_frame(STTMetadataFrame(service_name=self.name, ttfs_p99_latency=ttfs))
+        await self.broadcast_frame(STTMetadataFrame, service_name=self.name, ttfs_p99_latency=ttfs)
 
     async def _cancel_ttfb_timeout(self):
         """Cancel any pending TTFB timeout task."""

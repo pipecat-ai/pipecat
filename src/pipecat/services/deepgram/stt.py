@@ -84,7 +84,7 @@ class DeepgramSTTService(STTService):
                     This parameter will be removed along with `vad_events` support.
 
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
-                Defaults to 0.39s (measured). Override for custom deployments.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
 
         Note:

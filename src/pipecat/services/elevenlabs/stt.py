@@ -453,7 +453,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
-                Defaults to 0.41s (measured). Override for custom deployments.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
         super().__init__(

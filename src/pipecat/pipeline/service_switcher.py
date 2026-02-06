@@ -167,10 +167,11 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
                 if direction == self._direction:
                     await self.push_frame(frame, direction)
                 # If this is the upstream filter for the active service, request
-                # metadata when: (1) startup just completed, or (2) service became
-                # active. Startup triggers metadata request because ParallelPipeline
-                # synchronizes StartFrame release, so we must request metadata after
-                # to maintain ordering for downstream processors.
+                # a metadata broadcast from the service when: (1) startup just
+                # completed, or (2) service became active. Startup triggers metadata
+                # request because ParallelPipeline synchronizes StartFrame release,
+                # so we must request metadata after to maintain ordering for downstream
+                # processors.
                 elif (
                     self._direction == FrameDirection.UPSTREAM
                     and self._wrapped_service == frame.active_service
