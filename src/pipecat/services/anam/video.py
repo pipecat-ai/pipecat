@@ -141,9 +141,7 @@ class AnamVideoService(AIService):
 
         # Create client options
         # Enable audio input for turnkey solutions (Anam handles STT)
-        # disable_input_audio=False allows sending audio via send_user_audio()
         options = ClientOptions(
-            disable_input_audio=False,  # Enable audio input for send_user_audio()
             api_base_url=self._api_base_url or "https://api.anam.ai",
             ice_servers=self._ice_servers,
         )
