@@ -339,7 +339,7 @@ class OjinVideoService(FrameProcessor):
             next_frame_time += self._frame_duration
 
             if not initial_buffer_filled:
-                if len(self._video_frames) >= 7:
+                if len(self._video_frames) >= 10:
                     initial_buffer_filled = True
                 else:
                     continue
@@ -354,7 +354,7 @@ class OjinVideoService(FrameProcessor):
                 image_bytes = video_frame.image_bytes
                 audio_bytes = video_frame.audio_bytes if video_frame.audio_bytes else silence_audio
                 self._last_played_image_bytes = image_bytes
-                is_silence = False
+                is_silence = video_frame.frame_idx == 0
                 if self._settings.frame_debugging_enabled:
                     logger.debug(
                         f"Playing video frame {video_frame.frame_idx}, buffer left: {len(self._video_frames)}"
@@ -364,7 +364,6 @@ class OjinVideoService(FrameProcessor):
                 # Repeat last frame to avoid stutter
                 logger.debug("frame miss")
                 image_bytes = self._last_played_image_bytes
-                is_silence = True
             else:
                 # No frame to show yet - just continue
                 continue
@@ -378,8 +377,8 @@ class OjinVideoService(FrameProcessor):
             #     next_frame_time += 0.01
             #     logger.debug("Slowing down to fill up buffer")
 
-            if len(self._video_frames) > 7 and is_silence:
-                speedup = min((len(self._video_frames) - 7) / 50.0, 0.15)  # Limit to 15% speedup
+            if len(self._video_frames) > 10 and is_silence:
+                speedup = min((len(self._video_frames) - 10) / 50.0, 0.15)  # Limit to 15% speedup
                 next_frame_time -= speedup
                 logger.debug(
                     f"Speeding up to catch up buffer: {len(self._video_frames)}, target: 7"
