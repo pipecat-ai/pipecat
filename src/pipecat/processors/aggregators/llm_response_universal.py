@@ -796,10 +796,10 @@ class LLMUserAggregator(LLMContextAggregator):
               - Token count exceeds max_context_tokens
               - OR message count exceeds max_unsummarized_messages since last summary
         """
-        logger.debug(f"{self}: Checking if context summarization is needed")
+        logger.trace(f"{self}: Checking if context summarization is needed")
 
         if not self._summarization_enabled:
-            logger.debug(f"{self}: Summarization disabled")
+            logger.trace(f"{self}: Summarization disabled")
             return False
 
         if self._summarization_in_progress:
@@ -820,7 +820,7 @@ class LLMUserAggregator(LLMContextAggregator):
             messages_since_summary >= self._summarization_config.max_unsummarized_messages
         )
 
-        logger.debug(
+        logger.trace(
             f"{self}: Context has {num_messages} messages, "
             f"~{total_tokens} tokens (limit: {token_limit}), "
             f"{messages_since_summary} messages since last summary "
@@ -829,7 +829,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         # Trigger if either limit is exceeded
         if not token_limit_exceeded and not message_threshold_exceeded:
-            logger.debug(
+            logger.trace(
                 f"{self}: Neither token limit nor message threshold exceeded, skipping summarization"
             )
             return False
