@@ -20,7 +20,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 # Token estimation constants
 CHARS_PER_TOKEN = 4  # Industry-standard heuristic: 1 token ≈ 4 characters
 TOKEN_OVERHEAD_PER_MESSAGE = 10  # Estimated structural overhead per message
-IMAGE_TOKEN_ESTIMATE = 100  # Rough estimate for image content
+IMAGE_TOKEN_ESTIMATE = 500  # Rough estimate for image content
 SUMMARY_TOKEN_BUFFER = 0.8  # Keep summary at 80% of available space for safety
 MIN_SUMMARY_TOKENS = 100  # Minimum tokens to allocate for summary
 
