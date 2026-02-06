@@ -22,21 +22,20 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
-    """User turn stop strategy based on transcriptions.
+    """User turn stop strategy that uses a configurable timeout to determine if the user is done speaking.
 
-    This strategy triggers the user turn stopped event based on two factors:
+    After the user stops speaking (detected by VAD), this strategy waits for a
+    configurable timeout before triggering the end of the user's turn. The
+    timeout accounts for two factors:
 
-    1. STT timeout: The P99 time for the STT service to return a transcription
-       after the user stops speaking. This is adjusted by the VAD stop_secs.
+    - user_speech_timeout: Time to wait for the user to potentially say more
+      after they pause.
+    - stt_timeout: The P99 time for the STT service to return a transcription
+      after the user stops speaking, adjusted by the VAD stop_secs.
 
-    2. User resume speaking timeout: Time to wait for the user to potentially
-       say more after they pause.
-
-    The timeout starts when VADUserStoppedSpeakingFrame is received. For services
-    that support finalization (TranscriptionFrame.finalized=True), the turn can
-    be triggered immediately once the finalized transcript is received and the
-    user resume speaking timeout has elapsed.
-
+    For services that support finalization (TranscriptionFrame.finalized=True),
+    the turn can be triggered immediately once the finalized transcript is
+    received and the user resume speaking timeout has elapsed.
     """
 
     def __init__(self, *, user_speech_timeout: float = 0.6, **kwargs):

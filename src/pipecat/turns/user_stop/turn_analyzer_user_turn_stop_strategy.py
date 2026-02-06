@@ -27,16 +27,18 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
-    """User turn stop strategy using a turn detection model to detect end of user turn.
+    """User turn stop strategy that uses a turn detection model to determine if the user is done speaking.
 
-    This strategy uses the turn detection models to determine when the user has
-    finished speaking, combining audio, VAD, and transcription frames. Once the
-    turn is considered complete, the user end of turn is triggered.
+    This strategy feeds audio, VAD, and transcription frames to a turn
+    detection model (``BaseTurnAnalyzer``) that predicts when the user has
+    finished their turn. Once the model indicates the turn is complete, the
+    strategy waits for a final transcription before triggering the end of
+    the user's turn.
 
-    The STT timeout is used to wait for transcriptions after the user stops
-    speaking. For services that support finalization (TranscriptionFrame.finalized=True),
-    the turn can be triggered immediately once the finalized transcript is received.
-
+    For services that support finalization (TranscriptionFrame.finalized=True),
+    the turn can be triggered immediately once the finalized transcript is
+    received. Otherwise, an STT timeout (adjusted by VAD stop_secs) is used
+    as a fallback.
     """
 
     def __init__(self, *, turn_analyzer: BaseTurnAnalyzer, **kwargs):
