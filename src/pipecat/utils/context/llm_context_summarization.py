@@ -18,6 +18,7 @@ from loguru import logger
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 # Token estimation constants
+CHARS_PER_TOKEN = 4  # Industry-standard heuristic: 1 token ≈ 4 characters
 TOKEN_OVERHEAD_PER_MESSAGE = 10  # Estimated structural overhead per message
 IMAGE_TOKEN_ESTIMATE = 100  # Rough estimate for image content
 SUMMARY_TOKEN_BUFFER = 0.8  # Keep summary at 80% of available space for safety
@@ -150,7 +151,7 @@ class LLMContextSummarizationUtil:
         """
         if not text:
             return 0
-        return len(text) // 4
+        return len(text) // CHARS_PER_TOKEN
 
     @staticmethod
     def estimate_context_tokens(context: LLMContext) -> int:
