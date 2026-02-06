@@ -202,6 +202,8 @@ class OjinVideoService(FrameProcessor):
 
         elif isinstance(frame, TTSStartedFrame):
             logger.debug("TTSStartedFrame received")
+            if self._latency_start_ts is None:
+                self._latency_start_ts = time.perf_counter()
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, TTSAudioRawFrame):
@@ -230,8 +232,6 @@ class OjinVideoService(FrameProcessor):
             self._first_tts_received_at = time.perf_counter()
             # logger.debug("First TTS audio received, starting speaking timer")
 
-        if self._latency_start_ts is None:
-            self._latency_start_ts = time.perf_counter()
         # Reset empty timer since we have audio
         self._tts_empty_since = None
 
@@ -286,17 +286,12 @@ class OjinVideoService(FrameProcessor):
                 logger.debug(
                     f"Received video frame {frame_idx}, is_final={message.is_final_response}"
                 )
-            if (
-                self._latency_start_ts is not None
-                and video_frame.frame_idx == 1
-                and self._latency is None
-            ):
+            if self._latency_start_ts is not None and video_frame.frame_idx == 1:
                 self._latency = time.perf_counter() - self._latency_start_ts
                 self._latency_start_ts = None
                 await self.push_frame(
                     OjinLatencyFrame(latency=self._latency), direction=FrameDirection.DOWNSTREAM
                 )
-            elif self._latency is not None and video_frame.frame_idx == 0:
                 self._latency = None
 
         elif isinstance(message, ErrorResponseMessage):
