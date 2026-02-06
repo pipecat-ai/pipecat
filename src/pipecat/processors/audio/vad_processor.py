@@ -69,7 +69,10 @@ class VADProcessor(FrameProcessor):
         @self._vad_controller.event_handler("on_speech_stopped")
         async def on_speech_stopped(_controller):
             logger.debug(f"{self}: User stopped speaking")
-            await self.broadcast_frame(VADUserStoppedSpeakingFrame)
+            await self.broadcast_frame(
+                VADUserStoppedSpeakingFrame,
+                stop_secs=_controller._vad_analyzer.params.stop_secs,
+            )
 
         @self._vad_controller.event_handler("on_speech_activity")
         async def on_speech_activity(_controller):

@@ -1277,9 +1277,15 @@ class VADUserStartedSpeakingFrame(SystemFrame):
 
 @dataclass
 class VADUserStoppedSpeakingFrame(SystemFrame):
-    """Frame emitted when VAD definitively detects user stopped speaking."""
+    """Frame emitted when VAD definitively detects user stopped speaking.
 
-    pass
+    Parameters:
+        stop_secs: The VAD stop_secs duration that was used to confirm the user
+            stopped speaking. This represents the silence duration that had to
+            elapse before the VAD determined speech ended.
+    """
+
+    stop_secs: float = 0.0
 
 
 @dataclass

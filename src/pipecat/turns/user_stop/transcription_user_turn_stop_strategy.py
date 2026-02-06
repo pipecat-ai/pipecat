@@ -12,7 +12,6 @@ from typing import Optional
 
 from pipecat.frames.frames import (
     Frame,
-    SpeechControlParamsFrame,
     STTMetadataFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
@@ -51,7 +50,7 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         super().__init__(**kwargs)
         self._user_resume_speaking_timeout = user_resume_speaking_timeout
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
-        self._stop_secs: float = 0.0  # VAD stop_secs from SpeechControlParamsFrame
+        self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
 
         self._text = ""
         self._vad_user_speaking = False
@@ -94,23 +93,12 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """
         if isinstance(frame, STTMetadataFrame):
             self._stt_timeout = frame.ttfs_p99_latency
-        elif isinstance(frame, SpeechControlParamsFrame):
-            await self._handle_speech_control_params(frame)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._handle_vad_user_stopped_speaking(frame)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
-
-    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
-        """Handle speech control parameters to extract VAD stop_secs.
-
-        Args:
-            frame: The speech control parameters frame.
-        """
-        if frame.vad_params:
-            self._stop_secs = frame.vad_params.stop_secs
 
     async def _handle_vad_user_started_speaking(self, _: VADUserStartedSpeakingFrame):
         """Handle when the VAD indicates the user is speaking."""
@@ -122,9 +110,10 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def _handle_vad_user_stopped_speaking(self, _: VADUserStoppedSpeakingFrame):
+    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
+        self._stop_secs = frame.stop_secs
         self._vad_stopped_time = time.time()
 
         # Start the timeout task

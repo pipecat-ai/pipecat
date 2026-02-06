@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     MetricsFrame,
     RequestMetadataFrame,
-    SpeechControlParamsFrame,
     StartFrame,
     STTMetadataFrame,
     STTMuteFrame,
@@ -107,7 +106,6 @@ class STTService(AIService):
         # STT TTFB tracking state
         self._stt_ttfb_timeout = stt_ttfb_timeout
         self._ttfb_timeout_task: Optional[asyncio.Task] = None
-        self._vad_stop_secs: Optional[float] = None
         self._speech_end_time: Optional[float] = None
         self._user_speaking: bool = False
         self._last_transcription_time: Optional[float] = None
@@ -276,9 +274,6 @@ class STTService(AIService):
             await self.process_audio_frame(frame, direction)
             if self._audio_passthrough:
                 await self.push_frame(frame, direction)
-        elif isinstance(frame, SpeechControlParamsFrame):
-            await self._handle_speech_control_params(frame)
-            await self.push_frame(frame, direction)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
             await self.push_frame(frame, direction)
@@ -337,15 +332,6 @@ class STTService(AIService):
             logger.warning(f"{self.name}: ttfs_p99_latency not set, using default {ttfs}s")
         await self.push_frame(STTMetadataFrame(service_name=self.name, ttfs_p99_latency=ttfs))
 
-    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
-        """Handle speech control parameters frame to extract VAD stop_secs.
-
-        Args:
-            frame: The speech control parameters frame.
-        """
-        if frame.vad_params is not None:
-            self._vad_stop_secs = frame.vad_params.stop_secs
-
     async def _cancel_ttfb_timeout(self):
         """Cancel any pending TTFB timeout task."""
         if self._ttfb_timeout_task:
@@ -392,14 +378,14 @@ class STTService(AIService):
         """
         self._user_speaking = False
 
-        # Skip TTFB measurement if we don't have VAD params
-        if self._vad_stop_secs is None:
+        # Skip TTFB measurement if stop_secs is not set
+        if frame.stop_secs == 0.0:
             return
 
         # Calculate the actual speech end time (current time minus VAD stop delay).
         # This approximates when the last user audio was sent to the STT service,
         # which we use to measure against the eventual transcription response.
-        self._speech_end_time = time.time() - self._vad_stop_secs
+        self._speech_end_time = time.time() - frame.stop_secs
 
         # Start timeout task (any previous timeout was cancelled by VADUserStartedSpeakingFrame
         # or InterruptionFrame)

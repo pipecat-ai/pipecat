@@ -50,7 +50,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         super().__init__(**kwargs)
         self._turn_analyzer = turn_analyzer
         self._stt_timeout: float = 0.0  # STT P99 latency from STTMetadataFrame
-        self._stop_secs: float = 0.0  # VAD stop_secs from SpeechControlParamsFrame
+        self._stop_secs: float = 0.0  # VAD stop_secs from VADUserStoppedSpeakingFrame
 
         self._text = ""
         self._turn_complete = False
@@ -115,14 +115,11 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
     async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
         """Handle speech control parameters for VAD and turn analyzer configuration.
 
-        Updates the turn analyzer with VAD start delay and stores stop_secs
-        for STT timeout calculations.
+        Updates the turn analyzer with VAD start delay.
         """
         if frame.vad_params:
             # Sync Smart Turn pre-speech buffering with VAD start delay
             self._turn_analyzer.update_vad_start_secs(frame.vad_params.start_secs)
-            # Store stop_secs for STT timeout calculation
-            self._stop_secs = frame.vad_params.stop_secs
 
     async def _handle_input_audio(self, frame: InputAudioRawFrame):
         """Handle input audio to check if the turn is completed."""
@@ -146,9 +143,10 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
             await self.task_manager.cancel_task(self._timeout_task)
             self._timeout_task = None
 
-    async def _handle_vad_user_stopped_speaking(self, _: VADUserStoppedSpeakingFrame):
+    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
+        self._stop_secs = frame.stop_secs
         self._vad_stopped_time = time.time()
 
         state, prediction = await self._turn_analyzer.analyze_end_of_turn()
