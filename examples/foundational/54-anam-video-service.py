@@ -100,6 +100,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             persona_config=PersonaConfig(avatar_id=avatar_id),
             session=session,
             api_base_url="https://api.anam.ai",
+            api_version="v1",
         )
         logger.info(f"{anam}")
 
@@ -129,7 +130,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
-                anam,  # Turnkey Avatar
+                anam,  #  Avatar
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]

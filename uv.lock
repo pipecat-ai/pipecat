@@ -250,6 +250,7 @@ source = { editable = "../python-sdk" }
 dependencies = [
     { name = "aiohttp" },
     { name = "aiortc" },
+    { name = "av" },
     { name = "numpy" },
     { name = "python-dotenv" },
     { name = "websockets" },
@@ -259,6 +260,7 @@ dependencies = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "aiortc", specifier = ">=1.14.0" },
+    { name = "av", specifier = ">=16.0.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "opencv-python", marker = "extra == 'display'", specifier = ">=4.9.0" },

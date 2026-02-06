@@ -241,7 +241,8 @@ class AnamVideoService(AIService):
         - StartFrame: Forwards after initialization
         - EndFrame: Forwards after cleanup
         - CancelFrame: Forwards after cancellation
-        - TTSAudioRawFrame: Processes audio for avatar speech
+        - TTSAudioRawFrame: Processes audio for avatar speech (not pushed downstream)
+        - InputAudioRawFrame: Processes user audio (not pushed downstream for turnkey)
         - InterruptionFrame: Handles interruptions
         - Other frames: Forwards them through the pipeline
 
@@ -250,37 +251,30 @@ class AnamVideoService(AIService):
             direction: The direction of frame processing (input/output).
         """
         await super().process_frame(frame, direction)
-        # TODO: SEB clean up this mess.
 
-        if isinstance(frame, StartFrame):
-            # StartFrame is handled by super().process_frame() which calls start(),
-            # but we need to forward it downstream so the transport receives it
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            # EndFrame and CancelFrame are handled by super().process_frame() which calls
-            # stop()/cancel(), but we need to forward them downstream
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, InterruptionFrame):
-            await self._handle_interruption()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSAudioRawFrame):
+        # Handle frames that should not be pushed downstream
+        if isinstance(frame, TTSAudioRawFrame):
+            # Anam synchronises TTS with video frames for synchronised playback.
             await self._handle_audio_frame(frame)
-        elif isinstance(frame, InputAudioRawFrame):
+            return
+
+        if isinstance(frame, InputAudioRawFrame):
+            # Anam handles STT internally, so downstream processors don't need raw audio.
             await self._handle_user_audio_frame(frame, direction)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, OutputTransportReadyFrame):
-            # Mark transport as ready so we can start sending video/audio frames
+            return
+
+        # Handle frames that need processing before being pushed downstream
+        if isinstance(frame, InterruptionFrame):
+            await self._handle_interruption()
+        if isinstance(frame, OutputTransportReadyFrame):
             self._transport_ready = True
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSStartedFrame):
+        if isinstance(frame, TTSStartedFrame):
             await self.start_ttfb_metrics()
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            # We constantly receive audio through WebRTC, but most of the time it is silence.
-            # As soon as we receive actual audio, the base output transport will create a
-            # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
+        if isinstance(frame, BotStartedSpeakingFrame):
             await self.stop_ttfb_metrics()
-        else:
-            await self.push_frame(frame, direction)
+
+        # Push frames downstream
+        await self.push_frame(frame, direction)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -423,6 +417,9 @@ class AnamVideoService(AIService):
             frame: The user audio frame to process (InputAudioRawFrame).
             direction: The direction of frame processing.
         """
+        if self._client is None:
+            return
+
         try:
             # Send raw audio samples to SDK for WebRTC transport to Anam's service
             self._client._streaming_client.send_user_audio(

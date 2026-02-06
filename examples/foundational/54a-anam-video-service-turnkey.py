@@ -84,6 +84,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             persona_config=PersonaConfig(persona_id=persona_id),
             session=session,
             api_base_url="https://api.anam.ai",
+            api_version="v1",
         )
         logger.info(f"{anam}")
 
