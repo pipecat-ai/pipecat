@@ -54,12 +54,8 @@ class LLMContextSummarizationConfig:
     to manage token limits in long-running conversations.
 
     Attributes:
-        max_context_tokens: Maximum allowed context size in tokens. The context
-            is kept within this limit through periodic summarization.
-        summarization_threshold: Trigger summarization when estimated context
-            usage exceeds this fraction of max_context_tokens (0.5 = 50%).
-            For example, with max_context_tokens=8000 and threshold=0.5,
-            summarization triggers at 4000 tokens.
+        max_context_tokens: Maximum allowed context size in tokens. When this
+            limit is reached, summarization is triggered to compress the context.
         max_unsummarized_messages: Maximum number of new messages that can
             accumulate since the last summary before triggering a new
             summarization. This ensures regular compression even if token
@@ -72,7 +68,6 @@ class LLMContextSummarizationConfig:
     """
 
     max_context_tokens: int = 8000
-    summarization_threshold: float = 0.8
     max_unsummarized_messages: int = 20
     min_messages_after_summary: int = 4
     summarization_prompt: Optional[str] = None
@@ -81,8 +76,6 @@ class LLMContextSummarizationConfig:
         """Validate configuration parameters."""
         if self.max_context_tokens <= 0:
             raise ValueError("max_context_tokens must be positive")
-        if not 0.0 < self.summarization_threshold <= 1.0:
-            raise ValueError("summarization_threshold must be between 0 and 1")
         if self.max_unsummarized_messages < 1:
             raise ValueError("max_unsummarized_messages must be at least 1")
         if self.min_messages_after_summary < 0:

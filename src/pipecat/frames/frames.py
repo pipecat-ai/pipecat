@@ -1901,7 +1901,7 @@ class LLMContextSummaryRequestFrame(ControlFrame):
     Parameters:
         request_id: Unique identifier to match this request with its response.
             Used to handle async responses and avoid race conditions.
-        context: The full LLM context containing all messages to analyze.
+        context: The full LLM context containing all messages to analyze and summarize.
         min_messages_to_keep: Number of recent messages to preserve uncompressed.
             These messages will not be included in the summary.
         max_context_tokens: Maximum allowed context size in tokens. The LLM should

@@ -793,7 +793,7 @@ class LLMUserAggregator(LLMContextAggregator):
             - Summarization is enabled
             - No summarization currently in progress
             - AND either:
-              - Token count exceeds threshold (max_context_tokens * summarization_threshold)
+              - Token count exceeds max_context_tokens
               - OR message count exceeds max_unsummarized_messages since last summary
         """
         logger.debug(f"{self}: Checking if context summarization is needed")
@@ -810,12 +810,9 @@ class LLMUserAggregator(LLMContextAggregator):
         total_tokens = LLMContextSummarizationUtil.estimate_context_tokens(self._context)
         num_messages = len(self._context.messages)
 
-        # Check if we've reached the token threshold
-        token_threshold = int(
-            self._summarization_config.max_context_tokens
-            * self._summarization_config.summarization_threshold
-        )
-        token_threshold_exceeded = total_tokens >= token_threshold
+        # Check if we've reached the token limit
+        token_limit = self._summarization_config.max_context_tokens
+        token_limit_exceeded = total_tokens >= token_limit
 
         # Check if we've exceeded max unsummarized messages
         messages_since_summary = len(self._context.messages) - 1
@@ -825,26 +822,24 @@ class LLMUserAggregator(LLMContextAggregator):
 
         logger.debug(
             f"{self}: Context has {num_messages} messages, "
-            f"~{total_tokens} tokens (token threshold: {token_threshold}, "
-            f"{self._summarization_config.summarization_threshold * 100}% of "
-            f"{self._summarization_config.max_context_tokens}), "
+            f"~{total_tokens} tokens (limit: {token_limit}), "
             f"{messages_since_summary} messages since last summary "
             f"(message threshold: {self._summarization_config.max_unsummarized_messages})"
         )
 
-        # Trigger if either threshold is exceeded
-        if not token_threshold_exceeded and not message_threshold_exceeded:
+        # Trigger if either limit is exceeded
+        if not token_limit_exceeded and not message_threshold_exceeded:
             logger.debug(
-                f"{self}: Neither token threshold nor message threshold exceeded, skipping summarization"
+                f"{self}: Neither token limit nor message threshold exceeded, skipping summarization"
             )
             return False
 
         reason = []
-        if token_threshold_exceeded:
-            reason.append(f"~{total_tokens} tokens (>{token_threshold} threshold)")
+        if token_limit_exceeded:
+            reason.append(f"~{total_tokens} tokens (>={token_limit} limit)")
         if message_threshold_exceeded:
             reason.append(
-                f"{messages_since_summary} messages (>{self._summarization_config.max_unsummarized_messages} threshold)"
+                f"{messages_since_summary} messages (>={self._summarization_config.max_unsummarized_messages} threshold)"
             )
 
         logger.info(f"{self}: ✓ Summarization needed - {', '.join(reason)}")
