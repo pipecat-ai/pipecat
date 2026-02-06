@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
 )
-from pipecat.turns.user_stop import TranscriptionUserTurnStopStrategy
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
@@ -35,11 +35,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
     async def test_default_user_turn_strategies(self):
         controller = UserTurnController(
             user_turn_strategies=UserTurnStrategies(
-                stop=[
-                    TranscriptionUserTurnStopStrategy(
-                        user_resume_speaking_timeout=TRANSCRIPTION_TIMEOUT
-                    )
-                ],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)],
             )
         )
 
@@ -70,7 +66,7 @@ class TestUserTurnController(unittest.IsolatedAsyncioTestCase):
 
         await controller.process_frame(VADUserStoppedSpeakingFrame())
         self.assertTrue(should_start)
-        # Wait for user_resume_speaking_timeout to elapse
+        # Wait for user_speech_timeout to elapse
         await asyncio.sleep(TRANSCRIPTION_TIMEOUT + 0.1)
         self.assertTrue(should_stop)
 

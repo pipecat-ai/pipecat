@@ -41,7 +41,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.tests.utils import SleepFrame, run_test
 from pipecat.turns.user_mute import FirstSpeechUserMuteStrategy, FunctionCallUserMuteStrategy
-from pipecat.turns.user_stop import TranscriptionUserTurnStopStrategy
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 USER_TURN_STOP_TIMEOUT = 0.2
@@ -154,9 +154,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             params=LLMUserAggregatorParams(
                 user_turn_strategies=UserTurnStrategies(
                     stop=[
-                        TranscriptionUserTurnStopStrategy(
-                            user_resume_speaking_timeout=TRANSCRIPTION_TIMEOUT
-                        )
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
                     ],
                 ),
             ),
@@ -184,7 +182,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
-            # Wait for user_resume_speaking_timeout to elapse
+            # Wait for user_speech_timeout to elapse
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
         ]
         expected_down_frames = [
@@ -255,9 +253,7 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             params=LLMUserAggregatorParams(
                 user_turn_strategies=UserTurnStrategies(
                     stop=[
-                        TranscriptionUserTurnStopStrategy(
-                            user_resume_speaking_timeout=TRANSCRIPTION_TIMEOUT
-                        )
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
                     ],
                 ),
                 user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
@@ -287,12 +283,12 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         pipeline = Pipeline([user_aggregator])
 
-        # Transcript arrives before VAD stop, then we wait for user_resume_speaking_timeout
+        # Transcript arrives before VAD stop, then we wait for user_speech_timeout
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
             VADUserStoppedSpeakingFrame(),
-            # Wait for user_resume_speaking_timeout (TRANSCRIPTION_TIMEOUT=0.1s) to elapse
+            # Wait for user_speech_timeout (TRANSCRIPTION_TIMEOUT=0.1s) to elapse
             SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
         ]
         await run_test(

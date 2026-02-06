@@ -16,7 +16,7 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, TranscriptionUserTurnStopStrategy
+from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
@@ -24,16 +24,14 @@ AGGREGATION_TIMEOUT = 0.1
 STT_TIMEOUT = 0.0
 
 
-class TestTranscriptionUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
+class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.task_manager = TaskManager()
         self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
 
-    async def _create_strategy(self, user_resume_speaking_timeout=AGGREGATION_TIMEOUT):
+    async def _create_strategy(self, user_speech_timeout=AGGREGATION_TIMEOUT):
         """Create strategy and configure STT timeout via metadata frame."""
-        strategy = TranscriptionUserTurnStopStrategy(
-            user_resume_speaking_timeout=user_resume_speaking_timeout
-        )
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=user_speech_timeout)
         await strategy.setup(self.task_manager)
         # Set STT timeout via metadata frame (as would happen in real pipeline)
         await strategy.process_frame(
