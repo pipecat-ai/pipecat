@@ -385,7 +385,7 @@ class STTService(AIService):
         # Calculate the actual speech end time (current time minus VAD stop delay).
         # This approximates when the last user audio was sent to the STT service,
         # which we use to measure against the eventual transcription response.
-        self._speech_end_time = time.time() - frame.stop_secs
+        self._speech_end_time = frame.timestamp - frame.stop_secs
 
         # Start timeout task (any previous timeout was cancelled by VADUserStartedSpeakingFrame
         # or InterruptionFrame)

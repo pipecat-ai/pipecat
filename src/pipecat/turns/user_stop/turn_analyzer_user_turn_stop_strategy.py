@@ -7,7 +7,6 @@
 """User turn stop strategy based on turn detection analyzers."""
 
 import asyncio
-import time
 from typing import Optional
 
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
@@ -138,7 +137,7 @@ class TurnAnalyzerUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
         self._stop_secs = frame.stop_secs
-        self._vad_stopped_time = time.time()
+        self._vad_stopped_time = frame.timestamp
 
         state, prediction = await self._turn_analyzer.analyze_end_of_turn()
         await self._handle_prediction_result(prediction)

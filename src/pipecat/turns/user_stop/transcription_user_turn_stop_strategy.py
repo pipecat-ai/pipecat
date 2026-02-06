@@ -114,7 +114,7 @@ class TranscriptionUserTurnStopStrategy(BaseUserTurnStopStrategy):
         """Handle when the VAD indicates the user has stopped speaking."""
         self._vad_user_speaking = False
         self._stop_secs = frame.stop_secs
-        self._vad_stopped_time = time.time()
+        self._vad_stopped_time = frame.timestamp
 
         # Start the timeout task
         timeout = self._calculate_timeout()

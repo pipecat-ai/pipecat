@@ -12,6 +12,7 @@ and LLM processing.
 """
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -1276,9 +1277,11 @@ class VADUserStartedSpeakingFrame(SystemFrame):
         start_secs: The VAD start_secs duration that was used to confirm the user
             started speaking. This represents the speech duration that had to
             elapse before the VAD determined speech began.
+        timestamp: Wall-clock time when the VAD made its determination.
     """
 
     start_secs: float = 0.0
+    timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
@@ -1289,9 +1292,11 @@ class VADUserStoppedSpeakingFrame(SystemFrame):
         stop_secs: The VAD stop_secs duration that was used to confirm the user
             stopped speaking. This represents the silence duration that had to
             elapse before the VAD determined speech ended.
+        timestamp: Wall-clock time when the VAD made its determination.
     """
 
     stop_secs: float = 0.0
+    timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
