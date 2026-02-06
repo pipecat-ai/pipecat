@@ -96,6 +96,34 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
+    async def test_parallel_internal_frames_buffered_during_start(self):
+        """Frames pushed by internal processors during StartFrame processing
+        should be buffered and only released after StartFrame synchronization
+        completes."""
+
+        class EmitOnStartProcessor(FrameProcessor):
+            """Pushes a TextFrame when it receives a StartFrame."""
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+                await self.push_frame(frame, direction)
+                if isinstance(frame, StartFrame):
+                    await self.push_frame(TextFrame(text="from start"))
+
+        pipeline = ParallelPipeline([EmitOnStartProcessor()], [IdentityFilter()])
+
+        frames_to_send = [TextFrame(text="Hello!")]
+
+        # StartFrame should come first, then the TextFrame emitted during
+        # StartFrame processing, then the regular TextFrame.
+        expected_down_frames = [StartFrame, TextFrame, TextFrame]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            ignore_start=False,
+        )
+
 
 class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
