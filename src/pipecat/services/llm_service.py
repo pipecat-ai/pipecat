@@ -745,8 +745,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     await self.cancel_task(task)
                     cancelled_tasks.add(task)
 
-                frame = FunctionCallCancelFrame(function_name=name, tool_call_id=tool_call_id)
-                await self.push_frame(frame)
+                await self.broadcast_frame(
+                    FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
+                )
 
                 logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
 
