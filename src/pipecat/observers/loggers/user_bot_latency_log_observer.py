@@ -79,7 +79,7 @@ class UserBotLatencyLogObserver(BaseObserver):
         if isinstance(data.frame, VADUserStartedSpeakingFrame):
             self._user_stopped_time = 0
         elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
-            self._user_stopped_time = data.frame.timestamp
+            self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
         elif isinstance(data.frame, (EndFrame, CancelFrame)):
             self._log_summary()
         elif isinstance(data.frame, BotStartedSpeakingFrame) and self._user_stopped_time:
