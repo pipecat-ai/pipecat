@@ -14,7 +14,6 @@ from loguru import logger
 from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame, MixerEnableFrame, MixerUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -52,7 +51,7 @@ transport_params = {
             default_sound="office",
             volume=2.0,
         ),
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
@@ -62,7 +61,7 @@ transport_params = {
             default_sound="office",
             volume=2.0,
         ),
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -72,7 +71,7 @@ transport_params = {
             default_sound="office",
             volume=2.0,
         ),
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
