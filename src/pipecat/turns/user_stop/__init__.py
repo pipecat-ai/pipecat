@@ -7,7 +7,6 @@
 from .base_user_turn_stop_strategy import BaseUserTurnStopStrategy, UserTurnStoppedParams
 from .external_user_turn_stop_strategy import ExternalUserTurnStopStrategy
 from .speech_timeout_user_turn_stop_strategy import SpeechTimeoutUserTurnStopStrategy
-from .transcription_user_turn_stop_strategy import TranscriptionUserTurnStopStrategy
 from .turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrategy
 
 __all__ = [
@@ -15,6 +14,5 @@ __all__ = [
     "ExternalUserTurnStopStrategy",
     "SpeechTimeoutUserTurnStopStrategy",
     "UserTurnStoppedParams",
-    "TranscriptionUserTurnStopStrategy",
     "TurnAnalyzerUserTurnStopStrategy",
 ]
