@@ -44,7 +44,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         return self.services
 
     @property
-    def active_llm(self) -> Optional[LLMService]:
+    def active_llm(self) -> LLMService:
         """Get the currently active LLM.
 
         Returns:
