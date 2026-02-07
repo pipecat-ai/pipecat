@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
+    LLMFullResponseStartFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -550,15 +551,16 @@ class InworldTTSService(AudioContextWordTTSService):
         await self._disconnect()
 
     async def flush_audio(self):
-        """Flush any pending audio without closing the context.
+        """Flush any pending audio and close the context.
 
-        This triggers synthesis of all accumulated text in the buffer while
-        keeping the context open for subsequent text. The context is only
-        closed on interruption, disconnect, or end of session.
+        This triggers synthesis of all accumulated text in the buffer and
+        closes the context.
         """
         if self._context_id and self._websocket:
-            logger.trace(f"Flushing audio for context {self._context_id}")
+            logger.trace(f"{self}: Flushing and closing context {self._context_id}")
             await self._send_flush(self._context_id)
+            await self._send_close_context(self._context_id)
+            self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
@@ -578,6 +580,24 @@ class InworldTTSService(AudioContextWordTTSService):
             self._generation_end_time = 0.0
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)])
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and pre-open context on LLM response start.
+
+        Pre-opens a context when LLMFullResponseStartFrame arrives, so the context
+        is ready by the time text starts flowing. This avoids context creation overhead while
+        ensuring we don't race with the previous context's completion.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, LLMFullResponseStartFrame):
+            if not self._context_id:
+                logger.trace(f"{self}: LLM response starting, opening context")
+                await self._open_context()
 
     def _calculate_word_times(self, timestamp_info: Dict[str, Any]) -> List[Tuple[str, float]]:
         """Calculate word timestamps from Inworld WebSocket API response.
@@ -858,6 +878,22 @@ class InworldTTSService(AudioContextWordTTSService):
                 logger.warning(f"{self} keepalive error: {e}")
                 break
 
+    async def _open_context(self):
+        """Open a new context for TTS synthesis.
+
+        Creates a new context ID, registers it locally for audio tracking,
+        and sends the context configuration to the server.
+        """
+        if self._websocket and self._websocket.state is State.OPEN:
+            try:
+                self._context_id = str(uuid.uuid4())
+                logger.debug(f"{self}: Opening context {self._context_id}")
+                await self.create_audio_context(self._context_id)
+                await self._send_context(self._context_id)
+            except Exception as e:
+                logger.warning(f"{self}: Failed to open context: {e}")
+                self._context_id = None
+
     async def _send_context(self, context_id: str):
         """Send a context to the Inworld WebSocket TTS service.
 
@@ -938,11 +974,10 @@ class InworldTTSService(AudioContextWordTTSService):
                     yield TTSStartedFrame()
                     self._started = True
 
+                    # Fallback in case no context is available
                     if not self._context_id:
-                        self._context_id = str(uuid.uuid4())
-                        logger.trace(f"{self}: Creating new context {self._context_id}")
-                        await self.create_audio_context(self._context_id)
-                        await self._send_context(self._context_id)
+                        logger.debug(f"{self}: Opening context in run_tts (fallback)")
+                        await self._open_context()
                     elif not self.audio_context_available(self._context_id):
                         # Context exists on server but local tracking was removed
                         logger.trace(f"{self}: Recreating local audio context {self._context_id}")
