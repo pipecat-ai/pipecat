@@ -439,6 +439,7 @@ class InworldTTSService(AudioContextWordTTSService):
         encoding: str = "LINEAR16",
         params: InputParams = None,
         aggregate_sentences: bool = True,
+        append_trailing_space: bool = True,
         **kwargs: Any,
     ):
         """Initialize the Inworld WebSocket TTS service.
@@ -452,6 +453,7 @@ class InworldTTSService(AudioContextWordTTSService):
             encoding: Audio encoding format.
             params: Input parameters for Inworld WebSocket TTS configuration.
             aggregate_sentences: Whether to aggregate sentences before synthesis.
+            append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(
@@ -460,6 +462,7 @@ class InworldTTSService(AudioContextWordTTSService):
             pause_frame_processing=True,
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
+            append_trailing_space=append_trailing_space,
             **kwargs,
         )
 
