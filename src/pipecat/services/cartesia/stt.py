@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -137,6 +138,7 @@ class CartesiaSTTService(WebsocketSTTService):
         base_url: str = "",
         sample_rate: int = 16000,
         live_options: Optional[CartesiaLiveOptions] = None,
+        ttfs_p99_latency: Optional[float] = CARTESIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize CartesiaSTTService with API key and options.
@@ -146,10 +148,12 @@ class CartesiaSTTService(WebsocketSTTService):
             base_url: Custom API endpoint URL. If empty, uses default.
             sample_rate: Audio sample rate in Hz. Defaults to 16000.
             live_options: Configuration options for transcription service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         default_options = CartesiaLiveOptions(
             model="ink-whisper",

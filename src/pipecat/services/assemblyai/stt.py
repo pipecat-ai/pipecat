@@ -12,7 +12,7 @@ WebSocket API for streaming audio transcription.
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Optional
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -67,6 +68,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         api_endpoint_base_url: str = "wss://streaming.assemblyai.com/v3/ws",
         connection_params: AssemblyAIConnectionParams = AssemblyAIConnectionParams(),
         vad_force_turn_endpoint: bool = True,
+        ttfs_p99_latency: Optional[float] = ASSEMBLYAI_TTFS_P99,
         **kwargs,
     ):
         """Initialize the AssemblyAI STT service.
@@ -77,9 +79,13 @@ class AssemblyAISTTService(WebsocketSTTService):
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
             connection_params: Connection configuration parameters. Defaults to AssemblyAIConnectionParams().
             vad_force_turn_endpoint: Whether to force turn endpoint on VAD stop. Defaults to True.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(sample_rate=connection_params.sample_rate, **kwargs)
+        super().__init__(
+            sample_rate=connection_params.sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs
+        )
 
         self._api_key = api_key
         self._language = language

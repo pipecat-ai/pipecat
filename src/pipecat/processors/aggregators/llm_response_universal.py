@@ -664,10 +664,16 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._queued_broadcast_frame(frame_cls, **kwargs)
 
     async def _on_vad_speech_started(self, controller):
-        await self._queued_broadcast_frame(VADUserStartedSpeakingFrame)
+        await self._queued_broadcast_frame(
+            VADUserStartedSpeakingFrame,
+            start_secs=controller._vad_analyzer.params.start_secs,
+        )
 
     async def _on_vad_speech_stopped(self, controller):
-        await self._queued_broadcast_frame(VADUserStoppedSpeakingFrame)
+        await self._queued_broadcast_frame(
+            VADUserStoppedSpeakingFrame,
+            stop_secs=controller._vad_analyzer.params.stop_secs,
+        )
 
     async def _on_vad_speech_activity(self, controller):
         await self._queued_broadcast_frame(UserSpeakingFrame)

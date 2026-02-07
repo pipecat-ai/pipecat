@@ -161,7 +161,11 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         # was never destroyed.
         # So we can keep it here as false, because inside the method send_with_retry, it will
         # already try to reconnect if needed.
-        super().__init__(sample_rate=sample_rate, reconnect_on_error=False, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            reconnect_on_error=False,
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._url = url

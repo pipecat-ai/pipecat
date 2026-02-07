@@ -18,7 +18,7 @@ from pipecat.turns.user_start import (
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
-    TranscriptionUserTurnStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
 )
 
 
@@ -29,7 +29,7 @@ class UserTurnStrategies:
     If no strategies are specified, the following defaults are used:
 
         start: [VADUserTurnStartStrategy, TranscriptionUserTurnStartStrategy]
-         stop: [TranscriptionUserTurnStopStrategy]
+         stop: [SpeechTimeoutUserTurnStopStrategy]
 
     Attributes:
         start: A list of user turn start strategies used to detect when
@@ -46,7 +46,7 @@ class UserTurnStrategies:
         if not self.start:
             self.start = [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
         if not self.stop:
-            self.stop = [TranscriptionUserTurnStopStrategy()]
+            self.stop = [SpeechTimeoutUserTurnStopStrategy()]
 
 
 @dataclass

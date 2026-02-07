@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
+from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -59,6 +60,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         region: Optional[str] = None,
         sample_rate: int = 16000,
         language: Language = Language.EN,
+        ttfs_p99_latency: Optional[float] = AWS_TRANSCRIBE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the AWS Transcribe STT service.
@@ -70,9 +72,11 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             region: AWS region for the service.
             sample_rate: Audio sample rate in Hz. Must be 8000 or 16000. Defaults to 16000.
             language: Language for transcription. Defaults to English.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(**kwargs)
+        super().__init__(ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         self._settings = {
             "sample_rate": sample_rate,
