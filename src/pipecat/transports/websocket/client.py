@@ -141,7 +141,8 @@ class WebsocketClientSession:
                 self._client_task_handler(),
                 f"{self._transport_name}::WebsocketClientSession::_client_task_handler",
             )
-            await self._callbacks.on_connected(self._websocket)  # type: ignore[arg-type]
+            assert self._websocket is not None
+            await self._callbacks.on_connected(self._websocket)
         except TimeoutError:
             logger.error(f"Timeout connecting to {self._uri}")
 
@@ -194,13 +195,15 @@ class WebsocketClientSession:
         """Handle incoming messages from the WebSocket connection."""
         try:
             assert self._websocket is not None
+            websocket = self._websocket
             # Handle incoming messages
-            async for message in self._websocket:
-                await self._callbacks.on_message(self._websocket, message)  # type: ignore[arg-type]
+            async for message in websocket:
+                await self._callbacks.on_message(websocket, message)
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
-        await self._callbacks.on_disconnected(self._websocket)  # type: ignore[arg-type]
+        if self._websocket:
+            await self._callbacks.on_disconnected(self._websocket)
 
     def __str__(self):
         """String representation of the WebSocket client session."""

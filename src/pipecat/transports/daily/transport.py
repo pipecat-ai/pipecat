@@ -195,7 +195,7 @@ class DailyUpdateRemoteParticipantsFrame(ControlFrame):
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
-    remote_participants: Mapping[str, Any] = None  # type: ignore[assignment]
+    remote_participants: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -1959,7 +1959,8 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, DailyUpdateRemoteParticipantsFrame):
-            await self._client.update_remote_participants(frame.remote_participants)
+            if frame.remote_participants is not None:
+                await self._client.update_remote_participants(frame.remote_participants)
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame

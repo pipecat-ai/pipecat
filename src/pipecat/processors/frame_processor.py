@@ -470,11 +470,13 @@ class FrameProcessor(BaseObject):
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
-    def create_task(self, coroutine: Coroutine, name: Optional[str] = None) -> asyncio.Task:
+    def create_task(
+        self, coroutine: Coroutine | Awaitable, name: Optional[str] = None
+    ) -> asyncio.Task:
         """Create a new task managed by this processor.
 
         Args:
-            coroutine: The coroutine to run in the task.
+            coroutine: The coroutine or awaitable to run in the task.
             name: Optional name for the task.
 
         Returns:

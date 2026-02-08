@@ -88,12 +88,11 @@ class ProtobufFrameSerializer(FrameSerializer):
             )
 
         proto_frame = frame_protos.Frame()  # type: ignore[attr-defined]
-        if type(serializable_frame) not in self.SERIALIZABLE_TYPES:
+        proto_optional_name = self.SERIALIZABLE_TYPES.get(type(serializable_frame))
+        if proto_optional_name is None:
             logger.warning(f"Frame type {type(frame)} is not serializable")
             return None
 
-        # ignoring linter errors; we check that type(serializable_frame) is in this dict above
-        proto_optional_name = self.SERIALIZABLE_TYPES[type(serializable_frame)]  # type: ignore[index]
         proto_attr = getattr(proto_frame, proto_optional_name)
         for field in dataclasses.fields(serializable_frame):  # type: ignore[arg-type]
             value = getattr(serializable_frame, field.name)

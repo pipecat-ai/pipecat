@@ -157,7 +157,7 @@ class OpenAILLMContext:
         return self._messages
 
     @property
-    def tools(self) -> List[ChatCompletionToolParam] | NotGiven | List[Any]:
+    def tools(self) -> List[ChatCompletionToolParam] | NotGiven | ToolsSchema | List[Any]:
         """Get the tools list, converting through adapter if available.
 
         Returns:
@@ -165,7 +165,7 @@ class OpenAILLMContext:
         """
         if self._llm_adapter:
             return self._llm_adapter.from_standard_tools(self._tools)
-        return self._tools  # type: ignore[return-value]
+        return self._tools
 
     @property
     def tool_choice(self) -> ChatCompletionToolChoiceOptionParam | NotGiven:

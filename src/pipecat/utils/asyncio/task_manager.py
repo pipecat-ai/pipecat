@@ -15,7 +15,7 @@ import asyncio
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Coroutine, Dict, Optional, Sequence
+from typing import Awaitable, Coroutine, Dict, Optional, Sequence
 
 from loguru import logger
 
@@ -56,13 +56,13 @@ class BaseTaskManager(ABC):
         pass
 
     @abstractmethod
-    def create_task(self, coroutine: Coroutine, name: str) -> asyncio.Task:
+    def create_task(self, coroutine: Coroutine | Awaitable, name: str) -> asyncio.Task:
         """Creates and schedules a new asyncio Task that runs the given coroutine.
 
         The task is added to a global set of created tasks.
 
         Args:
-            coroutine: The coroutine to be executed within the task.
+            coroutine: The coroutine or awaitable to be executed within the task.
             name: The name to assign to the task for identification.
 
         Returns:
@@ -139,13 +139,13 @@ class TaskManager(BaseTaskManager):
             raise Exception("TaskManager is not setup: unable to get event loop")
         return self._params.loop
 
-    def create_task(self, coroutine: Coroutine, name: str) -> asyncio.Task:
+    def create_task(self, coroutine: Coroutine | Awaitable, name: str) -> asyncio.Task:
         """Creates and schedules a new asyncio Task that runs the given coroutine.
 
         The task is added to a global set of created tasks.
 
         Args:
-            coroutine: The coroutine to be executed within the task.
+            coroutine: The coroutine or awaitable to be executed within the task.
             name: The name to assign to the task for identification.
 
         Returns:

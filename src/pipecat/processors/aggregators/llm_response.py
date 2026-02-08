@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from loguru import logger
 
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -405,7 +405,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         """
         self._context.set_messages(messages)
 
-    def set_tools(self, tools: List):
+    def set_tools(self, tools):
         """Set tools in the context.
 
         Args:
@@ -470,7 +470,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
         self._vad_params: Optional[VADParams] = None
-        self._turn_params: Optional[SmartTurnParams] = None
+        self._turn_params: Optional[BaseTurnParams] = None
 
         if "aggregation_timeout" in kwargs:
             with warnings.catch_warnings():
@@ -558,12 +558,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            self.set_tools(frame.tools)  # type: ignore[arg-type]
+            self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, SpeechControlParamsFrame):
             self._vad_params = frame.vad_params
-            self._turn_params = frame.turn_params  # type: ignore[assignment]
+            self._turn_params = frame.turn_params
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -917,7 +917,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            self.set_tools(frame.tools)  # type: ignore[arg-type]
+            self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, FunctionCallsStartedFrame):
@@ -1023,7 +1023,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         # sure we don't block the pipeline.
         if properties and properties.on_context_updated:
             task_name = f"{frame.function_name}:{frame.tool_call_id}:on_context_updated"
-            task = self.create_task(properties.on_context_updated(), task_name)  # type: ignore[arg-type]
+            task = self.create_task(properties.on_context_updated(), task_name)
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
 

@@ -15,7 +15,7 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, List, Literal, Optional, Union, cast
 
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
@@ -224,9 +224,9 @@ class SmallWebRTCConnection(BaseObject):
         if not ice_servers:
             self.ice_servers: List[IceServer] = []
         elif all(isinstance(s, IceServer) for s in ice_servers):
-            self.ice_servers = ice_servers  # type: ignore[assignment]
+            self.ice_servers = cast(List[IceServer], ice_servers)
         elif all(isinstance(s, str) for s in ice_servers):
-            self.ice_servers = [IceServer(urls=s) for s in ice_servers]  # type: ignore[misc]
+            self.ice_servers = [IceServer(urls=cast(str, s)) for s in ice_servers]
         else:
             raise TypeError("ice_servers must be either List[str] or List[RTCIceServer]")
         self._connect_invoked = False

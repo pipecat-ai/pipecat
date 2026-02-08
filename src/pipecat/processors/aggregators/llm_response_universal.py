@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Type, cast
 
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
@@ -258,12 +258,20 @@ class LLMContextAggregator(FrameProcessor):
         """
         self._context.set_messages(messages)
 
-    def set_tools(self, tools: ToolsSchema | NotGiven):
+    def set_tools(self, tools: ToolsSchema | List | NotGiven):
         """Set tools in the context.
 
         Args:
-            tools: List of tool definitions to set in the context.
+            tools: Tool definitions to set in the context.
         """
+        if isinstance(tools, list):
+            tools = ToolsSchema(
+                standard_tools=[],
+                custom_tools=cast(
+                    Dict[AdapterType, List[Dict[str, Any]]],
+                    {AdapterType.SHIM: tools},
+                ),
+            )
         self._context.set_tools(tools)
 
     def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"] | dict):
@@ -461,7 +469,7 @@ class LLMUserAggregator(LLMContextAggregator):
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            self.set_tools(frame.tools)  # type: ignore[arg-type]
+            self.set_tools(frame.tools)
             # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
             # services (like OpenAI Realtime) may need to know about tool
             # changes; unlike text-based LLM services they won't just "pick up
@@ -819,7 +827,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
-        self._thought_llm: str = ""
+        self._thought_llm: Optional[str] = ""
         self._thought_aggregation: List[TextPartForConcatenation] = []
         self._thought_start_time: str = ""
 
@@ -881,7 +889,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            self.set_tools(frame.tools)  # type: ignore[arg-type]
+            self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, FunctionCallsStartedFrame):
@@ -1037,7 +1045,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # sure we don't block the pipeline.
         if properties and properties.on_context_updated:
             task_name = f"{frame.function_name}:{frame.tool_call_id}:on_context_updated"
-            task = self.create_task(properties.on_context_updated(), task_name)  # type: ignore[arg-type]
+            task = self.create_task(properties.on_context_updated(), task_name)
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
 
@@ -1119,7 +1127,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         await self._reset_thought_aggregation()
         self._thought_append_to_context = frame.append_to_context
-        self._thought_llm = frame.llm  # type: ignore[assignment]
+        self._thought_llm = frame.llm
         self._thought_start_time = time_now_iso8601()
 
     async def _handle_thought_text(self, frame: LLMThoughtTextFrame):
@@ -1143,10 +1151,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         thought = concatenate_aggregated_text(self._thought_aggregation)
 
         if self._thought_append_to_context:
-            llm = self._thought_llm
+            assert self._thought_llm is not None, "llm is required when append_to_context is True"
             self._context.add_message(
                 LLMSpecificMessage(
-                    llm=llm,
+                    llm=self._thought_llm,
                     message={
                         "type": "thought",
                         "text": thought,
