@@ -416,8 +416,8 @@ def _get_transport_params(transport_key: str, transport_params: Dict[str, Callab
 async def _create_telephony_transport(
     websocket: WebSocket,
     params: Optional[Any] = None,
-    transport_type: str = None,
-    call_data: dict = None,
+    transport_type: Optional[str] = None,
+    call_data: Optional[dict] = None,
 ) -> BaseTransport:
     """Create a telephony transport with pre-parsed WebSocket data.
 
@@ -442,6 +442,9 @@ async def _create_telephony_transport(
     params.add_wav_header = False
 
     logger.info(f"Using pre-detected telephony provider: {transport_type}")
+
+    if call_data is None:
+        raise ValueError("call_data must be provided for telephony transports.")
 
     if transport_type == "twilio":
         from pipecat.serializers.twilio import TwilioFrameSerializer
@@ -586,6 +589,8 @@ async def create_transport(
 
         from pipecat.transports.livekit.transport import LiveKitTransport
 
+        if runner_args.token is None:
+            raise ValueError("LiveKit token is required")
         return LiveKitTransport(
             runner_args.url,
             runner_args.token,

@@ -15,7 +15,10 @@ import asyncio
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Set
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Set, cast
+
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolChoiceOptionParam
 
 from loguru import logger
 
@@ -336,7 +339,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         Returns:
             List of message dictionaries from the context.
         """
-        return self._context.get_messages()
+        return cast(List[dict], self._context.get_messages())
 
     @property
     def role(self) -> str:
@@ -416,7 +419,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         Args:
             tool_choice: Tool choice configuration for the context.
         """
-        self._context.set_tool_choice(tool_choice)
+        self._context.set_tool_choice(cast("ChatCompletionToolChoiceOptionParam", tool_choice))
 
     async def reset(self):
         """Reset the aggregation state."""
@@ -503,7 +506,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         Args:
             aggregation: The aggregated user text to add as a user message.
         """
-        self._context.add_message({"role": self.role, "content": aggregation})
+        self._context.add_message(
+            cast("ChatCompletionMessageParam", {"role": self.role, "content": aggregation})
+        )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for user speech aggregation and context management.
@@ -553,12 +558,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            self.set_tools(frame.tools)
+            self.set_tools(frame.tools)  # type: ignore[arg-type]
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, SpeechControlParamsFrame):
             self._vad_params = frame.vad_params
-            self._turn_params = frame.turn_params
+            self._turn_params = frame.turn_params  # type: ignore[assignment]
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -851,7 +856,9 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         Args:
             aggregation: The aggregated assistant text to add as an assistant message.
         """
-        self._context.add_message({"role": "assistant", "content": aggregation})
+        self._context.add_message(
+            cast("ChatCompletionMessageParam", {"role": "assistant", "content": aggregation})
+        )
 
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         """Handle a function call that is in progress.
@@ -910,7 +917,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         elif isinstance(frame, LLMMessagesUpdateFrame):
             await self._handle_llm_messages_update(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            self.set_tools(frame.tools)
+            self.set_tools(frame.tools)  # type: ignore[arg-type]
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, FunctionCallsStartedFrame):
@@ -1016,7 +1023,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         # sure we don't block the pipeline.
         if properties and properties.on_context_updated:
             task_name = f"{frame.function_name}:{frame.tool_call_id}:on_context_updated"
-            task = self.create_task(properties.on_context_updated(), task_name)
+            task = self.create_task(properties.on_context_updated(), task_name)  # type: ignore[arg-type]
             self._context_updated_tasks.add(task)
             task.add_done_callback(self._context_updated_task_finished)
 
@@ -1030,6 +1037,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             del self._function_calls_in_progress[frame.tool_call_id]
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
+        assert frame.request is not None
         logger.debug(
             f"{self} UserImageRawFrame: [{frame.request.function_name}:{frame.request.tool_call_id}]"
         )
@@ -1105,14 +1113,18 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
                 DeprecationWarning,
                 stacklevel=2,
             )
-        super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
+        super().__init__(
+            context=OpenAILLMContext(cast(List["ChatCompletionMessageParam"], messages)),
+            params=params,
+            **kwargs,
+        )
 
     async def _process_aggregation(self):
         """Process the current aggregation and push it downstream."""
         aggregation = self._aggregation
         await self.reset()
         await self.handle_aggregation(aggregation)
-        frame = LLMMessagesFrame(self._context.messages)
+        frame = LLMMessagesFrame(cast(List[dict], self._context.messages))
         await self.push_frame(frame)
 
 
@@ -1150,7 +1162,11 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
                 DeprecationWarning,
                 stacklevel=2,
             )
-        super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
+        super().__init__(
+            context=OpenAILLMContext(cast(List["ChatCompletionMessageParam"], messages)),
+            params=params,
+            **kwargs,
+        )
 
     async def push_aggregation(self):
         """Push the aggregated assistant response as an LLMMessagesFrame."""
@@ -1161,5 +1177,5 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
             # if the tasks gets cancelled we won't be able to clear things up.
             await self.reset()
 
-            frame = LLMMessagesFrame(self._context.messages)
+            frame = LLMMessagesFrame(cast(List[dict], self._context.messages))
             await self.push_frame(frame)

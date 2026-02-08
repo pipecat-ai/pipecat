@@ -103,7 +103,7 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
         self.__high_counter = 0
         self.__low_counter = 0
 
-    async def put(self, item: Tuple[Frame, FrameDirection, FrameCallback]):
+    async def put(self, item: Tuple[Frame, FrameDirection, Optional[FrameCallback]]):
         """Put an item into the priority queue.
 
         System frames (`SystemFrame`) have higher priority than any other
@@ -483,7 +483,8 @@ class FrameProcessor(BaseObject):
         if name:
             name = f"{self}::{name}"
         else:
-            name = f"{self}::{coroutine.cr_code.co_name}"
+            cr_code = getattr(coroutine, "cr_code", None)
+            name = f"{self}::{cr_code.co_name if cr_code else 'unknown'}"
         return self.task_manager.create_task(coroutine, name)
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = 1.0):

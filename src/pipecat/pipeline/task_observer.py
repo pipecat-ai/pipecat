@@ -164,6 +164,8 @@ class TaskObserver(BaseObserver):
         return proxies
 
     async def _send_to_proxy(self, data: Any):
+        if not self._proxies:
+            return
         for proxy in self._proxies.values():
             await proxy.queue.put(data)
 
@@ -188,7 +190,9 @@ class TaskObserver(BaseObserver):
 
             if isinstance(data, FramePushed):
                 if on_push_frame_deprecated:
-                    await observer.on_push_frame(
+                    # Deprecated signature: on_push_frame(source, destination, frame, direction, timestamp)
+                    handler: Any = observer.on_push_frame
+                    await handler(
                         data.source, data.destination, data.frame, data.direction, data.timestamp
                     )
                 else:

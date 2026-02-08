@@ -14,6 +14,7 @@ in conversational pipelines.
 from pipecat.frames.frames import TextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregator
+from pipecat.utils.string import concatenate_aggregated_text
 
 
 class UserResponseAggregator(LLMUserAggregator):
@@ -45,20 +46,27 @@ class UserResponseAggregator(LLMUserAggregator):
                 stacklevel=2,
             )
 
-    async def push_aggregation(self):
+    async def push_aggregation(self) -> str:
         """Push the aggregated user response as a TextFrame.
 
         Creates a TextFrame from the current aggregation if it contains content,
         resets the aggregation state, and pushes the frame downstream.
+
+        Returns:
+            The pushed aggregation text, or empty string if nothing to push.
         """
         if len(self._aggregation) > 0:
-            frame = TextFrame(self._aggregation.strip())
+            text = concatenate_aggregated_text(self._aggregation).strip()
+            frame = TextFrame(text)
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
-            self._aggregation = ""
+            self._aggregation = []
 
             await self.push_frame(frame)
 
             # Reset our accumulator state.
             await self.reset()
+
+            return text
+        return ""

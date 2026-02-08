@@ -69,7 +69,7 @@ class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
         elif torch.cuda.is_available():
             self._device = "cuda"
         # Move model to selected device and set it to evaluation mode
-        self._turn_model = self._turn_model.to(self._device)
+        self._turn_model = self._turn_model.to(self._device)  # type: ignore[assignment]
         self._turn_model.eval()
         logger.debug("Loaded Local Smart Turn v2")
 
@@ -77,12 +77,12 @@ class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
         """Predict end-of-turn using local PyTorch model."""
         inputs = self._turn_processor(
             audio_array,
-            sampling_rate=16000,
-            padding="max_length",
-            truncation=True,
-            max_length=16000 * 16,  # 16 seconds at 16kHz
-            return_attention_mask=True,
-            return_tensors="pt",
+            sampling_rate=16000,  # type: ignore[call-arg]
+            padding="max_length",  # type: ignore[call-arg]
+            truncation=True,  # type: ignore[call-arg]
+            max_length=16000 * 16,  # type: ignore[call-arg]
+            return_attention_mask=True,  # type: ignore[call-arg]
+            return_tensors="pt",  # type: ignore[call-arg]
         )
 
         # Move inputs to device

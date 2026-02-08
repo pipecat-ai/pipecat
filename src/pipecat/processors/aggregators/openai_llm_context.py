@@ -21,7 +21,7 @@ import io
 import json
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from openai._types import NOT_GIVEN, NotGiven
 from openai.types.chat import (
@@ -144,7 +144,7 @@ class OpenAILLMContext:
         context = OpenAILLMContext()
 
         for message in messages:
-            context.add_message(message)
+            context.add_message(cast(ChatCompletionMessageParam, message))
         return context
 
     @property
@@ -165,7 +165,7 @@ class OpenAILLMContext:
         """
         if self._llm_adapter:
             return self._llm_adapter.from_standard_tools(self._tools)
-        return self._tools
+        return self._tools  # type: ignore[return-value]
 
     @property
     def tool_choice(self) -> ChatCompletionToolChoiceOptionParam | NotGiven:
@@ -311,7 +311,7 @@ class OpenAILLMContext:
         self._tools = tools
 
     def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+        self, *, format: str, size: tuple[int, int], image: bytes, text: Optional[str] = None
     ):
         """Add a message containing an image frame.
 
@@ -333,7 +333,9 @@ class OpenAILLMContext:
         )
         self.add_message({"role": "user", "content": content})
 
-    def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
+    def add_audio_frames_message(
+        self, *, audio_frames: list[AudioRawFrame], text: Optional[str] = None
+    ):
         """Add a message containing audio frames.
 
         Args:

@@ -14,7 +14,7 @@ were interrupted mid-thought.
 
 import asyncio
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from loguru import logger
 
@@ -27,6 +27,13 @@ from pipecat.frames.frames import (
     LLMTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+
+if TYPE_CHECKING:
+    from pipecat.processors.frame_processor import FrameProcessor
+
+    _MixinBase = FrameProcessor
+else:
+    _MixinBase = object
 
 # Turn completion markers
 USER_TURN_COMPLETE_MARKER = "✓"
@@ -178,7 +185,7 @@ class UserTurnCompletionConfig:
         return self.incomplete_long_prompt or DEFAULT_INCOMPLETE_LONG_PROMPT
 
 
-class UserTurnCompletionLLMServiceMixin:
+class UserTurnCompletionLLMServiceMixin(_MixinBase):
     """Mixin that adds turn completion detection to LLM services.
 
     This mixin provides methods to push LLM text with turn completion detection.

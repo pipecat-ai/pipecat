@@ -12,7 +12,7 @@ from threading import Lock
 from loguru import logger
 
 try:
-    import krisp_audio
+    import krisp_audio  # type: ignore[import-not-found]
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use the Krisp instance, you need to install krisp_audio.")

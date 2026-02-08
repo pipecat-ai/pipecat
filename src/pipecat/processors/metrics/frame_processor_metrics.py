@@ -65,6 +65,7 @@ class FrameProcessorMetrics(BaseObject):
         Returns:
             The task manager instance for async operations.
         """
+        assert self._task_manager is not None
         return self._task_manager
 
     @property

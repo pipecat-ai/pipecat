@@ -224,9 +224,9 @@ class SmallWebRTCConnection(BaseObject):
         if not ice_servers:
             self.ice_servers: List[IceServer] = []
         elif all(isinstance(s, IceServer) for s in ice_servers):
-            self.ice_servers = ice_servers
+            self.ice_servers = ice_servers  # type: ignore[assignment]
         elif all(isinstance(s, str) for s in ice_servers):
-            self.ice_servers = [IceServer(urls=s) for s in ice_servers]
+            self.ice_servers = [IceServer(urls=s) for s in ice_servers]  # type: ignore[misc]
         else:
             raise TypeError("ice_servers must be either List[str] or List[RTCIceServer]")
         self._connect_invoked = False
@@ -384,10 +384,10 @@ class SmallWebRTCConnection(BaseObject):
             # and aiortc does not handle that pretty well.
             video_input_track = self.video_input_track()
             if video_input_track:
-                await self.video_input_track().discard_old_frames()
+                await video_input_track.discard_old_frames()
             screen_video_input_track = self.screen_video_input_track()
             if screen_video_input_track:
-                await self.screen_video_input_track().discard_old_frames()
+                await screen_video_input_track.discard_old_frames()
             if video_input_track or screen_video_input_track:
                 # This prevents an issue where sometimes the WebRTC connection can be established
                 # before the bot is ready to receive video. When that happens, we can lose a couple

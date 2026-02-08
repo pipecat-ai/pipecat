@@ -57,7 +57,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
             package_path = "pipecat.audio.turn.smart_turn.data"
 
             try:
-                import importlib_resources as impresources
+                import importlib_resources as impresources  # type: ignore[import-not-found]
 
                 smart_turn_model_path = str(impresources.files(package_path).joinpath(model_name))
             except BaseException:
@@ -65,7 +65,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
                 try:
                     with impresources.path(package_path, model_name) as f:
-                        smart_turn_model_path = f
+                        smart_turn_model_path = str(f)
                 except BaseException:
                     smart_turn_model_path = str(
                         impresources.files(package_path).joinpath(model_name)
@@ -80,6 +80,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
         self._feature_extractor = WhisperFeatureExtractor(chunk_length=8)
+        assert smart_turn_model_path is not None
         self._session = ort.InferenceSession(smart_turn_model_path, sess_options=so)
 
         logger.debug("Loaded Local Smart Turn v3.x")
@@ -165,7 +166,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         outputs = self._session.run(None, {"input_features": input_features})
 
         # Extract probability (ONNX model returns sigmoid probabilities)
-        probability = outputs[0][0].item()
+        probability = outputs[0][0].item()  # type: ignore[index]
 
         # Make prediction (1 for Complete, 0 for Incomplete)
         prediction = 1 if probability > 0.5 else 0

@@ -234,7 +234,7 @@ class TextPartForConcatenation:
     includes_inter_part_spaces: bool
 
     def __str__(self):
-        return f"{self.name}(text: [{self.text}], includes_inter_part_spaces: {self.includes_inter_part_spaces})"
+        return f"{type(self).__name__}(text: [{self.text}], includes_inter_part_spaces: {self.includes_inter_part_spaces})"
 
 
 def concatenate_aggregated_text(text_parts: List[TextPartForConcatenation]) -> str:

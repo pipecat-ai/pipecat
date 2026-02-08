@@ -76,7 +76,12 @@ class StrandsAgentsProcessor(FrameProcessor):
             messages = frame.context.get_messages()
             if messages:
                 last_message = messages[-1]
-                await self._ainvoke(str(last_message["content"]).strip())
+                content = (
+                    last_message.get("content", "")
+                    if isinstance(last_message, dict)
+                    else getattr(last_message, "content", "")
+                )
+                await self._ainvoke(str(content).strip())
         else:
             await self.push_frame(frame, direction)
 
@@ -100,6 +105,7 @@ class StrandsAgentsProcessor(FrameProcessor):
                     await self.stop_ttfb_metrics()
                     ttfb_tracking = False
                 try:
+                    assert self.graph_exit_node is not None
                     node_result = graph_result.results[self.graph_exit_node]
                     logger.debug(f"Node result: {node_result}")
                     for agent_result in node_result.get_agent_results():
@@ -119,6 +125,7 @@ class StrandsAgentsProcessor(FrameProcessor):
                     logger.warning(f"Failed to extract messages from GraphResult: {parse_err}")
             else:
                 # Agent supports streaming events via async iterator
+                assert self.agent is not None
                 async for event in self.agent.stream_async(text):
                     # Push to TTS service
                     if isinstance(event, dict) and "data" in event:

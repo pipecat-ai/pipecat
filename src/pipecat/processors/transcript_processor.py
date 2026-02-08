@@ -10,7 +10,7 @@ This module provides processors that convert speech and text frames into structu
 transcript messages with timestamps, enabling conversation history tracking and analysis.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from loguru import logger
 
@@ -47,10 +47,14 @@ class BaseTranscriptProcessor(FrameProcessor):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
-        self._processed_messages: List[TranscriptionMessage] = []
+        self._processed_messages: List[
+            Union[TranscriptionMessage, ThoughtTranscriptionMessage]
+        ] = []
         self._register_event_handler("on_transcript_update")
 
-    async def _emit_update(self, messages: List[TranscriptionMessage]):
+    async def _emit_update(
+        self, messages: List[Union[TranscriptionMessage, ThoughtTranscriptionMessage]]
+    ):
         """Emit transcript updates for new messages.
 
         Args:

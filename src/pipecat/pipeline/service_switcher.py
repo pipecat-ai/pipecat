@@ -128,7 +128,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         def __init__(
             self,
             wrapped_service: FrameProcessor,
-            active_service: FrameProcessor,
+            active_service: Optional[FrameProcessor],
             direction: FrameDirection,
         ):
             """Initialize the service switcher filter with a strategy and direction.
@@ -163,7 +163,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     class ServiceSwitcherFilterFrame(ControlFrame):
         """An internal frame used by ServiceSwitcher to filter frames based on active service."""
 
-        active_service: FrameProcessor
+        active_service: Optional[FrameProcessor]
 
     @staticmethod
     def _make_pipeline_definitions(

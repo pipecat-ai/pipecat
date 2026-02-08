@@ -103,9 +103,9 @@ class BaseTextAggregator(ABC):
             a string indicating the type of aggregation (e.g., 'sentence', 'word',
             'token', 'my_custom_aggregation').
         """
-        pass
         # Make this a generator to satisfy type checker
-        yield  # pragma: no cover
+        yield Aggregation("", "")  # pragma: no cover
+        return  # pragma: no cover
 
     @abstractmethod
     async def flush(self) -> Optional[Aggregation]:

@@ -28,7 +28,7 @@ try:
 
     gi.require_version("Gst", "1.0")
     gi.require_version("GstApp", "1.0")
-    from gi.repository import Gst, GstApp
+    from gi.repository import Gst, GstApp  # type: ignore[import-not-found]
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(

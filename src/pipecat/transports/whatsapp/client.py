@@ -157,6 +157,7 @@ class WhatsAppClient:
     async def _validate_whatsapp_webhook_request(self, raw_body: bytes, sha256_signature: str):
         """Common handler for both /start and /connect endpoints."""
         # Compute HMAC SHA256 using your App Secret
+        assert self._whatsapp_secret is not None
         expected_signature = hmac.new(
             key=self._whatsapp_secret.encode("utf-8"),
             msg=raw_body,
@@ -205,6 +206,7 @@ class WhatsAppClient:
         """
         try:
             if self._whatsapp_secret:
+                assert raw_body is not None and sha256_signature is not None
                 await self._validate_whatsapp_webhook_request(raw_body, sha256_signature)
             for entry in request.entry:
                 for change in entry.changes:
@@ -306,7 +308,10 @@ class WhatsAppClient:
             # Create and initialize WebRTC connection
             pipecat_connection = SmallWebRTCConnection(self._ice_servers)
             await pipecat_connection.initialize(sdp=call.session.sdp, type=call.session.sdp_type)
-            sdp_answer = pipecat_connection.get_answer().get("sdp")
+            answer = pipecat_connection.get_answer()
+            assert answer is not None
+            sdp_answer = answer.get("sdp")
+            assert isinstance(sdp_answer, str)
             sdp_answer = self._filter_sdp_for_whatsapp(sdp_answer)
 
             logger.debug(f"SDP answer generated for call {call.id}")

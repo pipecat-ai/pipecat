@@ -65,7 +65,7 @@ class SileroOnnxModel:
         if np.ndim(x) == 1:
             x = np.expand_dims(x, 0)
         if np.ndim(x) > 2:
-            raise ValueError(f"Too many dimensions for input audio chunk {x.dim()}")
+            raise ValueError(f"Too many dimensions for input audio chunk {np.ndim(x)}")
 
         if sr not in self.sample_rates:
             raise ValueError(
@@ -150,7 +150,7 @@ class SileroVADAnalyzer(VADAnalyzer):
         package_path = "pipecat.audio.vad.data"
 
         try:
-            import importlib_resources as impresources
+            import importlib_resources as impresources  # type: ignore[import-not-found]
 
             model_file_path = str(impresources.files(package_path).joinpath(model_name))
         except BaseException:
@@ -158,7 +158,7 @@ class SileroVADAnalyzer(VADAnalyzer):
 
             try:
                 with impresources.path(package_path, model_name) as f:
-                    model_file_path = f
+                    model_file_path = str(f)
             except BaseException:
                 model_file_path = str(impresources.files(package_path).joinpath(model_name))
 
@@ -209,7 +209,7 @@ class SileroVADAnalyzer(VADAnalyzer):
             audio_int16 = np.frombuffer(buffer, np.int16)
             # Divide by 32768 because we have signed 16-bit data.
             audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
-            new_confidence = self._model(audio_float32, self.sample_rate)[0]
+            new_confidence = self._model(audio_float32, self.sample_rate)[0]  # type: ignore[index]
 
             # We need to reset the model from time to time because it doesn't
             # really need all the data and memory will keep growing otherwise.

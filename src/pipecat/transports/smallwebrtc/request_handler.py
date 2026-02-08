@@ -223,6 +223,7 @@ class SmallWebRTCRequestHandler:
                     )
 
             answer = pipecat_connection.get_answer()
+            assert answer is not None
 
             if self._esp32_mode:
                 from pipecat.runner.utils import smallwebrtc_sdp_munging

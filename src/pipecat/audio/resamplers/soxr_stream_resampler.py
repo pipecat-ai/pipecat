@@ -96,6 +96,7 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
 
         self._maybe_initialize_sox_stream(in_rate, out_rate)
         audio_data = np.frombuffer(audio, dtype=np.int16)
+        assert self._soxr_stream is not None
         resampled_audio = self._soxr_stream.resample_chunk(audio_data)
         result = resampled_audio.astype(np.int16).tobytes()
         return result

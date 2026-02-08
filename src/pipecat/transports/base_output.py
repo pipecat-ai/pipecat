@@ -708,7 +708,7 @@ class BaseOutputTransport(FrameProcessor):
                     try:
                         frame = self._audio_queue.get_nowait()
                         if isinstance(frame, OutputAudioRawFrame):
-                            frame.audio = await self._mixer.mix(frame.audio)
+                            frame.audio = await self._mixer.mix(frame.audio)  # type: ignore[union-attr]
                             last_frame_time = time.time()
                         yield frame
                         self._audio_queue.task_done()
@@ -719,7 +719,7 @@ class BaseOutputTransport(FrameProcessor):
                             await self._bot_stopped_speaking()
                         # Generate an audio frame with only the mixer's part.
                         frame = OutputAudioRawFrame(
-                            audio=await self._mixer.mix(silence),
+                            audio=await self._mixer.mix(silence),  # type: ignore[union-attr]
                             sample_rate=self._sample_rate,
                             num_channels=self._params.audio_out_channels,
                         )
@@ -864,6 +864,7 @@ class BaseOutputTransport(FrameProcessor):
                 # which is kind of what happens in P2P connections.
                 # We need to add support for that inside the DailyTransport
                 if frame.size != desired_size:
+                    assert frame.format is not None
                     image = Image.frombytes(frame.format, frame.size, frame.image)
                     resized_image = image.resize(desired_size)
                     # logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")

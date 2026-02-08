@@ -19,7 +19,7 @@ import base64
 import io
 import wave
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypeAlias, Union, cast
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -107,10 +107,13 @@ class LLMContext:
         converted_tools = openai_context.tools
         if isinstance(converted_tools, list):
             converted_tools = ToolsSchema(
-                standard_tools=[], custom_tools={AdapterType.SHIM: converted_tools}
+                standard_tools=[],
+                custom_tools=cast(
+                    Dict[AdapterType, List[Dict[str, Any]]], {AdapterType.SHIM: converted_tools}
+                ),
             )
         return LLMContext(
-            messages=openai_context.get_messages(),
+            messages=cast(List[LLMContextMessage], openai_context.get_messages()),
             tools=converted_tools,
             tool_choice=openai_context.tool_choice,
         )
@@ -152,7 +155,7 @@ class LLMContext:
 
         content.append({"type": "image_url", "image_url": {"url": url}})
 
-        return {"role": role, "content": content}
+        return cast(LLMContextMessage, {"role": role, "content": content})
 
     @staticmethod
     async def create_image_message(
@@ -204,7 +207,7 @@ class LLMContext:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
         """
-        content = [{"type": "text", "text": text}]
+        content: List[Dict[str, Any]] = [{"type": "text", "text": text}]
 
         def encode_audio():
             sample_rate = audio_frames[0].sample_rate
@@ -231,7 +234,7 @@ class LLMContext:
             }
         )
 
-        return {"role": role, "content": content}
+        return cast(LLMContextMessage, {"role": role, "content": content})
 
     @property
     def messages(self) -> List[LLMContextMessage]:

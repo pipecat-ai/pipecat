@@ -74,7 +74,13 @@ class LangchainProcessor(FrameProcessor):
                 if isinstance(frame, OpenAILLMContextFrame)
                 else frame.context.get_messages()
             )
-            text: str = messages[-1]["content"]
+            last_msg = messages[-1]
+            content = (
+                last_msg.get("content", "")
+                if isinstance(last_msg, dict)
+                else getattr(last_msg, "content", "")
+            )
+            text: str = content if isinstance(content, str) else str(content)
 
             await self._ainvoke(text.strip())
         else:
@@ -94,7 +100,7 @@ class LangchainProcessor(FrameProcessor):
             case str():
                 return text
             case AIMessageChunk():
-                return text.content
+                return text.content if isinstance(text.content, str) else str(text.content)
             case _:
                 return ""
 

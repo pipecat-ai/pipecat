@@ -310,7 +310,7 @@ class PatternPairAggregator(SimpleTextAggregator):
             # Which is why we base the return on the first found.
             if start_count > end_count:
                 start_index = text.find(start)
-                return [start_index, pattern_info]
+                return (start_index, pattern_info)
 
         return None
 

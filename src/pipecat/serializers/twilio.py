@@ -78,6 +78,7 @@ class TwilioFrameSerializer(FrameSerializer):
             params: Configuration parameters.
         """
         super().__init__(params or TwilioFrameSerializer.InputParams())
+        self._params: TwilioFrameSerializer.InputParams
 
         # Validate hangup-related parameters if auto_hang_up is enabled
         if self._params.auto_hang_up:
@@ -193,6 +194,8 @@ class TwilioFrameSerializer(FrameSerializer):
             endpoint = f"https://api.{edge_prefix}{region_prefix}twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
 
             # Create basic auth from account_sid and auth_token
+            assert account_sid is not None
+            assert auth_token is not None
             auth = aiohttp.BasicAuth(account_sid, auth_token)
 
             # Parameters to set the call status to "completed" (hang up)

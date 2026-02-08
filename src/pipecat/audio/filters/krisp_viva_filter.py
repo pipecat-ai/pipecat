@@ -10,6 +10,7 @@ This module provides an audio filter implementation using Krisp VIVA SDK.
 """
 
 import os
+from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -23,7 +24,7 @@ from pipecat.audio.krisp_instance import (
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
 try:
-    import krisp_audio
+    import krisp_audio  # type: ignore[import-not-found]
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use KrispVivaFilter, you need to install krisp_audio.")
@@ -39,7 +40,10 @@ class KrispVivaFilter(BaseAudioFilter):
     """
 
     def __init__(
-        self, model_path: str = None, frame_duration: int = 10, noise_suppression_level: int = 100
+        self,
+        model_path: Optional[str] = None,
+        frame_duration: int = 10,
+        noise_suppression_level: int = 100,
     ) -> None:
         """Initialize the Krisp noise reduction filter.
 
@@ -171,6 +175,9 @@ class KrispVivaFilter(BaseAudioFilter):
             return audio
 
         try:
+            if self._samples_per_frame is None or self._session is None:
+                return audio
+
             # Add incoming audio to our buffer
             self._audio_buffer.extend(audio)
 

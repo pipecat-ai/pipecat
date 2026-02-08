@@ -79,11 +79,11 @@ async def configure(
     aiohttp_session: aiohttp.ClientSession,
     *,
     api_key: Optional[str] = None,
-    room_exp_duration: Optional[float] = 2.0,
-    token_exp_duration: Optional[float] = 2.0,
+    room_exp_duration: float = 2.0,
+    token_exp_duration: float = 2.0,
     sip_caller_phone: Optional[str] = None,
-    sip_enable_video: Optional[bool] = False,
-    sip_num_endpoints: Optional[int] = 1,
+    sip_enable_video: bool = False,
+    sip_num_endpoints: int = 1,
     sip_codecs: Optional[Dict[str, List[str]]] = None,
     room_properties: Optional[DailyRoomProperties] = None,
     token_properties: Optional["DailyMeetingTokenProperties"] = None,
@@ -209,6 +209,7 @@ async def configure(
 
         # Add SIP configuration if enabled
         if sip_enabled:
+            assert sip_caller_phone is not None
             sip_params = DailyRoomSipParams(
                 display_name=sip_caller_phone,
                 video=sip_enable_video,
