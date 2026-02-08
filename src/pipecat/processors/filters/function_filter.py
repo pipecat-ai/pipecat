@@ -10,10 +10,12 @@ This module provides a processor that filters frames based on a custom function,
 allowing for flexible frame filtering logic in processing pipelines.
 """
 
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+FilterType = Callable[[Frame], Awaitable[bool]]
 
 
 class FunctionFilter(FrameProcessor):
@@ -26,9 +28,10 @@ class FunctionFilter(FrameProcessor):
 
     def __init__(
         self,
-        filter: Callable[[Frame], Awaitable[bool]],
-        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        filter: FilterType,
+        direction: Optional[FrameDirection] = FrameDirection.DOWNSTREAM,
         filter_system_frames: bool = False,
+        **kwargs,
     ):
         """Initialize the function filter.
 
@@ -36,10 +39,13 @@ class FunctionFilter(FrameProcessor):
             filter: An async function that takes a Frame and returns True if the
                 frame should pass through, False otherwise.
             direction: The direction to apply filtering. Only frames moving in
-                this direction will be filtered. Defaults to DOWNSTREAM.
+                this direction will be filtered; frames in the other direction
+                pass through unfiltered. If None, frames in both directions
+                are filtered. Defaults to DOWNSTREAM.
             filter_system_frames: Whether to filter system frames. Defaults to False.
+            **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._filter = filter
         self._direction = direction
         self._filter_system_frames = filter_system_frames
@@ -51,7 +57,7 @@ class FunctionFilter(FrameProcessor):
     def _should_passthrough_frame(self, frame, direction):
         """Check if a frame should pass through without filtering."""
         # Always passthrough frames in the wrong direction
-        if direction != self._direction:
+        if self._direction and direction != self._direction:
             return True
 
         # Always passthrough lifecycle frames
