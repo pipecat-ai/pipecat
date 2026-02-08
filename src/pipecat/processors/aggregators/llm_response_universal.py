@@ -1150,8 +1150,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         thought = concatenate_aggregated_text(self._thought_aggregation)
 
-        if self._thought_append_to_context:
-            assert self._thought_llm is not None, "llm is required when append_to_context is True"
+        if self._thought_append_to_context and self._thought_llm is not None:
             self._context.add_message(
                 LLMSpecificMessage(
                     llm=self._thought_llm,
