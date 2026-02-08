@@ -310,6 +310,9 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
     async def _receive_messages(self):
         """Receive and process messages from Neuphonic WebSocket."""
+        # Note: context_id is not available in this method since it's not passed through WebSocket messages
+        # Audio frames will not have context_id set in this streaming implementation.
+        # But the TTSTextFrame will have the context_id, because they will be pushed by the TTSService
         async for message in self._websocket:
             if isinstance(message, str):
                 msg = json.loads(message)
@@ -342,11 +345,12 @@ class NeuphonicTTSService(InterruptibleTTSService):
             await self._websocket.send(json.dumps(msg))
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -360,7 +364,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             try:
                 if not self._started:
                     await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._started = True
                     self._cumulative_time = 0
 
@@ -368,7 +372,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
@@ -502,11 +506,12 @@ class NeuphonicHttpTTSService(TTSService):
             return None
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic streaming API.
 
         Args:
             text: The text to convert to speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech and status information.
@@ -542,7 +547,7 @@ class NeuphonicHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 # Process SSE stream line by line
                 async for line in response.content:
@@ -564,7 +569,9 @@ class NeuphonicHttpTTSService(TTSService):
                             audio_bytes = base64.b64decode(audio_b64)
 
                             await self.stop_ttfb_metrics()
-                            yield TTSAudioRawFrame(audio_bytes, self.sample_rate, 1)
+                            yield TTSAudioRawFrame(
+                                audio_bytes, self.sample_rate, 1, context_id=context_id
+                            )
 
                     except Exception as e:
                         yield ErrorFrame(error=f"Unknown error occurred: {e}")
@@ -578,4 +585,4 @@ class NeuphonicHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)

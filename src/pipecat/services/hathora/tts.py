@@ -115,11 +115,12 @@ class HathoraTTSService(TTSService):
         return True
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Run text-to-speech synthesis on the provided text.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -142,7 +143,7 @@ class HathoraTTSService(TTSService):
                     for option in self._settings["config"]
                 ]
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -161,6 +162,7 @@ class HathoraTTSService(TTSService):
                 audio=pcm_audio,
                 sample_rate=self.sample_rate,
                 num_channels=num_channels,
+                context_id=context_id,
             )
 
             yield frame
@@ -170,4 +172,4 @@ class HathoraTTSService(TTSService):
         finally:
             await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)

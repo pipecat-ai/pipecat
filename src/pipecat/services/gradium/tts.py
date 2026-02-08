@@ -95,6 +95,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
 
         # State tracking
         self._receive_task = None
+        self._current_context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -261,11 +262,15 @@ class GradiumTTSService(InterruptibleWordTTSService):
                     audio=base64.b64decode(msg["audio"]),
                     sample_rate=self.sample_rate,
                     num_channels=1,
+                    context_id=self._current_context_id,
                 )
                 await self.push_frame(frame)
 
             elif msg["type"] == "text":
-                await self.add_word_timestamps([(msg["text"], msg["start_s"])])
+                if self._current_context_id:
+                    await self.add_word_timestamps(
+                        [(msg["text"], msg["start_s"])], self._current_context_id
+                    )
             elif msg["type"] == "end_of_stream":
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
@@ -285,11 +290,12 @@ class GradiumTTSService(InterruptibleWordTTSService):
         await super().push_frame(frame, direction)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Gradium's streaming API.
 
         Args:
             text: The text to convert to speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -302,14 +308,15 @@ class GradiumTTSService(InterruptibleWordTTSService):
                 await self._connect()
 
             try:
-                yield TTSStartedFrame()
+                self._current_context_id = context_id
+                yield TTSStartedFrame(context_id=context_id)
 
                 msg = self._build_msg(text=text)
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return

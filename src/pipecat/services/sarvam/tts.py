@@ -442,11 +442,12 @@ class SarvamHttpTTSService(TTSService):
         self._settings["sample_rate"] = self.sample_rate
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Sarvam AI's API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -483,7 +484,7 @@ class SarvamHttpTTSService(TTSService):
 
             url = f"{self._base_url}/text-to-speech"
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
@@ -513,6 +514,7 @@ class SarvamHttpTTSService(TTSService):
                 audio=audio_data,
                 sample_rate=self.sample_rate,
                 num_channels=1,
+                context_id=context_id,
             )
 
             yield frame
@@ -521,7 +523,7 @@ class SarvamHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Error generating TTS: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
 
 class SarvamTTSService(InterruptibleTTSService):
@@ -959,6 +961,9 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _receive_messages(self):
         """Receive and process messages from Sarvam WebSocket."""
+        # Note: context_id is not available in this method since it's not passed through WebSocket messages
+        # Audio frames will not have context_id set in this streaming implementation.
+        # But the TTSTextFrame will have the context_id, because they will be pushed by the TTSService
         async for message in self._get_websocket():
             if isinstance(message, str):
                 msg = json.loads(message)
@@ -1007,16 +1012,17 @@ class SarvamTTSService(InterruptibleTTSService):
             logger.warning("WebSocket not ready, cannot send text")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech audio frames from input text using Sarvam TTS.
 
         Sends text over WebSocket for synthesis and yields corresponding audio or status frames.
 
         Args:
             text: The text input to synthesize.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
-            Frame objects including TTSStartedFrame, TTSAudioRawFrame(s), or TTSStoppedFrame.
+            Frame objects including TTSStartedFrame, TTSAudioRawFrame(s, context_id=context_id), or TTSStoppedFrame.
         """
         logger.debug(f"Generating TTS: [{text}]")
 
@@ -1027,13 +1033,13 @@ class SarvamTTSService(InterruptibleTTSService):
             try:
                 if not self._started:
                     await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._started = True
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return

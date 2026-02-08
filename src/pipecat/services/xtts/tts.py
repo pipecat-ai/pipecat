@@ -148,11 +148,12 @@ class XTTSService(TTSService):
             self._studio_speakers = await r.json()
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using XTTS streaming server.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -186,7 +187,7 @@ class XTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             CHUNK_SIZE = self.chunk_size
 
@@ -211,7 +212,9 @@ class XTTSService(TTSService):
                             bytes(process_data), 24000, self.sample_rate
                         )
                         # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(
+                            resampled_audio, self.sample_rate, 1, context_id=context_id
+                        )
                         yield frame
 
             # Process any remaining data in the buffer.
@@ -219,7 +222,9 @@ class XTTSService(TTSService):
                 resampled_audio = await self._resampler.resample(
                     bytes(buffer), 24000, self.sample_rate
                 )
-                frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(
+                    resampled_audio, self.sample_rate, 1, context_id=context_id
+                )
                 yield frame
 
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)

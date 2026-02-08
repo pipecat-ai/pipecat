@@ -238,6 +238,9 @@ class DeepgramTTSService(WebsocketTTSService):
 
     async def _receive_messages(self):
         """Receive and process messages from Deepgram WebSocket."""
+        # Note: context_id is not available in this method since it's not passed through WebSocket messages
+        # Audio frames will not have context_id set in this streaming implementation.
+        # But the TTSTextFrame will have the context_id, because they will be pushed by the TTSService
         async for message in self._get_websocket():
             if isinstance(message, bytes):
                 # Binary message contains audio data
@@ -283,11 +286,12 @@ class DeepgramTTSService(WebsocketTTSService):
                 logger.error(f"{self} error sending Flush message: {e}")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Deepgram's WebSocket TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
@@ -302,7 +306,7 @@ class DeepgramTTSService(WebsocketTTSService):
             await self.start_ttfb_metrics()
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             # Send text message to Deepgram
             # Note: We don't send Flush here - that should only be sent when the
@@ -366,11 +370,12 @@ class DeepgramHttpTTSService(TTSService):
         return True
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Deepgram's TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech, plus start/stop frames.
@@ -404,7 +409,7 @@ class DeepgramHttpTTSService(TTSService):
                     raise Exception(f"HTTP {response.status}: {error_text}")
 
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
@@ -419,9 +424,10 @@ class DeepgramHttpTTSService(TTSService):
                             audio=chunk,
                             sample_rate=self.sample_rate,
                             num_channels=1,
+                            context_id=context_id,
                         )
 
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
         except Exception as e:
             yield ErrorFrame(f"Error getting audio: {str(e)}")

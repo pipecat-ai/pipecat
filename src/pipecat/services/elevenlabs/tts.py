@@ -475,7 +475,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
+                await self.add_word_timestamps([("Reset", 0)], self._context_id)
 
     async def _connect(self):
         await super()._connect()
@@ -624,7 +624,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self.start_word_timestamps()
 
                 audio = base64.b64decode(msg["audio"])
-                frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=received_ctx_id)
                 await self.append_to_audio_context(received_ctx_id, frame)
 
             if msg.get("alignment"):
@@ -639,7 +639,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 )
 
                 if word_times:
-                    await self.add_word_timestamps(word_times)
+                    await self.add_word_timestamps(word_times, received_ctx_id)
 
                     # Calculate the actual end time of this audio chunk
                     char_start_times_ms = alignment.get("charStartTimesMs", [])
@@ -689,11 +689,12 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             await self._websocket.send(json.dumps(msg))
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs' streaming WebSocket API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -707,18 +708,18 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             try:
                 if not self._started:
                     await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._started = True
                     self._cumulative_time = 0
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
-                    # If a context ID does not exist, create a new one and
-                    # register it. If an ID exists, that means the Pipeline
-                    # doesn't allow user interruptions, so continue using the
-                    # current ID. When interruptions are allowed, user speech
-                    # results in an interruption, which resets the context ID.
+                    # If a context ID does not exist, use the provided one.
+                    # If an ID exists, that means the Pipeline doesn't allow
+                    # user interruptions, so continue using the current ID.
+                    # When interruptions are allowed, user speech results in
+                    # an interruption, which resets the context ID.
                     if not self._context_id:
-                        self._context_id = str(uuid.uuid4())
+                        self._context_id = context_id
                     if not self.audio_context_available(self._context_id):
                         await self.create_audio_context(self._context_id)
 
@@ -737,7 +738,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 self._started = False
                 return
@@ -976,7 +977,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         return word_times
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs streaming API with timestamps.
 
         Makes a request to the ElevenLabs API to generate audio and timing data.
@@ -985,6 +986,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
         Args:
             text: Text to convert to speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio and control frames containing the synthesized speech.
@@ -1051,7 +1053,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                 # Start TTS sequence if not already started
                 if not self._started:
                     await self.start_word_timestamps()
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._started = True
 
                 # Track the duration of this utterance based on the last character's end time
@@ -1069,7 +1071,9 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         if data and "audio_base64" in data:
                             await self.stop_ttfb_metrics()
                             audio = base64.b64decode(data["audio_base64"])
-                            yield TTSAudioRawFrame(audio, self.sample_rate, 1)
+                            yield TTSAudioRawFrame(
+                                audio, self.sample_rate, 1, context_id=context_id
+                            )
 
                         # Process alignment if present
                         if data and "alignment" in data:
@@ -1085,7 +1089,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                                 # Calculate word timestamps
                                 word_times = self.calculate_word_times(alignment)
                                 if word_times:
-                                    await self.add_word_timestamps(word_times)
+                                    await self.add_word_timestamps(word_times, context_id)
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse JSON from stream: {e}")
                         continue
@@ -1097,7 +1101,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                 # since this is the end of the utterance
                 if self._partial_word:
                     final_word_time = [(self._partial_word, self._partial_word_start_time)]
-                    await self.add_word_timestamps(final_word_time)
+                    await self.add_word_timestamps(final_word_time, context_id)
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
 
