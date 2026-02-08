@@ -1,0 +1,3 @@
+- Improved `PatternPairAggregator` performance by using incremental delimiter detection.
+- Added `MatchAction` enum to control pattern matching behavior (`REMOVE`, `KEEP`, `AGGREGATE`).
+- Deprecated `add_pattern_pair` in favor of `add_pattern` with `MatchAction`.
