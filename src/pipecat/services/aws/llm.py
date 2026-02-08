@@ -844,11 +844,15 @@ class AWSBedrockLLMService(LLMService):
             inference_config["topP"] = self._settings["top_p"]
         return inference_config
 
-    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+    ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens setting.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -867,6 +871,10 @@ class AWSBedrockLLMService(LLMService):
 
         # Prepare request parameters using the same method as streaming
         inference_config = self._build_inference_config()
+
+        # Override maxTokens if provided
+        if max_tokens is not None:
+            inference_config["maxTokens"] = max_tokens
 
         request_params = {
             "modelId": self.model_name,

@@ -261,11 +261,15 @@ class AnthropicLLMService(LLMService):
             response = await api_call(**params)
             return response
 
-    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+    ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens setting.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -290,7 +294,7 @@ class AnthropicLLMService(LLMService):
         # Build params using the same method as streaming completions
         params = {
             "model": self.model_name,
-            "max_tokens": self._settings["max_tokens"],
+            "max_tokens": max_tokens if max_tokens is not None else self._settings["max_tokens"],
             "stream": False,
             "temperature": self._settings["temperature"],
             "top_k": self._settings["top_k"],

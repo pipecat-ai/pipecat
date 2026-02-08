@@ -13,6 +13,7 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 
 import asyncio
 import json
+import uuid
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -37,6 +38,8 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
+    LLMContextSummaryRequestFrame,
+    LLMContextSummaryResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -73,6 +76,10 @@ from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedPar
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 from pipecat.turns.user_turn_controller import UserTurnController
 from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
+from pipecat.utils.context.llm_context_summarization import (
+    LLMContextSummarizationConfig,
+    LLMContextSummarizationUtil,
+)
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
@@ -98,6 +105,12 @@ class LLMUserAggregatorParams:
         user_turn_completion_config: Configuration for turn completion behavior including
             custom instructions, timeouts, and prompts. Only used when
             filter_incomplete_user_turns is True.
+        enable_context_summarization: Enable automatic context summarization when token
+            limits are approached (disabled by default). When enabled, older conversation
+            messages are automatically compressed into summaries to manage context size.
+        context_summarization_config: Configuration for context summarization behavior.
+            Controls thresholds, message preservation, and summarization prompts. If None
+            and summarization is enabled, uses default configuration values.
     """
 
     user_turn_strategies: Optional[UserTurnStrategies] = None
@@ -107,6 +120,8 @@ class LLMUserAggregatorParams:
     vad_analyzer: Optional[VADAnalyzer] = None
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
+    enable_context_summarization: bool = False
+    context_summarization_config: Optional[LLMContextSummarizationConfig] = None
 
 
 @dataclass
@@ -417,6 +432,14 @@ class LLMUserAggregator(LLMContextAggregator):
         # pushed by strategies.
         self._self_queued_frames = set()
 
+        # Context summarization state
+        self._summarization_enabled = self._params.enable_context_summarization
+        self._summarization_config = (
+            self._params.context_summarization_config or LLMContextSummarizationConfig()
+        )
+        self._summarization_in_progress = False
+        self._pending_summary_request_id: Optional[str] = None
+
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
@@ -437,7 +460,10 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._vad_controller:
             await self._vad_controller.process_frame(frame)
 
-        if isinstance(frame, StartFrame):
+        if isinstance(frame, InterruptionFrame):
+            await self._handle_interruptions(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
             # processed by every processor before any other frame is processed.
             await self.push_frame(frame, direction)
@@ -470,6 +496,8 @@ class LLMUserAggregator(LLMContextAggregator):
             self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, SpeechControlParamsFrame):
             await self._handle_speech_control_params(frame)
+        elif isinstance(frame, LLMContextSummaryResultFrame):
+            await self._handle_summary_result(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -526,6 +554,7 @@ class LLMUserAggregator(LLMContextAggregator):
         await self._cleanup()
 
     async def _cleanup(self):
+        await self._clear_summarization()
         await self._user_turn_controller.cleanup()
 
         if self._user_idle_controller:
@@ -533,6 +562,12 @@ class LLMUserAggregator(LLMContextAggregator):
 
         for s in self._params.user_mute_strategies:
             await s.cleanup()
+
+    async def _clear_summarization(self):
+        # Cancel pending summarization
+        if self._summarization_in_progress:
+            self._summarization_in_progress = False
+            self._pending_summary_request_id = None
 
     async def _maybe_mute_frame(self, frame: Frame):
         should_mute_frame = self._user_is_muted and isinstance(
@@ -576,6 +611,16 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _handle_llm_run(self, frame: LLMRunFrame):
         await self.push_context_frame()
+
+    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a context frame in the specified direction.
+
+        Args:
+            direction: The direction to push the frame (upstream or downstream).
+        """
+        await super().push_context_frame(direction)
+        if self._should_summarize():
+            await self._request_summarization()
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
@@ -728,6 +773,206 @@ class LLMUserAggregator(LLMContextAggregator):
             )
             await self._call_event_handler("on_user_turn_stopped", strategy, message)
             self._user_turn_start_timestamp = ""
+
+    async def _handle_interruptions(self, frame: InterruptionFrame):
+        # If an interruption happened before we received the summary response
+        # from the LLM, we need to cancel the pending summarization.
+        # Because maybe we will never receive the response frame again
+        await self._clear_summarization()
+
+    # Context summarization methods
+
+    def _should_summarize(self) -> bool:
+        """Determine if context summarization should be triggered.
+
+        Evaluates whether the current context has reached either the token
+        threshold or message count threshold that warrants compression.
+
+        Returns:
+            True if all conditions are met:
+            - Summarization is enabled
+            - No summarization currently in progress
+            - AND either:
+              - Token count exceeds max_context_tokens
+              - OR message count exceeds max_unsummarized_messages since last summary
+        """
+        logger.trace(f"{self}: Checking if context summarization is needed")
+
+        if not self._summarization_enabled:
+            logger.trace(f"{self}: Summarization disabled")
+            return False
+
+        if self._summarization_in_progress:
+            logger.debug(f"{self}: Summarization already in progress")
+            return False
+
+        # Estimate tokens in context
+        total_tokens = LLMContextSummarizationUtil.estimate_context_tokens(self._context)
+        num_messages = len(self._context.messages)
+
+        # Check if we've reached the token limit
+        token_limit = self._summarization_config.max_context_tokens
+        token_limit_exceeded = total_tokens >= token_limit
+
+        # Check if we've exceeded max unsummarized messages
+        messages_since_summary = len(self._context.messages) - 1
+        message_threshold_exceeded = (
+            messages_since_summary >= self._summarization_config.max_unsummarized_messages
+        )
+
+        logger.trace(
+            f"{self}: Context has {num_messages} messages, "
+            f"~{total_tokens} tokens (limit: {token_limit}), "
+            f"{messages_since_summary} messages since last summary "
+            f"(message threshold: {self._summarization_config.max_unsummarized_messages})"
+        )
+
+        # Trigger if either limit is exceeded
+        if not token_limit_exceeded and not message_threshold_exceeded:
+            logger.trace(
+                f"{self}: Neither token limit nor message threshold exceeded, skipping summarization"
+            )
+            return False
+
+        reason = []
+        if token_limit_exceeded:
+            reason.append(f"~{total_tokens} tokens (>={token_limit} limit)")
+        if message_threshold_exceeded:
+            reason.append(
+                f"{messages_since_summary} messages (>={self._summarization_config.max_unsummarized_messages} threshold)"
+            )
+
+        logger.debug(f"{self}: ✓ Summarization needed - {', '.join(reason)}")
+        return True
+
+    async def _request_summarization(self):
+        """Request context summarization from LLM service.
+
+        Creates and broadcasts a summarization request frame to the LLM service.
+        Tracks the request ID to match async responses and prevent race conditions.
+        """
+        # Generate unique request ID
+        request_id = str(uuid.uuid4())
+        min_keep = self._summarization_config.min_messages_after_summary
+
+        # Mark summarization in progress
+        self._summarization_in_progress = True
+        self._pending_summary_request_id = request_id
+
+        logger.debug(f"{self}: Sending summarization request (request_id={request_id})")
+
+        # Create and broadcast the request frame
+        await self.broadcast_frame(
+            LLMContextSummaryRequestFrame,
+            request_id=request_id,
+            context=self._context,
+            min_messages_to_keep=min_keep,
+            max_context_tokens=self._summarization_config.max_context_tokens,
+            summarization_prompt=self._summarization_config.summary_prompt,
+        )
+
+    async def _handle_summary_result(self, frame: LLMContextSummaryResultFrame):
+        """Handle context summarization result from LLM service.
+
+        Processes the summary result by validating the request ID, checking for
+        errors, verifying context state hasn't changed, and applying the summary
+        to compress the context.
+
+        Args:
+            frame: The summary result frame containing the generated summary.
+        """
+        # Check if this is the result we're waiting for
+        if frame.request_id != self._pending_summary_request_id:
+            logger.debug(f"{self}: Ignoring stale summary result (request_id={frame.request_id})")
+            return
+
+        # Clear pending state
+        await self._clear_summarization()
+
+        # Check for errors
+        if frame.error:
+            logger.error(f"{self}: Context summarization failed: {frame.error}")
+            return
+
+        # Validate context state
+        if not self._validate_summary_context(frame.last_summarized_index):
+            logger.warning(f"{self}: Context state changed, skipping summary application")
+            return
+
+        # Apply summary
+        await self._apply_summary(frame.summary, frame.last_summarized_index)
+
+    def _validate_summary_context(self, last_summarized_index: int) -> bool:
+        """Validate that context state is still valid for applying summary.
+
+        Checks if the context has changed since the summarization request was
+        made. This prevents applying stale summaries when messages have been
+        removed during the async summarization process.
+
+        Args:
+            last_summarized_index: The index of the last summarized message.
+
+        Returns:
+            True if the context state is still consistent with the summary and
+            it's safe to apply the compression.
+        """
+        if last_summarized_index < 0:
+            return False
+
+        # Check if we still have enough messages
+        if last_summarized_index >= len(self._context.messages):
+            return False
+
+        # Check if we still have enough messages after summary
+        min_keep = self._summarization_config.min_messages_after_summary
+        remaining = len(self._context.messages) - 1 - last_summarized_index
+        if remaining < min_keep:
+            return False
+
+        return True
+
+    async def _apply_summary(self, summary: str, last_summarized_index: int):
+        """Apply summary to compress the conversation context.
+
+        Reconstructs the context with a compressed structure:
+        [first_system_message] + [summary_message] + [recent_messages]
+
+        The summary message uses provider-specific formatting (role and content)
+        as determined by the LLM service's adapter.
+
+        Args:
+            summary: The formatted summary message from the LLM service adapter.
+            last_summarized_index: The index of the last message included in
+                the summary. Messages after this index are preserved.
+        """
+        messages = self._context.messages
+
+        # Find first system message (if any)
+        first_system_message = next((msg for msg in messages if msg.get("role") == "system"), None)
+
+        # Get messages after the last summarized index
+        # These are the recent messages that were not included in the summary
+        recent_messages = messages[last_summarized_index + 1 :]
+
+        # Create summary message using provider-formatted summary
+        summary_message = {
+            "role": "system",
+            "content": f"Conversation summary:\n{summary}",
+        }
+
+        # Rebuild context using last_summarized_index
+        # Structure: [first_system] + [summary] + [messages after last_summarized_index]
+        new_messages = []
+        if first_system_message:
+            new_messages.append(first_system_message)
+        new_messages.append(summary_message)
+        new_messages.extend(recent_messages)
+
+        # Update context
+        self._context.set_messages(new_messages)
+
+        logger.info(f"{self}: Applied context summary")
+        logger.debug(f"{self}: New context: {self._context.messages}")
 
 
 class LLMAssistantAggregator(LLMContextAggregator):
