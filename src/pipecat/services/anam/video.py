@@ -485,9 +485,11 @@ class AnamVideoService(AIService):
             except asyncio.TimeoutError:
                 # Bot has stopped speaking - signal end of sequence
                 if self._event_id is not None and self._agent_audio_stream:
+                    if len(audio_buffer) > 0:
+                        await self._agent_audio_stream.send_audio_chunk(bytes(audio_buffer))
+                    audio_buffer.clear()
                     await self._agent_audio_stream.end_sequence()
                     self._event_id = None
-                    audio_buffer.clear()
             except Exception as e:
                 logger.error(f"Error in audio send task: {e}")
                 await self.push_error(ErrorFrame(error=f"Anam audio send error: {e}"))
