@@ -29,7 +29,6 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.anam.video import AnamVideoService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
@@ -55,7 +54,6 @@ transport_params = {
         video_out_width=720,
         video_out_height=480,
         video_out_bitrate=1_000_000,  # 1MBps
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -64,7 +62,6 @@ transport_params = {
         video_out_is_live=True,
         video_out_width=720,
         video_out_height=480,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         audio_out_sample_rate=48000,  # Anam WebRTC output (OPUS 48kHz stereo)
         audio_out_channels=2,
         audio_in_sample_rate=16000,  # WebRTC input
@@ -83,11 +80,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
             params=CartesiaTTSService.InputParams(sample_rate=ANAM_SAMPLE_RATE),
         )
-        # tts = ElevenLabsTTSService(
-        #     api_key=os.getenv("ELEVENLABS_API_KEY"),
-        #     voice_id="21m00Tcm4TlvDq8ikWAM",
-        #     params=ElevenLabsTTSService.InputParams(sample_rate=ANAM_SAMPLE_RATE),
-        # )
 
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
@@ -105,7 +97,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_base_url="https://api.anam.ai",
             api_version="v1",
         )
-        logger.info(f"{anam}")
 
         messages = [
             {
