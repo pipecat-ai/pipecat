@@ -25,6 +25,15 @@ Indian languages and two model variants:
       kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa, kabir,
       aayan, shubh, ashutosh, advait, amelia, sophia
 
+- **bulbul:v3**: Advanced TTS model with temperature control
+    - Does NOT support: pitch, loudness
+    - Supports: pace (0.5-2.0), temperature (0.01-1.0)
+    - Default sample rate: 24000 Hz
+    - Preprocessing is always enabled
+    - Speakers: aditya (default), ritu, priya, neha, rahul, pooja, rohan, simran,
+      kavya, amit, dev, ishita, shreya, ratan, varun, manan, sumit, roopa, kabir,
+      aayan, shubh, ashutosh, advait, amelia, sophia
+
 See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for full API details.
 """
 
@@ -83,6 +92,7 @@ class SarvamTTSModel(str, Enum):
 
     BULBUL_V2 = "bulbul:v2"
     BULBUL_V3_BETA = "bulbul:v3-beta"
+    BULBUL_V3 = "bulbul:v3"
 
 
 class SarvamTTSSpeakerV2(str, Enum):
@@ -171,6 +181,16 @@ TTS_MODEL_CONFIGS: Dict[str, TTSModelConfig] = {
         speakers=tuple(s.value for s in SarvamTTSSpeakerV2),
     ),
     "bulbul:v3-beta": TTSModelConfig(
+        supports_pitch=False,
+        supports_loudness=False,
+        supports_temperature=True,
+        default_sample_rate=24000,
+        default_speaker="shubh",
+        pace_range=(0.5, 2.0),
+        preprocessing_always_enabled=True,
+        speakers=tuple(s.value for s in SarvamTTSSpeakerV3),
+    ),
+    "bulbul:v3": TTSModelConfig(
         supports_pitch=False,
         supports_loudness=False,
         supports_temperature=True,
