@@ -68,7 +68,7 @@ class AnamVideoService(AIService):
         persona_id: ID of the persona to use (simple setup).
         persona_config: Full persona configuration (advanced setup).
         session: HTTP client session for API requests.
-        ice_servers: Custom ICE servers for WebRTC (optional).\
+        ice_servers: Custom ICE servers for WebRTC (optional).
         enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
         api_base_url: Base URL for the Anam API.
         api_version: API version to use.
@@ -444,7 +444,7 @@ class AnamVideoService(AIService):
         Anam works best with 16 bit PCM 24kHz mono audio.
         Audio send to Anam is returned in-sync with the avatar without any resampling.
         Sample rates lower than 24kHz will result in poor Avatar performance.
-        Sample rates highet than 24kHz might impact latency without any noticeable improvement in audio quality.
+        Sample rates higher than 24kHz might impact latency without any noticeable improvement in audio quality.
         """
         if not self._agent_audio_stream:
             logger.error("Agent audio stream not initialized")
