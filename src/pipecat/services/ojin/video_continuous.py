@@ -322,6 +322,7 @@ class OjinVideoService(FrameProcessor):
         image_bytes: Optional[bytes] = None
         audio_bytes: Optional[bytes] = None
 
+        MAX_FRAMES_BUFFER = 10
         while True:
             # Check speaking state notifications
             await self._check_started_speaking()
@@ -340,7 +341,7 @@ class OjinVideoService(FrameProcessor):
             next_frame_time += self._frame_duration
 
             if not initial_buffer_filled:
-                if len(self._video_frames) >= 7:
+                if len(self._video_frames) >= MAX_FRAMES_BUFFER:
                     initial_buffer_filled = True
                 else:
                     continue
@@ -362,13 +363,13 @@ class OjinVideoService(FrameProcessor):
                         logger.debug(
                             f"[SPEECH] Playing frame {frame_count}, buffer left: {len(self._video_frames)}"
                         )
-                all_silence = len(self._video_frames) > 7 and all(
+                all_silence = len(self._video_frames) > MAX_FRAMES_BUFFER and all(
                     f.frame_idx == 0 for f in self._video_frames
                 )
                 if all_silence:
-                    next_frame_time -= 0.02
+                    next_frame_time -= 0.015
                     logger.debug(
-                        f"Speeding up to catch up buffer: {len(self._video_frames)}, target: 7"
+                        f"Speeding up to catch up buffer: {len(self._video_frames)}, target: {MAX_FRAMES_BUFFER}"
                     )
 
                 image_frame = OutputImageRawFrame(
