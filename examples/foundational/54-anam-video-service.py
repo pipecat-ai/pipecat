@@ -72,105 +72,101 @@ transport_params = {
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
-    async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
-            params=CartesiaTTSService.InputParams(sample_rate=ANAM_SAMPLE_RATE),
-        )
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
+        params=CartesiaTTSService.InputParams(sample_rate=ANAM_SAMPLE_RATE),
+    )
 
-        llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
-        avatar_id = os.getenv("ANAM_AVATAR_ID", "").strip().strip('"')
-        persona_config = PersonaConfig(
-            avatar_id=avatar_id,
-            enable_audio_passthrough=True,
-        )
-        logger.info(f"Persona config: {persona_config}")
+    avatar_id = os.getenv("ANAM_AVATAR_ID", "").strip().strip('"')
+    persona_config = PersonaConfig(
+        avatar_id=avatar_id,
+        enable_audio_passthrough=True,
+    )
+    logger.info(f"Persona config: {persona_config}")
 
-        anam = AnamVideoService(
-            api_key=os.getenv("ANAM_API_KEY"),
-            persona_config=persona_config,
-            session=session,
-            api_base_url="https://api.anam.ai",
-            api_version="v1",
-        )
+    anam = AnamVideoService(
+        api_key=os.getenv("ANAM_API_KEY"),
+        persona_config=persona_config,
+        api_base_url="https://api.anam.ai",
+        api_version="v1",
+    )
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
-            },
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Be succinct and respond to what the user said in a creative and helpful way.",
+        },
+    ]
+
+    context = LLMContext(messages)
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+            ),
+        ),
+    )
+
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,  # STT
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            anam,  # Video Avatar (returns synchronised audio/video)
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
+    )
 
-        context = LLMContext(messages)
-        context_aggregator = LLMContextAggregatorPair(
-            context,
-            user_params=LLMUserAggregatorParams(
-                user_turn_strategies=UserTurnStrategies(
-                    stop=[
-                        TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
-                    ]
-                ),
-            ),
-        )
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                stt,  # STT
-                context_aggregator.user(),  # User responses
-                llm,  # LLM
-                tts,  # TTS
-                anam,  # Video Avatar (returns synchronised audio/video)
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
-            ]
-        )
-
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
-
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected")
-            # Updating publishing settings to enable adaptive bitrate
-            if isinstance(transport, DailyTransport):
-                await transport.update_publishing(
-                    publishing_settings={
-                        "camera": {
-                            "sendSettings": {
-                                "allowAdaptiveLayers": True,
-                            }
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Updating publishing settings to enable adaptive bitrate
+        if isinstance(transport, DailyTransport):
+            await transport.update_publishing(
+                publishing_settings={
+                    "camera": {
+                        "sendSettings": {
+                            "allowAdaptiveLayers": True,
                         }
                     }
-                )
-
-            # Kick off the conversation.
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "Start by saying 'Hello' and then a short greeting.",
                 }
             )
-            await task.queue_frames([LLMRunFrame()])
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await task.cancel()
+        # Kick off the conversation.
+        messages.append(
+            {
+                "role": "system",
+                "content": "Start by saying 'Hello' and then a short greeting.",
+            }
+        )
+        await task.queue_frames([LLMRunFrame()])
 
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await task.cancel()
 
-        await runner.run(task)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
+
+    await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):
