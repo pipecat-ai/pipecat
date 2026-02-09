@@ -310,59 +310,89 @@ class OjinVideoService(FrameProcessor):
                 await self._handle_ojin_message(message)
 
     async def _playback_loop(self):
+        """Main playback loop - outputs video frames and audio at fixed fps."""
         logger.info("Starting playback loop")
 
-        # Use a fixed start time for the stream
-        stream_start_time = time.perf_counter()
-        frame_idx = 0
+        start_ts = time.perf_counter()
+        next_frame_time = start_ts + self._frame_duration
+        initial_buffer_filled = False
+        is_silence = False
+        frame_count = 0
+        # Determine which frame to play
+        image_bytes: Optional[bytes] = None
+        audio_bytes: Optional[bytes] = None
 
+        MAX_FRAMES_BUFFER = 10
         while True:
-            # 1. Calculate the exact time this specific frame SHOULD play
-            target_time = stream_start_time + (frame_idx * self._frame_duration)
+            # Check speaking state notifications
+            await self._check_started_speaking()
+            await self._check_stopped_speaking()
 
+            # Sleep for most of the wait time
             now = time.perf_counter()
-            wait_time = target_time - now
+            sleep_time = next_frame_time - now - 0.01
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
 
-            if wait_time > 0:
-                # Sleep for the remainder.
-                # Note: asyncio.sleep is not 100% precise, but for media
-                # streaming, it is better than blocking the whole event loop.
-                await asyncio.sleep(wait_time)
+            # Spin lock for precise timing
+            while time.perf_counter() < next_frame_time:
+                pass
 
-            # Check speaking state (non-blocking)
-            await asyncio.gather(self._check_started_speaking(), self._check_stopped_speaking())
+            next_frame_time += self._frame_duration
 
+            if not initial_buffer_filled:
+                if len(self._video_frames) >= MAX_FRAMES_BUFFER:
+                    initial_buffer_filled = True
+                else:
+                    continue
+
+            # Check if we have a ready video frame
             if len(self._video_frames) > 0:
                 video_frame = self._video_frames.popleft()
-
-                # Use the calculated target_time for PTS to ensure
-                # the frames are perfectly spaced in the stream metadata.
-                pts = target_time
+                frame_count += 1
+                image_bytes = video_frame.image_bytes
+                audio_bytes = video_frame.audio_bytes
+                self._last_played_image_bytes = image_bytes
+                is_silence = video_frame.frame_idx == 0
+                if self._settings.frame_debugging_enabled:
+                    if is_silence:
+                        logger.debug(
+                            f"[SILENCE] Playing frame {frame_count}, buffer left: {len(self._video_frames)}"
+                        )
+                    else:
+                        logger.debug(
+                            f"[SPEECH] Playing frame {frame_count}, buffer left: {len(self._video_frames)}"
+                        )
+                # all_silence = len(self._video_frames) > MAX_FRAMES_BUFFER and all(
+                #     f.frame_idx == 0 for f in self._video_frames
+                # )
+                # if all_silence:
+                #     next_frame_time -= 0.015
+                #     logger.debug(
+                #         f"Speeding up to catch up buffer: {len(self._video_frames)}, target: {MAX_FRAMES_BUFFER}"
+                #     )
 
                 image_frame = OutputImageRawFrame(
-                    image=video_frame.image_bytes, size=self._settings.image_size, format="RGB"
+                    image=image_bytes, size=self._settings.image_size, format="RGB"
                 )
-                image_frame.pts = pts
+                image_frame.pts = next_frame_time
+                await self.push_frame(image_frame)
 
                 audio_frame = OutputAudioRawFrame(
-                    audio=video_frame.audio_bytes,
+                    audio=audio_bytes,
                     sample_rate=OJIN_PERSONA_SAMPLE_RATE,
                     num_channels=1,
                 )
-                audio_frame.pts = pts
+                audio_frame.pts = next_frame_time
+                await self.push_frame(audio_frame)
 
-                logger.debug(f"Pushing frame {frame_idx} buffer: {len(self._video_frames)}")
-
-                # 2. Push both simultaneously to prevent sequential lag
-                await asyncio.gather(self.push_frame(image_frame), self.push_frame(audio_frame))
-
-                frame_idx += 1
+            elif self._last_played_image_bytes:
+                # Repeat last frame to avoid stutter
+                logger.debug(f"frame miss, repeating frame {frame_count}")
+                continue
             else:
-                frame_idx += 1
-                # Handle buffer underrun (stutter)
-                # If we miss a frame, we might need to adjust stream_start_time
-                # or just wait for the next buffer fill.
-                await asyncio.sleep(0.01)
+                # No frame to show yet - just continue
+                continue
 
     async def _start(self):
         """Initialize the service and start processing."""
