@@ -43,6 +43,7 @@ jobs:
             --extra google \
             --extra langchain \
             --extra livekit \
+            --extra local-smart-turn-v3 \
             --extra piper \
             --extra websocket
 

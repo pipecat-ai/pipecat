@@ -48,7 +48,7 @@ from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 
-AUDIO_INPUT_TIMEOUT_SECS = 1.0
+AUDIO_INPUT_TIMEOUT_SECS = 0.5
 
 
 class BaseInputTransport(FrameProcessor):
@@ -448,8 +448,6 @@ class BaseInputTransport(FrameProcessor):
             except asyncio.TimeoutError:
                 if not audio_received:
                     continue
-
-                logger.debug(f"{self}: audio not received for more than {AUDIO_INPUT_TIMEOUT_SECS}")
 
                 ###################################################################
                 # DEPRECATED.
