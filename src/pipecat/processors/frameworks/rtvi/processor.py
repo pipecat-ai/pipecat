@@ -8,9 +8,11 @@
 
 import asyncio
 import base64
+import io
 import os
 from typing import Any, Dict, Mapping, Optional
 
+import aiohttp
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
@@ -574,19 +576,35 @@ class RTVIProcessor(FrameProcessor):
         type = file.source.type
         opts = data.options if data.options is not None else RTVI.SendFileOptions()
 
-        if type == "bytes":
-            source = file.source.bytes
-        elif type == "url":
-            if file.source.url.startswith("/files/"):
+        match type:
+            case "bytes":
+                source = file.source.bytes
+            case "url":
+                if not file.source.public:
+                    # read bytes from URL and encode to base64
+                    type = "bytes"
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(file.source.url) as response:
+                            content = io.BytesIO(await response.content.read())
+                            base64_string = base64.b64encode(content.getvalue()).decode("utf-8")
+                            source = f"data:{file.format};base64,{base64_string}"
+                else:
+                    source = file.source.url
+            case "id":
+                if not file.source.id.startswith("pipecat:"):
+                    logger.warning(f"Unsupported file ID: {file.source.id}")
+                    self.send_error_response(data.id, f"Unsupported file ID: {file.source.id}")
+                    return
                 if not self._folder:
                     logger.warning(
-                        "Send-file with /files/ URL requires uploads_folder on RTVIProcessor "
+                        "Send-file with a pipecat id requires uploads_folder on RTVIProcessor "
                         "(e.g. uploads_folder=runner_uploads_folder())."
                     )
+                    self.send_error_response(data.id, "Uploads folder not set")
                     return
                 # read bytes from file system, encode to base64, then delete the file
                 type = "bytes"
-                file_path = os.path.join(self._folder, file.source.url.removeprefix("/files/"))
+                file_path = os.path.join(self._folder, file.source.id.removeprefix("pipecat:"))
                 with open(file_path, "rb") as f:
                     raw_bytes = f.read()
                     encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
@@ -595,11 +613,10 @@ class RTVIProcessor(FrameProcessor):
                     os.remove(file_path)
                 except OSError as e:
                     logger.warning(f"Failed to remove uploaded file {file_path}: {e}")
-            else:
-                source = file.source.url
-        else:
-            logger.warning(f"Unsupported file source type: {type}")
-            return
+                source = file.source.id
+            case _:
+                logger.warning(f"Unsupported file source type: {type}")
+                return
 
         if type == "bytes" and file.format.startswith("image/"):
             # Only access width/height if the original source is RTVIFileBytes (not RTVIFileUrl)
