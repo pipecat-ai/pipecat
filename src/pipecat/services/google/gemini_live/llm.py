@@ -950,10 +950,7 @@ class GeminiLiveLLMService(LLMService):
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMSetToolsFrame):
-            if frame.tools is not None:
-                self._tools_from_init = frame.tools
-                if self._session:
-                    await self._reconnect()
+            logger.warning(f"{self}: Updating tools is not currently supported in Gemini Live")
         else:
             await self.push_frame(frame, direction)
 
