@@ -321,7 +321,7 @@ class OjinVideoService(FrameProcessor):
         # Determine which frame to play
         image_bytes: Optional[bytes] = None
         audio_bytes: Optional[bytes] = None
-
+        last_audio_push_ts = None
         MAX_FRAMES_BUFFER = 10
         while True:
             # Check speaking state notifications
@@ -329,7 +329,7 @@ class OjinVideoService(FrameProcessor):
             await self._check_stopped_speaking()
 
             # Sleep for most of the wait time
-            now = time.perf_counter()
+            now = time.perf_counter()            
             sleep_time = next_frame_time - now - 0.01
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
@@ -378,6 +378,11 @@ class OjinVideoService(FrameProcessor):
                 image_frame.pts = next_frame_time
                 await self.push_frame(image_frame)
 
+                # if silence (frame_idx == 0), cut bytes to just the duration since last audio push
+                if last_audio_push_ts is not None and video_frame.frame_idx == 0:
+                    audio_bytes = audio_bytes[:int((time.perf_counter()-last_audio_push_ts)*OJIN_PERSONA_SAMPLE_RATE)]
+
+                last_audio_push_ts = time.perf_counter()
                 audio_frame = OutputAudioRawFrame(
                     audio=audio_bytes,
                     sample_rate=OJIN_PERSONA_SAMPLE_RATE,
