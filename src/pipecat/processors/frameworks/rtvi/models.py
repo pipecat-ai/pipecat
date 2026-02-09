@@ -250,6 +250,14 @@ class FileUrl(FileSource):
 
     type: FileSourceType = "url"
     url: str
+    public: bool = True
+
+
+class FileId(FileSource):
+    """File source as a file ID."""
+
+    type: FileSourceType = "id"
+    id: str
 
 
 class File(BaseModel):
@@ -257,7 +265,7 @@ class File(BaseModel):
 
     format: str  # Mime format of the file, e.g., 'application/pdf'
     name: Optional[str] = None
-    source: FileBytes | FileUrl
+    source: FileBytes | FileUrl | FileId
 
 
 class SendFileOptions(BaseModel):

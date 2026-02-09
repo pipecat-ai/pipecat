@@ -311,7 +311,7 @@ def _setup_webrtc_routes(app: FastAPI, args: argparse.Namespace):
         # Return the file as a URL that can be used in the client, matching the format of RTVIFile
         return {
             "name": original_name,
-            "source": {"type": "url", "url": f"/files/{safe_name}"},
+            "source": {"type": "id", "id": f"pipecat:{safe_name}"},
             "format": media_type,
         }
 
