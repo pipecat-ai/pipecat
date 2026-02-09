@@ -78,9 +78,7 @@ class AnamVideoService(AIService):
         self,
         *,
         api_key: str,
-        persona_id: Optional[str] = None,
-        persona_config: Optional[PersonaConfig] = None,
-        session: aiohttp.ClientSession,
+        persona_config: PersonaConfig,
         ice_servers: Optional[list[dict]] = None,
         enable_turnkey: bool = False,
         api_base_url: Optional[str] = None,
@@ -102,8 +100,6 @@ class AnamVideoService(AIService):
         """
         super().__init__(**kwargs)
         self._api_key = api_key
-        self._session = session
-        self._persona_id = persona_id
         self._persona_config = persona_config
         self._ice_servers = ice_servers
         self._is_turnkey_session = enable_turnkey
@@ -134,14 +130,6 @@ class AnamVideoService(AIService):
         """
         await super().setup(setup)
 
-        # Create persona config
-        if self._persona_config:
-            persona_config = self._persona_config
-        elif self._persona_id:
-            persona_config = PersonaConfig(persona_id=self._persona_id)
-        else:
-            raise ValueError("Either persona_id or persona config must be provided")
-
         # Create client options
         # Enable audio input for turnkey solutions (Anam handles STT)
         options = ClientOptions(
@@ -153,7 +141,7 @@ class AnamVideoService(AIService):
         # Initialize Anam client
         self._client = AnamClient(
             api_key=self._api_key,
-            persona_config=persona_config,
+            persona_config=self._persona_config,
             options=options,
         )
 
