@@ -14,7 +14,6 @@ real-time audio/video streaming capabilities through the Anam API.
 import asyncio
 from typing import Optional
 
-import aiohttp
 from anam import (
     AgentAudioInputConfig,
     AnamClient,
@@ -65,9 +64,7 @@ class AnamVideoService(AIService):
 
     Args:
         api_key: Anam API key for authentication.
-        persona_id: ID of the persona to use (simple setup).
-        persona_config: Full persona configuration (advanced setup).
-        session: HTTP client session for API requests.
+        persona_config: Full persona configuration.
         ice_servers: Custom ICE servers for WebRTC (optional).
         enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
         api_base_url: Base URL for the Anam API.
@@ -89,9 +86,7 @@ class AnamVideoService(AIService):
 
         Args:
             api_key: Anam API key for authentication.
-            persona_id: ID of the persona to use (simple setup).
-            persona_config: Full persona configuration (advanced setup).
-            session: HTTP client session for API requests.
+            persona_config: Full persona configuration.
             ice_servers: Custom ICE servers for WebRTC (optional).
             enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
             api_base_url: Base URL for the Anam API.
