@@ -1023,7 +1023,7 @@ class RTVIObserverParams:
             sets the default level for unlisted functions::
 
                 function_call_report_level={
-                    "*": RTVIFunctionCallReportLevel.DISABLED,  # Default: no events
+                    "*": RTVIFunctionCallReportLevel.NONE,  # Default: events with no metadata
                     "get_weather": RTVIFunctionCallReportLevel.FULL,  # Expose everything
                 }
 
@@ -1198,6 +1198,12 @@ class RTVIObserver(BaseObserver):
         src = data.source
         frame = data.frame
         direction = data.direction
+
+        # Only process downstream frames. Some frames are broadcast in both
+        # directions (e.g. UserStartedSpeakingFrame, FunctionCallResultFrame),
+        # and we only want to send one RTVI message per event.
+        if direction != FrameDirection.DOWNSTREAM:
+            return
 
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
