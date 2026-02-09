@@ -10,7 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -32,9 +31,8 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_processor import UserTurnProcessor
-from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserTurnStrategies
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -100,11 +98,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # UserStartedSpeakingFrame and UserStoppedSpeakingFrame as well as
     # interruptions. This can be used in advanced cases when there are multiple
     # aggregators in the pipeline.
-    user_turn_processor = UserTurnProcessor(
-        user_turn_strategies=UserTurnStrategies(
-            stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-        ),
-    )
+    user_turn_processor = UserTurnProcessor()
 
     # We use external user turn strategies for both aggregators since the turn
     # management is done by the common UserTurnProcessor.
