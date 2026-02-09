@@ -28,6 +28,11 @@ logging.getLogger("anam").setLevel(logging.DEBUG)
 
 load_dotenv(override=True)
 
+REQUIRED_ENV_VARS = ["ANAM_API_KEY", "ANAM_AVATAR_ID", "ANAM_LLM_ID", "ANAM_VOICE_ID"]
+missing = [v for v in REQUIRED_ENV_VARS if not os.getenv(v)]
+if missing:
+    raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
+
 ANAM_SAMPLE_RATE = 24000
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -41,7 +46,6 @@ transport_params = {
         video_out_is_live=True,
         video_out_width=720,
         video_out_height=480,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         audio_out_sample_rate=48000,  # Anam WebRTC output (OPUS 48kHz stereo)
         audio_out_channels=2,
         audio_in_sample_rate=16000,  # WebRTC input
@@ -53,18 +57,23 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
     async with aiohttp.ClientSession() as session:
-        persona_id = os.getenv("ANAM_PERSONA_ID").strip().strip('"')
-        logger.info(f"Persona config: {PersonaConfig(persona_id=persona_id)}")
+        avatar_id = os.getenv("ANAM_AVATAR_ID").strip().strip('"')
+        persona_config = PersonaConfig(
+            avatar_id=avatar_id,
+            voice_id=os.getenv("ANAM_VOICE_ID").strip().strip('"'),
+            llm_id=os.getenv("ANAM_LLM_ID").strip().strip('"'),
+            enable_audio_passthrough=False,
+        )
+        logger.info(f"Persona config: {persona_config}")
 
         anam = AnamVideoService(
             api_key=os.getenv("ANAM_API_KEY"),
             enable_turnkey=True,
-            persona_config=PersonaConfig(persona_id=persona_id),
+            persona_config=persona_config,
             session=session,
             api_base_url="https://api.anam.ai",
             api_version="v1",
         )
-        logger.info(f"{anam}")
 
         pipeline = Pipeline(
             [
