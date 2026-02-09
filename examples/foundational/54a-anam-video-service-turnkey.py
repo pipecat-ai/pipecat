@@ -46,7 +46,6 @@ transport_params = {
         video_out_is_live=True,
         video_out_width=720,
         video_out_height=480,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         audio_out_sample_rate=48000,  # Anam WebRTC output (OPUS 48kHz stereo)
         audio_out_channels=2,
         audio_in_sample_rate=16000,  # WebRTC input
@@ -63,6 +62,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             avatar_id=avatar_id,
             voice_id=os.getenv("ANAM_VOICE_ID").strip().strip('"'),
             llm_id=os.getenv("ANAM_LLM_ID").strip().strip('"'),
+            enable_audio_passthrough=False,
         )
         logger.info(f"Persona config: {persona_config}")
 
@@ -74,7 +74,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_base_url="https://api.anam.ai",
             api_version="v1",
         )
-        logger.info(f"{anam}")
 
         pipeline = Pipeline(
             [
