@@ -23,10 +23,8 @@ from anam import (
     PersonaConfig,
 )
 from av.audio.resampler import AudioResampler
-from av.video.frame import VideoFrame
 from loguru import logger
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     CancelFrame,
@@ -41,8 +39,6 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -120,7 +116,6 @@ class AnamVideoService(AIService):
         self._send_task: Optional[asyncio.Task] = None
         self._video_task: Optional[asyncio.Task] = None
         self._audio_task: Optional[asyncio.Task] = None
-        self._resampler = create_stream_resampler()
         self._anam_resampler = AudioResampler("s16", "mono", 48000)
         self._is_interrupting = False
         self._transport_ready = False
@@ -269,7 +264,7 @@ class AnamVideoService(AIService):
 
         if isinstance(frame, InputAudioRawFrame) and self._is_turnkey_session:
             # Anam handles STT internally, so don't push raw audio downstream for turnkey sessions.
-            await self._handle_user_audio_frame(frame, direction)
+            await self._handle_user_audio_frame(frame)
             return
 
         # Handle frames that need processing before being pushed downstream
@@ -415,12 +410,11 @@ class AnamVideoService(AIService):
         """
         await self._queue.put(frame)
 
-    async def _handle_user_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
-        """Handle user audio frame by sending it to Anam SDK.
+    async def _handle_user_audio_frame(self, frame: InputAudioRawFrame):
+        """Handle user audio frame by sending it to Anam SDK - for turnkey sessions.
 
-        For turnkey solutions where Anam handles STT, this sends user audio
-        directly to the SDK via send_user_audio(). The SDK handles WebRTC
-        transmission and format conversion internally.
+        Anam handles STT internally. Send user audio through the SDK to Anam's service.
+        The SDK handles WebRTC transmission and format conversion internally.
 
         Args:
             frame: The user audio frame to process (InputAudioRawFrame).
