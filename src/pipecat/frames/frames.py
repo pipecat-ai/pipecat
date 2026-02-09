@@ -1721,16 +1721,19 @@ class STTMetadataFrame(ServiceMetadataFrame):
 
 
 @dataclass
-class RequestMetadataFrame(ControlFrame):
-    """Request services to re-emit their metadata frames.
+class ServiceSwitcherRequestMetadataFrame(ControlFrame):
+    """Request a service to re-emit its metadata frames.
 
     Used by ServiceSwitcher when switching active services to ensure
     downstream processors receive updated metadata from the newly active service.
     Services that receive this frame should re-push their metadata frame
     (e.g., STTMetadataFrame for STT services).
+
+    Parameters:
+        service: The target service that should re-emit its metadata.
     """
 
-    pass
+    service: "FrameProcessor"
 
 
 #

@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from pipecat.frames.frames import (
     Frame,
     ManuallySwitchServiceFrame,
-    RequestMetadataFrame,
     ServiceMetadataFrame,
+    ServiceSwitcherRequestMetadataFrame,
     StartFrame,
     SystemFrame,
     TextFrame,
@@ -68,7 +68,7 @@ class MockMetadataFrame(ServiceMetadataFrame):
 class MockMetadataService(FrameProcessor):
     """A mock service that emits ServiceMetadataFrame like STT services.
 
-    Pushes MockMetadataFrame on StartFrame and RequestMetadataFrame.
+    Pushes MockMetadataFrame on StartFrame and ServiceSwitcherRequestMetadataFrame.
     """
 
     def __init__(self, test_name: str, **kwargs):
@@ -84,9 +84,9 @@ class MockMetadataService(FrameProcessor):
         if isinstance(frame, StartFrame):
             await self.push_frame(frame, direction)
             await self._push_metadata()
-        elif isinstance(frame, RequestMetadataFrame):
-            # Don't push RequestMetadataFrame downstream (it's internal)
+        elif isinstance(frame, ServiceSwitcherRequestMetadataFrame):
             await self._push_metadata()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -472,9 +472,11 @@ class TestServiceSwitcherMetadata(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=[],
         )
 
-        # service2 should have received RequestMetadataFrame after becoming active
+        # service2 should have received ServiceSwitcherRequestMetadataFrame after becoming active
         request_frames = [
-            f for f in self.service2.processed_frames if isinstance(f, RequestMetadataFrame)
+            f
+            for f in self.service2.processed_frames
+            if isinstance(f, ServiceSwitcherRequestMetadataFrame)
         ]
         self.assertEqual(len(request_frames), 1)
 

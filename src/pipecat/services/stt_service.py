@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     MetricsFrame,
-    RequestMetadataFrame,
+    ServiceSwitcherRequestMetadataFrame,
     StartFrame,
     STTMetadataFrame,
     STTMuteFrame,
@@ -264,9 +264,9 @@ class STTService(AIService):
             # Push StartFrame first, then metadata so downstream receives them in order
             await self.push_frame(frame, direction)
             await self._push_stt_metadata()
-        elif isinstance(frame, RequestMetadataFrame):
-            # Don't push the RequestMetadataFrame, just push the metadata
+        elif isinstance(frame, ServiceSwitcherRequestMetadataFrame):
             await self._push_stt_metadata()
+            await self.push_frame(frame, direction)
         elif isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone

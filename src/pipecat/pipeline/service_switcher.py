@@ -12,9 +12,9 @@ from typing import Any, Generic, List, Optional, Type, TypeVar
 from pipecat.frames.frames import (
     Frame,
     ManuallySwitchServiceFrame,
-    RequestMetadataFrame,
     ServiceMetadataFrame,
     ServiceSwitcherFrame,
+    ServiceSwitcherRequestMetadataFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
@@ -220,16 +220,19 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame out of the service switcher.
 
-        Suppresses `RequestMetadataFrame` (internal to the switcher) and
-        `ServiceMetadataFrame` from inactive services so only the active
-        service's metadata reaches downstream processors. One case this happens
-        is with `StartFrame` since all the filters let it pass, and `StartFrame`
-        causes the service to generate `ServiceMetadataFrame`.
+        Suppresses `ServiceSwitcherRequestMetadataFrame` targeting the active
+        service (since it has already been handled) and `ServiceMetadataFrame`
+        from inactive services so only the active service's metadata reaches
+        downstream processors. One case this happens is with `StartFrame` since
+        all the filters let it pass, and `StartFrame` causes the service to
+        generate `ServiceMetadataFrame`.
 
         """
-        # Don't let RequestMetadataFrame out.
-        if isinstance(frame, RequestMetadataFrame):
-            return
+        # Consume ServiceSwitcherRequestMetadataFrame once the targeted service
+        # has handled it (i.e. the active service).
+        if isinstance(frame, ServiceSwitcherRequestMetadataFrame):
+            if frame.service == self.strategy.active_service:
+                return
 
         # Only let metadata from the active service escape.
         if isinstance(frame, ServiceMetadataFrame):
@@ -255,6 +258,6 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
             # If we switched to a new service, request its metadata.
             if service:
-                await service.queue_frame(RequestMetadataFrame())
+                await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
         else:
             await super().process_frame(frame, direction)
