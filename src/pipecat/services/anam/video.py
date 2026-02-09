@@ -19,6 +19,7 @@ from anam import (
     AnamClient,
     AnamEvent,
     ClientOptions,
+    ConnectionClosedCode,
     PersonaConfig,
 )
 from av.audio.resampler import AudioResampler
@@ -38,6 +39,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -338,13 +340,22 @@ class AnamVideoService(AIService):
         """Handle connection closed event.
 
         Args:
-            code: Connection close code.
+            code: Connection close code (from ConnectionClosedCode enum).
             reason: Optional reason for closure.
         """
-        logger.info(f"Anam connection closed: {code} - {reason or 'No reason'}")
-        await self.push_error(ErrorFrame(error=f"Anam connection closed: {code}"))
+        if code == ConnectionClosedCode.NORMAL:
+            # Normal closure - just log and clean up gracefully
+            logger.debug("Anam connection closed normally")
+            return
 
-    async def _handle_interruption(self):
+        # For error conditions, push an error frame
+        error_message = f"Anam connection closed: {code}"
+        if reason:
+            error_message += f" - {reason}"
+        logger.error(f"{error_message}")
+        await self.push_error(ErrorFrame(error=error_message))
+
+    async def _handle_interruption(self) -> None:
         """Handle interruption events by resetting send tasks and notifying client.
 
         Manages the interruption flow by:
@@ -355,7 +366,7 @@ class AnamVideoService(AIService):
         """
         self._is_interrupting = True
         if self._anam_session:
-            self._anam_session.interrupt()
+            await self._anam_session.interrupt()
         await self._cancel_send_task()
         self._is_interrupting = False
         await self._create_send_task()
