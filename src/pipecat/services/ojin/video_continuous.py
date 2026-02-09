@@ -407,6 +407,10 @@ class OjinVideoService(FrameProcessor):
         await self._client.start_interaction()
 
     async def _stop(self):
+        if self._client:
+            await self._client.close()
+            self._client = None
+
         """Stop the service and clean up resources."""
         if self._receive_msg_task:
             await self.cancel_task(self._receive_msg_task)
@@ -415,10 +419,6 @@ class OjinVideoService(FrameProcessor):
         if self._playback_task:
             await self.cancel_task(self._playback_task)
             self._playback_task = None
-
-        if self._client:
-            await self._client.close()
-            self._client = None
 
         logger.debug(f"OjinVideoService {self._settings.config_id} stopped")
 
