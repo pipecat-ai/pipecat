@@ -588,8 +588,7 @@ class InworldTTSService(AudioContextWordTTSService):
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
-        self._context_id = None
-        self._started = False
+        await self._discard_context(reason="interruption")
         logger.trace(f"{self}: Interruption handled, context reset to None")
 
     def _get_websocket(self):
@@ -601,6 +600,38 @@ class InworldTTSService(AudioContextWordTTSService):
         if self._websocket:
             return self._websocket
         raise Exception("Websocket not connected")
+
+    async def _discard_context(self, *, reason: str):
+        """Discard the active synthesis context.
+
+        Inworld contexts are tied to a single websocket connection. After a disconnect/reconnect we
+        create a fresh context rather than trying to replay/resume the previous one.
+        """
+        self._started = False
+        if not self._context_id:
+            return
+
+        old_context_id = self._context_id
+        logger.debug(f"{self}: Discarding context {old_context_id} ({reason})")
+
+        self._context_id = None
+
+        # Ensure the audio context task doesn't block behind a dead context.
+        if self.audio_context_available(old_context_id):
+            await self.remove_audio_context(old_context_id)
+
+    async def _ensure_local_audio_context(self, context_id: str):
+        if not self.audio_context_available(context_id):
+            await self.create_audio_context(context_id)
+
+    async def _ensure_context(self):
+        if not self._context_id:
+            self._context_id = str(uuid.uuid4())
+            logger.trace(f"{self}: Creating new context {self._context_id}")
+            await self._ensure_local_audio_context(self._context_id)
+            await self._send_context(self._context_id)
+        else:
+            await self._ensure_local_audio_context(self._context_id)
 
     async def _connect(self):
         """Connect to the Inworld WebSocket TTS service.
@@ -646,14 +677,12 @@ class InworldTTSService(AudioContextWordTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
+            # Don't attempt to resume an existing context on a new websocket connection.
+            await self._discard_context(reason="websocket reconnect")
+
             logger.debug("Connecting to Inworld WebSocket TTS")
             headers = [("Authorization", f"Basic {self._api_key}")]
             self._websocket = await websocket_connect(self._url, additional_headers=headers)
-
-            if self._context_id:
-                if not self.audio_context_available(self._context_id):
-                    await self.create_audio_context(self._context_id)
-                await self._send_context(self._context_id)
 
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -682,9 +711,7 @@ class InworldTTSService(AudioContextWordTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._started = False
-            if self._disconnecting:
-                self._context_id = None
+            await self._discard_context(reason="websocket disconnected")
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -699,17 +726,6 @@ class InworldTTSService(AudioContextWordTTSService):
 
             result = msg.get("result", {})
             ctx_id = result.get("contextId") or result.get("context_id")
-
-            # Log all incoming messages for debugging
-            msg_types = [
-                k
-                for k in ["contextCreated", "audioChunk", "flushCompleted", "contextClosed"]
-                if k in result
-            ]
-            logger.debug(
-                f"{self}: Received message types={msg_types}, ctx_id={ctx_id}, "
-                f"current_ctx={self._context_id}, available={self.audio_context_available(ctx_id) if ctx_id else 'N/A'}"
-            )
 
             # Check for errors
             status = result.get("status", {})
@@ -732,25 +748,17 @@ class InworldTTSService(AudioContextWordTTSService):
                 continue
 
             # Check if this message belongs to an available context.
-            # If the context isn't available but matches our current context ID,
-            # recreate it (handles race conditions during interruption recovery).
             if ctx_id and not self.audio_context_available(ctx_id):
-                if self._context_id == ctx_id:
-                    logger.trace(
-                        f"{self}: Recreating audio context for current context: {self._context_id}"
-                    )
-                    await self.create_audio_context(self._context_id)
-                else:
-                    # This is a message from an old/closed context - skip it
-                    logger.trace(f"{self}: Skipping message from unavailable context: {ctx_id}")
+                if ctx_id != self._context_id:
+                    # Old/closed context - skip it.
                     continue
+                await self._ensure_local_audio_context(ctx_id)
 
             # Process audio chunk
             audio_chunk = result.get("audioChunk", {})
             audio_b64 = audio_chunk.get("audioContent")
 
             if audio_b64:
-                logger.trace(f"{self}: Processing audio chunk for context {ctx_id}")
                 await self.stop_ttfb_metrics()
                 await self.start_word_timestamps()
                 audio = base64.b64decode(audio_b64)
@@ -768,23 +776,11 @@ class InworldTTSService(AudioContextWordTTSService):
                     if word_times:
                         await self.add_word_timestamps(word_times)
 
-            # Handle context created confirmation
-            if "contextCreated" in result:
-                logger.trace(f"{self}: Context created on server: {ctx_id}")
-
-            # Handle flush completion - context is still valid, just acknowledge it
-            if "flushCompleted" in result:
-                logger.trace(f"{self}: Flush completed for context {ctx_id}")
-
             # Handle context closed - context no longer exists on server
             if "contextClosed" in result:
-                logger.trace(f"{self}: Context closed on server: {ctx_id}")
-                await self.stop_ttfb_metrics()
-                # Only reset if this is our current context
                 if ctx_id == self._context_id:
-                    self._context_id = None
-                    self._started = False
-                if ctx_id and self.audio_context_available(ctx_id):
+                    await self._discard_context(reason="context closed by server")
+                elif ctx_id and self.audio_context_available(ctx_id):
                     await self.remove_audio_context(ctx_id)
                 await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
 
@@ -835,7 +831,7 @@ class InworldTTSService(AudioContextWordTTSService):
 
         msg = {"create": create_config, "contextId": context_id}
         logger.trace(f"{self}: Sending context create: {create_config}")
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     async def _send_text(self, context_id: str, text: str):
         """Send text to the Inworld WebSocket TTS service.
@@ -845,7 +841,7 @@ class InworldTTSService(AudioContextWordTTSService):
             text: The text to send.
         """
         msg = {"send_text": {"text": text}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     async def _send_flush(self, context_id: str):
         """Send a flush to the Inworld WebSocket TTS service.
@@ -854,7 +850,7 @@ class InworldTTSService(AudioContextWordTTSService):
             context_id: The context ID.
         """
         msg = {"flush_context": {}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     async def _send_close_context(self, context_id: str):
         """Send a close context to the Inworld WebSocket TTS service.
@@ -863,7 +859,7 @@ class InworldTTSService(AudioContextWordTTSService):
             context_id: The context ID.
         """
         msg = {"close_context": {}, "contextId": context_id}
-        await self.send_with_retry(json.dumps(msg), self._report_error)
+        await self._get_websocket().send(json.dumps(msg))
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -886,16 +882,7 @@ class InworldTTSService(AudioContextWordTTSService):
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
                     self._started = True
-
-                    if not self._context_id:
-                        self._context_id = str(uuid.uuid4())
-                        logger.trace(f"{self}: Creating new context {self._context_id}")
-                        await self.create_audio_context(self._context_id)
-                        await self._send_context(self._context_id)
-                    elif not self.audio_context_available(self._context_id):
-                        # Context exists on server but local tracking was removed
-                        logger.trace(f"{self}: Recreating local audio context {self._context_id}")
-                        await self.create_audio_context(self._context_id)
+                    await self._ensure_context()
 
                 await self._send_text(self._context_id, text)
                 await self.start_tts_usage_metrics(text)
@@ -903,7 +890,7 @@ class InworldTTSService(AudioContextWordTTSService):
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
                 yield TTSStoppedFrame()
-                self._started = False
+                await self._discard_context(reason="run_tts error")
                 return
             yield None
         except Exception as e:
