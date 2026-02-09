@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -21,6 +22,13 @@ except ImportError:
 
 # Module path for patching
 AIC_FILTER_MODULE = "pipecat.audio.filters.aic_filter"
+
+
+def _model_manager_ref_count(manager, key: str) -> int:
+    """Test helper: return reference count for a cache key (reads internal cache)."""
+    with manager._lock:
+        entry = manager._cache.get(key)
+        return entry[1] if entry else 0
 
 
 class MockProcessor:
@@ -99,10 +107,11 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         """Import AICFilter after confirming aic_sdk is available."""
-        from pipecat.audio.filters.aic_filter import AICFilter
+        from pipecat.audio.filters.aic_filter import AICFilter, AICModelManager
         from pipecat.frames.frames import FilterEnableFrame
 
         cls.AICFilter = AICFilter
+        cls.AICModelManager = AICModelManager
         cls.FilterEnableFrame = FilterEnableFrame
 
     def setUp(self):
@@ -122,13 +131,13 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
 
     async def _start_filter_with_mocks(self, filter_instance, sample_rate=16000):
         """Start a filter with mocked SDK components."""
+        cache_key = "test-cache-key"
         with (
-            patch(f"{AIC_FILTER_MODULE}.Model") as mock_model_cls,
+            patch(f"{AIC_FILTER_MODULE}.AICModelManager") as mock_manager_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorAsync", return_value=self.mock_processor),
         ):
-            mock_model_cls.from_file.return_value = self.mock_model
-            mock_model_cls.download_async = AsyncMock(return_value="/tmp/model")
+            mock_manager_cls.acquire = AsyncMock(return_value=(self.mock_model, cache_key))
             mock_config_cls.optimal.return_value = MagicMock()
             await filter_instance.start(sample_rate)
 
@@ -171,37 +180,44 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         filter_instance = self._create_filter_with_mocks(model_id=None, model_path=model_path)
 
         with (
-            patch(f"{AIC_FILTER_MODULE}.Model") as mock_model_cls,
+            patch(f"{AIC_FILTER_MODULE}.AICModelManager") as mock_manager_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorAsync", return_value=self.mock_processor),
         ):
-            mock_model_cls.from_file.return_value = self.mock_model
+            mock_manager_cls.acquire = AsyncMock(
+                return_value=(self.mock_model, "path:/tmp/test.aicmodel")
+            )
             mock_config_cls.optimal.return_value = MagicMock()
 
             await filter_instance.start(16000)
 
-            mock_model_cls.from_file.assert_called_once_with(str(model_path))
+            mock_manager_cls.acquire.assert_called_once()
+            call_kw = mock_manager_cls.acquire.call_args[1]
+            self.assertEqual(call_kw["model_path"], model_path)
+            self.assertIsNone(call_kw["model_id"])
             self.assertTrue(filter_instance._aic_ready)
             self.assertEqual(filter_instance._sample_rate, 16000)
             self.assertEqual(filter_instance._frames_per_block, 160)
 
     async def test_start_with_model_id_downloads(self):
-        """Test starting filter with model_id triggers download."""
+        """Test starting filter with model_id uses manager (download happens in manager)."""
         filter_instance = self._create_filter_with_mocks()
 
         with (
-            patch(f"{AIC_FILTER_MODULE}.Model") as mock_model_cls,
+            patch(f"{AIC_FILTER_MODULE}.AICModelManager") as mock_manager_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorAsync", return_value=self.mock_processor),
         ):
-            mock_model_cls.from_file.return_value = self.mock_model
-            mock_model_cls.download_async = AsyncMock(return_value="/tmp/model")
+            mock_manager_cls.acquire = AsyncMock(
+                return_value=(self.mock_model, "id:test-model:/custom/cache")
+            )
             mock_config_cls.optimal.return_value = MagicMock()
 
             await filter_instance.start(16000)
 
-            mock_model_cls.download_async.assert_called_once()
-            mock_model_cls.from_file.assert_called_once()
+            mock_manager_cls.acquire.assert_called_once()
+            call_kw = mock_manager_cls.acquire.call_args[1]
+            self.assertEqual(call_kw["model_id"], "test-model")
             self.assertTrue(filter_instance._aic_ready)
 
     async def test_start_creates_processor(self):
@@ -209,14 +225,13 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         filter_instance = self._create_filter_with_mocks()
 
         with (
-            patch(f"{AIC_FILTER_MODULE}.Model") as mock_model_cls,
+            patch(f"{AIC_FILTER_MODULE}.AICModelManager") as mock_manager_cls,
             patch(f"{AIC_FILTER_MODULE}.ProcessorConfig") as mock_config_cls,
             patch(
                 f"{AIC_FILTER_MODULE}.ProcessorAsync", return_value=self.mock_processor
             ) as mock_processor_cls,
         ):
-            mock_model_cls.from_file.return_value = self.mock_model
-            mock_model_cls.download_async = AsyncMock(return_value="/tmp/model")
+            mock_manager_cls.acquire = AsyncMock(return_value=(self.mock_model, "test-cache-key"))
             mock_config_cls.optimal.return_value = MagicMock()
 
             await filter_instance.start(16000)
@@ -241,17 +256,21 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bypass_params[-1][1], 0.0)
 
     async def test_stop_cleans_up_resources(self):
-        """Test that stop properly cleans up resources."""
+        """Test that stop properly cleans up resources and releases model reference."""
         filter_instance = self._create_filter_with_mocks()
         await self._start_filter_with_mocks(filter_instance)
+        cache_key = filter_instance._model_cache_key
 
-        await filter_instance.stop()
+        with patch(f"{AIC_FILTER_MODULE}.AICModelManager.release") as mock_release:
+            await filter_instance.stop()
 
+        mock_release.assert_called_once_with(cache_key)
         self.assertTrue(self.mock_processor.processor_ctx.reset_called)
         self.assertIsNone(filter_instance._processor)
         self.assertIsNone(filter_instance._processor_ctx)
         self.assertIsNone(filter_instance._vad_ctx)
         self.assertIsNone(filter_instance._model)
+        self.assertIsNone(filter_instance._model_cache_key)
         self.assertFalse(filter_instance._aic_ready)
 
     async def test_stop_without_start(self):
@@ -260,6 +279,76 @@ class TestAICFilter(unittest.IsolatedAsyncioTestCase):
 
         # Should not raise
         await filter_instance.stop()
+
+    async def test_model_manager_reference_count(self):
+        """Test that AICModelManager reference count increments and decrements correctly."""
+        model_path = Path("/tmp/refcount-test.aicmodel")
+        mock_model = MockModel()
+        manager = self.AICModelManager
+
+        with patch(f"{AIC_FILTER_MODULE}.Model") as mock_model_cls:
+            mock_model_cls.from_file.return_value = mock_model
+
+            # Acquire first reference
+            model1, key = await manager.acquire(model_path=model_path)
+            self.assertEqual(model1, mock_model)
+            self.assertEqual(_model_manager_ref_count(manager, key), 1)
+
+            # Acquire second reference (same key, cached)
+            model2, key2 = await manager.acquire(model_path=model_path)
+            self.assertIs(model2, model1)
+            self.assertEqual(key2, key)
+            self.assertEqual(_model_manager_ref_count(manager, key), 2)
+
+            # Release one reference
+            manager.release(key)
+            self.assertEqual(_model_manager_ref_count(manager, key), 1)
+
+            # Release last reference (model evicted from cache)
+            manager.release(key)
+            self.assertEqual(_model_manager_ref_count(manager, key), 0)
+
+    async def test_model_manager_concurrent_load_deduplication(self):
+        """Test that concurrent acquire calls for the same key share a single load task."""
+        model_path = Path("/tmp/concurrent-load-test.aicmodel")
+        mock_model = MockModel()
+        manager = self.AICModelManager
+        load_count = 0
+
+        def from_file_once(path):
+            nonlocal load_count
+            load_count += 1
+            time.sleep(0.02)  # yield so other acquire callers can hit _loading and await same task
+            return mock_model
+
+        with patch(f"{AIC_FILTER_MODULE}.Model") as mock_model_cls:
+            mock_model_cls.from_file.side_effect = from_file_once
+
+            # Start several acquire calls concurrently before any completes
+            results = await asyncio.gather(
+                manager.acquire(model_path=model_path),
+                manager.acquire(model_path=model_path),
+                manager.acquire(model_path=model_path),
+            )
+
+            self.assertEqual(
+                load_count, 1, "Model.from_file should be called once for concurrent callers"
+            )
+            model1, key1 = results[0]
+            model2, key2 = results[1]
+            model3, key3 = results[2]
+            self.assertIs(model1, mock_model)
+            self.assertIs(model2, mock_model)
+            self.assertIs(model3, mock_model)
+            self.assertEqual(key1, key2)
+            self.assertEqual(key2, key3)
+            self.assertEqual(_model_manager_ref_count(manager, key1), 3)
+
+            # Release all references
+            manager.release(key1)
+            manager.release(key1)
+            manager.release(key1)
+            self.assertEqual(_model_manager_ref_count(manager, key1), 0)
 
     async def test_process_frame_enable(self):
         """Test processing FilterEnableFrame to enable filtering."""
