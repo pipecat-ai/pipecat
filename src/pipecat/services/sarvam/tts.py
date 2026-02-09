@@ -525,7 +525,7 @@ class SarvamHttpTTSService(TTSService):
             audio_data = base64.b64decode(base64_audio)
 
             # Strip WAV header (first 44 bytes) if present
-            if audio_data.startswith(b"RIFF"):
+            if len(audio_data) > 44 and audio_data.startswith(b"RIFF"):
                 logger.debug("Stripping WAV header from Sarvam audio data")
                 audio_data = audio_data[44:]
 
@@ -792,7 +792,6 @@ class SarvamTTSService(InterruptibleTTSService):
         self._started = False
         self._receive_task = None
         self._keepalive_task = None
-        self._disconnecting = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -844,10 +843,13 @@ class SarvamTTSService(InterruptibleTTSService):
         await self._disconnect()
 
     async def flush_audio(self):
-        """Flush any pending audio synthesis by sending stop command."""
-        if self._websocket:
-            msg = {"type": "flush"}
-            await self._websocket.send(json.dumps(msg))
+        """Flush any pending audio synthesis by sending flush command."""
+        try:
+            if self._websocket:
+                msg = {"type": "flush"}
+                await self._websocket.send(json.dumps(msg))
+        except Exception as e:
+            await self.push_error(error_msg=f"Error sending flush to Sarvam: {e}", exception=e)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with special handling for stop conditions.
@@ -894,29 +896,15 @@ class SarvamTTSService(InterruptibleTTSService):
         """Disconnect from Sarvam WebSocket and clean up tasks."""
         await super()._disconnect()
 
-        try:
-            # First, set a flag to prevent new operations
-            self._disconnecting = True
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
 
-            # Cancel background tasks BEFORE closing websocket
-            if self._receive_task:
-                await self.cancel_task(self._receive_task, timeout=2.0)
-                self._receive_task = None
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
 
-            if self._keepalive_task:
-                await self.cancel_task(self._keepalive_task, timeout=2.0)
-                self._keepalive_task = None
-
-            # Now close the websocket
-            await self._disconnect_websocket()
-
-        except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        finally:
-            # Reset state only after everything is cleaned up
-            self._started = False
-            self._websocket = None
-            self._disconnecting = False
+        await self._disconnect_websocket()
 
     async def _connect_websocket(self):
         """Establish WebSocket connection to Sarvam API."""
@@ -996,6 +984,7 @@ class SarvamTTSService(InterruptibleTTSService):
                     if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
                         logger.warning("Connection timeout detected, service may need restart")
 
+                    self._started = False
                     await self.push_frame(ErrorFrame(error=f"TTS Error: {error_msg}"))
 
     async def _keepalive_task_handler(self):
@@ -1007,19 +996,12 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _send_keepalive(self):
         """Send keepalive message to maintain connection."""
-        if self._disconnecting:
-            return
-
         if self._websocket and self._websocket.state == State.OPEN:
             msg = {"type": "ping"}
             await self._websocket.send(json.dumps(msg))
 
     async def _send_text(self, text: str):
         """Send text to Sarvam WebSocket for synthesis."""
-        if self._disconnecting:
-            logger.warning("Service is disconnecting, ignoring text send")
-            return
-
         if self._websocket and self._websocket.state == State.OPEN:
             msg = {"type": "text", "data": {"text": text}}
             await self._websocket.send(json.dumps(msg))
