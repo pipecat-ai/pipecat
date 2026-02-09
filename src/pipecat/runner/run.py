@@ -72,9 +72,22 @@ import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
-from http import HTTPMethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict, Union
+
+if sys.version_info >= (3, 11):
+    from http import HTTPMethod
+else:
+    # HTTPMethod was added in Python 3.11
+    from enum import Enum
+
+    class HTTPMethod(str, Enum):
+        """HTTP method enum for Python < 3.11 compatibility."""
+
+        POST = "POST"
+        PATCH = "PATCH"
+        GET = "GET"
+
 
 import aiohttp
 from fastapi.responses import FileResponse, Response
@@ -140,6 +153,8 @@ def _get_bot_module():
                 spec = importlib.util.spec_from_file_location(
                     module_name, os.path.join(cwd, filename)
                 )
+                if not spec or not spec.loader:
+                    continue
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
@@ -396,6 +411,11 @@ def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
             """
         )
         return
+
+    # Assertions after the all() check above ensures these are non-None
+    assert WHATSAPP_TOKEN is not None
+    assert WHATSAPP_PHONE_NUMBER_ID is not None
+    assert WHATSAPP_WEBHOOK_VERIFICATION_TOKEN is not None
 
     try:
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection

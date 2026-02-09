@@ -326,6 +326,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def _monitor_websocket(self):
         """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
+        assert self._params.session_timeout is not None
         await asyncio.sleep(self._params.session_timeout)
         await self._client.trigger_client_timeout()
 

@@ -57,6 +57,7 @@ class VonageFrameSerializer(FrameSerializer):
             params: Configuration parameters.
         """
         super().__init__(params or VonageFrameSerializer.InputParams())
+        self._params: VonageFrameSerializer.InputParams
 
         self._vonage_sample_rate = self._params.vonage_sample_rate
         self._sample_rate = 0  # Pipeline input rate

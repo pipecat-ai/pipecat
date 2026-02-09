@@ -241,4 +241,4 @@ def traceable(cls: C) -> C:
             else:
                 Traceable.__init__(self, cls.__name__)
 
-    return TracedClass
+    return TracedClass  # type: ignore[return-value]

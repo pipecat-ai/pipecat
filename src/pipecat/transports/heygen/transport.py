@@ -230,6 +230,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
                     logger.warning("self._event_id is already defined!")
                 self._event_id = str(frame.id)
             elif isinstance(frame, BotStoppedSpeakingFrame):
+                assert self._event_id is not None
                 await self._client.agent_speak_end(self._event_id)
                 self._event_id = None
         await super().push_frame(frame, direction)
@@ -252,7 +253,8 @@ class HeyGenOutputTransport(BaseOutputTransport):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, InterruptionFrame):
-            await self._client.interrupt(self._event_id)
+            if self._event_id is not None:
+                await self._client.interrupt(self._event_id)
             await self.push_frame(frame, direction)
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._client.start_agent_listening()
@@ -267,6 +269,7 @@ class HeyGenOutputTransport(BaseOutputTransport):
         Args:
             frame: The audio frame to write.
         """
+        assert self._event_id is not None
         await self._client.agent_speak(bytes(frame.audio), self._event_id)
         return True
 

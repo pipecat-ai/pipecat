@@ -181,7 +181,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
     async def _server_task_handler(self):
         """Handle WebSocket server startup and client connections."""
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
-        async with websocket_serve(self._client_handler, self._host, self._port) as server:
+        async with websocket_serve(self._client_handler, self._host, self._port) as server:  # type: ignore[arg-type]
             await self._callbacks.on_websocket_ready()
             await self._stop_server_event.wait()
 

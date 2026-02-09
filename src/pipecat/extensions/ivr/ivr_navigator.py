@@ -99,7 +99,7 @@ class IVRProcessor(FrameProcessor):
         self._register_event_handler("on_conversation_detected")
         self._register_event_handler("on_ivr_status_changed")
 
-    def update_saved_messages(self, messages: List[dict]) -> None:
+    def update_saved_messages(self, messages: List) -> None:
         """Update the saved context messages.
 
         Sets the messages that are saved when switching between

@@ -29,7 +29,7 @@ from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, BaseTurnPara
 from pipecat.metrics.metrics import MetricsData
 
 try:
-    import krisp_audio
+    import krisp_audio  # type: ignore[import-not-found]
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use KrispVivaTurn, you need to install krisp_audio.")

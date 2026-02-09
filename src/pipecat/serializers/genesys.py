@@ -169,6 +169,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             **kwargs: Additional arguments passed to BaseObject (e.g., name).
         """
         super().__init__(params or GenesysAudioHookSerializer.InputParams(), **kwargs)
+        self._params: GenesysAudioHookSerializer.InputParams
 
         self._genesys_sample_rate = self._params.genesys_sample_rate
         self._sample_rate = 0  # Pipeline input rate, set in setup()

@@ -132,7 +132,7 @@ class WebsocketClientSession:
             return
 
         try:
-            self._websocket = await websocket_connect(
+            self._websocket = await websocket_connect(  # type: ignore[assignment]
                 uri=self._uri,
                 open_timeout=10,
                 additional_headers=self._params.additional_headers,
@@ -141,7 +141,8 @@ class WebsocketClientSession:
                 self._client_task_handler(),
                 f"{self._transport_name}::WebsocketClientSession::_client_task_handler",
             )
-            await self._callbacks.on_connected(self._websocket)
+            if self._websocket:
+                await self._callbacks.on_connected(self._websocket)
         except TimeoutError:
             logger.error(f"Timeout connecting to {self._uri}")
 
@@ -179,7 +180,7 @@ class WebsocketClientSession:
         Returns:
             True if the WebSocket is in connected state.
         """
-        return self._websocket.state == websockets.State.OPEN if self._websocket else False
+        return self._websocket.state == websockets.State.OPEN if self._websocket else False  # type: ignore[attr-defined]
 
     @property
     def is_closing(self) -> bool:
@@ -188,18 +189,22 @@ class WebsocketClientSession:
         Returns:
             True if the WebSocket is in the process of closing.
         """
-        return self._websocket.state == websockets.State.CLOSING if self._websocket else False
+        return self._websocket.state == websockets.State.CLOSING if self._websocket else False  # type: ignore[attr-defined]
 
     async def _client_task_handler(self):
         """Handle incoming messages from the WebSocket connection."""
+        if not self._websocket:
+            return
+
+        websocket = self._websocket
         try:
             # Handle incoming messages
-            async for message in self._websocket:
-                await self._callbacks.on_message(self._websocket, message)
+            async for message in websocket:
+                await self._callbacks.on_message(websocket, message)
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
-        await self._callbacks.on_disconnected(self._websocket)
+        await self._callbacks.on_disconnected(websocket)
 
     def __str__(self):
         """String representation of the WebSocket client session."""

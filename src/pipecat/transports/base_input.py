@@ -592,7 +592,8 @@ class BaseInputTransport(FrameProcessor):
         """Handle end-of-turn analysis and generate prediction results."""
         if self._params.turn_analyzer:
             state, prediction = await self._params.turn_analyzer.analyze_end_of_turn()
-            await self._deprecated_handle_prediction_result(prediction)
+            if prediction is not None:
+                await self._deprecated_handle_prediction_result(prediction)
             await self._deprecated_handle_end_of_turn_complete(state)
 
     async def _deprecated_handle_end_of_turn_complete(self, state: EndOfTurnState):
@@ -610,6 +611,7 @@ class BaseInputTransport(FrameProcessor):
         """Run turn analysis on audio frame and handle results."""
         is_speech = vad_state == VADState.SPEAKING or vad_state == VADState.STARTING
         # If silence exceeds threshold, we are going to receive EndOfTurnState.COMPLETE
+        assert self._params.turn_analyzer is not None
         end_of_turn_state = self._params.turn_analyzer.append_audio(frame.audio, is_speech)
         if end_of_turn_state == EndOfTurnState.COMPLETE:
             await self._deprecated_handle_end_of_turn_complete(end_of_turn_state)

@@ -74,6 +74,7 @@ class PlivoFrameSerializer(FrameSerializer):
             params: Configuration parameters.
         """
         super().__init__(params or PlivoFrameSerializer.InputParams())
+        self._params: PlivoFrameSerializer.InputParams
 
         self._stream_id = stream_id
         self._call_id = call_id

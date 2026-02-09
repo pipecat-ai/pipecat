@@ -61,6 +61,8 @@ class RNNoiseFilter(BaseAudioFilter):
 
         try:
             # RNNoise always requires 48kHz
+            if RNNoise is None:
+                raise RuntimeError("RNNoise module is not available")
             self._rnnoise = RNNoise(sample_rate=48000)
             self._rnnoise_ready = True
         except Exception as e:
@@ -126,6 +128,7 @@ class RNNoiseFilter(BaseAudioFilter):
         # denoise_chunk handles buffering internally and yields (speech_prob, denoised_frame)
         # denoised_frame is in float32 format normalized to [-1.0, 1.0]
         filtered_frames = []
+        assert self._rnnoise is not None
         for speech_prob, denoised_frame in self._rnnoise.denoise_chunk(audio_samples):
             # Check if output is float (needs scaling) or int16 (ready)
             if np.issubdtype(denoised_frame.dtype, np.floating):

@@ -195,7 +195,7 @@ class DailyUpdateRemoteParticipantsFrame(ControlFrame):
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
-    remote_participants: Mapping[str, Any] = None
+    remote_participants: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -751,7 +751,10 @@ class DailyTransportClient(EventHandler):
 
         self._client.set_user_name(self._bot_name)
 
-        (data, error) = await self._join()
+        result = await self._join()
+        if result is None:
+            return
+        (data, error) = result
 
         if not error:
             self._joined = True
@@ -881,7 +884,7 @@ class DailyTransportClient(EventHandler):
         """Cleanup the Daily client instance."""
         if self._client:
             self._client.release()
-            self._client = None
+            self._client = None  # type: ignore[assignment]
 
     def participants(self) -> Mapping[str, Any]:
         """Get current participants in the room.
@@ -1956,7 +1959,8 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, DailyUpdateRemoteParticipantsFrame):
-            await self._client.update_remote_participants(frame.remote_participants)
+            if frame.remote_participants is not None:
+                await self._client.update_remote_participants(frame.remote_participants)
 
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame

@@ -257,12 +257,14 @@ class TavusTransportClient:
             await self._client.setup(setup)
         except Exception as e:
             logger.error(f"Failed to setup TavusTransportClient: {e}")
+            assert self._conversation_id is not None
             await self._api.end_conversation(self._conversation_id)
             self._conversation_id = None
 
     async def cleanup(self):
         """Cleanup client resources."""
         try:
+            assert self._client is not None
             await self._client.cleanup()
         except Exception as e:
             logger.error(f"Exception during cleanup: {e}")
@@ -294,12 +296,15 @@ class TavusTransportClient:
             frame: The start frame containing initialization parameters.
         """
         logger.debug("TavusTransportClient start invoked!")
+        assert self._client is not None
         await self._client.start(frame)
         await self._client.join()
 
     async def stop(self):
         """Stop the client and end the conversation."""
+        assert self._client is not None
         await self._client.leave()
+        assert self._conversation_id is not None
         await self._api.end_conversation(self._conversation_id)
         self._conversation_id = None
 
@@ -320,6 +325,7 @@ class TavusTransportClient:
             video_source: Video source to capture from.
             color_format: Color format for video frames.
         """
+        assert self._client is not None
         await self._client.capture_participant_video(
             participant_id, callback, framerate, video_source, color_format
         )
@@ -341,6 +347,7 @@ class TavusTransportClient:
             sample_rate: Desired sample rate for audio capture.
             callback_interval_ms: Interval between audio callbacks in milliseconds.
         """
+        assert self._client is not None
         await self._client.capture_participant_audio(
             participant_id, callback, audio_source, sample_rate, callback_interval_ms
         )
@@ -353,6 +360,7 @@ class TavusTransportClient:
         Args:
             frame: The message frame to send.
         """
+        assert self._client is not None
         await self._client.send_message(frame)
 
     @property
@@ -362,6 +370,7 @@ class TavusTransportClient:
         Returns:
             The output sample rate in Hz.
         """
+        assert self._client is not None
         return self._client.out_sample_rate
 
     @property
@@ -371,6 +380,7 @@ class TavusTransportClient:
         Returns:
             The input sample rate in Hz.
         """
+        assert self._client is not None
         return self._client.in_sample_rate
 
     async def send_interrupt_message(self) -> None:

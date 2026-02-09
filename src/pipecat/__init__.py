@@ -31,7 +31,7 @@ def version() -> str:
 import asyncio
 
 if sys.version_info < (3, 12):
-    import wait_for2
+    import wait_for2  # type: ignore[import-untyped]
 
     # Replace asyncio.wait_for.
     asyncio.wait_for = wait_for2.wait_for

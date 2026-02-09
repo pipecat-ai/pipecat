@@ -307,7 +307,7 @@ class SmallWebRTCClient:
                 if (
                     self._webrtc_connection.is_connected()
                     and video_track
-                    and video_track.is_enabled()
+                    and video_track.is_enabled()  # type: ignore[attr-defined]
                 ):
                     logger.warning("Timeout: No video frame received within the specified time.")
                     # self._webrtc_connection.ask_to_renegotiate()
@@ -362,7 +362,7 @@ class SmallWebRTCClient:
                 if (
                     self._webrtc_connection.is_connected()
                     and self._audio_input_track
-                    and self._audio_input_track.is_enabled()
+                    and self._audio_input_track.is_enabled()  # type: ignore[attr-defined]
                 ):
                     logger.warning("Timeout: No audio frame received within the specified time.")
                 frame = None
@@ -375,7 +375,7 @@ class SmallWebRTCClient:
                 await asyncio.sleep(0.01)
                 continue
 
-            if frame.sample_rate > self._in_sample_rate:
+            if self._in_sample_rate is not None and frame.sample_rate > self._in_sample_rate:
                 resampled_frames = self._pipecat_resampler.resample(frame)
                 for resampled_frame in resampled_frames:
                     # 16-bit PCM bytes
@@ -383,6 +383,7 @@ class SmallWebRTCClient:
                     pcm_bytes = pcm_array.tobytes()
                     del pcm_array  # free NumPy array immediately
 
+                    assert self._audio_in_channels is not None
                     audio_frame = InputAudioRawFrame(
                         audio=pcm_bytes,
                         sample_rate=resampled_frame.sample_rate,
@@ -398,6 +399,7 @@ class SmallWebRTCClient:
                 pcm_bytes = pcm_array.tobytes()
                 del pcm_array  # free NumPy array immediately
 
+                assert self._audio_in_channels is not None
                 audio_frame = InputAudioRawFrame(
                     audio=pcm_bytes,
                     sample_rate=frame.sample_rate,
@@ -489,9 +491,9 @@ class SmallWebRTCClient:
         if not self._params:
             return
 
-        self._audio_input_track = self._webrtc_connection.audio_input_track()
-        self._video_input_track = self._webrtc_connection.video_input_track()
-        self._screen_video_track = self._webrtc_connection.screen_video_input_track()
+        self._audio_input_track = self._webrtc_connection.audio_input_track()  # type: ignore[assignment]
+        self._video_input_track = self._webrtc_connection.video_input_track()  # type: ignore[assignment]
+        self._screen_video_track = self._webrtc_connection.screen_video_input_track()  # type: ignore[assignment]
         if self._params.audio_out_enabled:
             self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
             self._webrtc_connection.replace_audio_track(self._audio_output_track)

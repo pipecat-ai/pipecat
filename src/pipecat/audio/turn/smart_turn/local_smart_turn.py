@@ -74,7 +74,7 @@ class LocalSmartTurnAnalyzer(BaseSmartTurn):
         # Set device to GPU if available, else CPU
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Move model to selected device and set it to evaluation mode
-        self._turn_model = self._turn_model.to(self._device)
+        self._turn_model = self._turn_model.to(self._device)  # type: ignore[assignment]
         self._turn_model.eval()
         logger.debug("Loaded Local Smart Turn")
 

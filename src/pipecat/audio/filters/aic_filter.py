@@ -18,15 +18,21 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
-from aic_sdk import (
-    Model,
-    ParameterFixedError,
-    ProcessorAsync,
-    ProcessorConfig,
-    ProcessorParameter,
-    set_sdk_id,
-)
 from loguru import logger
+
+try:
+    from aic_sdk import (  # type: ignore[import-not-found,import-untyped]
+        Model,
+        ParameterFixedError,
+        ProcessorAsync,
+        ProcessorConfig,
+        ProcessorParameter,
+        set_sdk_id,  # pyright: ignore[reportAttributeAccessIssue]
+    )
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use AICFilter, you need to install aic_sdk.")
+    raise Exception(f"Missing module: {e}")
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.vad.aic_vad import AICVADAnalyzer
@@ -167,6 +173,7 @@ class AICFilter(BaseAudioFilter):
             logger.debug(f"Loading AIC model from: {self._model_path}")
             self._model = Model.from_file(str(self._model_path))
         else:
+            assert self._model_id is not None
             logger.debug(f"Downloading AIC model: {self._model_id}")
             self._model_download_dir.mkdir(parents=True, exist_ok=True)
             model_path = await Model.download_async(self._model_id, str(self._model_download_dir))
@@ -200,6 +207,7 @@ class AICFilter(BaseAudioFilter):
             return
 
         # Get contexts for parameter control and VAD
+        assert self._processor is not None
         self._processor_ctx = self._processor.get_processor_context()
         self._vad_ctx = self._processor.get_vad_context()
 
@@ -286,6 +294,9 @@ class AICFilter(BaseAudioFilter):
         filtered_chunks: List[bytes] = []
         mv = memoryview(self._audio_buffer)
         block_size = self._frames_per_block * self._bytes_per_sample
+
+        assert self._in_f32 is not None
+        assert self._out_i16 is not None
 
         for i in range(num_blocks):
             start = i * block_size

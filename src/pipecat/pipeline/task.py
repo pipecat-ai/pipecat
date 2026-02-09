@@ -383,7 +383,7 @@ class PipelineTask(BasePipelineTask):
         # allows us to receive and react to downstream frames.
         source = PipelineSource(self._source_push_frame, name=f"{self}::Source")
         sink = PipelineSink(self._sink_push_frame, name=f"{self}::Sink")
-        processors = [self._rtvi, pipeline] if self._rtvi else [pipeline]
+        processors: List[FrameProcessor] = [self._rtvi, pipeline] if self._rtvi else [pipeline]
         self._pipeline = Pipeline(processors, source=source, sink=sink)
 
         # The task observer acts as a proxy to the provided observers. This way,
@@ -786,7 +786,7 @@ class PipelineTask(BasePipelineTask):
             await self._observer.cleanup()
 
         # End conversation tracing if it's active - this will also close any active turn span
-        if self._enable_tracing and hasattr(self, "_turn_trace_observer"):
+        if self._enable_tracing and self._turn_trace_observer is not None:
             self._turn_trace_observer.end_conversation_tracing()
 
         # Cleanup pipeline processors.
@@ -1020,7 +1020,7 @@ class PipelineTask(BasePipelineTask):
                 path = Path(f).resolve()
                 module_name = path.stem
                 spec = importlib.util.spec_from_file_location(module_name, str(path))
-                if spec:
+                if spec and spec.loader:
                     logger.debug(f"{self} loading observers from {path}")
 
                     # Load module.

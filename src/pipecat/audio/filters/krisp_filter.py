@@ -11,6 +11,7 @@ reduction technology to suppress background noise in audio streams.
 """
 
 import os
+from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -19,7 +20,9 @@ from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
 try:
-    from pipecat_ai_krisp.audio.krisp_processor import KrispAudioProcessor
+    from pipecat_ai_krisp.audio.krisp_processor import (  # type: ignore[import-not-found]
+        KrispAudioProcessor,
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use the Krisp filter, you need to `pip install pipecat-ai[krisp]`.")
@@ -68,7 +71,7 @@ class KrispFilter(BaseAudioFilter):
     """
 
     def __init__(
-        self, sample_type: str = "PCM_16", channels: int = 1, model_path: str = None
+        self, sample_type: str = "PCM_16", channels: int = 1, model_path: Optional[str] = None
     ) -> None:
         """Initialize the Krisp noise reduction filter.
 
@@ -115,6 +118,7 @@ class KrispFilter(BaseAudioFilter):
             sample_rate: The sample rate of the input transport in Hz.
         """
         self._sample_rate = sample_rate
+        assert self._model_path is not None
         self._krisp_processor = KrispProcessorManager.get_processor(
             self._sample_rate, self._sample_type, self._channels, self._model_path
         )
@@ -154,6 +158,7 @@ class KrispFilter(BaseAudioFilter):
         data = data.astype(np.float32) + epsilon
 
         # Process the audio chunk to reduce noise
+        assert self._krisp_processor is not None
         reduced_noise = self._krisp_processor.process(data)
 
         # Clip and set processed audio back to frame

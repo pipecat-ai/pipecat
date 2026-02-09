@@ -467,9 +467,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Handle system message for different services
                             system_message = None
                             if hasattr(context, "system"):
-                                system_message = context.system
+                                system_message = getattr(context, "system")
                             elif hasattr(context, "system_message"):
-                                system_message = context.system_message
+                                system_message = getattr(context, "system_message")
                             elif hasattr(self, "_system_instruction"):
                                 system_message = self._system_instruction
 

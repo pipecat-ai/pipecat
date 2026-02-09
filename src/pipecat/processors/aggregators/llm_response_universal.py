@@ -16,11 +16,11 @@ import json
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Set, Type
+from typing import Any, Dict, List, Literal, Optional, Set, Type, cast
 
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
 from pipecat.frames.frames import (
@@ -258,12 +258,20 @@ class LLMContextAggregator(FrameProcessor):
         """
         self._context.set_messages(messages)
 
-    def set_tools(self, tools: ToolsSchema | NotGiven):
+    def set_tools(self, tools: ToolsSchema | List | NotGiven):
         """Set tools in the context.
 
         Args:
-            tools: List of tool definitions to set in the context.
+            tools: Tool definitions to set in the context.
         """
+        if isinstance(tools, list):
+            tools = ToolsSchema(
+                standard_tools=[],
+                custom_tools=cast(
+                    Dict[AdapterType, List[Dict[str, Any]]],
+                    {AdapterType.SHIM: tools},
+                ),
+            )
         self._context.set_tools(tools)
 
     def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"] | dict):
@@ -272,7 +280,9 @@ class LLMContextAggregator(FrameProcessor):
         Args:
             tool_choice: Tool choice configuration for the context.
         """
-        self._context.set_tool_choice(tool_choice)
+        from pipecat.processors.aggregators.llm_context import LLMContextToolChoice
+
+        self._context.set_tool_choice(cast(LLMContextToolChoice, tool_choice))
 
     async def reset(self):
         """Reset the aggregation state."""
@@ -485,7 +495,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         aggregation = self.aggregation_string()
         await self.reset()
-        self._context.add_message({"role": self.role, "content": aggregation})
+        self._context.add_message(
+            cast(LLMContextMessage, {"role": self.role, "content": aggregation})
+        )
         await self.push_context_frame()
 
         return aggregation
@@ -515,7 +527,11 @@ class LLMUserAggregator(LLMContextAggregator):
             )
 
             # Auto-inject turn completion instructions into context
-            self._context.add_message({"role": "system", "content": config.completion_instructions})
+            self._context.add_message(
+                cast(
+                    LLMContextMessage, {"role": "system", "content": config.completion_instructions}
+                )
+            )
 
     async def _stop(self, frame: EndFrame):
         await self._maybe_emit_user_turn_stopped(on_session_end=True)
@@ -811,7 +827,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._assistant_turn_start_timestamp = ""
 
         self._thought_append_to_context = False
-        self._thought_llm: str = ""
+        self._thought_llm: Optional[str] = ""
         self._thought_aggregation: List[TextPartForConcatenation] = []
         self._thought_start_time: str = ""
 
@@ -899,7 +915,9 @@ class LLMAssistantAggregator(LLMContextAggregator):
         aggregation = self.aggregation_string()
         await self.reset()
 
-        self._context.add_message({"role": "assistant", "content": aggregation})
+        self._context.add_message(
+            cast(LLMContextMessage, {"role": "assistant", "content": aggregation})
+        )
 
         # Push context frame
         await self.push_context_frame()
@@ -945,26 +963,32 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         # Update context with the in-progress function call
         self._context.add_message(
-            {
-                "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id": frame.tool_call_id,
-                        "function": {
-                            "name": frame.function_name,
-                            "arguments": json.dumps(frame.arguments, ensure_ascii=False),
-                        },
-                        "type": "function",
-                    }
-                ],
-            }
+            cast(
+                LLMContextMessage,
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": frame.tool_call_id,
+                            "function": {
+                                "name": frame.function_name,
+                                "arguments": json.dumps(frame.arguments, ensure_ascii=False),
+                            },
+                            "type": "function",
+                        }
+                    ],
+                },
+            )
         )
         self._context.add_message(
-            {
-                "role": "tool",
-                "content": "IN_PROGRESS",
-                "tool_call_id": frame.tool_call_id,
-            }
+            cast(
+                LLMContextMessage,
+                {
+                    "role": "tool",
+                    "content": "IN_PROGRESS",
+                    "tool_call_id": frame.tool_call_id,
+                },
+            )
         )
 
         self._function_calls_in_progress[frame.tool_call_id] = frame
@@ -1060,6 +1084,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         logger.debug(f"{self} Appending AssistantImageRawFrame to LLM context (size: {frame.size})")
 
         if frame.original_data and frame.original_mime_type:
+            assert frame.original_mime_type is not None
             await self._context.add_image_frame_message(
                 format=frame.original_mime_type,
                 size=frame.size,  # Technically doesn't matter, since already encoded
@@ -1068,7 +1093,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             )
         else:
             await self._context.add_image_frame_message(
-                format=frame.format,
+                format=frame.format or "RGB",
                 size=frame.size,
                 image=frame.image,
                 role="assistant",
@@ -1125,11 +1150,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         thought = concatenate_aggregated_text(self._thought_aggregation)
 
-        if self._thought_append_to_context:
-            llm = self._thought_llm
+        if self._thought_append_to_context and self._thought_llm is not None:
             self._context.add_message(
                 LLMSpecificMessage(
-                    llm=llm,
+                    llm=self._thought_llm,
                     message={
                         "type": "thought",
                         "text": thought,
@@ -1151,7 +1175,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         logger.debug(f"{self} Appending UserImageRawFrame to LLM context (size: {frame.size})")
 
         await self._context.add_image_frame_message(
-            format=frame.format,
+            format=frame.format or "RGB",
             size=frame.size,
             image=frame.image,
             text=frame.text,

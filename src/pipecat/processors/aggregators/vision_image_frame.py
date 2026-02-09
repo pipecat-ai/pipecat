@@ -72,7 +72,7 @@ class VisionImageFrameAggregator(FrameProcessor):
                     text=self._describe_text,
                     image=frame.image,
                     size=frame.size,
-                    format=frame.format,
+                    format=frame.format or "RGB",
                 )
                 frame = OpenAILLMContextFrame(context)
                 await self.push_frame(frame)

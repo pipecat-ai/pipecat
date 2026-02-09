@@ -62,6 +62,7 @@ class ExotelFrameSerializer(FrameSerializer):
             params: Configuration parameters.
         """
         super().__init__(params or ExotelFrameSerializer.InputParams())
+        self._params: ExotelFrameSerializer.InputParams
 
         self._stream_sid = stream_sid
         self._call_sid = call_sid

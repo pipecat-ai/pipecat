@@ -212,6 +212,14 @@ ignore = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.pyright]
+typeCheckingMode = "basic"
+pythonVersion = "3.10"
+exclude = [
+    "src/pipecat/services/",
+    "src/pipecat/adapters/",
+]
+
 [tool.coverage.run]
 command_line = "--module pytest"
 source = ["src"]

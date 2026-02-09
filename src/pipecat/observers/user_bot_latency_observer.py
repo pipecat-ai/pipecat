@@ -44,7 +44,7 @@ class UserBotLatencyObserver(BaseObserver):
         """
         super().__init__(**kwargs)
         self._user_stopped_time: Optional[float] = None
-        self._processed_frames: Set[str] = set()
+        self._processed_frames: Set[int] = set()
 
         self._register_event_handler("on_latency_measured")
 

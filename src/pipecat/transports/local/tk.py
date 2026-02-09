@@ -229,7 +229,7 @@ class TkOutputTransport(BaseOutputTransport):
 
         # This holds a reference to the photo, preventing it from being garbage
         # collected.
-        self._image_label.image = photo
+        self._image_label.image = photo  # type: ignore[assignment]
 
 
 class TkLocalTransport(BaseTransport):
