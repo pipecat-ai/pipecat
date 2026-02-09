@@ -22,7 +22,7 @@ from pathlib import Path
 
 try:
     import numpy as np
-    import soundfile as sf
+    import soundfile as sf  # noqa: F401
     from audio_file_utils import calculate_audio_stats, read_audio_file, write_audio_file
 except ImportError as e:
     print(f"Error: Missing required dependencies: {e}")

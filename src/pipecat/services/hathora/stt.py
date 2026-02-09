@@ -111,7 +111,6 @@ class HathoraSTTService(SegmentedSTTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
             url = f"{self._base_url}"
 
@@ -153,7 +152,6 @@ class HathoraSTTService(SegmentedSTTService):
                         result=response,
                     )
 
-            await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
 
         except Exception as e:

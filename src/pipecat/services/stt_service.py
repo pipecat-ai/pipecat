@@ -6,7 +6,9 @@
 
 """Base classes for Speech-to-Text services with continuous and segmented processing."""
 
+import asyncio
 import io
+import time
 import wave
 from abc import abstractmethod
 from typing import Any, AsyncGenerator, Dict, Mapping, Optional
@@ -17,12 +19,17 @@ from pipecat.frames.frames import (
     AudioRawFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
+    MetricsFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
+    TranscriptionFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
@@ -61,6 +68,8 @@ class STTService(AIService):
         audio_passthrough=True,
         # STT input sample rate
         sample_rate: Optional[int] = None,
+        # STT TTFB timeout - time to wait after VAD stop before reporting TTFB
+        stt_ttfb_timeout: float = 2.0,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -70,6 +79,12 @@ class STTService(AIService):
                 Defaults to True.
             sample_rate: The sample rate for audio input. If None, will be determined
                 from the start frame.
+            stt_ttfb_timeout: Time in seconds to wait after VAD stop before reporting
+                TTFB. This delay allows the final transcription to arrive. Defaults to 2.0.
+                Note: STT "TTFB" differs from traditional TTFB (which measures from a discrete
+                request to first response byte). Since STT receives continuous audio, we measure
+                from when the user stops speaking to when the final transcript arrives—capturing
+                the latency that matters for voice AI applications.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -80,6 +95,16 @@ class STTService(AIService):
         self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
+
+        # STT TTFB tracking state
+        self._stt_ttfb_timeout = stt_ttfb_timeout
+        self._ttfb_timeout_task: Optional[asyncio.Task] = None
+        self._vad_stop_secs: Optional[float] = None
+        self._speech_end_time: Optional[float] = None
+        self._user_speaking: bool = False
+        self._last_transcription_time: Optional[float] = None
+        self._finalize_pending: bool = False
+        self._finalize_requested: bool = False
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -93,6 +118,31 @@ class STTService(AIService):
             True if the service is muted and will not process audio.
         """
         return self._muted
+
+    def request_finalize(self):
+        """Mark that a finalize request has been sent, awaiting server confirmation.
+
+        For providers that have explicit server confirmation of finalization
+        (e.g., Deepgram's from_finalize field), call this when sending the finalize
+        request. Then call confirm_finalize() when the server confirms.
+
+        For providers without server confirmation, don't call this method - just
+        send the finalize/flush/commit command and rely on the TTFB timeout.
+        """
+        self._finalize_requested = True
+
+    def confirm_finalize(self):
+        """Confirm that the server has acknowledged the finalize request.
+
+        Call this when the server response confirms finalization (e.g., Deepgram's
+        from_finalize=True). The next TranscriptionFrame pushed will be marked
+        as finalized.
+
+        Only has effect if request_finalize() was previously called.
+        """
+        if self._finalize_requested:
+            self._finalize_pending = True
+            self._finalize_requested = False
 
     @property
     def sample_rate(self) -> int:
@@ -144,6 +194,11 @@ class STTService(AIService):
         self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
         self._tracing_enabled = frame.enable_tracing
 
+    async def cleanup(self):
+        """Clean up STT service resources."""
+        await super().cleanup()
+        await self._cancel_ttfb_timeout()
+
     async def _update_settings(self, settings: Mapping[str, Any]):
         logger.info(f"Updating STT settings: {self._settings}")
         for key, value in settings.items():
@@ -152,6 +207,8 @@ class STTService(AIService):
                 self._settings[key] = value
                 if key == "language":
                     await self.set_language(value)
+            elif key == "language":
+                await self.set_language(value)
             elif key == "model":
                 self.set_model_name(value)
             else:
@@ -204,13 +261,167 @@ class STTService(AIService):
             await self.process_audio_frame(frame, direction)
             if self._audio_passthrough:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, SpeechControlParamsFrame):
+            await self._handle_speech_control_params(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._handle_vad_user_started_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._handle_vad_user_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, STTMuteFrame):
             self._muted = frame.mute
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
+        elif isinstance(frame, InterruptionFrame):
+            await self._reset_stt_ttfb_state()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream, tracking TranscriptionFrame timestamps for TTFB.
+
+        Stores the timestamp of each TranscriptionFrame for TTFB calculation.
+        If the frame is marked as finalized (via request_finalize/confirm_finalize),
+        reports TTFB immediately and cancels any pending timeout. Otherwise, TTFB is
+        reported after a timeout.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        if isinstance(frame, TranscriptionFrame):
+            # Store the transcription time for TTFB calculation
+            self._last_transcription_time = time.time()
+
+            # Set finalized from pending state and auto-reset
+            if self._finalize_pending:
+                frame.finalized = True
+                self._finalize_pending = False
+
+            # If this is a finalized transcription, report TTFB immediately
+            if frame.finalized and self._speech_end_time is not None:
+                ttfb = self._last_transcription_time - self._speech_end_time
+                await self._emit_stt_ttfb_metric(ttfb)
+                # Cancel the timeout since we've already reported
+                await self._cancel_ttfb_timeout()
+                # Clear state
+                self._speech_end_time = None
+                self._last_transcription_time = None
+
+        await super().push_frame(frame, direction)
+
+    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
+        """Handle speech control parameters frame to extract VAD stop_secs.
+
+        Args:
+            frame: The speech control parameters frame.
+        """
+        if frame.vad_params is not None:
+            self._vad_stop_secs = frame.vad_params.stop_secs
+
+    async def _cancel_ttfb_timeout(self):
+        """Cancel any pending TTFB timeout task."""
+        if self._ttfb_timeout_task:
+            await self.cancel_task(self._ttfb_timeout_task)
+            self._ttfb_timeout_task = None
+
+    async def _reset_stt_ttfb_state(self):
+        """Reset STT TTFB measurement state.
+
+        Called when starting a new utterance or on interruption to ensure
+        we don't use stale state for TTFB calculations. This specifically guards
+        against the case where a TranscriptionFrame is received without corresponding
+        VADUserStartedSpeakingFrame and VADUserStoppedSpeakingFrame frames.
+
+        Note: Does not reset _user_speaking since InterruptionFrame can arrive
+        while user is still speaking.
+        """
+        await self._cancel_ttfb_timeout()
+        self._speech_end_time = None
+        self._last_transcription_time = None
+
+    async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
+        """Handle VAD user started speaking frame to start tracking transcriptions.
+
+        Cancels any pending TTFB timeout, resets TTFB tracking state, and marks user as speaking.
+        Also resets finalization state to prevent stale finalization from a previous utterance.
+
+        Args:
+            frame: The VAD user started speaking frame.
+        """
+        await self._reset_stt_ttfb_state()
+        self._user_speaking = True
+        self._finalize_requested = False
+        self._finalize_pending = False
+
+    async def _handle_vad_user_stopped_speaking(self, frame: VADUserStoppedSpeakingFrame):
+        """Handle VAD user stopped speaking frame.
+
+        Calculates the actual speech end time and starts a timeout task to wait
+        for the final transcription before reporting TTFB.
+
+        Args:
+            frame: The VAD user stopped speaking frame.
+        """
+        self._user_speaking = False
+
+        # Skip TTFB measurement if we don't have VAD params
+        if self._vad_stop_secs is None:
+            return
+
+        # Calculate the actual speech end time (current time minus VAD stop delay).
+        # This approximates when the last user audio was sent to the STT service,
+        # which we use to measure against the eventual transcription response.
+        self._speech_end_time = time.time() - self._vad_stop_secs
+
+        # Start timeout task (any previous timeout was cancelled by VADUserStartedSpeakingFrame
+        # or InterruptionFrame)
+        self._ttfb_timeout_task = self.create_task(
+            self._ttfb_timeout_handler(), name="stt_ttfb_timeout"
+        )
+
+    async def _ttfb_timeout_handler(self):
+        """Wait for timeout then report TTFB using the last transcription timestamp.
+
+        This timeout allows the final transcription to arrive before we calculate
+        and report TTFB. If no transcription arrived, no TTFB is reported.
+        """
+        try:
+            await asyncio.sleep(self._stt_ttfb_timeout)
+
+            # Report TTFB if we have both speech end time and transcription time
+            if self._speech_end_time is not None and self._last_transcription_time is not None:
+                ttfb = self._last_transcription_time - self._speech_end_time
+                await self._emit_stt_ttfb_metric(ttfb)
+
+            # Clear state after reporting
+            self._speech_end_time = None
+            self._last_transcription_time = None
+        except asyncio.CancelledError:
+            # Task was cancelled (new utterance or interruption), which is expected behavior
+            pass
+        finally:
+            self._ttfb_timeout_task = None
+
+    async def _emit_stt_ttfb_metric(self, ttfb: float):
+        """Emit STT TTFB metric if value is non-negative.
+
+        Args:
+            ttfb: The TTFB value in seconds.
+        """
+        if ttfb >= 0:
+            logger.debug(f"{self} TTFB: {ttfb:.3f}s")
+            if self.metrics_enabled:
+                ttfb_data = TTFBMetricsData(
+                    processor=self.name,
+                    model=self.model_name,
+                    value=ttfb,
+                )
+                await super().push_frame(MetricsFrame(data=[ttfb_data]))
 
 
 class SegmentedSTTService(STTService):
@@ -248,6 +459,20 @@ class SegmentedSTTService(STTService):
         await super().start(frame)
         self._audio_buffer_size_1s = self.sample_rate * 2
 
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame, marking TranscriptionFrames as finalized.
+
+        Segmented STT services process complete speech segments and return a single
+        TranscriptionFrame per segment, so every transcription is inherently finalized.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame flow in the pipeline.
+        """
+        if isinstance(frame, TranscriptionFrame):
+            frame.finalized = True
+        await super().push_frame(frame, direction)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames, handling VAD events and audio segmentation."""
         await super().process_frame(frame, direction)
@@ -272,10 +497,10 @@ class SegmentedSTTService(STTService):
         wav.close()
         content.seek(0)
 
-        await self.process_generator(self.run_stt(content.read()))
-
         # Start clean.
         self._audio_buffer.clear()
+
+        await self.process_generator(self.run_stt(content.read()))
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process audio frames by buffering them for segmented transcription.

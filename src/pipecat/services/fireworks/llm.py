@@ -6,8 +6,6 @@
 
 """Fireworks AI service implementation using OpenAI-compatible interface."""
 
-from typing import List
-
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams

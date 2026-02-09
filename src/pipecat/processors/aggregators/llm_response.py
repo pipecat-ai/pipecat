@@ -1042,6 +1042,11 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
         del self._function_calls_in_progress[frame.request.tool_call_id]
 
+        # Call the result_callback if provided. This signals that the image
+        # has been retrieved and the function call can now complete.
+        if frame.request and frame.request.result_callback:
+            await frame.request.result_callback(None)
+
         await self.handle_user_image_frame(frame)
         await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)

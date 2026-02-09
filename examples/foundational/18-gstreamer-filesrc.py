@@ -20,13 +20,8 @@ from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
-parser = argparse.ArgumentParser(description="Pipecat Video Streaming Bot")
-parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
-args = parser.parse_args()
-
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_out_enabled=True,
@@ -46,10 +41,10 @@ transport_params = {
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot with video input: {args.input}")
+    logger.info(f"Starting bot with video input: {runner_args.cli_args.input}")
 
     gst = GStreamerPipelineSource(
-        pipeline=f"filesrc location={args.input}",
+        pipeline=f"filesrc location={runner_args.cli_args.input}",
         out_params=GStreamerPipelineSource.OutputParams(
             video_width=1280,
             video_height=720,
@@ -68,6 +63,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await task.cancel()
+
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
@@ -82,4 +86,7 @@ async def bot(runner_args: RunnerArguments):
 if __name__ == "__main__":
     from pipecat.runner.run import main
 
-    main()
+    parser = argparse.ArgumentParser(description="Pipecat Video Streaming Bot")
+    parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
+
+    main(parser)

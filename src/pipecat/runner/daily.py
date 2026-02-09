@@ -17,7 +17,7 @@ Functions:
 Environment variables:
 
 - DAILY_API_KEY - Daily API key for room/token creation (required)
-- DAILY_SAMPLE_ROOM_URL (optional) - Existing room URL to use. If not provided,
+- DAILY_ROOM_URL (optional) - Existing room URL to use. If not provided,
   a temporary room will be created automatically.
 
 Example::
@@ -91,7 +91,7 @@ async def configure(
     """Configure Daily room URL and token with optional SIP capabilities.
 
     This function will either:
-    1. Use an existing room URL from DAILY_SAMPLE_ROOM_URL environment variable (standard mode only)
+    1. Use an existing room URL from DAILY_ROOM_URL environment variable (standard mode only)
     2. Create a new temporary room automatically if no URL is provided
 
     Args:
@@ -177,7 +177,7 @@ async def configure(
     )
 
     # Check for existing room URL (only in standard mode)
-    existing_room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+    existing_room_url = os.getenv("DAILY_ROOM_URL")
     if existing_room_url and not sip_enabled:
         # Use existing room (standard mode only)
         logger.info(f"Using existing Daily room: {existing_room_url}")

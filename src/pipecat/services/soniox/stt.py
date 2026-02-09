@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import WebsocketSTTService
@@ -162,7 +162,7 @@ class SonioxSTTService(WebsocketSTTService):
             sample_rate: Audio sample rate.
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
-            vad_force_turn_endpoint: Listen to `UserStoppedSpeakingFrame` to send finalize message to Soniox. If disabled, Soniox will detect the end of the speech.
+            vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox. If disabled, Soniox will detect the end of the speech.
             **kwargs: Additional arguments passed to the STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -247,7 +247,7 @@ class SonioxSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
+        if isinstance(frame, VADUserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
             # Send finalize message to Soniox so we get the final tokens asap.
             if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send(FINALIZE_MESSAGE)
@@ -374,12 +374,15 @@ class SonioxSTTService(WebsocketSTTService):
         async def send_endpoint_transcript():
             if self._final_transcription_buffer:
                 text = "".join(map(lambda token: token["text"], self._final_transcription_buffer))
+                # Soniox only pushes TranscriptionFrame when an end token is received,
+                # so every TranscriptionFrame is inherently finalized
                 await self.push_frame(
                     TranscriptionFrame(
                         text=text,
                         user_id=self._user_id,
                         timestamp=time_now_iso8601(),
                         result=self._final_transcription_buffer,
+                        finalized=True,
                     )
                 )
                 await self._handle_transcription(text, is_final=True)

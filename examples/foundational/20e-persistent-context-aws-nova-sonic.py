@@ -22,7 +22,6 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.nova_sonic.llm import AWSNovaSonicLLMService
@@ -114,6 +113,14 @@ async def load_conversation(params: FunctionCallParams):
                 #         "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
                 #     }
                 # )
+                # If the last message isn't from the user, add a message asking for a recap
+                if messages and messages[-1].get("role") != "user":
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "Can you catch me up on what we were talking about?",
+                        }
+                    )
                 params.context.set_messages(messages)
                 await params.llm.reset_conversation()
                 # await params.llm.trigger_assistant_response()
@@ -176,9 +183,8 @@ tools = ToolsSchema(
 )
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,

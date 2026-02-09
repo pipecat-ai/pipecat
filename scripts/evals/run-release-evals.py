@@ -90,6 +90,11 @@ EVAL_ORDER = EvalConfig(
     eval_speaks_first=True,
 )
 
+EVAL_COMPLETE_TURN = EvalConfig(
+    prompt="I would go to Japan because I love the culture and want to try authentic ramen.",
+    eval="The user provides a relevant response about Japan or travel, showing the conversation continues normally.",
+)
+
 
 TESTS_07 = [
     # 07 series
@@ -106,6 +111,7 @@ TESTS_07 = [
     ("07f-interruptible-azure.py", EVAL_SIMPLE_MATH),
     ("07f-interruptible-azure-http.py", EVAL_SIMPLE_MATH),
     ("07g-interruptible-openai.py", EVAL_SIMPLE_MATH),
+    ("07g-interruptible-openai-http.py", EVAL_SIMPLE_MATH),
     ("07h-interruptible-openpipe.py", EVAL_SIMPLE_MATH),
     ("07j-interruptible-gladia.py", EVAL_SIMPLE_MATH),
     ("07j-interruptible-gladia-vad.py", EVAL_SIMPLE_MATH),
@@ -133,11 +139,13 @@ TESTS_07 = [
     ("07zb-interruptible-inworld-http.py", EVAL_SIMPLE_MATH),
     ("07zc-interruptible-asyncai.py", EVAL_SIMPLE_MATH),
     ("07zc-interruptible-asyncai-http.py", EVAL_SIMPLE_MATH),
-    # Need license key to run
-    # ("07zd-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
+    ("07zd-interruptible-aicoustics.py", EVAL_SIMPLE_MATH),
     ("07ze-interruptible-hume.py", EVAL_SIMPLE_MATH),
     ("07zf-interruptible-gradium.py", EVAL_SIMPLE_MATH),
+    ("07zg-interruptible-camb.py", EVAL_SIMPLE_MATH),
     ("07zh-interruptible-hathora.py", EVAL_SIMPLE_MATH),
+    ("07zi-interruptible-piper.py", EVAL_SIMPLE_MATH),
+    ("07zj-interruptible-kokoro.py", EVAL_SIMPLE_MATH),
     # Needs a local XTTS docker instance running.
     # ("07i-interruptible-xtts.py", EVAL_SIMPLE_MATH),
     # Needs a Krisp license.
@@ -208,6 +216,10 @@ TESTS_21 = [
     ("21a-tavus-video-service.py", EVAL_SIMPLE_MATH),
 ]
 
+TESTS_22 = [
+    ("22-filter-incomplete-turns.py", EVAL_COMPLETE_TURN),
+]
+
 TESTS_26 = [
     ("26-gemini-live.py", EVAL_SIMPLE_MATH),
     ("26a-gemini-live-transcription.py", EVAL_SIMPLE_MATH),
@@ -264,6 +276,7 @@ TESTS = [
     *TESTS_15,
     *TESTS_19,
     *TESTS_21,
+    *TESTS_22,
     *TESTS_26,
     *TESTS_27,
     *TESTS_40,

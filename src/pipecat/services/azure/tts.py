@@ -90,7 +90,7 @@ class AzureBaseTTSService:
             emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
             language: Language for synthesis. Defaults to English (US).
             pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
-            rate: Speech rate multiplier. Defaults to "1.05".
+            rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
             role: Voice role for expression (e.g., "YoungAdultFemale").
             style: Speaking style (e.g., "cheerful", "sad", "excited").
             style_degree: Intensity of the speaking style (0.01 to 2.0).
@@ -100,7 +100,7 @@ class AzureBaseTTSService:
         emphasis: Optional[str] = None
         language: Optional[Language] = Language.EN_US
         pitch: Optional[str] = None
-        rate: Optional[str] = "1.05"
+        rate: Optional[str] = None
         role: Optional[str] = None
         style: Optional[str] = None
         style_degree: Optional[str] = None
@@ -185,7 +185,9 @@ class AzureBaseTTSService:
         if self._settings["volume"]:
             prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
-        ssml += f"<prosody {' '.join(prosody_attrs)}>"
+        # Only wrap in prosody tag if there are prosody attributes
+        if prosody_attrs:
+            ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
         if self._settings["emphasis"]:
             ssml += f"<emphasis level='{self._settings['emphasis']}'>"
@@ -195,7 +197,8 @@ class AzureBaseTTSService:
         if self._settings["emphasis"]:
             ssml += "</emphasis>"
 
-        ssml += "</prosody>"
+        if prosody_attrs:
+            ssml += "</prosody>"
 
         if self._settings["style"]:
             ssml += "</mstts:express-as>"
@@ -277,6 +280,11 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._started = False
         self._first_chunk = True
         self._cumulative_audio_offset: float = 0.0  # Cumulative audio duration in seconds
+        self._current_sentence_base_offset: float = 0.0  # Base offset for current sentence
+        self._current_sentence_duration: float = 0.0  # Duration from Azure callback
+        self._current_sentence_max_word_offset: float = (
+            0.0  # Max word boundary offset seen in current sentence (for 8kHz workaround)
+        )
         self._last_word: Optional[str] = None  # Track last word for punctuation merging
         self._last_timestamp: Optional[float] = None  # Track last timestamp
 
@@ -386,8 +394,14 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         word = evt.text
         sentence_relative_seconds = evt.audio_offset / 10_000_000.0
 
-        # Add cumulative offset to get absolute timestamp across sentences
-        absolute_seconds = self._cumulative_audio_offset + sentence_relative_seconds
+        # Use base offset captured at start of run_tts to avoid race conditions
+        # with callbacks from overlapping TTS requests
+        absolute_seconds = self._current_sentence_base_offset + sentence_relative_seconds
+
+        # Track max word offset for accurate cumulative timing
+        # (audio_duration from Azure doesn't always match word boundary offsets at 8kHz)
+        if sentence_relative_seconds > self._current_sentence_max_word_offset:
+            self._current_sentence_max_word_offset = sentence_relative_seconds
 
         if not word:
             return
@@ -492,9 +506,9 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             self._last_word = None
             self._last_timestamp = None
 
-        # Update cumulative audio offset for next sentence
+        # Store duration for cumulative offset calculation
         if evt.result and evt.result.audio_duration:
-            self._cumulative_audio_offset += evt.result.audio_duration.total_seconds()
+            self._current_sentence_duration = evt.result.audio_duration.total_seconds()
 
         self._audio_queue.put_nowait(None)  # Signal completion
 
@@ -530,6 +544,9 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._started = False
         self._first_chunk = True
         self._cumulative_audio_offset = 0.0
+        self._current_sentence_base_offset = 0.0
+        self._current_sentence_duration = 0.0
+        self._current_sentence_max_word_offset = 0.0
         self._last_word = None
         self._last_timestamp = None
 
@@ -604,6 +621,12 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                     self._started = True
                     self._first_chunk = True
 
+                # Capture base offset BEFORE starting synthesis to avoid race conditions
+                # Word boundary callbacks will use this value
+                self._current_sentence_base_offset = self._cumulative_audio_offset
+                self._current_sentence_duration = 0.0
+                self._current_sentence_max_word_offset = 0.0
+
                 ssml = self._construct_ssml(text)
                 self._speech_synthesizer.speak_ssml_async(ssml)
                 await self.start_tts_usage_metrics(text)
@@ -626,6 +649,16 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                         num_channels=1,
                     )
                     yield frame
+
+                # Update cumulative offset for next sentence
+                # At 8kHz, Azure's audio_duration doesn't match word boundary offsets,
+                # so we use max_word_offset as a workaround. At other sample rates,
+                # audio_duration is accurate.
+                # TODO: Remove after Azure fixes word boundary timing at 8kHz
+                if self.sample_rate == 8000:
+                    self._cumulative_audio_offset += self._current_sentence_max_word_offset
+                else:
+                    self._cumulative_audio_offset += self._current_sentence_duration
 
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")

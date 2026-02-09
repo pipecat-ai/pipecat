@@ -5,7 +5,7 @@
 #
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import numpy as np
 
@@ -143,3 +143,7 @@ class TestRNNoiseFilter(unittest.IsolatedAsyncioTestCase):
         )
 
         await filter.stop()
+
+
+if __name__ == "__main__":
+    unittest.main()

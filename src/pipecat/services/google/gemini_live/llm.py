@@ -1198,7 +1198,20 @@ class GeminiLiveLLMService(LLMService):
                         # Reset failure counter if connection has been stable
                         self._check_and_reset_failure_counter()
 
-                        if message.server_content and message.server_content.model_turn:
+                        if message.server_content and message.server_content.interrupted:
+                            # NOTE: while the service triggers interruptions in
+                            # the specific case of barge-ins, it does *not*
+                            # emit UserStarted/StoppedSpeakingFrames, as the
+                            # Gemini Live API does not give us broadly reliable
+                            # signals to base those off of. Pipelines that
+                            # require turn tracking (like those using context
+                            # aggregators) still need an independent way to
+                            # track turns, such as local Silero VAD in
+                            # combination with the context aggregator default
+                            # turn strategies.
+                            logger.debug("Gemini VAD: interrupted signal received")
+                            await self.push_interruption_task_frame_and_wait()
+                        elif message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
                         elif (
                             message.server_content
@@ -1676,6 +1689,8 @@ class GeminiLiveLLMService(LLMService):
             self._transcription_timeout_task = self.create_task(
                 self._transcription_timeout_handler()
             )
+            # Let the event loop schedule the taks before it gets cancelled.
+            await asyncio.sleep(0)
 
     async def _handle_msg_output_transcription(self, message: LiveServerMessage):
         """Handle the output transcription message."""

@@ -161,7 +161,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_ttfb_metrics()
+            pass
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             if (
                 self._vad_force_turn_endpoint
@@ -354,7 +354,6 @@ class AssemblyAISTTService(WebsocketSTTService):
         """Handle transcription results."""
         if not message.transcript:
             return
-        await self.stop_ttfb_metrics()
         if message.end_of_turn and (
             not self._connection_params.formatted_finals or message.turn_is_formatted
         ):
