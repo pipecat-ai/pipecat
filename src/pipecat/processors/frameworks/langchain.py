@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    TextFrame,
+    LLMTextFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -107,8 +107,7 @@ class LangchainProcessor(FrameProcessor):
                 {self._transcript_key: text},
                 config={"configurable": {"session_id": self._participant_id}},
             ):
-                frame = TextFrame(self.__get_token_value(token))
-                frame.includes_inter_frame_spaces = True
+                frame = LLMTextFrame(self.__get_token_value(token))
                 await self.push_frame(frame)
         except GeneratorExit:
             logger.warning(f"{self} generator was closed prematurely")
