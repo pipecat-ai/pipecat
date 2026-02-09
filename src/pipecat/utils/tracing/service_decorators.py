@@ -267,6 +267,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     - Transcription text and final status
     - Language information
     - Performance metrics like TTFB
+    - Additional service-specific attributes (e.g., confidence scores, NBest results)
 
     Args:
         func: The STT method to trace.
@@ -280,11 +281,11 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
     def decorator(f):
         @functools.wraps(f)
-        async def wrapper(self, transcript, is_final, language=None):
+        async def wrapper(self, transcript, is_final, language=None, **kwargs):
             try:
                 # Check if tracing is enabled for this service instance
                 if not getattr(self, "_tracing_enabled", False):
-                    return await f(self, transcript, is_final, language)
+                    return await f(self, transcript, is_final, language, **kwargs)
 
                 service_class_name = self.__class__.__name__
                 span_name = "stt"
@@ -318,10 +319,11 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             vad_enabled=getattr(self, "vad_enabled", False),
                             settings=settings,
                             ttfb=ttfb,
+                            **kwargs,  # Pass through additional service-specific attributes
                         )
 
                         # Call the original function
-                        return await f(self, transcript, is_final, language)
+                        return await f(self, transcript, is_final, language, **kwargs)
                     except Exception as e:
                         # Log any exception but don't disrupt the main flow
                         logging.warning(f"Error in STT transcription tracing: {e}")
@@ -329,7 +331,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             except Exception as e:
                 logging.error(f"Error in STT tracing (continuing without tracing): {e}")
                 # If tracing fails, fall back to the original function
-                return await f(self, transcript, is_final, language)
+                return await f(self, transcript, is_final, language, **kwargs)
 
         return wrapper
 
