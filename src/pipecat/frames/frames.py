@@ -1209,6 +1209,28 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class UserMuteStartedFrame(SystemFrame):
+    """Frame indicating that the user has been muted.
+
+    Emitted when a mute strategy activates, suppressing user frames (audio,
+    transcription, interruption) from propagating through the pipeline.
+    """
+
+    pass
+
+
+@dataclass
+class UserMuteStoppedFrame(SystemFrame):
+    """Frame indicating that the user has been unmuted.
+
+    Emitted when a mute strategy deactivates, allowing user frames to
+    propagate through the pipeline again.
+    """
+
+    pass
+
+
+@dataclass
 class UserSpeakingFrame(SystemFrame):
     """Frame indicating the user is speaking.
 

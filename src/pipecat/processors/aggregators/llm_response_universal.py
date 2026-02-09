@@ -53,6 +53,8 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     UserImageRawFrame,
+    UserMuteStartedFrame,
+    UserMuteStoppedFrame,
     UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -569,8 +571,10 @@ class LLMUserAggregator(LLMContextAggregator):
             # Emit mute state change events
             if self._user_is_muted:
                 await self._call_event_handler("on_user_mute_started")
+                await self.broadcast_frame(UserMuteStartedFrame)
             else:
                 await self._call_event_handler("on_user_mute_stopped")
+                await self.broadcast_frame(UserMuteStoppedFrame)
 
         return should_mute_frame
 
