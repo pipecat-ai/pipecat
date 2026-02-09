@@ -23,10 +23,8 @@ from anam import (
     PersonaConfig,
 )
 from av.audio.resampler import AudioResampler
-from av.video.frame import VideoFrame
 from loguru import logger
 
-from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     CancelFrame,
@@ -41,8 +39,6 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -72,7 +68,7 @@ class AnamVideoService(AIService):
         persona_id: ID of the persona to use (simple setup).
         persona_config: Full persona configuration (advanced setup).
         session: HTTP client session for API requests.
-        ice_servers: Custom ICE servers for WebRTC (optional).\
+        ice_servers: Custom ICE servers for WebRTC (optional).
         enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
         api_base_url: Base URL for the Anam API.
         api_version: API version to use.
@@ -82,9 +78,7 @@ class AnamVideoService(AIService):
         self,
         *,
         api_key: str,
-        persona_id: Optional[str] = None,
-        persona_config: Optional[PersonaConfig] = None,
-        session: aiohttp.ClientSession,
+        persona_config: PersonaConfig,
         ice_servers: Optional[list[dict]] = None,
         enable_turnkey: bool = False,
         api_base_url: Optional[str] = None,
@@ -106,8 +100,6 @@ class AnamVideoService(AIService):
         """
         super().__init__(**kwargs)
         self._api_key = api_key
-        self._session = session
-        self._persona_id = persona_id
         self._persona_config = persona_config
         self._ice_servers = ice_servers
         self._is_turnkey_session = enable_turnkey
@@ -120,7 +112,6 @@ class AnamVideoService(AIService):
         self._send_task: Optional[asyncio.Task] = None
         self._video_task: Optional[asyncio.Task] = None
         self._audio_task: Optional[asyncio.Task] = None
-        self._resampler = create_stream_resampler()
         self._anam_resampler = AudioResampler("s16", "mono", 48000)
         self._is_interrupting = False
         self._transport_ready = False
@@ -139,14 +130,6 @@ class AnamVideoService(AIService):
         """
         await super().setup(setup)
 
-        # Create persona config
-        if self._persona_config:
-            persona_config = self._persona_config
-        elif self._persona_id:
-            persona_config = PersonaConfig(persona_id=self._persona_id)
-        else:
-            raise ValueError("Either persona_id or persona config must be provided")
-
         # Create client options
         # Enable audio input for turnkey solutions (Anam handles STT)
         options = ClientOptions(
@@ -158,7 +141,7 @@ class AnamVideoService(AIService):
         # Initialize Anam client
         self._client = AnamClient(
             api_key=self._api_key,
-            persona_config=persona_config,
+            persona_config=self._persona_config,
             options=options,
         )
 
@@ -269,7 +252,7 @@ class AnamVideoService(AIService):
 
         if isinstance(frame, InputAudioRawFrame) and self._is_turnkey_session:
             # Anam handles STT internally, so don't push raw audio downstream for turnkey sessions.
-            await self._handle_user_audio_frame(frame, direction)
+            await self._handle_user_audio_frame(frame)
             return
 
         # Handle frames that need processing before being pushed downstream
@@ -415,12 +398,11 @@ class AnamVideoService(AIService):
         """
         await self._queue.put(frame)
 
-    async def _handle_user_audio_frame(self, frame: InputAudioRawFrame, direction: FrameDirection):
-        """Handle user audio frame by sending it to Anam SDK.
+    async def _handle_user_audio_frame(self, frame: InputAudioRawFrame):
+        """Handle user audio frame by sending it to Anam SDK - for turnkey sessions.
 
-        For turnkey solutions where Anam handles STT, this sends user audio
-        directly to the SDK via send_user_audio(). The SDK handles WebRTC
-        transmission and format conversion internally.
+        Anam handles STT internally. Send user audio through the SDK to Anam's service.
+        The SDK handles WebRTC transmission and format conversion internally.
 
         Args:
             frame: The user audio frame to process (InputAudioRawFrame).
@@ -450,7 +432,7 @@ class AnamVideoService(AIService):
         Anam works best with 16 bit PCM 24kHz mono audio.
         Audio send to Anam is returned in-sync with the avatar without any resampling.
         Sample rates lower than 24kHz will result in poor Avatar performance.
-        Sample rates highet than 24kHz might impact latency without any noticeable improvement in audio quality.
+        Sample rates higher than 24kHz might impact latency without any noticeable improvement in audio quality.
         """
         if not self._agent_audio_stream:
             logger.error("Agent audio stream not initialized")
