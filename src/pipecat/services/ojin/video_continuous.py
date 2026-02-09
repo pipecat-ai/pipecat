@@ -146,6 +146,7 @@ class OjinVideoService(FrameProcessor):
         # Tasks
         self._receive_msg_task: Optional[asyncio.Task] = None
         self._playback_task: Optional[asyncio.Task] = None
+        self._stopped = False
 
         # Server tracking
         self._server_fps_tracker = FPSTracker("OjinVideoService")
@@ -321,9 +322,10 @@ class OjinVideoService(FrameProcessor):
         # Determine which frame to play
         image_bytes: Optional[bytes] = None
         audio_bytes: Optional[bytes] = None
-
+        skip_count = 0
         MAX_FRAMES_BUFFER = 10
-        while True:
+
+        while not self._stopped:
             # Check speaking state notifications
             await self._check_started_speaking()
             await self._check_stopped_speaking()
@@ -363,14 +365,16 @@ class OjinVideoService(FrameProcessor):
                         logger.debug(
                             f"[SPEECH] Playing frame {frame_count}, buffer left: {len(self._video_frames)}"
                         )
-                # all_silence = len(self._video_frames) > MAX_FRAMES_BUFFER and all(
-                #     f.frame_idx == 0 for f in self._video_frames
-                # )
-                # if all_silence:
-                #     next_frame_time -= 0.015
-                #     logger.debug(
-                #         f"Speeding up to catch up buffer: {len(self._video_frames)}, target: {MAX_FRAMES_BUFFER}"
-                #     )
+                all_silence = len(self._video_frames) > MAX_FRAMES_BUFFER and all(
+                    f.frame_idx == 0 for f in self._video_frames
+                )
+                if all_silence:
+                    skip_count += 1
+                    if skip_count % 2 == 0:
+                        self._video_frames.popleft()
+                        logger.debug(
+                            f"Skipping silence frame: {len(self._video_frames)}, target: {MAX_FRAMES_BUFFER}"
+                        )
 
                 image_frame = OutputImageRawFrame(
                     image=image_bytes, size=self._settings.image_size, format="RGB"
@@ -407,6 +411,7 @@ class OjinVideoService(FrameProcessor):
         await self._client.start_interaction()
 
     async def _stop(self):
+        self._stopped = True
         if self._client:
             await self._client.close()
             self._client = None
