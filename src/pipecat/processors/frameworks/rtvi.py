@@ -689,7 +689,7 @@ class RTVILLMFunctionCallInProgressMessageData(BaseModel):
 
     tool_call_id: str
     function_name: Optional[str] = None
-    args: Optional[Mapping[str, Any]] = None
+    arguments: Optional[Mapping[str, Any]] = None
 
 
 class RTVILLMFunctionCallInProgressMessage(BaseModel):
@@ -1277,7 +1277,7 @@ class RTVIObserver(BaseObserver):
                 ):
                     data.function_name = frame.function_name
                 if report_level == RTVIFunctionCallReportLevel.FULL:
-                    data.args = frame.arguments
+                    data.arguments = frame.arguments
                 message = RTVILLMFunctionCallInProgressMessage(data=data)
                 await self.send_rtvi_message(message)
         elif isinstance(frame, FunctionCallCancelFrame):
