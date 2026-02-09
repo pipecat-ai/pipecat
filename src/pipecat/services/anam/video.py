@@ -414,12 +414,12 @@ class AnamVideoService(AIService):
             frame: The user audio frame to process (InputAudioRawFrame).
             direction: The direction of frame processing.
         """
-        if self._client is None or self._client._streaming_client is None:
+        if self._anam_session is None:
             return
 
         try:
             # Send raw audio samples to SDK for WebRTC transport to Anam's service
-            self._client._streaming_client.send_user_audio(
+            self._anam_session.send_user_audio(
                 audio_bytes=frame.audio,
                 sample_rate=frame.sample_rate,
                 num_channels=frame.num_channels,
