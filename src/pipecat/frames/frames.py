@@ -12,6 +12,7 @@ and LLM processing.
 """
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -1270,16 +1271,32 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
 @dataclass
 class VADUserStartedSpeakingFrame(SystemFrame):
-    """Frame emitted when VAD definitively detects user started speaking."""
+    """Frame emitted when VAD definitively detects user started speaking.
 
-    pass
+    Parameters:
+        start_secs: The VAD start_secs duration that was used to confirm the user
+            started speaking. This represents the speech duration that had to
+            elapse before the VAD determined speech began.
+        timestamp: Wall-clock time when the VAD made its determination.
+    """
+
+    start_secs: float = 0.0
+    timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
 class VADUserStoppedSpeakingFrame(SystemFrame):
-    """Frame emitted when VAD definitively detects user stopped speaking."""
+    """Frame emitted when VAD definitively detects user stopped speaking.
 
-    pass
+    Parameters:
+        stop_secs: The VAD stop_secs duration that was used to confirm the user
+            stopped speaking. This represents the silence duration that had to
+            elapse before the VAD determined speech ended.
+        timestamp: Wall-clock time when the VAD made its determination.
+    """
+
+    stop_secs: float = 0.0
+    timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
@@ -1649,6 +1666,49 @@ class SpeechControlParamsFrame(SystemFrame):
 
     vad_params: Optional[VADParams] = None
     turn_params: Optional[BaseTurnParams] = None
+
+
+@dataclass
+class ServiceMetadataFrame(SystemFrame):
+    """Base metadata frame for services.
+
+    Broadcast by services at pipeline start to share service-specific
+    configuration and performance characteristics with downstream processors.
+
+    Parameters:
+        service_name: The name of the service broadcasting this metadata.
+    """
+
+    service_name: str
+
+
+@dataclass
+class STTMetadataFrame(ServiceMetadataFrame):
+    """Metadata from STT service.
+
+    Broadcast by STT services to inform downstream processors (like turn
+    strategies) about STT latency characteristics.
+
+    Parameters:
+        ttfs_p99_latency: Time to final segment P99 latency in seconds.
+            This is the expected time from when speech ends to when the
+            final transcript is received, at the 99th percentile.
+    """
+
+    ttfs_p99_latency: float
+
+
+@dataclass
+class RequestMetadataFrame(ControlFrame):
+    """Request services to re-emit their metadata frames.
+
+    Used by ServiceSwitcher when switching active services to ensure
+    downstream processors receive updated metadata from the newly active service.
+    Services that receive this frame should re-push their metadata frame
+    (e.g., STTMetadataFrame for STT services).
+    """
+
+    pass
 
 
 #

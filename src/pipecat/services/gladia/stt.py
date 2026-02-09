@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
+from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -205,6 +206,7 @@ class GladiaSTTService(WebsocketSTTService):
         params: Optional[GladiaInputParams] = None,
         max_buffer_size: int = 1024 * 1024 * 20,  # 20MB default buffer
         should_interrupt: bool = True,
+        ttfs_p99_latency: Optional[float] = GLADIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Gladia STT service.
@@ -225,9 +227,11 @@ class GladiaSTTService(WebsocketSTTService):
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
             should_interrupt: Determine whether the bot should be interrupted when
                 Gladia VAD detects user speech. Defaults to True.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService parent class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         params = params or GladiaInputParams()
 

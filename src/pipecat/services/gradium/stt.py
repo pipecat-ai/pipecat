@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -94,6 +95,7 @@ class GradiumSTTService(WebsocketSTTService):
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
+        ttfs_p99_latency: Optional[float] = GRADIUM_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Gradium STT service.
@@ -107,9 +109,11 @@ class GradiumSTTService(WebsocketSTTService):
                 .. deprecated:: 0.0.101
                     Use `params` instead for type-safe configuration.
 
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(sample_rate=SAMPLE_RATE, **kwargs)
+        super().__init__(sample_rate=SAMPLE_RATE, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         if json_config is not None:
             import warnings

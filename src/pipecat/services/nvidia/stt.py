@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -117,6 +118,7 @@ class NvidiaSTTService(STTService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         use_ssl: bool = True,
+        ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the NVIDIA Riva STT service.
@@ -128,9 +130,11 @@ class NvidiaSTTService(STTService):
             sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
             params: Additional configuration parameters for NVIDIA Riva.
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         params = params or NvidiaSTTService.InputParams()
 
@@ -413,6 +417,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         use_ssl: bool = True,
+        ttfs_p99_latency: Optional[float] = NVIDIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the NVIDIA Riva segmented STT service.
@@ -424,9 +429,11 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
             params: Additional configuration parameters for NVIDIA Riva
             use_ssl: Whether to use SSL for the NVIDIA Riva server. Defaults to True.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         params = params or NvidiaSegmentedSTTService.InputParams()
 

@@ -21,8 +21,9 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     MetricsFrame,
-    SpeechControlParamsFrame,
+    RequestMetadataFrame,
     StartFrame,
+    STTMetadataFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TranscriptionFrame,
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
@@ -65,11 +67,11 @@ class STTService(AIService):
 
     def __init__(
         self,
+        *,
         audio_passthrough=True,
-        # STT input sample rate
         sample_rate: Optional[int] = None,
-        # STT TTFB timeout - time to wait after VAD stop before reporting TTFB
         stt_ttfb_timeout: float = 2.0,
+        ttfs_p99_latency: Optional[float] = None,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -85,6 +87,10 @@ class STTService(AIService):
                 request to first response byte). Since STT receives continuous audio, we measure
                 from when the user stops speaking to when the final transcript arrives—capturing
                 the latency that matters for voice AI applications.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                This is broadcast via STTMetadataFrame at pipeline start for downstream
+                processors (e.g., turn strategies) to optimize timing. Subclasses provide
+                measured defaults; pass a value here to override for your deployment.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -95,11 +101,11 @@ class STTService(AIService):
         self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
+        self._ttfs_p99_latency = ttfs_p99_latency
 
         # STT TTFB tracking state
         self._stt_ttfb_timeout = stt_ttfb_timeout
         self._ttfb_timeout_task: Optional[asyncio.Task] = None
-        self._vad_stop_secs: Optional[float] = None
         self._speech_end_time: Optional[float] = None
         self._user_speaking: bool = False
         self._last_transcription_time: Optional[float] = None
@@ -254,16 +260,20 @@ class STTService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, StartFrame):
+            # Push StartFrame first, then metadata so downstream receives them in order
+            await self.push_frame(frame, direction)
+            await self._push_stt_metadata()
+        elif isinstance(frame, RequestMetadataFrame):
+            # Don't push the RequestMetadataFrame, just push the metadata
+            await self._push_stt_metadata()
+        elif isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
             await self.process_audio_frame(frame, direction)
             if self._audio_passthrough:
                 await self.push_frame(frame, direction)
-        elif isinstance(frame, SpeechControlParamsFrame):
-            await self._handle_speech_control_params(frame)
-            await self.push_frame(frame, direction)
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             await self._handle_vad_user_started_speaking(frame)
             await self.push_frame(frame, direction)
@@ -314,14 +324,13 @@ class STTService(AIService):
 
         await super().push_frame(frame, direction)
 
-    async def _handle_speech_control_params(self, frame: SpeechControlParamsFrame):
-        """Handle speech control parameters frame to extract VAD stop_secs.
-
-        Args:
-            frame: The speech control parameters frame.
-        """
-        if frame.vad_params is not None:
-            self._vad_stop_secs = frame.vad_params.stop_secs
+    async def _push_stt_metadata(self):
+        """Push STT metadata frame for downstream processors (e.g., turn strategies)."""
+        ttfs = self._ttfs_p99_latency
+        if ttfs is None:
+            ttfs = DEFAULT_TTFS_P99
+            logger.warning(f"{self.name}: ttfs_p99_latency not set, using default {ttfs}s")
+        await self.broadcast_frame(STTMetadataFrame, service_name=self.name, ttfs_p99_latency=ttfs)
 
     async def _cancel_ttfb_timeout(self):
         """Cancel any pending TTFB timeout task."""
@@ -369,14 +378,14 @@ class STTService(AIService):
         """
         self._user_speaking = False
 
-        # Skip TTFB measurement if we don't have VAD params
-        if self._vad_stop_secs is None:
+        # Skip TTFB measurement if stop_secs is not set
+        if frame.stop_secs == 0.0:
             return
 
         # Calculate the actual speech end time (current time minus VAD stop delay).
         # This approximates when the last user audio was sent to the STT service,
         # which we use to measure against the eventual transcription response.
-        self._speech_end_time = time.time() - self._vad_stop_secs
+        self._speech_end_time = frame.timestamp - frame.stop_secs
 
         # Start timeout task (any previous timeout was cancelled by VADUserStartedSpeakingFrame
         # or InterruptionFrame)
