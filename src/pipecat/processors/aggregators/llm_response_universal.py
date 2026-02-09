@@ -598,25 +598,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if not frame.turn_params:
             return
 
-        logger.warning(
-            f"{self}: `turn_analyzer` in base input transport is deprecated. "
-            "Use `LLMUserAggregator`'s new `user_turn_strategies` parameter with "
-            "`TurnAnalyzerUserTurnStopStrategy` instead:\n"
-            "\n"
-            "    context_aggregator = LLMContextAggregatorPair(\n"
-            "        context,\n"
-            "        user_params=LLMUserAggregatorParams(\n"
-            "            ...,\n"
-            "            user_turn_strategies=UserTurnStrategies(\n"
-            "                stop=[\n"
-            "                    TurnAnalyzerUserTurnStopStrategy(\n"
-            "                        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams())\n"
-            "                    )\n"
-            "                ],\n"
-            "            )\n"
-            "        ),\n"
-            "    )"
-        )
+        logger.warning(f"{self}: `turn_analyzer` in base input transport is deprecated.")
 
         await self._user_turn_controller.update_strategies(ExternalUserTurnStrategies())
 
