@@ -344,9 +344,10 @@ class AnamVideoService(AIService):
             reason: Optional reason for closure.
         """
         if self._anam_session:
-            await self._anam_session.close()
+            await self._anam_session.close(close_code=None)
             self._anam_session = None
 
+        await self._cleanup()
         if code == ConnectionClosedCode.NORMAL:
             # Normal closure - just log and clean up gracefully
             logger.debug("Disconnected from Anam")
@@ -356,7 +357,6 @@ class AnamVideoService(AIService):
             if reason:
                 error_message += f" - {reason}"
             logger.error(f"{error_message}")
-            await self._cleanup()
             await self.push_error(ErrorFrame(error=error_message))
 
     async def _handle_interruption(self) -> None:
@@ -381,7 +381,8 @@ class AnamVideoService(AIService):
         Closes the Anam session and cleans up conversation-specific resources.
         """
         if self._anam_session:
-            await self._anam_session.close()
+            logger.debug("Disconnecting from Anam")
+            await self._anam_session.close(close_code=None)
             self._anam_session = None
         self._agent_audio_stream = None
         self._event_id = None
