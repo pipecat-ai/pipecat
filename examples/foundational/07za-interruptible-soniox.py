@@ -24,7 +24,8 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.soniox.stt import SonioxSTTService
+from pipecat.services.soniox.stt import SonioxInputParams, SonioxSTTService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -52,6 +53,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = SonioxSTTService(
         api_key=os.getenv("SONIOX_API_KEY"),
+        vad_force_turn_endpoint=True,
+        params=SonioxInputParams(
+            language_hints=[Language.EN],
+            language_hints_strict=True,
+        ),
     )
 
     tts = CartesiaTTSService(
