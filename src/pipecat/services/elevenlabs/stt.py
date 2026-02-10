@@ -459,6 +459,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=10,
+            keepalive_interval=5,
             **kwargs,
         )
 
@@ -611,9 +613,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     async def _connect(self):
         """Establish WebSocket connection to ElevenLabs Realtime STT."""
-        await super()._connect()
-
         await self._connect_websocket()
+
+        await super()._connect()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
@@ -627,6 +629,21 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             self._receive_task = None
 
         await self._disconnect_websocket()
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio wrapped in ElevenLabs' JSON protocol.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        audio_base64 = base64.b64encode(silence).decode("utf-8")
+        message = {
+            "message_type": "input_audio_chunk",
+            "audio_base_64": audio_base64,
+            "commit": False,
+            "sample_rate": self.sample_rate,
+        }
+        await self._websocket.send(json.dumps(message))
 
     async def _connect_websocket(self):
         """Connect to ElevenLabs Realtime STT WebSocket endpoint."""

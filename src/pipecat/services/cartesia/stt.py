@@ -129,6 +129,11 @@ class CartesiaSTTService(WebsocketSTTService):
     Provides real-time speech transcription through WebSocket connection
     to Cartesia's Live transcription service. Supports both interim and
     final transcriptions with configurable models and languages.
+
+    Cartesia disconnects WebSocket connections after 3 minutes of inactivity.
+    The timeout resets with each message (audio data or text command) sent to
+    the server. Silence-based keepalive is enabled by default to prevent this.
+    See: https://docs.cartesia.ai/api-reference/stt/stt
     """
 
     def __init__(
@@ -153,7 +158,13 @@ class CartesiaSTTService(WebsocketSTTService):
             **kwargs: Additional arguments passed to parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=120,
+            keepalive_interval=30,
+            **kwargs,
+        )
 
         default_options = CartesiaLiveOptions(
             model="ink-whisper",
@@ -248,9 +259,9 @@ class CartesiaSTTService(WebsocketSTTService):
         yield None
 
     async def _connect(self):
-        await super()._connect()
-
         await self._connect_websocket()
+
+        await super()._connect()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
@@ -295,7 +306,7 @@ class CartesiaSTTService(WebsocketSTTService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _process_messages(self):
+    async def _receive_messages(self):
         """Process incoming WebSocket messages."""
         async for message in self._get_websocket():
             try:
@@ -305,14 +316,6 @@ class CartesiaSTTService(WebsocketSTTService):
                 logger.warning(f"Received non-JSON message: {message}")
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
-
-    async def _receive_messages(self):
-        while True:
-            await self._process_messages()
-            # Cartesia times out after 5 minutes of innactivity (no keepalive
-            # mechanism is available). So, we try to reconnect.
-            logger.debug(f"{self} Cartesia connection was disconnected (timeout?), reconnecting")
-            await self._connect_websocket()
 
     async def _process_response(self, data):
         if "type" in data:

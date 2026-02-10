@@ -14,6 +14,7 @@ from abc import abstractmethod
 from typing import Any, AsyncGenerator, Dict, Mapping, Optional
 
 from loguru import logger
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -36,6 +37,9 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+
+# Duration in seconds of silent audio sent for WebSocket keepalive (100ms).
+_KEEPALIVE_SILENCE_DURATION = 0.1
 
 
 class STTService(AIService):
@@ -543,18 +547,120 @@ class WebsocketSTTService(STTService, WebsocketService):
     """Base class for websocket-based STT services.
 
     Combines STT functionality with websocket connectivity, providing automatic
-    error handling and reconnection capabilities.
+    error handling, reconnection capabilities, and optional silence-based keepalive.
+
+    The keepalive feature sends silent audio when no real audio has been sent for
+    a configurable timeout, preventing servers from closing idle connections (e.g.
+    when behind a ServiceSwitcher). Subclasses can override ``_send_keepalive()``
+    to wrap the silence in a service-specific protocol.
     """
 
-    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+    def __init__(
+        self,
+        *,
+        reconnect_on_error: bool = True,
+        keepalive_timeout: Optional[float] = None,
+        keepalive_interval: float = 5.0,
+        **kwargs,
+    ):
         """Initialize the Websocket STT service.
 
         Args:
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
+            keepalive_timeout: Seconds of no audio before sending silence to keep the
+                connection alive. None disables keepalive. Useful for services that
+                close idle connections (e.g. behind a ServiceSwitcher).
+            keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to parent classes.
         """
         STTService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        self._keepalive_timeout = keepalive_timeout
+        self._keepalive_interval = keepalive_interval
+        self._keepalive_task: Optional[asyncio.Task] = None
+        self._last_audio_time: float = 0
+
+    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+        """Process an audio frame, tracking the last audio time for keepalive.
+
+        Args:
+            frame: The audio frame to process.
+            direction: The direction of frame processing.
+        """
+        self._last_audio_time = time.monotonic()
+        await super().process_audio_frame(frame, direction)
+
+    async def _connect(self):
+        """Connect and start keepalive task if enabled."""
+        await super()._connect()
+        self._create_keepalive_task()
+
+    async def _disconnect(self):
+        """Disconnect and cancel keepalive task."""
+        await super()._disconnect()
+        await self._cancel_keepalive_task()
+
+    async def _reconnect_websocket(self, attempt_number: int) -> bool:
+        """Reconnect and restart keepalive task.
+
+        The keepalive task breaks out of its loop on send errors, so it may
+        be dead after the websocket failure that triggered this reconnect.
+        """
+        result = await super()._reconnect_websocket(attempt_number)
+        if result:
+            await self._cancel_keepalive_task()
+            self._create_keepalive_task()
+        return result
+
+    def _create_keepalive_task(self):
+        """Start the keepalive task if keepalive is enabled."""
+        if self._keepalive_timeout is not None:
+            self._last_audio_time = time.monotonic()
+            self._keepalive_task = self.create_task(
+                self._keepalive_task_handler(), name="keepalive"
+            )
+
+    async def _cancel_keepalive_task(self):
+        """Stop the keepalive task if running."""
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
+    async def _keepalive_task_handler(self):
+        """Send periodic silent audio to prevent the server from closing the connection.
+
+        When keepalive is enabled, this task checks periodically if the connection
+        has been idle (no audio sent) for longer than keepalive_timeout seconds.
+        If so, it generates silent 16-bit mono PCM audio and passes it to
+        _send_keepalive() for service-specific formatting and sending.
+        """
+        while True:
+            await asyncio.sleep(self._keepalive_interval)
+            try:
+                if not self._websocket or self._websocket.state is not State.OPEN:
+                    continue
+                elapsed = time.monotonic() - self._last_audio_time
+                if elapsed < self._keepalive_timeout:
+                    continue
+                num_samples = int(self.sample_rate * _KEEPALIVE_SILENCE_DURATION)
+                silence = b"\x00" * (num_samples * 2)
+                await self._send_keepalive(silence)
+                self._last_audio_time = time.monotonic()
+                logger.trace(f"{self} sent keepalive silence")
+            except Exception as e:
+                logger.warning(f"{self} keepalive error: {e}")
+                break
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio over the websocket to keep the connection alive.
+
+        The default implementation sends raw PCM bytes directly. Subclasses
+        can override this to wrap the silence in a service-specific protocol.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        await self._websocket.send(silence)
 
     async def _report_error(self, error: ErrorFrame):
         await self._call_event_handler("on_connection_error", error.error)
