@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
-    UserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -154,13 +153,8 @@ class AnamVideoService(AIService):
         Terminates the Anam client session and cleans up associated resources.
         """
         await super().cleanup()
-        await self._cancel_video_task()
-        await self._cancel_audio_task()
-        if self._client:
-            await self._client.close()
-            self._client = None
-        self._anam_session = None
-        self._agent_audio_stream = None
+        await self._close_session()
+        await self._cleanup()
 
     async def start(self, frame: StartFrame):
         """Start the Anam video service and initialize the avatar session.
@@ -211,6 +205,7 @@ class AnamVideoService(AIService):
             frame: The end frame.
         """
         await super().stop(frame)
+        await self._close_session()
         await self._cleanup()
 
     async def cancel(self, frame: CancelFrame):
@@ -223,14 +218,20 @@ class AnamVideoService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
+        await self._close_session()
         await self._cleanup()
 
     async def _cleanup(self):
         """Clean up resources: end conversation and cancel all tasks."""
-        await self._end_conversation()
         await self._cancel_video_task()
         await self._cancel_audio_task()
         await self._cancel_send_task()
+        self._agent_audio_stream = None
+        self._event_id = None
+        self._is_interrupting = False
+        self._transport_ready = False
+        self._client = None
+        self._anam_session = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and coordinate avatar behavior.
@@ -361,20 +362,12 @@ class AnamVideoService(AIService):
             code: Connection close code (from ConnectionClosedCode enum).
             reason: Optional reason for closure.
         """
-        if self._anam_session:
-            await self._anam_session.close(close_code=None)
-            self._anam_session = None
-
-        await self._cleanup()
-        if code == ConnectionClosedCode.NORMAL.value:
-            # Normal closure - just log and clean up gracefully
-            logger.debug("Disconnected from Anam")
-        else:
-            # For error conditions, push an error frame
+        if code != ConnectionClosedCode.NORMAL.value:
             error_message = f"Anam connection closed: {code}"
             if reason:
                 error_message += f" - {reason}"
             logger.error(f"{error_message}")
+            await self._cleanup()
             await self.push_error(ErrorFrame(error=error_message))
 
     async def _handle_interruption(self) -> None:
@@ -396,20 +389,13 @@ class AnamVideoService(AIService):
         self._is_interrupting = False
         await self._create_send_task()
 
-    async def _end_conversation(self):
-        """End the current conversation and reset state.
-
-        Closes the Anam session and cleans up conversation-specific resources.
-        """
-        if self._anam_session:
+    async def _close_session(self):
+        """Close the Anam client."""
+        if self._client and self._anam_session and self._anam_session.is_active:
             logger.debug("Disconnecting from Anam")
-            await self._anam_session.close(close_code=None)
+            await self._anam_session.close()
             self._anam_session = None
-        self._agent_audio_stream = None
-        self._event_id = None
-        self._is_interrupting = False
-        self._transport_ready = False
-        self._session_ready_event.clear()
+            self._client = None
 
     async def _create_send_task(self):
         """Create the audio sending task if it doesn't exist."""
