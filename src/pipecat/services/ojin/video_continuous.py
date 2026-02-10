@@ -11,7 +11,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Type
 
 from loguru import logger
 from ojin.entities.interaction_messages import ErrorResponseMessage
