@@ -40,6 +40,13 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 @dataclass
+class OjinVideoStartFrame(Frame):
+    """Frame indicating that the service has been initialized."""
+
+    session_data: Optional[dict] = None
+
+
+@dataclass
 class OjinVideoInitializedFrame(Frame):
     """Frame indicating that the service has been initialized."""
 
@@ -95,6 +102,7 @@ class OjinVideoSettings:
     started_speaking_delay_s: float = field(default=0.5)  # Delay before sending StartedSpeaking
     stopped_speaking_delay_s: float = field(default=0.5)  # Delay before sending StoppedSpeaking
     frame_debugging_enabled: bool = field(default=False)
+    start_frame_cls: Type[Frame] = field(default=OjinVideoStartFrame)
 
 
 class OjinVideoService(FrameProcessor):
@@ -197,8 +205,8 @@ class OjinVideoService(FrameProcessor):
         """Process incoming frames from the pipeline."""
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            logger.debug("StartFrame received")
+        if isinstance(frame, self._settings.start_frame_cls):
+            logger.debug(f"{self._settings.start_frame_cls.__name__} received")
             await self.push_frame(frame, direction)
             await self._start()
 
