@@ -264,7 +264,8 @@ class OjinVideoService(FrameProcessor):
             self._server_fps_tracker.start()
 
             # Start the playback loop
-            self._playback_task = self.create_task(self._playback_loop())
+            if self._playback_task is None:
+                self._playback_task = self.create_task(self._playback_loop())
 
             # Notify that we're ready
             initialized_frame = OjinVideoInitializedFrame(session_data=self._session_data)
