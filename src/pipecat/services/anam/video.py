@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
-    UserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -152,7 +151,7 @@ class AnamVideoService(AIService):
         Terminates the Anam client session and cleans up associated resources.
         """
         await super().cleanup()
-        await self._close_client()
+        await self._close_session()
         await self._cleanup()
 
     async def start(self, frame: StartFrame):
@@ -197,7 +196,7 @@ class AnamVideoService(AIService):
             frame: The end frame.
         """
         await super().stop(frame)
-        await self._close_client()
+        await self._close_session()
         await self._cleanup()
 
     async def cancel(self, frame: CancelFrame):
@@ -210,7 +209,7 @@ class AnamVideoService(AIService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        await self._close_client()
+        await self._close_session()
         await self._cleanup()
 
     async def _cleanup(self):
@@ -223,6 +222,8 @@ class AnamVideoService(AIService):
         self._event_id = None
         self._is_interrupting = False
         self._transport_ready = False
+        self._client = None
+        self._anam_session = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and coordinate avatar behavior.
@@ -371,11 +372,12 @@ class AnamVideoService(AIService):
         self._is_interrupting = False
         await self._create_send_task()
 
-    async def _close_client(self):
+    async def _close_session(self):
         """Close the Anam client."""
-        if self._client:
+        if self._client and self._anam_session and self._anam_session.is_active:
             logger.debug("Disconnecting from Anam")
-            await self._client.close()
+            await self._anam_session.close()
+            self._anam_session = None
             self._client = None
 
     async def _create_send_task(self):
