@@ -18,11 +18,7 @@ import time
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Literal,
-)
+from typing import TYPE_CHECKING, Any, Literal
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.dtmf.types import KeypadEntry
@@ -178,13 +174,33 @@ class ImageRawFrame:
     """A frame containing a raw image.
 
     Parameters:
-        image: Raw image bytes.
+        image: Raw image bytes or a base64-encoded string.
         size: Image dimensions as (width, height) tuple.
         format: Image format (e.g., 'RGB', 'RGBA').
     """
 
-    image: bytes
+    image: bytes | str
     size: tuple[int, int]
+    format: str | None
+
+
+FileSourceType = Literal["bytes", "url", "id"]
+
+
+@dataclass
+class FileRawFrame:
+    """A frame containing a raw file.
+
+    Parameters:
+        file: Raw file bytes.
+        type: Type of the file ('bytes', 'url', or 'id'),
+        name: Optional name of the file.
+        format: File format (expected in Mime Format).
+    """
+
+    file: bytes | str
+    type: FileSourceType
+    name: str | None
     format: str | None
 
 
@@ -1324,6 +1340,18 @@ class InputImageRawFrame(SystemFrame, ImageRawFrame):
 
 
 @dataclass
+class InputFileRawFrame(SystemFrame, FileRawFrame):
+    """Raw file input frame.
+
+    A file usually coming from RTVI.
+    """
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, type: {self.type})"
+
+
+@dataclass
 class InputTextRawFrame(SystemFrame, TextFrame):
     """Raw text input frame from transport.
 
@@ -1375,6 +1403,30 @@ class UserImageRawFrame(InputImageRawFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.transport_source}, size: {self.size}, format: {self.format}, text: {self.text}, append_to_context: {self.append_to_context})"
+
+
+@dataclass
+class UserFileRawFrame(InputFileRawFrame):
+    """Raw file input frame associated with a specific user.
+
+    A file associated to a user.
+
+    Parameters:
+        user_id: Identifier of the user who provided this file.
+        text: Text associated to this file.
+        append_to_context: Whether the requested file should be appended to the LLM context.
+        custom_options: Dictionary of custom llm-specific options to be used when processing
+                        this file, like 'detail' in openAI or 'citations' in Bedrock.
+    """
+
+    user_id: str = ""
+    text: str = ""
+    append_to_context: bool | None = None
+    custom_options: dict | None = None
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, format: {self.format}, type: {self.type}, text: {self.text}, append_to_context: {self.append_to_context})"
 
 
 @dataclass
