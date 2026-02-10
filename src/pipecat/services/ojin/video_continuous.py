@@ -102,7 +102,7 @@ class OjinVideoSettings:
     started_speaking_delay_s: float = field(default=0.5)  # Delay before sending StartedSpeaking
     stopped_speaking_delay_s: float = field(default=0.5)  # Delay before sending StoppedSpeaking
     frame_debugging_enabled: bool = field(default=False)
-    start_frame_cls: Type[Frame] = field(default=OjinVideoStartFrame)
+    start_frame_cls: Type[Frame] = field(default=StartFrame)
 
 
 class OjinVideoService(FrameProcessor):
