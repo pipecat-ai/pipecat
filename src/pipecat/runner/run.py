@@ -576,6 +576,7 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
 
         result = None
 
+        print(f"create_daily_room: {create_daily_room}, existing_room_url: {existing_room_url}")
         # Configure room if:
         # 1. Explicitly requested via createDailyRoom in payload
         # 2. Using pre-configured room from DAILY_ROOM_URL env var

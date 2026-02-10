@@ -55,6 +55,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TranslationFrame,
+    UserFileRawFrame,
     UserImageRawFrame,
     UserMuteStartedFrame,
     UserMuteStoppedFrame,
@@ -957,6 +958,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_function_call_cancel(frame)
         elif isinstance(frame, UserImageRawFrame):
             await self._handle_user_image_frame(frame)
+        elif isinstance(frame, UserFileRawFrame):
+            await self._handle_user_file_frame(frame)
         elif isinstance(frame, AssistantImageRawFrame):
             await self._handle_assistant_image_frame(frame)
         else:
@@ -1134,6 +1137,22 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         if image_appended:
             await self.push_context_frame(FrameDirection.UPSTREAM)
+
+    async def _handle_user_file_frame(self, frame: UserFileRawFrame):
+        if not frame.append_to_context:
+            return
+
+        logger.debug(f"{self} Appending UserFileRawFrame to LLM context (format: {frame.format})")
+        await self._context.add_file_frame_message(
+            format=frame.format,
+            text=frame.text,
+            type=frame.type,
+            file=frame.file,
+            options=frame.custom_options,
+        )
+
+        await self.push_aggregation()
+        await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_assistant_image_frame(self, frame: AssistantImageRawFrame):
         logger.debug(f"{self} Appending AssistantImageRawFrame to LLM context (size: {frame.size})")
