@@ -186,9 +186,9 @@ class OjinVideoService(FrameProcessor):
                     logger.info(f"Retrying in {self._settings.client_reconnect_delay} seconds...")
                     await asyncio.sleep(self._settings.client_reconnect_delay)
 
-        logger.error(
-            f"Failed to connect after {self._settings.client_connect_max_retries} attempts. "
-            f"Last error: {last_error}"
+        await self.push_error(
+            error_msg=f"Failed to connect after {self._settings.client_connect_max_retries} attempts. error: {last_error}",
+            fatal=True,
         )
         await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
         await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
@@ -298,9 +298,9 @@ class OjinVideoService(FrameProcessor):
                 self._latency = None
 
         elif isinstance(message, ErrorResponseMessage):
-            logger.error(f"Received error response: {message.payload.code}")
-            await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
-            await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+            await self.push_error(
+                error_msg=f"Ojin server error: {message.payload.code}", fatal=True
+            )
 
     async def _receive_ojin_messages(self):
         """Continuously receive and process messages from the server."""
