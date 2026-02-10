@@ -153,11 +153,12 @@ class NvidiaTTSService(TTSService):
         logger.debug(f"Initialized NvidiaTTSService with model: {self.model_name}")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using NVIDIA Riva TTS.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech data.
@@ -193,7 +194,7 @@ class NvidiaTTSService(TTSService):
             assert self._config is not None, "Synthesis configuration not created"
 
             await self.start_ttfb_metrics()
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -205,12 +206,13 @@ class NvidiaTTSService(TTSService):
                     audio=resp.audio,
                     sample_rate=self.sample_rate,
                     num_channels=1,
+                    context_id=context_id,
                 )
                 yield frame
 
             await self.start_tts_usage_metrics(text)
-            yield TTSStoppedFrame()
-        except asyncio.TimeoutError:
+            yield TTSStoppedFrame(context_id=context_id)
+        except asyncio.TimeoutError as e:
             logger.error(f"{self} timeout waiting for audio response")
             yield ErrorFrame(error=f"{self} error: {e}")
         except Exception as e:

@@ -682,11 +682,12 @@ class GoogleHttpTTSService(TTSService):
         return ssml
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Google's HTTP TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -731,7 +732,7 @@ class GoogleHttpTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             # Skip the first 44 bytes to remove the WAV header
             audio_content = response.audio_content[44:]
@@ -743,10 +744,10 @@ class GoogleHttpTTSService(TTSService):
                 if not chunk:
                     break
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                 yield frame
 
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
         except Exception as e:
             error_message = f"TTS generation error: {str(e)}"
@@ -828,6 +829,7 @@ class GoogleBaseTTSService(TTSService):
         self,
         streaming_config: texttospeech_v1.StreamingSynthesizeConfig,
         text: str,
+        context_id: str,
         prompt: Optional[str] = None,
     ) -> AsyncGenerator[Frame, None]:
         """Shared streaming synthesis logic.
@@ -835,6 +837,7 @@ class GoogleBaseTTSService(TTSService):
         Args:
             streaming_config: The streaming configuration.
             text: The text to synthesize.
+            context_id: Unique identifier for this TTS context.
             prompt: Optional prompt for style instructions (Gemini only).
 
         Yields:
@@ -856,7 +859,7 @@ class GoogleBaseTTSService(TTSService):
         streaming_responses = await self._client.streaming_synthesize(request_generator())
         await self.start_tts_usage_metrics(text)
 
-        yield TTSStartedFrame()
+        yield TTSStartedFrame(context_id=context_id)
 
         audio_buffer = b""
         first_chunk_for_ttfb = False
@@ -876,12 +879,12 @@ class GoogleBaseTTSService(TTSService):
             while len(audio_buffer) >= CHUNK_SIZE:
                 piece = audio_buffer[:CHUNK_SIZE]
                 audio_buffer = audio_buffer[CHUNK_SIZE:]
-                yield TTSAudioRawFrame(piece, self.sample_rate, 1)
+                yield TTSAudioRawFrame(piece, self.sample_rate, 1, context_id=context_id)
 
         if audio_buffer:
-            yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1)
+            yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1, context_id=context_id)
 
-        yield TTSStoppedFrame()
+        yield TTSStoppedFrame(context_id=context_id)
 
 
 class GoogleTTSService(GoogleBaseTTSService):
@@ -976,11 +979,12 @@ class GoogleTTSService(GoogleBaseTTSService):
         await super()._update_settings(settings)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate streaming speech from text using Google's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech as it's generated.
@@ -1014,7 +1018,7 @@ class GoogleTTSService(GoogleBaseTTSService):
             )
 
             # Use base class streaming logic
-            async for frame in self._stream_tts(streaming_config, text):
+            async for frame in self._stream_tts(streaming_config, text, context_id):
                 yield frame
 
         except Exception as e:
@@ -1213,11 +1217,12 @@ class GeminiTTSService(GoogleBaseTTSService):
         await super()._update_settings(settings)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate streaming speech from text using Gemini TTS models.
 
         Args:
-            text: The text to synthesize into speech. Can include markup tags
+            text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames. Can include markup tags
                   like [sigh], [laughing], [whispering] for expressive control.
 
         Yields:
@@ -1267,7 +1272,9 @@ class GeminiTTSService(GoogleBaseTTSService):
             )
 
             # Use base class streaming logic with prompt support
-            async for frame in self._stream_tts(streaming_config, text, self._settings["prompt"]):
+            async for frame in self._stream_tts(
+                streaming_config, text, context_id, self._settings["prompt"]
+            ):
                 yield frame
 
         except Exception as e:

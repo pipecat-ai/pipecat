@@ -112,11 +112,12 @@ class GroqTTSService(TTSService):
         return True
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Groq's TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech data.
@@ -124,7 +125,7 @@ class GroqTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
         measuring_ttfb = True
         await self.start_ttfb_metrics()
-        yield TTSStartedFrame()
+        yield TTSStartedFrame(context_id=context_id)
 
         try:
             response = await self._client.audio.speech.create(
@@ -144,8 +145,8 @@ class GroqTTSService(TTSService):
                     frame_rate = w.getframerate()
                     num_frames = w.getnframes()
                     bytes = w.readframes(num_frames)
-                    yield TTSAudioRawFrame(bytes, frame_rate, channels)
+                    yield TTSAudioRawFrame(bytes, frame_rate, channels, context_id=context_id)
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-        yield TTSStoppedFrame()
+        yield TTSStoppedFrame(context_id=context_id)

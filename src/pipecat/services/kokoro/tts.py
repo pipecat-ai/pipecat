@@ -143,13 +143,14 @@ class KokoroTTSService(TTSService):
         return True
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Synthesize speech from text using kokoro-onnx.
 
         Uses the async streaming API to generate audio frames.
 
         Args:
             text: The text to synthesize.
+            context_id: Unique identifier for this TTS context.
 
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
@@ -157,7 +158,7 @@ class KokoroTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
             await self.start_tts_usage_metrics(text)
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             stream = self._kokoro.create_stream(
                 text, voice=self._voice_id, lang=self._lang_code, speed=1.0
@@ -172,10 +173,13 @@ class KokoroTTSService(TTSService):
                 )
 
                 yield TTSAudioRawFrame(
-                    audio=audio_data, sample_rate=self.sample_rate, num_channels=1
+                    audio=audio_data,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                    context_id=context_id,
                 )
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
