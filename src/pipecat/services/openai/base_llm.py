@@ -265,11 +265,15 @@ class BaseOpenAILLMService(LLMService):
         params.update(self._settings["extra"])
         return params
 
-    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+    ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens/max_completion_tokens setting.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -290,6 +294,14 @@ class BaseOpenAILLMService(LLMService):
         # Override for non-streaming
         params["stream"] = False
         params.pop("stream_options", None)
+
+        # Override max_tokens if provided
+        if max_tokens is not None:
+            # Use max_completion_tokens for newer models, fallback to max_tokens
+            if "max_completion_tokens" in params:
+                params["max_completion_tokens"] = max_tokens
+            else:
+                params["max_tokens"] = max_tokens
 
         # LLM completion
         response = await self._client.chat.completions.create(**params)
