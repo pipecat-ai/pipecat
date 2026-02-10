@@ -62,14 +62,6 @@ class AnamVideoService(AIService):
     - Interrupt handling for more natural conversations
     - Audio resampling for optimal playback quality
     - Automatic session management
-
-    Args:
-        api_key: Anam API key for authentication.
-        persona_config: Full persona configuration.
-        ice_servers: Custom ICE servers for WebRTC (optional).
-        enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
-        api_base_url: Base URL for the Anam API.
-        api_version: API version to use.
     """
 
     def __init__(
@@ -235,12 +227,13 @@ class AnamVideoService(AIService):
         """Process incoming frames and coordinate avatar behavior.
 
         Handles different types of frames to manage avatar interactions:
-        - StartFrame: Forwards after initialization
-        - EndFrame: Forwards after cleanup
-        - CancelFrame: Forwards after cancellation
+
         - TTSAudioRawFrame: Processes audio for avatar speech (not pushed downstream)
         - InputAudioRawFrame: Processes user audio (not pushed downstream for turnkey)
         - InterruptionFrame: Handles interruptions
+        - OutputTransportReadyFrame: Sets transport ready flag
+        - TTSStartedFrame: Starts TTFB metrics
+        - BotStartedSpeakingFrame: Stops TTFB metrics
         - Other frames: Forwards them through the pipeline
 
         Args:
@@ -415,10 +408,10 @@ class AnamVideoService(AIService):
 
         Anam handles STT internally. Send user audio through the SDK to Anam's service.
         The SDK handles WebRTC transmission and format conversion internally.
+        This frame should not be pushed in the pipeline as it is not consumable downstream.
 
         Args:
             frame: The user audio frame to process (InputAudioRawFrame).
-            direction: The direction of frame processing.
         """
         if self._anam_session is None:
             return
