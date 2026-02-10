@@ -44,13 +44,13 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
     LLMUpdateSettingsFrame,
     SpeechControlParamsFrame,
     StartFrame,
-    TextFrame,
     TranscriptionFrame,
     UserImageRawFrame,
     UserMuteStartedFrame,
@@ -850,7 +850,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._handle_llm_end(frame)
-        elif isinstance(frame, TextFrame):
+        elif isinstance(frame, LLMTextFrame):
             await self._handle_text(frame)
         elif isinstance(frame, LLMThoughtStartFrame):
             await self._handle_thought_start(frame)
@@ -1074,7 +1074,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._started -= 1
         await self._trigger_assistant_turn_stopped()
 
-    async def _handle_text(self, frame: TextFrame):
+    async def _handle_text(self, frame: LLMTextFrame):
         if not self._started or not frame.append_to_context:
             return
 

@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
@@ -627,6 +628,41 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The incomplete marker should be stripped (resulting in empty content)
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+
+    async def test_transcription_frames_not_aggregated(self):
+        """STT transcription frames should not be aggregated as assistant messages."""
+        context = LLMContext()
+
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now"),
+            TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            LLMTextFrame("Hi there!"),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            InterimTranscriptionFrame,
+            TranscriptionFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        # Only the LLMTextFrame content should be aggregated
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hi there!")
 
 
 if __name__ == "__main__":
