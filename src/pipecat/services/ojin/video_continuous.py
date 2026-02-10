@@ -271,6 +271,12 @@ class OjinVideoService(FrameProcessor):
             await self.push_frame(initialized_frame, direction=FrameDirection.DOWNSTREAM)
             await self.push_frame(initialized_frame, direction=FrameDirection.UPSTREAM)
 
+            await self._send_tts_audio(
+                TTSAudioRawFrame(
+                    audio=b"0x00", sample_rate=OJIN_PERSONA_SAMPLE_RATE, num_channels=1
+                )
+            )
+
         elif isinstance(message, OjinInteractionResponseMessage):
             frame_idx = message.index
 
