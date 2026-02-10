@@ -17,6 +17,7 @@ from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
     MetricsData,
     ProcessingMetricsData,
+    TextAggregationMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -190,3 +191,27 @@ class FrameProcessorMetrics(BaseObject):
         )
         logger.debug(f"{self._processor_name()} usage characters: {characters.value}")
         return MetricsFrame(data=[characters])
+
+    async def start_text_aggregation_metrics(self):
+        """Start measuring text aggregation time (first token to first sentence)."""
+        self._start_text_aggregation_time = time.time()
+
+    async def stop_text_aggregation_metrics(self):
+        """Stop text aggregation measurement and generate metrics frame.
+
+        Returns:
+            MetricsFrame containing text aggregation time, or None if not measuring.
+        """
+        if (
+            not hasattr(self, "_start_text_aggregation_time")
+            or self._start_text_aggregation_time == 0
+        ):
+            return None
+
+        value = time.time() - self._start_text_aggregation_time
+        logger.debug(f"{self._processor_name()} text aggregation time: {value}")
+        aggregation = TextAggregationMetricsData(
+            processor=self._processor_name(), value=value, model=self._model_name()
+        )
+        self._start_text_aggregation_time = 0
+        return MetricsFrame(data=[aggregation])
