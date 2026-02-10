@@ -111,6 +111,7 @@ class AnamVideoService(AIService):
         self._anam_resampler = AudioResampler("s16", "mono", 48000)
         self._is_interrupting = False
         self._transport_ready = False
+        self._session_ready_event = asyncio.Event()
         self._audio_chunk_size = 0
         self._event_id = None
 
@@ -142,7 +143,7 @@ class AnamVideoService(AIService):
         )
 
         # Register event handlers (only for connection events)
-        self._client.add_listener(AnamEvent.CONNECTION_ESTABLISHED, self._on_connection_established)
+        self._client.add_listener(AnamEvent.SESSION_READY, self._on_session_ready)
         self._client.add_listener(AnamEvent.CONNECTION_CLOSED, self._on_connection_closed)
 
     async def cleanup(self):
@@ -158,18 +159,24 @@ class AnamVideoService(AIService):
         """Start the Anam video service and initialize the avatar session.
 
         Creates necessary tasks for audio/video processing and establishes
-        the connection with the Anam service.
+        the connection with the Anam service. Blocks until sessionready is
+        received so that audio is only forwarded when the backend is ready.
 
         Args:
             frame: The start frame containing initialization parameters.
         """
-        await super().start(frame)
-
         if not self._client:
             raise RuntimeError("Anam client not initialized. Call setup() first.")
 
-        # Connect to Anam
+        self._session_ready_event.clear()
+
         self._anam_session = await self._client.connect_async()
+
+        # Block until sessionready so the backend is ready to receive TTS
+        await self._session_ready_event.wait()
+
+        # Allow the pipeline to continue start up
+        await super().start(frame)
 
         # Create agent audio input stream for sending TTS audio
         audio_config = AgentAudioInputConfig(
@@ -218,7 +225,6 @@ class AnamVideoService(AIService):
         await self._cancel_audio_task()
         await self._cancel_send_task()
         self._agent_audio_stream = None
-        self._user_audio_stream = None
         self._event_id = None
         self._is_interrupting = False
         self._transport_ready = False
@@ -330,13 +336,14 @@ class AnamVideoService(AIService):
             await self.cancel_task(self._audio_task)
             self._audio_task = None
 
-    async def _on_connection_established(self) -> None:
-        """Handle connection established event.
+    async def _on_session_ready(self) -> None:
+        """Handle session ready event (backend service is ready to receive audio).
 
-        Audio pushed before this point has been discarded in the SDK to limit latency build up.
-        Synchronise with live point by flushing stale audio in prior buffers here, if necessary.
+        Unblocks the pipeline so StartFrame can propagate and audio can be forwarded to the backend.
+        Any audio pushed before this point has been discarded and lost.
         """
         logger.info("Anam connection established")
+        self._session_ready_event.set()
 
     async def _on_connection_closed(self, code: str, reason: Optional[str]) -> None:
         """Handle connection closed event.
