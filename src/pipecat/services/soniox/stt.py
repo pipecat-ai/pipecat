@@ -152,7 +152,7 @@ class SonioxSTTService(WebsocketSTTService):
         url: str = "wss://stt-rt.soniox.com/transcribe-websocket",
         sample_rate: Optional[int] = None,
         params: Optional[SonioxInputParams] = None,
-        vad_force_turn_endpoint: bool = False,
+        vad_force_turn_endpoint: bool = True,
         ttfs_p99_latency: Optional[float] = SONIOX_TTFS_P99,
         **kwargs,
     ):
@@ -164,7 +164,8 @@ class SonioxSTTService(WebsocketSTTService):
             sample_rate: Audio sample rate.
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
-            vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox. If disabled, Soniox will detect the end of the speech.
+            vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox.
+                If disabled, Soniox will detect the end of the speech. Defaults to True.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService.
