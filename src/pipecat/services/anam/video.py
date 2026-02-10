@@ -343,17 +343,21 @@ class AnamVideoService(AIService):
             code: Connection close code (from ConnectionClosedCode enum).
             reason: Optional reason for closure.
         """
+        if self._anam_session:
+            await self._anam_session.close()
+            self._anam_session = None
+
         if code == ConnectionClosedCode.NORMAL:
             # Normal closure - just log and clean up gracefully
-            logger.debug("Anam connection closed normally")
-            return
-
-        # For error conditions, push an error frame
-        error_message = f"Anam connection closed: {code}"
-        if reason:
-            error_message += f" - {reason}"
-        logger.error(f"{error_message}")
-        await self.push_error(ErrorFrame(error=error_message))
+            logger.debug("Disconnected from Anam")
+        else:
+            # For error conditions, push an error frame
+            error_message = f"Anam connection closed: {code}"
+            if reason:
+                error_message += f" - {reason}"
+            logger.error(f"{error_message}")
+            await self._cleanup()
+            await self.push_error(ErrorFrame(error=error_message))
 
     async def _handle_interruption(self) -> None:
         """Handle interruption events by resetting send tasks and notifying client.
@@ -380,6 +384,9 @@ class AnamVideoService(AIService):
             await self._anam_session.close()
             self._anam_session = None
         self._agent_audio_stream = None
+        self._event_id = None
+        self._is_interrupting = False
+        self._transport_ready = False
 
     async def _create_send_task(self):
         """Create the audio sending task if it doesn't exist."""
