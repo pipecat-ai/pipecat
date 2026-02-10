@@ -181,5 +181,39 @@ class TestSimpleTextAggregator(unittest.IsolatedAsyncioTestCase):
         assert result.text == "こんにちは。"
 
 
+class TestSimpleTextAggregatorTokenMode(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from pipecat.utils.text.base_text_aggregator import AggregationType
+
+        self.aggregator = SimpleTextAggregator(aggregation_type=AggregationType.TOKEN)
+
+    async def test_token_passthrough(self):
+        """TOKEN mode yields text immediately without buffering."""
+        results = [agg async for agg in self.aggregator.aggregate("Hello")]
+        assert len(results) == 1
+        assert results[0].text == "Hello"
+        assert results[0].type == "token"
+
+    async def test_token_multiple_calls(self):
+        """Each aggregate call yields its text independently."""
+        r1 = [agg async for agg in self.aggregator.aggregate("Hello ")]
+        r2 = [agg async for agg in self.aggregator.aggregate("world.")]
+        assert len(r1) == 1
+        assert r1[0].text == "Hello "
+        assert len(r2) == 1
+        assert r2[0].text == "world."
+
+    async def test_token_empty_text(self):
+        """Empty text yields nothing."""
+        results = [agg async for agg in self.aggregator.aggregate("")]
+        assert len(results) == 0
+
+    async def test_token_flush_returns_none(self):
+        """Flush returns None in TOKEN mode since nothing is buffered."""
+        await self.aggregator.aggregate("Hello").__anext__()
+        result = await self.aggregator.flush()
+        assert result is None
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ import asyncio
 import uuid
 from abc import abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import (
     Any,
     AsyncGenerator,
@@ -71,6 +72,23 @@ class TTSContext:
     append_to_context: bool = True
 
 
+class TextAggregationMode(str, Enum):
+    """Controls how incoming text is aggregated before TTS synthesis.
+
+    Parameters:
+        SENTENCE: Buffer text until sentence boundaries are detected before synthesis.
+            Produces more natural speech but adds latency (~200-300ms per sentence).
+        TOKEN: Stream text tokens directly to TTS as they arrive.
+            Reduces latency but may affect speech quality depending on the TTS provider.
+    """
+
+    SENTENCE = "sentence"
+    TOKEN = "token"
+
+    def __str__(self):
+        return self.value
+
+
 class TTSService(AIService):
     """Base class for text-to-speech services.
 
@@ -106,7 +124,8 @@ class TTSService(AIService):
     def __init__(
         self,
         *,
-        aggregate_sentences: bool = True,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        aggregate_sentences: Optional[bool] = None,
         # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
         # otherwise subclass must do it
         push_text_frames: bool = True,
@@ -147,7 +166,16 @@ class TTSService(AIService):
         """Initialize the TTS service.
 
         Args:
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
+                TextAggregationMode.SENTENCE (default) buffers until sentence boundaries,
+                TextAggregationMode.TOKEN streams tokens directly for lower latency.
             aggregate_sentences: Whether to aggregate text into sentences before synthesis.
+
+                .. deprecated:: 0.0.102
+                    Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE``
+                    to aggregate text into sentences before synthesis, or
+                    ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency.
+
             push_text_frames: Whether to push TextFrames and LLMFullResponseEndFrames.
             push_stop_frames: Whether to automatically push TTSStoppedFrames.
             stop_frame_timeout_s: Idle time before pushing TTSStoppedFrame when push_stop_frames is True.
@@ -178,7 +206,33 @@ class TTSService(AIService):
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
-        self._aggregate_sentences: bool = aggregate_sentences
+
+        # Resolve text_aggregation_mode from the new param or deprecated aggregate_sentences
+        if aggregate_sentences is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'aggregate_sentences' is deprecated. "
+                    "Use 'text_aggregation_mode=TextAggregationMode.SENTENCE' or "
+                    "'text_aggregation_mode=TextAggregationMode.TOKEN' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            if text_aggregation_mode is None:
+                text_aggregation_mode = (
+                    TextAggregationMode.SENTENCE
+                    if aggregate_sentences
+                    else TextAggregationMode.TOKEN
+                )
+
+        if text_aggregation_mode is None:
+            text_aggregation_mode = TextAggregationMode.SENTENCE
+
+        self._text_aggregation_mode: TextAggregationMode = text_aggregation_mode
+        # Keep for backward compat with subclasses that read self._aggregate_sentences
+        self._aggregate_sentences: bool = text_aggregation_mode != TextAggregationMode.TOKEN
         self._push_text_frames: bool = push_text_frames
         self._push_stop_frames: bool = push_stop_frames
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
@@ -190,7 +244,9 @@ class TTSService(AIService):
         self._sample_rate = 0
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
-        self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
+        self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator(
+            aggregation_type=self._text_aggregation_mode
+        )
         if text_aggregator:
             import warnings
 
@@ -228,11 +284,18 @@ class TTSService(AIService):
 
         self._processing_text: bool = False
         self._tts_contexts: Dict[str, TTSContext] = {}
+        self._streaming_text_log: str = ""
+        self._aggregation_logged: bool = False
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
         self._register_event_handler("on_connection_error")
         self._register_event_handler("on_tts_request")
+
+    @property
+    def _is_streaming_tokens(self) -> bool:
+        """Whether the service is streaming tokens directly without sentence aggregation."""
+        return self._text_aggregation_mode == TextAggregationMode.TOKEN
 
     @property
     def sample_rate(self) -> int:
@@ -468,6 +531,9 @@ class TTSService(AIService):
             and not isinstance(frame, InterimTranscriptionFrame)
             and not isinstance(frame, TranscriptionFrame)
         ):
+            if not self._is_streaming_tokens and not self._aggregation_logged:
+                await self.start_text_aggregation_metrics()
+                self._aggregation_logged = True
             await self._process_text_frame(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption(frame, direction)
@@ -481,7 +547,17 @@ class TTSService(AIService):
             # Flush any remaining text (including text waiting for lookahead)
             remaining = await self._text_aggregator.flush()
             if remaining:
+                # If this is the first (and only) sentence, stop the aggregation metric.
+                await self.stop_text_aggregation_metrics()
                 await self._push_tts_frames(AggregatedTextFrame(remaining.text, remaining.type))
+
+            self._aggregation_logged = False
+
+            # Log accumulated streamed text and emit aggregated usage metric.
+            if self._streaming_text_log:
+                logger.debug(f"{self}: Generating TTS [{self._streaming_text_log}]")
+                await self.start_tts_usage_metrics(self._streaming_text_log)
+                self._streaming_text_log = ""
 
             # Reset aggregator state
             self._processing_text = False
@@ -624,26 +700,18 @@ class TTSService(AIService):
             await self.resume_processing_frames()
 
     async def _process_text_frame(self, frame: TextFrame):
-        text: Optional[str] = None
-        includes_inter_frame_spaces: bool = False
-        if not self._aggregate_sentences:
-            text = frame.text
-            includes_inter_frame_spaces = frame.includes_inter_frame_spaces
-            aggregated_by = "token"
-
-            if text:
-                logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
-                await self._push_tts_frames(
-                    AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
-                )
-        else:
-            async for aggregate in self._text_aggregator.aggregate(frame.text):
-                text = aggregate.text
-                aggregated_by = aggregate.type
-                logger.trace(f"Pushing TTS frames for text: {text}, {aggregated_by}")
-                await self._push_tts_frames(
-                    AggregatedTextFrame(text, aggregated_by), includes_inter_frame_spaces
-                )
+        async for aggregate in self._text_aggregator.aggregate(frame.text):
+            includes_inter_frame_spaces = (
+                frame.includes_inter_frame_spaces
+                if aggregate.type == AggregationType.TOKEN
+                else False
+            )
+            if aggregate.type != AggregationType.TOKEN:
+                # Stop the aggregation metric on the first sentence only.
+                await self.stop_text_aggregation_metrics()
+            await self._push_tts_frames(
+                AggregatedTextFrame(aggregate.text, aggregate.type), includes_inter_frame_spaces
+            )
 
     async def _push_tts_frames(
         self,
@@ -673,7 +741,15 @@ class TTSService(AIService):
         # or when we received an LLMFullResponseEndFrame
         self._processing_text = True
 
-        await self.start_processing_metrics()
+        # Accumulate text for a single debug log at flush time when streaming tokens.
+        if self._is_streaming_tokens:
+            self._streaming_text_log += text
+
+        # Skip per-token processing metrics when streaming. The per-token
+        # processing time is just websocket send overhead (~0.1ms) and not
+        # meaningful. TTFB captures the important timing for streaming TTS.
+        if not self._is_streaming_tokens:
+            await self.start_processing_metrics()
 
         # Process all filters.
         for filter in self._text_filters:
@@ -681,7 +757,8 @@ class TTSService(AIService):
             text = await filter.filter(text)
 
         if not text.strip():
-            await self.stop_processing_metrics()
+            if not self._is_streaming_tokens:
+                await self.stop_processing_metrics()
             return
 
         # Create context ID and store metadata
@@ -719,7 +796,8 @@ class TTSService(AIService):
 
         await self.process_generator(self.run_tts(prepared_text, context_id))
 
-        await self.stop_processing_metrics()
+        if not self._is_streaming_tokens:
+            await self.stop_processing_metrics()
 
         if self._push_text_frames:
             # In TTS services that support word timestamps, the TTSTextFrames

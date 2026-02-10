@@ -62,7 +62,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.tts_service import InterruptibleTTSService, TTSService
+from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -696,7 +696,8 @@ class SarvamTTSService(InterruptibleTTSService):
         model: str = "bulbul:v2",
         voice_id: Optional[str] = None,
         url: str = "wss://api.sarvam.ai/text-to-speech/ws",
-        aggregate_sentences: Optional[bool] = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         **kwargs,
@@ -710,7 +711,12 @@ class SarvamTTSService(InterruptibleTTSService):
                 - "bulbul:v3-beta": Advanced model with temperature control
             voice_id: Speaker voice ID. If None, uses model-appropriate default.
             url: WebSocket URL for the TTS backend (default production URL).
-            aggregate_sentences: Merge multiple sentences into one audio chunk (default True).
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.102
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             sample_rate: Output audio sample rate in Hz (8000, 16000, 22050, 24000).
                 If None, uses model-specific default.
             params: Optional input parameters to override defaults.
@@ -732,6 +738,7 @@ class SarvamTTSService(InterruptibleTTSService):
         # Initialize parent class first
         super().__init__(
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             push_text_frames=True,
             pause_frame_processing=True,
             push_stop_frames=True,
