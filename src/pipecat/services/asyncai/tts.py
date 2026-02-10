@@ -94,8 +94,8 @@ class AsyncAITTSService(AudioContextTTSService):
         api_key: str,
         voice_id: str,
         version: str = "v1",
-        url: str = "wss://api.async.ai/text_to_speech/websocket/ws",
-        model: str = "asyncflow_multilingual_v1.0",
+        url: str = "wss://api.async.com/text_to_speech/websocket/ws",
+        model: str = "async_flash_v1.0",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
@@ -108,10 +108,10 @@ class AsyncAITTSService(AudioContextTTSService):
         Args:
             api_key: Async API key.
             voice_id: UUID of the voice to use for synthesis. See docs for a full list:
-                https://docs.async.ai/list-voices-16699698e0
+                https://docs.async.com/list-voices-16699698e0
             version: Async API version.
             url: WebSocket URL for Async TTS API.
-            model: TTS model to use (e.g., "asyncflow_multilingual_v1.0").
+            model: TTS model to use (e.g., "async_flash_v1.0").
             sample_rate: Audio sample rate.
             encoding: Audio encoding format.
             container: Audio container format.
@@ -435,8 +435,8 @@ class AsyncAIHttpTTSService(TTSService):
         api_key: str,
         voice_id: str,
         aiohttp_session: aiohttp.ClientSession,
-        model: str = "asyncflow_multilingual_v1.0",
-        url: str = "https://api.async.ai",
+        model: str = "async_flash_v1.0",
+        url: str = "https://api.async.com",
         version: str = "v1",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
@@ -450,7 +450,7 @@ class AsyncAIHttpTTSService(TTSService):
             api_key: Async API key.
             voice_id: ID of the voice to use for synthesis.
             aiohttp_session: An aiohttp session for making HTTP requests.
-            model: TTS model to use (e.g., "asyncflow_multilingual_v1.0").
+            model: TTS model to use (e.g., "async_flash_v1.0").
             url: Base URL for Async API.
             version: API version string for Async API.
             sample_rate: Audio sample rate.
