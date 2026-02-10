@@ -190,6 +190,7 @@ class OjinVideoService(FrameProcessor):
             error_msg=f"Failed to connect after {self._settings.client_connect_max_retries} attempts. error: {last_error}",
             fatal=True,
         )
+        await self._stop()
         return False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -306,6 +307,7 @@ class OjinVideoService(FrameProcessor):
             await self.push_error(
                 error_msg=f"Ojin server error: {message.payload.code}", fatal=True
             )
+            await self._stop()
 
     async def _receive_ojin_messages(self):
         """Continuously receive and process messages from the server."""
