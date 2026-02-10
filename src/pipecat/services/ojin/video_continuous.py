@@ -75,6 +75,7 @@ class OjinBotStoppedSpeakingFrame(Frame):
 OJIN_PERSONA_SAMPLE_RATE = 16000
 SPEECH_FILTER_AMOUNT = 5
 SPEECH_MOUTH_OPENING_SCALE = 1.0
+BYTES_PER_FRAME = int(OJIN_PERSONA_SAMPLE_RATE / 25 * 2)
 
 
 @dataclass
@@ -161,9 +162,6 @@ class OjinVideoService(FrameProcessor):
 
         # Frame timing
         self._frame_duration = 0.04
-        self._audio_bytes_per_frame = (
-            640  # 2 * int(self._frame_duration * OJIN_PERSONA_SAMPLE_RATE)
-        )
 
         # Speaking state tracking
         self._first_tts_received_at: Optional[float] = None
@@ -283,7 +281,9 @@ class OjinVideoService(FrameProcessor):
 
             await self._send_tts_audio(
                 TTSAudioRawFrame(
-                    audio=b"0x00", sample_rate=OJIN_PERSONA_SAMPLE_RATE, num_channels=1
+                    audio=b"\x00" * BYTES_PER_FRAME,
+                    sample_rate=OJIN_PERSONA_SAMPLE_RATE,
+                    num_channels=1,
                 )
             )
 
