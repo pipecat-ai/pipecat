@@ -348,7 +348,7 @@ class AnamVideoService(AIService):
             self._anam_session = None
 
         await self._cleanup()
-        if code == ConnectionClosedCode.NORMAL:
+        if code == ConnectionClosedCode.NORMAL.value:
             # Normal closure - just log and clean up gracefully
             logger.debug("Disconnected from Anam")
         else:
