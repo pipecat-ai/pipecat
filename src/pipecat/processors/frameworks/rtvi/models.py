@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     AggregationType,
+    FileSourceType,
 )
 from pipecat.utils.deprecation import deprecated
 
@@ -239,6 +240,66 @@ class SendTextData(BaseModel):
 
     content: str
     options: SendTextOptions | None = None
+
+
+class FileSource(BaseModel):
+    """Base class for RTVI file sources."""
+
+    type: FileSourceType
+
+
+class FileBytes(FileSource):
+    """File source as base64-encoded bytes."""
+
+    type: FileSourceType = "bytes"
+    bytes: str  # base64-encoded string
+    width: int | None = None
+    height: int | None = None
+
+
+class FileUrl(FileSource):
+    """File source as a URL."""
+
+    type: FileSourceType = "url"
+    url: str
+    public: bool = True
+
+
+class FileId(FileSource):
+    """File source as a file ID."""
+
+    type: FileSourceType = "id"
+    id: str
+
+
+class File(BaseModel):
+    """File data structure for RTVI file sending."""
+
+    format: str  # Mime format of the file, e.g., 'application/pdf'
+    name: str | None = None
+    source: FileBytes | FileUrl | FileId
+
+
+class SendFileOptions(BaseModel):
+    """Options for sending text input to the LLM.
+
+    Contains options for how the pipeline should process the text input.
+    """
+
+    run_immediately: bool = True
+    audio_response: bool = True
+    custom_options: dict | None = None  # ex. 'detail' in openAI or 'citations' in Bedrock
+
+
+class SendFileData(BaseModel):
+    """Data format for sending a file to the LLM.
+
+    Contains the information of the file to send and any options for how the pipeline should process it.
+    """
+
+    content: str  # Text to accompany the file
+    file: File
+    options: SendFileOptions | None = None
 
 
 class DTMFInputData(BaseModel):
