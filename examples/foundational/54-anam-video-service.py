@@ -7,7 +7,6 @@
 import logging
 import os
 
-import aiohttp
 from anam import PersonaConfig
 from dotenv import load_dotenv
 from loguru import logger
@@ -40,6 +39,17 @@ logging.getLogger("anam").setLevel(logging.DEBUG)
 
 load_dotenv(override=True)
 
+REQUIRED_ENV_VARS = [
+    "ANAM_API_KEY",
+    "ANAM_AVATAR_ID",
+    "DEEPGRAM_API_KEY",
+    "CARTESIA_API_KEY",
+    "GOOGLE_API_KEY",
+]
+missing = [v for v in REQUIRED_ENV_VARS if not os.getenv(v)]
+if missing:
+    raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
+
 ANAM_SAMPLE_RATE = 24000
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -62,9 +72,9 @@ transport_params = {
         video_out_is_live=True,
         video_out_width=720,
         video_out_height=480,
-        audio_out_sample_rate=48000,  # Anam WebRTC output (OPUS 48kHz stereo)
+        audio_out_sample_rate=48000,
         audio_out_channels=2,
-        audio_in_sample_rate=16000,  # WebRTC input
+        audio_in_sample_rate=16000,
         audio_in_channels=1,
     ),
 }
