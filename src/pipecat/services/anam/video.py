@@ -143,7 +143,6 @@ class AnamVideoService(AIService):
         )
 
         # Register event handlers (only for connection events)
-        self._client.add_listener(AnamEvent.CONNECTION_ESTABLISHED, self._on_connection_established)
         self._client.add_listener(AnamEvent.SESSION_READY, self._on_session_ready)
         self._client.add_listener(AnamEvent.CONNECTION_CLOSED, self._on_connection_closed)
 
@@ -171,13 +170,12 @@ class AnamVideoService(AIService):
 
         self._session_ready_event.clear()
 
-        # Connect to Anam (connection_established fires before sessionready)
         self._anam_session = await self._client.connect_async()
 
-        # Block until sessionready so the SDK is ready to receive TTS
+        # Block until sessionready so the backend is ready to receive TTS
         await self._session_ready_event.wait()
 
-        # Now allow the pipeline to continue (StartFrame propagates)
+        # Allow the pipeline to continue start up
         await super().start(frame)
 
         # Create agent audio input stream for sending TTS audio
@@ -338,20 +336,13 @@ class AnamVideoService(AIService):
             await self.cancel_task(self._audio_task)
             self._audio_task = None
 
-    async def _on_connection_established(self) -> None:
-        """Handle connection established event.
+    async def _on_session_ready(self) -> None:
+        """Handle session ready event (backend service is ready to receive audio).
 
-        Audio pushed before this point has been discarded in the SDK to limit latency build up.
-        Synchronise with live point by flushing stale audio in prior buffers here, if necessary.
+        Unblocks the pipeline so StartFrame can propagate and audio can be forwarded to the backend.
+        Any audio pushed before this point has been discarded and lost.
         """
         logger.info("Anam connection established")
-
-    async def _on_session_ready(self) -> None:
-        """Handle session ready event (signalling: ready to receive TTS).
-
-        Unblocks the pipeline so StartFrame can propagate and audio can be fowarded do Anam.
-        """
-        logger.info("Anam session ready (ready to receive TTS)")
 
         self._session_ready_event.set()
 

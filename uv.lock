@@ -314,7 +314,7 @@ wheels = [
 
 [[package]]
 name = "anam"
-version = "0.1.0"
+version = "0.2.0a2"
 source = { editable = "../python-sdk" }
 dependencies = [
     { name = "aiohttp" },
