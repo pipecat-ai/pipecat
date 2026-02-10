@@ -28,23 +28,35 @@ from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 ValidVoice = Literal[
-    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar"
+    "alloy",
+    "ash",
+    "ballad",
+    "cedar",
+    "coral",
+    "echo",
+    "fable",
+    "marin",
+    "nova",
+    "onyx",
+    "sage",
+    "shimmer",
+    "verse",
 ]
 
 VALID_VOICES: Dict[str, ValidVoice] = {
     "alloy": "alloy",
     "ash": "ash",
     "ballad": "ballad",
+    "cedar": "cedar",
     "coral": "coral",
     "echo": "echo",
     "fable": "fable",
-    "onyx": "onyx",
+    "marin": "marin",
     "nova": "nova",
+    "onyx": "onyx",
     "sage": "sage",
     "shimmer": "shimmer",
     "verse": "verse",
-    "marin": "marin",
-    "cedar": "cedar",
 }
 
 
