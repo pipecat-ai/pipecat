@@ -371,6 +371,9 @@ class AnamVideoService(AIService):
         self._is_interrupting = True
         if self._anam_session:
             await self._anam_session.interrupt()
+            if self._agent_audio_stream:
+                await self._agent_audio_stream.end_sequence()
+
         await self._cancel_send_task()
         self._is_interrupting = False
         await self._create_send_task()
