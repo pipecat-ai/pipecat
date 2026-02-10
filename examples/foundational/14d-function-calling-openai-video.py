@@ -99,7 +99,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that.", append_to_context=False))
 
     fetch_image_function = FunctionSchema(
         name="fetch_user_image",
@@ -173,6 +173,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @tts.event_handler("on_tts_request")
+    async def on_tts_request(tts, context_id: str, text: str):
+        logger.debug(f"On TTS request: {context_id}: {text}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
