@@ -343,7 +343,6 @@ class AnamVideoService(AIService):
         Any audio pushed before this point has been discarded and lost.
         """
         logger.info("Anam connection established")
-
         self._session_ready_event.set()
 
     async def _on_connection_closed(self, code: str, reason: Optional[str]) -> None:
