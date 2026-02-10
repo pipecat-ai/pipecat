@@ -113,8 +113,8 @@ class LmntTTSService(InterruptibleTTSService):
             "language": self.language_to_service_language(language),
             "format": "raw",  # Use raw format for direct PCM data
         }
-        self._started = False
         self._receive_task = None
+        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -170,8 +170,6 @@ class LmntTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            self._started = False
 
     async def _connect(self):
         """Connect to LMNT WebSocket and start receive task."""
@@ -236,7 +234,7 @@ class LmntTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting from LMNT: {e}", exception=e)
         finally:
-            self._started = False
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -262,6 +260,7 @@ class LmntTTSService(InterruptibleTTSService):
                     audio=message,
                     sample_rate=self.sample_rate,
                     num_channels=1,
+                    context_id=self._context_id,
                 )
                 await self.push_frame(frame)
             else:
@@ -276,11 +275,12 @@ class LmntTTSService(InterruptibleTTSService):
                     logger.error(f"Invalid JSON message: {message}")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text using LMNT's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -292,10 +292,10 @@ class LmntTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                if not self._started:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._started = True
+                await self.start_ttfb_metrics()
+                # Store context_id for use in _receive_messages
+                self._context_id = context_id
+                yield TTSStartedFrame(context_id=context_id)
 
                 # Send text to LMNT
                 await self._get_websocket().send(json.dumps({"text": text}))
@@ -304,7 +304,7 @@ class LmntTTSService(InterruptibleTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return

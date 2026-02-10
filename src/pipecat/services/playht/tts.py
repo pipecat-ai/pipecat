@@ -13,7 +13,6 @@ supporting both WebSocket streaming and HTTP-based synthesis.
 import io
 import json
 import struct
-import uuid
 import warnings
 from typing import AsyncGenerator, Optional
 
@@ -169,7 +168,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         self._user_id = user_id
         self._websocket_url = None
         self._receive_task = None
-        self._request_id = None
+        self._context_id = None
 
         self._settings = {
             "language": self.language_to_service_language(params.language)
@@ -285,7 +284,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
-            self._request_id = None
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -328,7 +327,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         """Handle interruption by stopping metrics and clearing request ID."""
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        self._request_id = None
+        self._context_id = None
 
     async def _receive_messages(self):
         """Receive messages from PlayHT websocket."""
@@ -338,7 +337,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 if message.startswith(b"RIFF"):
                     continue
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(message, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(message, self.sample_rate, 1, context_id=self._context_id)
                 await self.push_frame(frame)
             else:
                 logger.debug(f"Received text message: {message}")
@@ -349,20 +348,21 @@ class PlayHTTTSService(InterruptibleTTSService):
                         logger.debug(f"Started processing request: {msg.get('request_id')}")
                     elif msg.get("type") == "end":
                         # Handle end of stream
-                        if "request_id" in msg and msg["request_id"] == self._request_id:
-                            await self.push_frame(TTSStoppedFrame())
-                            self._request_id = None
+                        if "request_id" in msg and msg["request_id"] == self._context_id:
+                            await self.push_frame(TTSStoppedFrame(context_id=self._context_id))
+                            self._context_id = None
                     elif "error" in msg:
                         await self.push_error(error_msg=f"Error: {msg['error']}")
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text using PlayHT's WebSocket API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -374,10 +374,10 @@ class PlayHTTTSService(InterruptibleTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self._request_id:
+            if not self._context_id:
                 await self.start_ttfb_metrics()
-                yield TTSStartedFrame()
-                self._request_id = str(uuid.uuid4())
+                yield TTSStartedFrame(context_id=context_id)
+                self._context_id = context_id
 
             tts_command = {
                 "text": text,
@@ -388,7 +388,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 "language": self._settings["language"],
                 "speed": self._settings["speed"],
                 "seed": self._settings["seed"],
-                "request_id": self._request_id,
+                "request_id": self._context_id,
             }
 
             try:
@@ -396,7 +396,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
@@ -540,11 +540,12 @@ class PlayHTHttpTTSService(TTSService):
         return language_to_playht_language(language)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text using PlayHT's HTTP API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -579,7 +580,7 @@ class PlayHTHttpTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -616,16 +617,20 @@ class PlayHTHttpTTSService(TTSService):
                                 audio_data = buffer[fh.tell() :]
                                 if len(audio_data) > 0:
                                     await self.stop_ttfb_metrics()
-                                    frame = TTSAudioRawFrame(audio_data, self.sample_rate, 1)
+                                    frame = TTSAudioRawFrame(
+                                        audio_data, self.sample_rate, 1, context_id=context_id
+                                    )
                                     yield frame
                                 in_header = False
                         elif len(chunk) > 0:
                             await self.stop_ttfb_metrics()
-                            frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                            frame = TTSAudioRawFrame(
+                                chunk, self.sample_rate, 1, context_id=context_id
+                            )
                             yield frame
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)

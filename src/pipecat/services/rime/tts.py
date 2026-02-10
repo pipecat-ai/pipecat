@@ -12,7 +12,6 @@ using Rime's API for streaming and batch audio synthesis.
 
 import base64
 import json
-import uuid
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
@@ -387,6 +386,7 @@ class RimeTTSService(AudioContextWordTTSService):
             if not msg or not self.audio_context_available(msg["contextId"]):
                 continue
 
+            context_id = msg["contextId"]
             if msg["type"] == "chunk":
                 # Process audio chunk
                 await self.stop_ttfb_metrics()
@@ -395,8 +395,9 @@ class RimeTTSService(AudioContextWordTTSService):
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,
                     num_channels=1,
+                    context_id=context_id,
                 )
-                await self.append_to_audio_context(msg["contextId"], frame)
+                await self.append_to_audio_context(context_id, frame)
 
             elif msg["type"] == "timestamps":
                 # Process word timing information
@@ -409,7 +410,7 @@ class RimeTTSService(AudioContextWordTTSService):
                     # Calculate word timing pairs
                     word_pairs = self._calculate_word_times(words, starts, ends)
                     if word_pairs:
-                        await self.add_word_timestamps(word_pairs)
+                        await self.add_word_timestamps(word_pairs, context_id=context_id)
                         self._cumulative_time = ends[-1] + self._cumulative_time
                         logger.debug(f"Updated cumulative time to: {self._cumulative_time}")
 
@@ -432,11 +433,12 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self.add_word_timestamps([("Reset", 0)])
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Rime's streaming API.
 
         Args:
             text: The text to convert to speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -449,9 +451,9 @@ class RimeTTSService(AudioContextWordTTSService):
             try:
                 if not self._context_id:
                     await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._cumulative_time = 0
-                    self._context_id = str(uuid.uuid4())
+                    self._context_id = context_id
                     await self.create_audio_context(self._context_id)
 
                 msg = self._build_msg(text=text)
@@ -459,7 +461,7 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
@@ -558,11 +560,12 @@ class RimeHttpTTSService(TTSService):
         return language_to_rime_language(language)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Rime's HTTP API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -601,13 +604,14 @@ class RimeHttpTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
                 async for frame in self._stream_audio_frames_from_iterator(
                     response.content.iter_chunked(CHUNK_SIZE),
                     strip_wav_header=need_to_strip_wav_header,
+                    context_id=context_id,
                 ):
                     await self.stop_ttfb_metrics()
                     yield frame
@@ -616,7 +620,7 @@ class RimeHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
 
 class RimeNonJsonTTSService(InterruptibleTTSService):
@@ -716,8 +720,8 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         if params.extra:
             self._settings.update(params.extra)
 
-        self._started = False
         self._receive_task = None
+        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -767,8 +771,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            self._started = False
 
     async def _connect(self):
         """Establish WebSocket connection and start receive task."""
@@ -817,7 +819,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._started = False
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -847,17 +849,19 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                         audio=message,
                         sample_rate=self.sample_rate,
                         num_channels=1,
+                        context_id=self._context_id,
                     )
                     await self.push_frame(frame)
             except Exception as e:
                 await self.push_error(error_msg=f"Error: {e}", exception=e)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Rime's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -867,17 +871,17 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
             try:
-                if not self._started:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._started = True
+                await self.start_ttfb_metrics()
+                # Store context_id for use in _receive_messages
+                self._context_id = context_id
+                yield TTSStartedFrame(context_id=context_id)
                 # Send bare text (not JSON)
                 await self._get_websocket().send(text)
                 await self.start_tts_usage_metrics(text)
 
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
