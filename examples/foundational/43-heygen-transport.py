@@ -25,6 +25,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
 from pipecat.transports.heygen.transport import HeyGenParams, HeyGenTransport, ServiceType
 
 load_dotenv(override=True)
@@ -42,6 +43,12 @@ async def main():
             params=HeyGenParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
+            ),
+            session_request=LiveAvatarNewSessionRequest(
+                is_sandbox=True,
+                # Sandbox mode only works with this specific avatar
+                # https://docs.liveavatar.com/docs/developing-in-sandbox-mode#sandbox-mode-behaviors
+                avatar_id="dd73ea75-1218-4ef3-92ce-606d5f7fbc0a",
             ),
         )
 

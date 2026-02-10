@@ -25,6 +25,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
 from pipecat.services.heygen.client import ServiceType
 from pipecat.services.heygen.video import HeyGenVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -71,6 +72,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
             service_type=ServiceType.LIVE_AVATAR,
             session=session,
+            session_request=LiveAvatarNewSessionRequest(
+                is_sandbox=True,
+                # Sandbox mode only works with this specific avatar
+                # https://docs.liveavatar.com/docs/developing-in-sandbox-mode#sandbox-mode-behaviors
+                avatar_id="dd73ea75-1218-4ef3-92ce-606d5f7fbc0a",
+            ),
         )
 
         messages = [
