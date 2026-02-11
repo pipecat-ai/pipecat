@@ -20,7 +20,7 @@ Build and deploy your first voice AI bot in under 10 minutes. Develop locally, t
 You'll need API keys from three services:
 
 - [Deepgram](https://console.deepgram.com/signup) for Speech-to-Text
-- [OpenAI](https://auth.openai.com/create-account) for LLM inference
+- [OpenAI](https://auth.openai.com/create-account) or [Google Gemini](https://aistudio.google.com/app/apikey) for LLM inference
 - [Cartesia](https://play.cartesia.ai/sign-up) for Text-to-Speech
 
 > 💡 **Tip**: Sign up for all three now. You'll need them for both local and cloud deployment.
@@ -49,12 +49,18 @@ Navigate to the quickstart directory and set up your environment.
    DEEPGRAM_API_KEY=your_deepgram_api_key
    OPENAI_API_KEY=your_openai_api_key
    CARTESIA_API_KEY=your_cartesia_api_key
-   ```
+   GEMINI_API_KEY=your_gemini_api_key
+```
 
 ### Run your bot locally
 
 ```bash
 uv run bot.py
+```
+
+To run with Google Gemini (defaults to OpenAI):
+```bash
+uv run bot.py --llm gemini
 ```
 
 **Open http://localhost:7860 in your browser** and click `Connect` to start talking to your bot.

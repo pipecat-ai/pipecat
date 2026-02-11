@@ -48,6 +48,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
@@ -66,7 +67,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    if runner_args.cli_args.llm == "gemini":
+        llm = GoogleLLMService(
+            api_key=os.getenv("GEMINI_API_KEY"),
+            model="gemini-2.5-flash",
+        )
+    else:
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     messages = [
         {
@@ -138,6 +145,10 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    import argparse
     from pipecat.runner.run import main
 
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--llm", type=str, choices=["openai", "gemini"], default="openai", help="Select LLM provider")
+
+    main(parser)
