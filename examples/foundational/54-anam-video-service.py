@@ -50,8 +50,6 @@ missing = [v for v in REQUIRED_ENV_VARS if not os.getenv(v)]
 if missing:
     raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
 
-ANAM_SAMPLE_RATE = 24000
-
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
 # selected.
@@ -73,7 +71,7 @@ transport_params = {
         video_out_width=720,
         video_out_height=480,
         audio_out_sample_rate=48000,
-        audio_out_channels=2,
+        audio_out_channels=1,
         audio_in_sample_rate=16000,
         audio_in_channels=1,
     ),
@@ -85,9 +83,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="00967b2f-88a6-4a31-8153-110a92134b9f",
-        params=CartesiaTTSService.InputParams(sample_rate=ANAM_SAMPLE_RATE),
+        api_key=os.getenv("CARTESIA_API_KEY"), voice_id="00967b2f-88a6-4a31-8153-110a92134b9f"
     )
 
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))

@@ -113,18 +113,15 @@ class AnamVideoService(AIService):
         """
         await super().setup(setup)
 
-        # Create client options
-        options = ClientOptions(
-            api_base_url=self._api_base_url or "https://api.anam.ai",
-            ice_servers=self._ice_servers,
-            api_version=self._api_version,
-        )
-
         # Initialize Anam client
         self._client = AnamClient(
             api_key=self._api_key,
             persona_config=self._persona_config,
-            options=options,
+            options=ClientOptions(
+                api_base_url=self._api_base_url or "https://api.anam.ai",
+                ice_servers=self._ice_servers,
+                api_version=self._api_version,
+            ),
         )
 
         # Register event handlers (only for connection events)
@@ -181,9 +178,6 @@ class AnamVideoService(AIService):
     async def stop(self, frame: EndFrame):
         """Stop the Anam video service gracefully.
 
-        Performs cleanup by ending the conversation and cancelling ongoing tasks
-        in a controlled manner.
-
         Args:
             frame: The end frame.
         """
@@ -193,9 +187,6 @@ class AnamVideoService(AIService):
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Anam video service.
-
-        Performs an immediate termination of the service, cleaning up resources
-        without waiting for ongoing operations to complete.
 
         Args:
             frame: The cancel frame.
@@ -327,6 +318,8 @@ class AnamVideoService(AIService):
     async def _on_connection_closed(self, code: str, reason: Optional[str]) -> None:
         """Handle connection closed event.
 
+        Client and session have been closed by the SDK before emitting this event.
+
         Args:
             code: Connection close code (from ConnectionClosedCode enum).
             reason: Optional reason for closure.
@@ -386,9 +379,9 @@ class AnamVideoService(AIService):
         """Handle sending audio frames to the Anam client.
 
         Sends each TTS frame's audio directly to the backend without buffering.
-        Sends end_sequence when queue is empty.
+        Sends end_sequence when all audio frames have been sent.
 
-        Anam works best with 16 bit PCM 24kHz mono audio.
+        Anam recommends 16 bit PCM 24kHz mono audio fo best trade-off between latency, audio quality and avatar performance.
         """
         if not self._agent_audio_stream:
             logger.error("Agent audio stream not initialized")
