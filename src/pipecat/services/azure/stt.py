@@ -11,6 +11,7 @@ Speech SDK for real-time audio transcription.
 """
 
 import asyncio
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -25,6 +26,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
+from pipecat.services.settings import NOT_GIVEN, STTSettings
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -46,6 +48,19 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Azure, you need to `pip install pipecat-ai[azure]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class AzureSTTSettings(STTSettings):
+    """Typed settings for the Azure STT service.
+
+    Parameters:
+        region: Azure region for the Speech service.
+        sample_rate: Audio sample rate in Hz.
+    """
+
+    region: str = field(default_factory=lambda: NOT_GIVEN)
+    sample_rate: Optional[int] = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureSTTService(STTService):
@@ -92,11 +107,11 @@ class AzureSTTService(STTService):
 
         self._audio_stream = None
         self._speech_recognizer = None
-        self._settings = {
-            "region": region,
-            "language": language_to_azure_language(language),
-            "sample_rate": sample_rate,
-        }
+        self._settings: AzureSTTSettings = AzureSTTSettings(
+            region=region,
+            language=language_to_azure_language(language),
+            sample_rate=sample_rate,
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate performance metrics.
@@ -198,7 +213,7 @@ class AzureSTTService(STTService):
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or self._settings.get("language")
+            language = getattr(event.result, "language", None) or self._settings.language
             frame = TranscriptionFrame(
                 event.result.text,
                 self._user_id,
@@ -213,7 +228,7 @@ class AzureSTTService(STTService):
 
     def _on_handle_recognizing(self, event):
         if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or self._settings.get("language")
+            language = getattr(event.result, "language", None) or self._settings.language
             frame = InterimTranscriptionFrame(
                 event.result.text,
                 self._user_id,

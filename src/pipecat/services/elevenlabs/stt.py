@@ -514,7 +514,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             Changing model requires reconnecting to the WebSocket.
         """
         await super().set_model(model)
-        logger.info(f"Switching STT model to: [{model}]")
         self._model_id = model
         # Reconnect with new settings
         await self._disconnect()

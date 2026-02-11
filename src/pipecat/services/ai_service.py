@@ -10,7 +10,7 @@ Provides the foundation for all AI services in the Pipecat framework, including
 model management, settings handling, and frame processing lifecycle methods.
 """
 
-from typing import Any, AsyncGenerator, Dict, Mapping
+from typing import Any, AsyncGenerator, Dict, Mapping, Set
 
 from loguru import logger
 
@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.settings import ServiceSettings
 
 
 class AIService(FrameProcessor):
@@ -42,7 +43,7 @@ class AIService(FrameProcessor):
         """
         super().__init__(**kwargs)
         self._model_name: str = ""
-        self._settings: Dict[str, Any] = {}
+        self._settings: Dict[str, Any] | ServiceSettings = {}
         self._session_properties: Dict[str, Any] = {}
 
     @property
@@ -134,6 +135,42 @@ class AIService(FrameProcessor):
                 self.set_model_name(value)
             else:
                 logger.warning(f"Unknown setting for {self.name} service: {key}")
+
+    async def _update_settings_from_typed(self, update: ServiceSettings) -> Set[str]:
+        """Apply a typed settings update and return the set of changed field names.
+
+        If ``_settings`` is a :class:`ServiceSettings` object, the update is
+        applied to it and the changed-field set is returned.  The ``model``
+        field is handled specially: when it changes, ``set_model_name`` is
+        called.
+
+        Services that have been migrated to typed settings should override
+        this method (calling ``super()``) to react to specific changed fields
+        (e.g. reconnect on voice change).
+
+        Args:
+            update: A typed settings delta.
+
+        Returns:
+            Set of field names whose values actually changed.
+        """
+        if not isinstance(self._settings, ServiceSettings):
+            logger.warning(
+                f"{self.name}: received typed settings update but _settings "
+                f"is not a ServiceSettings — falling back to dict-based update"
+            )
+            await self._update_settings(update.to_dict())
+            return set()
+
+        changed = self._settings.apply_update(update)
+
+        if "model" in changed:
+            self.set_model_name(self._settings.model)
+
+        if changed:
+            logger.info(f"{self.name}: updated settings fields: {changed}")
+
+        return changed
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle service lifecycle.

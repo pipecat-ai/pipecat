@@ -8,6 +8,7 @@
 
 import io
 import wave
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -20,6 +21,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -30,6 +32,21 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Groq, you need to `pip install pipecat-ai[groq]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class GroqTTSSettings(TTSSettings):
+    """Typed settings for the Groq TTS service.
+
+    Parameters:
+        output_format: Audio output format.
+        speed: Speech speed multiplier. Defaults to 1.0.
+        groq_sample_rate: Audio sample rate.
+    """
+
+    output_format: str = field(default_factory=lambda: NOT_GIVEN)
+    speed: float = field(default_factory=lambda: NOT_GIVEN)
+    groq_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GroqTTSService(TTSService):
@@ -92,14 +109,14 @@ class GroqTTSService(TTSService):
         self._voice_id = voice_id
         self._params = params
 
-        self._settings = {
-            "model": model_name,
-            "voice_id": voice_id,
-            "output_format": output_format,
-            "language": str(params.language) if params.language else "en",
-            "speed": params.speed,
-            "sample_rate": sample_rate,
-        }
+        self._settings: GroqTTSSettings = GroqTTSSettings(
+            model=model_name,
+            voice=voice_id,
+            language=str(params.language) if params.language else "en",
+            output_format=output_format,
+            speed=params.speed,
+            groq_sample_rate=sample_rate,
+        )
 
         self._client = AsyncGroq(api_key=self._api_key)
 

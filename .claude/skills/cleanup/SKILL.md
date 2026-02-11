@@ -293,7 +293,7 @@ class NewTTSService(TTSService):
         """
         super().__init__(**kwargs)
         self._api_key = api_key
-        self.set_voice(voice)
+        self._voice_id = voice
 ```
 
 ---

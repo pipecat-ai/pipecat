@@ -40,9 +40,9 @@ See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for full API
 import asyncio
 import base64
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple
+from typing import AsyncGenerator, Dict, List, Optional, Tuple
 
 import aiohttp
 from loguru import logger
@@ -62,6 +62,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -244,6 +245,80 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass
+class SarvamHttpTTSSettings(TTSSettings):
+    """Typed settings for Sarvam HTTP TTS service.
+
+    Parameters:
+        language: Sarvam language code.
+        enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
+            **Note:** Always enabled for bulbul:v3-beta (cannot be disabled).
+        pace: Speech pace multiplier. Defaults to 1.0.
+            - bulbul:v2: Range 0.3 to 3.0
+            - bulbul:v3-beta: Range 0.5 to 2.0
+        pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
+            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+        loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
+            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+        temperature: Controls output randomness for bulbul:v3-beta (0.01 to 1.0).
+            Lower values = more deterministic, higher = more random. Defaults to 0.6.
+            **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
+        sample_rate: Audio sample rate.
+    """
+
+    language: str = field(default_factory=lambda: NOT_GIVEN)
+    enable_preprocessing: bool = field(default_factory=lambda: NOT_GIVEN)
+    pace: float = field(default_factory=lambda: NOT_GIVEN)
+    pitch: float = field(default_factory=lambda: NOT_GIVEN)
+    loudness: float = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float = field(default_factory=lambda: NOT_GIVEN)
+    sarvam_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+
+
+@dataclass
+class SarvamWSTTSSettings(TTSSettings):
+    """Typed settings for Sarvam WebSocket TTS service.
+
+    Parameters:
+        target_language_code: Sarvam language code.
+        speaker: Voice speaker ID.
+        speech_sample_rate: Audio sample rate as string.
+        enable_preprocessing: Enable text preprocessing. Defaults to False.
+            **Note:** Always enabled for bulbul:v3-beta.
+        min_buffer_size: Minimum characters to buffer before generating audio.
+            Lower values reduce latency but may affect quality. Defaults to 50.
+        max_chunk_length: Maximum characters processed in a single chunk.
+            Controls memory usage and processing efficiency. Defaults to 150.
+        output_audio_codec: Audio codec format. Options: linear16, mulaw, alaw,
+            opus, flac, aac, wav, mp3. Defaults to "linear16".
+        output_audio_bitrate: Audio bitrate (32k, 64k, 96k, 128k, 192k).
+            Defaults to "128k".
+        pace: Speech pace multiplier. Defaults to 1.0.
+            - bulbul:v2: Range 0.3 to 3.0
+            - bulbul:v3-beta: Range 0.5 to 2.0
+        pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
+            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+        loudness: Volume multiplier (0.3 to 3.0). Defaults to 1.0.
+            **Note:** Only supported for bulbul:v2. Ignored for v3 models.
+        temperature: Controls output randomness for bulbul:v3-beta (0.01 to 1.0).
+            Lower = more deterministic, higher = more random. Defaults to 0.6.
+            **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
+    """
+
+    target_language_code: str = field(default_factory=lambda: NOT_GIVEN)
+    speaker: str = field(default_factory=lambda: NOT_GIVEN)
+    speech_sample_rate: str = field(default_factory=lambda: NOT_GIVEN)
+    enable_preprocessing: bool = field(default_factory=lambda: NOT_GIVEN)
+    min_buffer_size: int = field(default_factory=lambda: NOT_GIVEN)
+    max_chunk_length: int = field(default_factory=lambda: NOT_GIVEN)
+    output_audio_codec: str = field(default_factory=lambda: NOT_GIVEN)
+    output_audio_bitrate: str = field(default_factory=lambda: NOT_GIVEN)
+    pace: float = field(default_factory=lambda: NOT_GIVEN)
+    pitch: float = field(default_factory=lambda: NOT_GIVEN)
+    loudness: float = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float = field(default_factory=lambda: NOT_GIVEN)
+
+
 class SarvamHttpTTSService(TTSService):
     """Text-to-Speech service using Sarvam AI's API.
 
@@ -403,35 +478,35 @@ class SarvamHttpTTSService(TTSService):
             pace = max(pace_min, min(pace_max, pace))
 
         # Build base settings
-        self._settings = {
-            "language": (
+        self._settings: SarvamHttpTTSSettings = SarvamHttpTTSSettings(
+            language=(
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
-            "enable_preprocessing": (
+            enable_preprocessing=(
                 True if self._config.preprocessing_always_enabled else params.enable_preprocessing
             ),
-            "pace": pace,
-            "model": model,
-        }
+            pace=pace,
+            model=model,
+        )
 
         # Add parameters based on model support
         if self._config.supports_pitch:
-            self._settings["pitch"] = params.pitch
+            self._settings.pitch = params.pitch
         elif params.pitch != 0.0:
             logger.warning(f"pitch parameter is ignored for {model}")
 
         if self._config.supports_loudness:
-            self._settings["loudness"] = params.loudness
+            self._settings.loudness = params.loudness
         elif params.loudness != 1.0:
             logger.warning(f"loudness parameter is ignored for {model}")
 
         if self._config.supports_temperature:
-            self._settings["temperature"] = params.temperature
+            self._settings.temperature = params.temperature
         elif params.temperature != 0.6:
             logger.warning(f"temperature parameter is ignored for {model}")
 
         self.set_model_name(model)
-        self.set_voice(voice_id)
+        self._voice_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -459,7 +534,7 @@ class SarvamHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["sample_rate"] = self.sample_rate
+        self._settings.sarvam_sample_rate = self.sample_rate
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -480,21 +555,25 @@ class SarvamHttpTTSService(TTSService):
             # Build payload with common parameters
             payload = {
                 "text": text,
-                "target_language_code": self._settings["language"],
+                "target_language_code": self._settings.language,
                 "speaker": self._voice_id,
                 "sample_rate": self.sample_rate,
-                "enable_preprocessing": self._settings["enable_preprocessing"],
+                "enable_preprocessing": self._settings.enable_preprocessing,
                 "model": self._model_name,
-                "pace": self._settings.get("pace", 1.0),
+                "pace": self._settings.pace if is_given(self._settings.pace) else 1.0,
             }
 
             # Add model-specific parameters based on config
             if self._config.supports_pitch:
-                payload["pitch"] = self._settings.get("pitch", 0.0)
+                payload["pitch"] = self._settings.pitch if is_given(self._settings.pitch) else 0.0
             if self._config.supports_loudness:
-                payload["loudness"] = self._settings.get("loudness", 1.0)
+                payload["loudness"] = (
+                    self._settings.loudness if is_given(self._settings.loudness) else 1.0
+                )
             if self._config.supports_temperature:
-                payload["temperature"] = self._settings.get("temperature", 0.6)
+                payload["temperature"] = (
+                    self._settings.temperature if is_given(self._settings.temperature) else 0.6
+                )
 
             headers = {
                 "api-subscription-key": self._api_key,
@@ -748,7 +827,7 @@ class SarvamTTSService(InterruptibleTTSService):
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
         self.set_model_name(model)
-        self.set_voice(voice_id)
+        self._voice_id = voice_id
 
         # Validate and clamp pace to model's valid range
         pace = params.pace
@@ -758,36 +837,36 @@ class SarvamTTSService(InterruptibleTTSService):
             pace = max(pace_min, min(pace_max, pace))
 
         # Build base settings
-        self._settings = {
-            "target_language_code": (
+        self._settings: SarvamWSTTSSettings = SarvamWSTTSSettings(
+            target_language_code=(
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
-            "speaker": voice_id,
-            "speech_sample_rate": str(sample_rate),
-            "enable_preprocessing": (
+            speaker=voice_id,
+            speech_sample_rate=str(sample_rate),
+            enable_preprocessing=(
                 True if self._config.preprocessing_always_enabled else params.enable_preprocessing
             ),
-            "min_buffer_size": params.min_buffer_size,
-            "max_chunk_length": params.max_chunk_length,
-            "output_audio_codec": params.output_audio_codec,
-            "output_audio_bitrate": params.output_audio_bitrate,
-            "pace": pace,
-            "model": model,
-        }
+            min_buffer_size=params.min_buffer_size,
+            max_chunk_length=params.max_chunk_length,
+            output_audio_codec=params.output_audio_codec,
+            output_audio_bitrate=params.output_audio_bitrate,
+            pace=pace,
+            model=model,
+        )
 
         # Add parameters based on model support
         if self._config.supports_pitch:
-            self._settings["pitch"] = params.pitch
+            self._settings.pitch = params.pitch
         elif params.pitch != 0.0:
             logger.warning(f"pitch parameter is ignored for {model}")
 
         if self._config.supports_loudness:
-            self._settings["loudness"] = params.loudness
+            self._settings.loudness = params.loudness
         elif params.loudness != 1.0:
             logger.warning(f"loudness parameter is ignored for {model}")
 
         if self._config.supports_temperature:
-            self._settings["temperature"] = params.temperature
+            self._settings.temperature = params.temperature
         elif params.temperature != 0.6:
             logger.warning(f"temperature parameter is ignored for {model}")
 
@@ -823,7 +902,7 @@ class SarvamTTSService(InterruptibleTTSService):
         await super().start(frame)
 
         # WebSocket API expects sample rate as string
-        self._settings["speech_sample_rate"] = str(self.sample_rate)
+        self._settings.speech_sample_rate = str(self.sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -870,13 +949,12 @@ class SarvamTTSService(InterruptibleTTSService):
         if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if voice changed."""
-        prev_voice = self._voice_id
-        await super()._update_settings(settings)
-        if not prev_voice == self._voice_id:
-            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
+        """Apply a typed settings update and resend config if voice changed."""
+        changed = await super()._update_settings_from_typed(update)
+        if "voice" in changed:
             await self._send_config()
+        return changed
 
     async def _connect(self):
         """Connect to Sarvam WebSocket and start background tasks."""
@@ -934,9 +1012,28 @@ class SarvamTTSService(InterruptibleTTSService):
         """Send initial configuration message."""
         if not self._websocket:
             raise Exception("WebSocket not connected")
-        self._settings["speaker"] = self._voice_id
-        logger.debug(f"Config being sent is {self._settings}")
-        config_message = {"type": "config", "data": self._settings}
+        self._settings.speaker = self._voice_id
+        # Build config dict for the API
+        config_data = {
+            "target_language_code": self._settings.target_language_code,
+            "speaker": self._settings.speaker,
+            "speech_sample_rate": self._settings.speech_sample_rate,
+            "enable_preprocessing": self._settings.enable_preprocessing,
+            "min_buffer_size": self._settings.min_buffer_size,
+            "max_chunk_length": self._settings.max_chunk_length,
+            "output_audio_codec": self._settings.output_audio_codec,
+            "output_audio_bitrate": self._settings.output_audio_bitrate,
+            "pace": self._settings.pace,
+            "model": self._settings.model,
+        }
+        if is_given(self._settings.pitch):
+            config_data["pitch"] = self._settings.pitch
+        if is_given(self._settings.loudness):
+            config_data["loudness"] = self._settings.loudness
+        if is_given(self._settings.temperature):
+            config_data["temperature"] = self._settings.temperature
+        logger.debug(f"Config being sent is {config_data}")
+        config_message = {"type": "config", "data": config_data}
 
         try:
             await self._websocket.send(json.dumps(config_message))

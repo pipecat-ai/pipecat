@@ -117,7 +117,7 @@ class HumeTTSService(WordTTSService):
         self._params = params or HumeTTSService.InputParams()
 
         # Store voice in the base class (mirrors other services)
-        self.set_voice(voice_id)
+        self._voice_id = voice_id
 
         self._audio_bytes = b""
 
@@ -196,7 +196,7 @@ class HumeTTSService(WordTTSService):
         key_l = (key or "").lower()
 
         if key_l == "voice_id":
-            self.set_voice(str(value))
+            await self.set_voice(str(value))
             logger.debug(f"HumeTTSService voice_id set to: {self.voice}")
         elif key_l == "description":
             self._params.description = None if value is None else str(value)
