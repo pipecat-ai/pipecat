@@ -13,8 +13,8 @@ https://docs.x.ai/docs/guides/voice/agent
 import base64
 import json
 import time
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -56,6 +56,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.settings import NOT_GIVEN, LLMSettings
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
@@ -83,6 +84,17 @@ class CurrentAudioResponse:
     content_index: int
     start_time_ms: int
     total_size: int = 0
+
+
+@dataclass
+class GrokRealtimeLLMSettings(LLMSettings):
+    """Typed settings for Grok Realtime LLM services.
+
+    Parameters:
+        session_properties: Grok Realtime session configuration.
+    """
+
+    session_properties: Any = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GrokRealtimeLLMService(LLMService):
@@ -134,9 +146,8 @@ class GrokRealtimeLLMService(LLMService):
         self.api_key = api_key
         self.base_url = base_url
 
-        # Initialize session_properties
-        self._session_properties: events.SessionProperties = (
-            session_properties or events.SessionProperties()
+        self._settings = GrokRealtimeLLMSettings(
+            session_properties=session_properties or events.SessionProperties(),
         )
 
         self._audio_input_paused = start_audio_paused
@@ -186,13 +197,13 @@ class GrokRealtimeLLMService(LLMService):
             Configured sample rate or None if not manually configured.
             For PCMU/PCMA formats, returns 8000 Hz (G.711 standard).
         """
-        if not self._session_properties.audio:
+        if not self._settings.session_properties.audio:
             return None
 
         audio_config = (
-            self._session_properties.audio.input
+            self._settings.session_properties.audio.input
             if direction == "input"
-            else self._session_properties.audio.output
+            else self._settings.session_properties.audio.output
         )
 
         if audio_config and audio_config.format:
@@ -222,8 +233,8 @@ class GrokRealtimeLLMService(LLMService):
 
     def _is_turn_detection_enabled(self) -> bool:
         """Check if server-side VAD is enabled."""
-        if self._session_properties.turn_detection:
-            return self._session_properties.turn_detection.type == "server_vad"
+        if self._settings.session_properties.turn_detection:
+            return self._settings.session_properties.turn_detection.type == "server_vad"
         return False
 
     async def _handle_interruption(self):
@@ -290,18 +301,18 @@ class GrokRealtimeLLMService(LLMService):
         await super().start(frame)
 
         # Ensure audio configuration exists with both input and output
-        if not self._session_properties.audio:
-            self._session_properties.audio = events.AudioConfiguration()
+        if not self._settings.session_properties.audio:
+            self._settings.session_properties.audio = events.AudioConfiguration()
 
         # Fill in missing input configuration
-        if not self._session_properties.audio.input:
-            self._session_properties.audio.input = events.AudioInput(
+        if not self._settings.session_properties.audio.input:
+            self._settings.session_properties.audio.input = events.AudioInput(
                 format=events.PCMAudioFormat(rate=frame.audio_in_sample_rate)
             )
 
         # Fill in missing output configuration
-        if not self._session_properties.audio.output:
-            self._session_properties.audio.output = events.AudioOutput(
+        if not self._settings.session_properties.audio.output:
+            self._settings.session_properties.audio.output = events.AudioOutput(
                 format=events.PCMAudioFormat(rate=frame.audio_out_sample_rate)
             )
 
@@ -336,6 +347,16 @@ class GrokRealtimeLLMService(LLMService):
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
+        # Legacy dict path: frame.settings contains SessionProperties fields,
+        # not our Settings fields, so we construct SessionProperties directly.
+        # The new typed path (frame.update) falls through to super, which calls
+        # _update_settings_from_typed → our override handles the rest.
+        if isinstance(frame, LLMUpdateSettingsFrame) and frame.update is None:
+            self._settings.session_properties = events.SessionProperties(**frame.settings)
+            await self._update_settings()
+            await self.push_frame(frame, direction)
+            return
+
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
@@ -355,9 +376,6 @@ class GrokRealtimeLLMService(LLMService):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            self._session_properties = events.SessionProperties(**frame.settings)
-            await self._update_settings()
         elif isinstance(frame, LLMSetToolsFrame):
             await self._update_settings()
 
@@ -436,9 +454,16 @@ class GrokRealtimeLLMService(LLMService):
                 return
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
+    async def _update_settings_from_typed(self, update):
+        """Apply a typed settings update, sending a session update if needed."""
+        changed = await super()._update_settings_from_typed(update)
+        if "session_properties" in changed:
+            await self._update_settings()
+        return changed
+
     async def _update_settings(self):
         """Update session settings on the server."""
-        settings = self._session_properties
+        settings = self._settings.session_properties
         adapter: GrokRealtimeLLMAdapter = self.get_llm_adapter()
 
         if self._context:

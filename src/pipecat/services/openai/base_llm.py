@@ -10,7 +10,8 @@ import asyncio
 import base64
 import json
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Dict, List, Mapping, Optional
 
 import httpx
 from loguru import logger
@@ -32,7 +33,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
-    LLMUpdateSettingsFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -42,7 +42,22 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.tracing.service_decorators import traced_llm
+
+
+@dataclass
+class OpenAILLMSettings(LLMSettings):
+    """Typed settings for OpenAI-compatible LLM services.
+
+    Parameters:
+        max_completion_tokens: Maximum completion tokens to generate.
+        service_tier: Service tier to use (e.g., "auto", "flex", "priority").
+    """
+
+    max_completion_tokens: Any = field(default_factory=lambda: _NOT_GIVEN)
+    service_tier: Any = field(default_factory=lambda: _NOT_GIVEN)
 
 
 class BaseOpenAILLMService(LLMService):
@@ -120,17 +135,18 @@ class BaseOpenAILLMService(LLMService):
 
         params = params or BaseOpenAILLMService.InputParams()
 
-        self._settings = {
-            "frequency_penalty": params.frequency_penalty,
-            "presence_penalty": params.presence_penalty,
-            "seed": params.seed,
-            "temperature": params.temperature,
-            "top_p": params.top_p,
-            "max_tokens": params.max_tokens,
-            "max_completion_tokens": params.max_completion_tokens,
-            "service_tier": params.service_tier,
-            "extra": params.extra if isinstance(params.extra, dict) else {},
-        }
+        self._settings = OpenAILLMSettings(
+            model=model,
+            frequency_penalty=params.frequency_penalty,
+            presence_penalty=params.presence_penalty,
+            seed=params.seed,
+            temperature=params.temperature,
+            top_p=params.top_p,
+            max_tokens=params.max_tokens,
+            max_completion_tokens=params.max_completion_tokens,
+            service_tier=params.service_tier,
+            extra=params.extra if isinstance(params.extra, dict) else {},
+        )
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         self.set_model_name(model)
@@ -250,20 +266,20 @@ class BaseOpenAILLMService(LLMService):
             "model": self.model_name,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "frequency_penalty": self._settings["frequency_penalty"],
-            "presence_penalty": self._settings["presence_penalty"],
-            "seed": self._settings["seed"],
-            "temperature": self._settings["temperature"],
-            "top_p": self._settings["top_p"],
-            "max_tokens": self._settings["max_tokens"],
-            "max_completion_tokens": self._settings["max_completion_tokens"],
-            "service_tier": self._settings["service_tier"],
+            "frequency_penalty": self._settings.frequency_penalty,
+            "presence_penalty": self._settings.presence_penalty,
+            "seed": self._settings.seed,
+            "temperature": self._settings.temperature,
+            "top_p": self._settings.top_p,
+            "max_tokens": self._settings.max_tokens,
+            "max_completion_tokens": self._settings.max_completion_tokens,
+            "service_tier": self._settings.service_tier,
         }
 
         # Messages, tools, tool_choice
         params.update(params_from_context)
 
-        params.update(self._settings["extra"])
+        params.update(self._settings.extra)
         return params
 
     async def run_inference(
@@ -508,8 +524,6 @@ class BaseOpenAILLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = OpenAILLMContext.from_messages(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 

@@ -6,6 +6,7 @@
 
 """Deepgram speech-to-text service implementation."""
 
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -23,6 +24,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -43,6 +45,17 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Deepgram, you need to `pip install pipecat-ai[deepgram]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class DeepgramSTTSettings(STTSettings):
+    """Typed settings for the Deepgram STT service.
+
+    Parameters:
+        live_options: Deepgram ``LiveOptions`` for detailed configuration.
+    """
+
+    live_options: LiveOptions = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramSTTService(STTService):
@@ -129,11 +142,17 @@ class DeepgramSTTService(STTService):
             merged_options["language"] = merged_options["language"].value
 
         self.set_model_name(merged_options["model"])
-        self._settings = merged_options
+        merged_live_options = LiveOptions(**merged_options)
+        self._settings: DeepgramSTTSettings = DeepgramSTTSettings(
+            model=merged_options.get("model"),
+            language=merged_options.get("language"),
+            live_options=merged_live_options,
+        )
+
         self._addons = addons
         self._should_interrupt = should_interrupt
 
-        if merged_options.get("vad_events"):
+        if merged_live_options.vad_events:
             import warnings
 
             with warnings.catch_warnings():
@@ -164,7 +183,7 @@ class DeepgramSTTService(STTService):
         Returns:
             True if VAD events are enabled in the current settings.
         """
-        return self._settings["vad_events"]
+        return self._settings.live_options.vad_events
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -174,28 +193,48 @@ class DeepgramSTTService(STTService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Set the Deepgram model and reconnect.
+    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
+        """Apply a typed settings update, keeping ``live_options`` in sync.
 
-        Args:
-            model: The Deepgram model name to use.
+        Top-level ``model`` and ``language`` are the source of truth.  When
+        they are given in *update* their values are propagated into
+        ``live_options``.  When only ``live_options`` is given, its ``model``
+        and ``language`` are propagated *up* to the top-level fields.
+
+        Any change triggers a WebSocket reconnect.
         """
-        await super().set_model(model)
-        logger.info(f"Switching STT model to: [{model}]")
-        self._settings["model"] = model
+        # Determine which top-level fields are explicitly provided.
+        model_given = isinstance(update, DeepgramSTTSettings) and is_given(
+            getattr(update, "model", NOT_GIVEN)
+        )
+        language_given = isinstance(update, DeepgramSTTSettings) and is_given(
+            getattr(update, "language", NOT_GIVEN)
+        )
+
+        changed = await super()._update_settings_from_typed(update)
+
+        if not changed:
+            return changed
+
+        # --- Sync model --------------------------------------------------
+        if model_given:
+            # Top-level model wins → push into live_options.
+            self._settings.live_options.model = self._settings.model
+        elif "live_options" in changed and self._settings.live_options.model is not None:
+            # Only live_options was given → pull model up.
+            self._settings.model = self._settings.live_options.model
+            self.set_model_name(self._settings.model)
+
+        # --- Sync language -----------------------------------------------
+        if language_given:
+            self._settings.live_options.language = self._settings.language
+        elif "live_options" in changed and self._settings.live_options.language is not None:
+            self._settings.language = self._settings.live_options.language
+
         await self._disconnect()
         await self._connect()
 
-    async def set_language(self, language: Language):
-        """Set the recognition language and reconnect.
-
-        Args:
-            language: The language to use for speech recognition.
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._settings["language"] = language
-        await self._disconnect()
-        await self._connect()
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the Deepgram STT service.
@@ -204,7 +243,7 @@ class DeepgramSTTService(STTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["sample_rate"] = self.sample_rate
+        self._settings.live_options.sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -257,7 +296,9 @@ class DeepgramSTTService(STTService):
                 self._on_utterance_end,
             )
 
-        if not await self._connection.start(options=self._settings, addons=self._addons):
+        if not await self._connection.start(
+            options=self._settings.live_options, addons=self._addons
+        ):
             await self.push_error(error_msg=f"Unable to connect to Deepgram")
         else:
             headers = {

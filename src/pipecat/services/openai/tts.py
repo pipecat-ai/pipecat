@@ -10,6 +10,7 @@ This module provides integration with OpenAI's text-to-speech API for
 generating high-quality synthetic speech from text input.
 """
 
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Dict, Literal, Optional
 
 from loguru import logger
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -58,6 +60,19 @@ VALID_VOICES: Dict[str, ValidVoice] = {
     "shimmer": "shimmer",
     "verse": "verse",
 }
+
+
+@dataclass
+class OpenAITTSSettings(TTSSettings):
+    """Typed settings for OpenAI TTS service.
+
+    Parameters:
+        instructions: Instructions to guide voice synthesis behavior.
+        speed: Voice speed control (0.25 to 4.0, default 1.0).
+    """
+
+    instructions: str = field(default_factory=lambda: NOT_GIVEN)
+    speed: float = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAITTSService(TTSService):
@@ -118,7 +133,7 @@ class OpenAITTSService(TTSService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self.set_model_name(model)
-        self.set_voice(voice)
+        self._voice_id = voice
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
         if instructions or speed:
@@ -132,10 +147,12 @@ class OpenAITTSService(TTSService):
                     stacklevel=2,
                 )
 
-        self._settings = {
-            "instructions": params.instructions if params else instructions,
-            "speed": params.speed if params else speed,
-        }
+        self._settings: OpenAITTSSettings = OpenAITTSSettings(
+            model=model,
+            voice=voice,
+            instructions=params.instructions if params else instructions,
+            speed=params.speed if params else speed,
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -144,15 +161,6 @@ class OpenAITTSService(TTSService):
             True, as OpenAI TTS service supports metrics generation.
         """
         return True
-
-    async def set_model(self, model: str):
-        """Set the TTS model to use.
-
-        Args:
-            model: The model name to use for text-to-speech synthesis.
-        """
-        logger.info(f"Switching TTS model to: [{model}]")
-        self.set_model_name(model)
 
     async def start(self, frame: StartFrame):
         """Start the OpenAI TTS service.
@@ -190,11 +198,11 @@ class OpenAITTSService(TTSService):
                 "response_format": "pcm",
             }
 
-            if self._settings["instructions"]:
-                create_params["instructions"] = self._settings["instructions"]
+            if self._settings.instructions:
+                create_params["instructions"] = self._settings.instructions
 
-            if self._settings["speed"]:
-                create_params["speed"] = self._settings["speed"]
+            if self._settings.speed:
+                create_params["speed"] = self._settings.speed
 
             async with self._client.audio.speech.with_streaming_response.create(
                 **create_params

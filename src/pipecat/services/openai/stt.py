@@ -16,6 +16,7 @@ Provides two STT services:
 
 import base64
 import json
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Literal, Optional, Union
 
 from loguru import logger
@@ -34,6 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
@@ -121,6 +123,17 @@ class OpenAISTTService(BaseWhisperSTTService):
 
 
 _OPENAI_SAMPLE_RATE = 24000
+
+
+@dataclass
+class OpenAIRealtimeSTTSettings(STTSettings):
+    """Typed settings for the OpenAI Realtime STT service.
+
+    Parameters:
+        prompt: Optional prompt text to guide transcription style.
+    """
+
+    prompt: Optional[str] = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAIRealtimeSTTService(WebsocketSTTService):
@@ -213,11 +226,16 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         self._base_url = base_url
         self.set_model_name(model)
 
-        self._language_code = self._language_to_code(language) if language else None
         self._prompt = prompt
         self._turn_detection = turn_detection
         self._noise_reduction = noise_reduction
         self._should_interrupt = should_interrupt
+
+        self._settings: OpenAIRealtimeSTTSettings = OpenAIRealtimeSTTSettings(
+            model=model,
+            language=language,
+            prompt=prompt,
+        )
 
         self._receive_task = None
         self._session_ready = False
@@ -248,18 +266,30 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
-    async def set_language(self, language: Language):
-        """Set the language for speech recognition.
+    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
+        """Apply a typed settings update and send session update if needed.
 
-        If the session is already active, sends an updated configuration
-        to the server.
+        Keeps ``_language_code`` and ``_prompt`` in sync with typed settings
+        and sends a ``session.update`` to the server when the session is active.
 
         Args:
-            language: The language to use for speech recognition.
+            update: A :class:`STTSettings` (or ``OpenAIRealtimeSTTSettings``) delta.
+
+        Returns:
+            Set of field names whose values actually changed.
         """
-        self._language_code = self._language_to_code(language)
+        changed = await super()._update_settings_from_typed(update)
+
+        if not changed:
+            return changed
+
+        if "prompt" in changed and isinstance(self._settings, OpenAIRealtimeSTTSettings):
+            self._prompt = self._settings.prompt
+
         if self._session_ready:
             await self._send_session_update()
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the service and establish WebSocket connection.
@@ -407,8 +437,11 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """Send ``session.update`` to configure the transcription session."""
         transcription: dict = {"model": self.model_name}
 
-        if self._language_code:
-            transcription["language"] = self._language_code
+        language_code = (
+            self._language_to_code(self._settings.language) if self._settings.language else None
+        )
+        if language_code:
+            transcription["language"] = language_code
 
         if self._prompt:
             transcription["prompt"] = self._prompt

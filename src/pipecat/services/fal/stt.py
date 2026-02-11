@@ -11,12 +11,14 @@ transcription using segmented audio processing.
 """
 
 import os
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.services.settings import NOT_GIVEN, STTSettings
 from pipecat.services.stt_latency import FAL_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -146,6 +148,22 @@ def language_to_fal_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class FalSTTSettings(STTSettings):
+    """Typed settings for the Fal Wizper STT service.
+
+    Parameters:
+        task: Task to perform ('transcribe' or 'translate'). Defaults to
+            'transcribe'.
+        chunk_level: Level of chunking ('segment'). Defaults to 'segment'.
+        version: Version of Wizper model to use. Defaults to '3'.
+    """
+
+    task: str = field(default_factory=lambda: NOT_GIVEN)
+    chunk_level: str = field(default_factory=lambda: NOT_GIVEN)
+    version: str = field(default_factory=lambda: NOT_GIVEN)
+
+
 class FalSTTService(SegmentedSTTService):
     """Speech-to-text service using Fal's Wizper API.
 
@@ -203,14 +221,14 @@ class FalSTTService(SegmentedSTTService):
             )
 
         self._fal_client = fal_client.AsyncClient(key=api_key or os.getenv("FAL_KEY"))
-        self._settings = {
-            "task": params.task,
-            "language": self.language_to_service_language(params.language)
+        self._settings: FalSTTSettings = FalSTTSettings(
+            language=self.language_to_service_language(params.language)
             if params.language
             else "en",
-            "chunk_level": params.chunk_level,
-            "version": params.version,
-        }
+            task=params.task,
+            chunk_level=params.chunk_level,
+            version=params.version,
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -231,23 +249,17 @@ class FalSTTService(SegmentedSTTService):
         """
         return language_to_fal_language(language)
 
-    async def set_language(self, language: Language):
-        """Set the transcription language.
+    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
+        """Apply a typed settings update, converting language if changed."""
+        changed = await super()._update_settings_from_typed(update)
 
-        Args:
-            language: The language to use for speech-to-text transcription.
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._settings["language"] = self.language_to_service_language(language)
+        if "language" in changed:
+            # Convert the Language enum to a Fal language code.
+            lang = self._settings.language
+            if isinstance(lang, Language):
+                self._settings.language = self.language_to_service_language(lang)
 
-    async def set_model(self, model: str):
-        """Set the STT model.
-
-        Args:
-            model: The model name to use for transcription.
-        """
-        await super().set_model(model)
-        logger.info(f"Switching STT model to: [{model}]")
+        return changed
 
     @traced_stt
     async def _handle_transcription(
@@ -276,19 +288,19 @@ class FalSTTService(SegmentedSTTService):
             data_uri = fal_client.encode(audio, "audio/x-wav")
             response = await self._fal_client.run(
                 "fal-ai/wizper",
-                arguments={"audio_url": data_uri, **self._settings},
+                arguments={"audio_url": data_uri, **self._settings.given_fields()},
             )
 
             if response and "text" in response:
                 text = response["text"].strip()
                 if text:  # Only yield non-empty text
-                    await self._handle_transcription(text, True, self._settings["language"])
+                    await self._handle_transcription(text, True, self._settings.language)
                     logger.debug(f"Transcription: [{text}]")
                     yield TranscriptionFrame(
                         text,
                         self._user_id,
                         time_now_iso8601(),
-                        Language(self._settings["language"]),
+                        Language(self._settings.language),
                         result=response,
                     )
 

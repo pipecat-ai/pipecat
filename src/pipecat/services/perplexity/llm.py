@@ -72,16 +72,16 @@ class PerplexityLLMService(OpenAILLMService):
         }
 
         # Add OpenAI-compatible parameters if they're set
-        if self._settings["frequency_penalty"] is not NOT_GIVEN:
-            params["frequency_penalty"] = self._settings["frequency_penalty"]
-        if self._settings["presence_penalty"] is not NOT_GIVEN:
-            params["presence_penalty"] = self._settings["presence_penalty"]
-        if self._settings["temperature"] is not NOT_GIVEN:
-            params["temperature"] = self._settings["temperature"]
-        if self._settings["top_p"] is not NOT_GIVEN:
-            params["top_p"] = self._settings["top_p"]
-        if self._settings["max_tokens"] is not NOT_GIVEN:
-            params["max_tokens"] = self._settings["max_tokens"]
+        if self._settings.frequency_penalty is not NOT_GIVEN:
+            params["frequency_penalty"] = self._settings.frequency_penalty
+        if self._settings.presence_penalty is not NOT_GIVEN:
+            params["presence_penalty"] = self._settings.presence_penalty
+        if self._settings.temperature is not NOT_GIVEN:
+            params["temperature"] = self._settings.temperature
+        if self._settings.top_p is not NOT_GIVEN:
+            params["top_p"] = self._settings.top_p
+        if self._settings.max_tokens is not NOT_GIVEN:
+            params["max_tokens"] = self._settings.max_tokens
 
         return params
 

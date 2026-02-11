@@ -10,8 +10,8 @@ import base64
 import json
 import time
 import warnings
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -54,6 +54,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
+from pipecat.services.settings import NOT_GIVEN, LLMSettings
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -89,6 +90,17 @@ class CurrentAudioResponse:
     content_index: int
     start_time_ms: int
     total_size: int = 0
+
+
+@dataclass
+class OpenAIRealtimeBetaLLMSettings(LLMSettings):
+    """Typed settings for OpenAI Realtime Beta LLM services.
+
+    Parameters:
+        session_properties: OpenAI Realtime session configuration.
+    """
+
+    session_properties: Any = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAIRealtimeBetaLLMService(LLMService):
@@ -146,8 +158,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self.base_url = full_url
         self.set_model_name(model)
 
-        self._session_properties: events.SessionProperties = (
-            session_properties or events.SessionProperties()
+        self._settings = OpenAIRealtimeBetaLLMSettings(
+            model=model,
+            session_properties=session_properties or events.SessionProperties(),
         )
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
@@ -187,12 +200,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     def _is_modality_enabled(self, modality: str) -> bool:
         """Check if a specific modality is enabled, "text" or "audio"."""
-        modalities = self._session_properties.modalities or ["audio", "text"]
+        modalities = self._settings.session_properties.modalities or ["audio", "text"]
         return modality in modalities
 
     def _get_enabled_modalities(self) -> list[str]:
         """Get the list of enabled modalities."""
-        return self._session_properties.modalities or ["audio", "text"]
+        return self._settings.session_properties.modalities or ["audio", "text"]
 
     async def retrieve_conversation_item(self, item_id: str):
         """Retrieve a conversation item by ID from the server.
@@ -259,7 +272,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_interruption(self):
         # None and False are different. Check for False. None means we're using OpenAI's
         # built-in turn detection defaults.
-        if self._session_properties.turn_detection is False:
+        if self._settings.session_properties.turn_detection is False:
             await self.send_client_event(events.InputAudioBufferClearEvent())
             await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
@@ -276,7 +289,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_user_stopped_speaking(self, frame):
         # None and False are different. Check for False. None means we're using OpenAI's
         # built-in turn detection defaults.
-        if self._session_properties.turn_detection is False:
+        if self._settings.session_properties.turn_detection is False:
             await self.send_client_event(events.InputAudioBufferCommitEvent())
             await self.send_client_event(events.ResponseCreateEvent())
 
@@ -342,6 +355,16 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
+        # Legacy dict path: frame.settings contains SessionProperties fields,
+        # not our Settings fields, so we construct SessionProperties directly.
+        # The new typed path (frame.update) falls through to super, which calls
+        # _update_settings_from_typed → our override handles the rest.
+        if isinstance(frame, LLMUpdateSettingsFrame) and frame.update is None:
+            self._settings.session_properties = events.SessionProperties(**frame.settings)
+            await self._update_settings()
+            await self.push_frame(frame, direction)
+            return
+
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
@@ -377,9 +400,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             await self._handle_messages_append(frame)
         elif isinstance(frame, RealtimeMessagesUpdateFrame):
             self._context = frame.context
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            self._session_properties = events.SessionProperties(**frame.settings)
-            await self._update_settings()
         elif isinstance(frame, LLMSetToolsFrame):
             await self._update_settings()
         elif isinstance(frame, RealtimeFunctionCallResultFrame):
@@ -456,8 +476,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # treat a send-side error as fatal.
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
+    async def _update_settings_from_typed(self, update):
+        """Apply a typed settings update, sending a session update if needed."""
+        changed = await super()._update_settings_from_typed(update)
+        if "session_properties" in changed:
+            await self._update_settings()
+        return changed
+
     async def _update_settings(self):
-        settings = self._session_properties
+        settings = self._settings.session_properties
         # tools given in the context override the tools in the session properties
         if self._context and self._context.tools:
             settings.tools = self._context.tools

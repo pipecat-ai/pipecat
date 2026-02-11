@@ -11,6 +11,7 @@ for generating speech from text using various voice models.
 """
 
 import json
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -29,6 +30,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -41,6 +43,17 @@ except ModuleNotFoundError as e:
         "In order to use DeepgramWebsocketTTSService, you need to `pip install pipecat-ai[deepgram]`."
     )
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class DeepgramTTSSettings(TTSSettings):
+    """Typed settings for Deepgram TTS service.
+
+    Parameters:
+        encoding: Audio encoding format (linear16, mulaw, alaw).
+    """
+
+    encoding: str = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramTTSService(WebsocketTTSService):
@@ -91,10 +104,12 @@ class DeepgramTTSService(WebsocketTTSService):
 
         self._api_key = api_key
         self._base_url = base_url
-        self._settings = {
-            "encoding": encoding,
-        }
-        self.set_voice(voice)
+        self._settings: DeepgramTTSSettings = DeepgramTTSSettings(
+            model=voice,
+            voice=voice,
+            encoding=encoding,
+        )
+        self._voice_id = voice
 
         self._receive_task = None
         self._context_id: Optional[str] = None
@@ -177,7 +192,7 @@ class DeepgramTTSService(WebsocketTTSService):
             # Build WebSocket URL with query parameters
             params = []
             params.append(f"model={self._voice_id}")
-            params.append(f"encoding={self._settings['encoding']}")
+            params.append(f"encoding={self._settings.encoding}")
             params.append(f"sample_rate={self.sample_rate}")
 
             url = f"{self._base_url}/v1/speak?{'&'.join(params)}"
@@ -357,10 +372,12 @@ class DeepgramHttpTTSService(TTSService):
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = base_url
-        self._settings = {
-            "encoding": encoding,
-        }
-        self.set_voice(voice)
+        self._settings: DeepgramTTSSettings = DeepgramTTSSettings(
+            model=voice,
+            voice=voice,
+            encoding=encoding,
+        )
+        self._voice_id = voice
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -390,7 +407,7 @@ class DeepgramHttpTTSService(TTSService):
 
         params = {
             "model": self._voice_id,
-            "encoding": self._settings["encoding"],
+            "encoding": self._settings.encoding,
             "sample_rate": self.sample_rate,
             "container": "none",
         }

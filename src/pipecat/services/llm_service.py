@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    LLMUpdateSettingsFrame,
     StartFrame,
     UserImageRequestFrame,
 )
@@ -58,6 +59,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.settings import ServiceSettings
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationUtil,
@@ -351,6 +353,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._handle_interruptions(frame)
         elif isinstance(frame, LLMConfigureOutputFrame):
             self._skip_tts = frame.skip_tts
+        elif isinstance(frame, LLMUpdateSettingsFrame):
+            # New path: typed settings update object.
+            if frame.update is not None:
+                await self._update_settings_from_typed(frame.update)
+            # Legacy path: plain dict, but service uses typed settings — convert.
+            elif isinstance(self._settings, ServiceSettings):
+                update = type(self._settings).from_mapping(frame.settings)
+                await self._update_settings_from_typed(update)
+            # Legacy path: plain dict, service still uses dict-based settings.
+            else:
+                await self._update_settings(frame.settings)
         elif isinstance(frame, LLMContextSummaryRequestFrame):
             await self._handle_summary_request(frame)
 

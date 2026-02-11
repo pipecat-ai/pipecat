@@ -6,7 +6,8 @@
 
 import base64
 import json
-from typing import Any, AsyncGenerator, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import InterruptibleWordTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -35,6 +37,17 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 SAMPLE_RATE = 48000
+
+
+@dataclass
+class GradiumTTSSettings(TTSSettings):
+    """Typed settings for the Gradium TTS service.
+
+    Parameters:
+        output_format: Audio output format.
+    """
+
+    output_format: str = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GradiumTTSService(InterruptibleWordTTSService):
@@ -86,12 +99,11 @@ class GradiumTTSService(InterruptibleWordTTSService):
         self._url = url
         self._voice_id = voice_id
         self._json_config = json_config
-        self._model = model
-        self._settings = {
-            "voice_id": voice_id,
-            "model_name": model,
-            "output_format": "pcm",
-        }
+        self._settings: GradiumTTSSettings = GradiumTTSSettings(
+            model=model,
+            voice=voice_id,
+            output_format="pcm",
+        )
 
         # State tracking
         self._receive_task = None
@@ -105,24 +117,21 @@ class GradiumTTSService(InterruptibleWordTTSService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Update the TTS model.
+    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
+        """Apply a typed settings update and reconnect if voice changed.
 
         Args:
-            model: The model name to use for synthesis.
-        """
-        self._model = model
-        await super().set_model(model)
+            update: A :class:`TTSSettings` (or ``GradiumTTSSettings``) delta.
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if voice changed."""
+        Returns:
+            Set of field names whose values actually changed.
+        """
         prev_voice = self._voice_id
-        await super()._update_settings(settings)
-        if not prev_voice == self._voice_id:
-            self._settings["voice_id"] = self._voice_id
-            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+        changed = await super()._update_settings_from_typed(update)
+        if self._voice_id != prev_voice:
             await self._disconnect()
             await self._connect()
+        return changed
 
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Gradium API."""

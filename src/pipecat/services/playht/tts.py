@@ -14,6 +14,7 @@ import io
 import json
 import struct
 import warnings
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -95,6 +97,25 @@ def language_to_playht_language(language: Language) -> Optional[str]:
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+
+
+@dataclass
+class PlayHTTTSSettings(TTSSettings):
+    """Typed settings for PlayHT TTS services.
+
+    Parameters:
+        output_format: Audio output format.
+        voice_engine: Voice engine to use.
+        speed: Speech speed multiplier. Defaults to 1.0.
+        seed: Random seed for voice consistency.
+        playht_sample_rate: Audio sample rate sent to the API.
+    """
+
+    output_format: str = field(default_factory=lambda: NOT_GIVEN)
+    voice_engine: str = field(default_factory=lambda: NOT_GIVEN)
+    speed: float = field(default_factory=lambda: NOT_GIVEN)
+    seed: int = field(default_factory=lambda: NOT_GIVEN)
+    playht_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
 
 
 class PlayHTTTSService(InterruptibleTTSService):
@@ -170,17 +191,19 @@ class PlayHTTTSService(InterruptibleTTSService):
         self._receive_task = None
         self._context_id = None
 
-        self._settings = {
-            "language": self.language_to_service_language(params.language)
+        self._settings: PlayHTTTSSettings = PlayHTTTSSettings(
+            model=voice_engine,
+            voice=voice_url,
+            language=self.language_to_service_language(params.language)
             if params.language
             else "english",
-            "output_format": output_format,
-            "voice_engine": voice_engine,
-            "speed": params.speed,
-            "seed": params.seed,
-        }
+            output_format=output_format,
+            voice_engine=voice_engine,
+            speed=params.speed,
+            seed=params.seed,
+        )
         self.set_model_name(voice_engine)
-        self.set_voice(voice_url)
+        self._voice_id = voice_url
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -304,13 +327,13 @@ class PlayHTTTSService(InterruptibleTTSService):
                     # Handle the new response format with multiple URLs
                     if "websocket_urls" in data:
                         # Select URL based on voice_engine
-                        if self._settings["voice_engine"] in data["websocket_urls"]:
+                        if self._settings.voice_engine in data["websocket_urls"]:
                             self._websocket_url = data["websocket_urls"][
-                                self._settings["voice_engine"]
+                                self._settings.voice_engine
                             ]
                         else:
                             raise ValueError(
-                                f"Unsupported voice engine: {self._settings['voice_engine']}"
+                                f"Unsupported voice engine: {self._settings.voice_engine}"
                             )
                     else:
                         raise ValueError("Invalid response: missing websocket_urls")
@@ -382,12 +405,12 @@ class PlayHTTTSService(InterruptibleTTSService):
             tts_command = {
                 "text": text,
                 "voice": self._voice_id,
-                "voice_engine": self._settings["voice_engine"],
-                "output_format": self._settings["output_format"],
+                "voice_engine": self._settings.voice_engine,
+                "output_format": self._settings.output_format,
                 "sample_rate": self.sample_rate,
-                "language": self._settings["language"],
-                "speed": self._settings["speed"],
-                "seed": self._settings["seed"],
+                "language": self._settings.language,
+                "speed": self._settings.speed,
+                "seed": self._settings.seed,
                 "request_id": self._context_id,
             }
 
@@ -499,17 +522,18 @@ class PlayHTHttpTTSService(TTSService):
             # Extract the base engine name
             voice_engine = voice_engine.replace("-ws", "")
 
-        self._settings = {
-            "language": self.language_to_service_language(params.language)
+        self._settings: PlayHTTTSSettings = PlayHTTTSSettings(
+            voice=voice_url,
+            language=self.language_to_service_language(params.language)
             if params.language
             else "english",
-            "output_format": output_format,
-            "voice_engine": voice_engine,
-            "speed": params.speed,
-            "seed": params.seed,
-        }
+            output_format=output_format,
+            voice_engine=voice_engine,
+            speed=params.speed,
+            seed=params.seed,
+        )
         self.set_model_name(voice_engine)
-        self.set_voice(voice_url)
+        self._voice_id = voice_url
 
     async def start(self, frame: StartFrame):
         """Start the PlayHT HTTP TTS service.
@@ -518,7 +542,7 @@ class PlayHTHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["sample_rate"] = self.sample_rate
+        self._settings.playht_sample_rate = self.sample_rate
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -559,17 +583,17 @@ class PlayHTHttpTTSService(TTSService):
             payload = {
                 "text": text,
                 "voice": self._voice_id,
-                "voice_engine": self._settings["voice_engine"],
-                "output_format": self._settings["output_format"],
+                "voice_engine": self._settings.voice_engine,
+                "output_format": self._settings.output_format,
                 "sample_rate": self.sample_rate,
-                "language": self._settings["language"],
+                "language": self._settings.language,
             }
 
             # Add optional parameters if they exist
-            if self._settings["speed"] is not None:
-                payload["speed"] = self._settings["speed"]
-            if self._settings["seed"] is not None:
-                payload["seed"] = self._settings["seed"]
+            if self._settings.speed is not None:
+                payload["speed"] = self._settings.speed
+            if self._settings.seed is not None:
+                payload["seed"] = self._settings.seed
 
             headers = {
                 "Authorization": f"Bearer {self._api_key}",

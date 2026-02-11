@@ -16,7 +16,8 @@ Features:
     - Model-specific sample rates: mars-pro (48kHz), mars-flash (22.05kHz)
 """
 
-from typing import Any, AsyncGenerator, Dict, Optional
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, Dict, Optional
 
 from camb import StreamTtsOutputConfiguration
 from camb.client import AsyncCambAI
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -133,6 +135,18 @@ def _get_aligned_audio(buffer: bytes) -> tuple[bytes, bytes]:
     return buffer[:aligned_size], buffer[aligned_size:]
 
 
+@dataclass
+class CambTTSSettings(TTSSettings):
+    """Typed settings for Camb.ai TTS service.
+
+    Parameters:
+        user_instructions: Custom instructions for mars-instruct model only.
+            Ignored for other models. Max 1000 characters.
+    """
+
+    user_instructions: str = field(default_factory=lambda: NOT_GIVEN)
+
+
 class CambTTSService(TTSService):
     """Camb.ai MARS text-to-speech service using the official SDK.
 
@@ -212,15 +226,16 @@ class CambTTSService(TTSService):
             )
 
         # Build settings
-        self._settings = {
-            "language": (
+        self._settings: CambTTSSettings = CambTTSSettings(
+            model=model,
+            voice=voice_id,
+            language=(
                 self.language_to_service_language(params.language) if params.language else "en-us"
             ),
-            "user_instructions": params.user_instructions,
-        }
+            user_instructions=params.user_instructions,
+        )
 
         self.set_model_name(model)
-        self.set_voice(str(voice_id))
         self._voice_id = voice_id
 
         self._client = None
@@ -283,14 +298,14 @@ class CambTTSService(TTSService):
             tts_kwargs: Dict[str, Any] = {
                 "text": text,
                 "voice_id": self._voice_id,
-                "language": self._settings["language"],
+                "language": self._settings.language,
                 "speech_model": self.model_name,
                 "output_configuration": StreamTtsOutputConfiguration(format="pcm_s16le"),
             }
 
             # Add user instructions if using mars-instruct model
-            if self._model_name == "mars-instruct" and self._settings.get("user_instructions"):
-                tts_kwargs["user_instructions"] = self._settings["user_instructions"]
+            if self._model_name == "mars-instruct" and self._settings.user_instructions:
+                tts_kwargs["user_instructions"] = self._settings.user_instructions
 
             await self.start_tts_usage_metrics(text)
             yield TTSStartedFrame(context_id=context_id)

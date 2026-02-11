@@ -8,7 +8,8 @@
 
 import json
 import time
-from typing import AsyncGenerator, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -23,6 +24,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -134,6 +136,17 @@ def _prepare_language_hints(
     return list(set(prepared_languages))
 
 
+@dataclass
+class SonioxSTTSettings(STTSettings):
+    """Typed settings for Soniox STT service.
+
+    Parameters:
+        input_params: Soniox ``SonioxInputParams`` for detailed configuration.
+    """
+
+    input_params: SonioxInputParams = field(default_factory=lambda: NOT_GIVEN)
+
+
 class SonioxSTTService(WebsocketSTTService):
     """Speech-to-Text service using Soniox's WebSocket API.
 
@@ -181,8 +194,12 @@ class SonioxSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._url = url
         self.set_model_name(params.model)
-        self._params = params
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
+
+        self._settings = SonioxSTTSettings(
+            model=params.model,
+            input_params=params,
+        )
 
         self._final_transcription_buffer = []
         self._last_tokens_received: Optional[float] = None
@@ -197,6 +214,43 @@ class SonioxSTTService(WebsocketSTTService):
         """
         await super().start(frame)
         await self._connect()
+
+    async def _update_settings_from_typed(self, update: SonioxSTTSettings) -> set[str]:
+        """Apply a typed settings update, keeping ``input_params`` in sync.
+
+        Top-level ``model`` is the source of truth.  When it is given in
+        *update* its value is propagated into ``input_params``.  When only
+        ``input_params`` is given, its ``model`` is propagated *up* to the
+        top-level field.
+
+        Any change triggers a WebSocket reconnect.
+
+        Args:
+            update: A typed settings delta.
+
+        Returns:
+            Set of field names whose values actually changed.
+        """
+        model_given = is_given(getattr(update, "model", NOT_GIVEN))
+
+        changed = await super()._update_settings_from_typed(update)
+
+        if not changed:
+            return changed
+
+        # --- Sync model --------------------------------------------------
+        if model_given:
+            # Top-level model wins → push into input_params.
+            self._settings.input_params.model = self._settings.model
+        elif "input_params" in changed and self._settings.input_params.model is not None:
+            # Only input_params was given → pull model up.
+            self._settings.model = self._settings.input_params.model
+            self.set_model_name(self._settings.model)
+
+        await self._disconnect()
+        await self._connect()
+
+        return changed
 
     async def stop(self, frame: EndFrame):
         """Stop the Soniox STT websocket connection.
@@ -311,7 +365,9 @@ class SonioxSTTService(WebsocketSTTService):
             # Either one or the other is required.
             enable_endpoint_detection = not self._vad_force_turn_endpoint
 
-            context = self._params.context
+            params = self._settings.input_params
+
+            context = params.context
             if isinstance(context, SonioxContextObject):
                 context = context.model_dump()
 
@@ -319,16 +375,16 @@ class SonioxSTTService(WebsocketSTTService):
             config = {
                 "api_key": self._api_key,
                 "model": self._model_name,
-                "audio_format": self._params.audio_format,
-                "num_channels": self._params.num_channels or 1,
+                "audio_format": params.audio_format,
+                "num_channels": params.num_channels or 1,
                 "enable_endpoint_detection": enable_endpoint_detection,
                 "sample_rate": self.sample_rate,
-                "language_hints": _prepare_language_hints(self._params.language_hints),
-                "language_hints_strict": self._params.language_hints_strict,
+                "language_hints": _prepare_language_hints(params.language_hints),
+                "language_hints_strict": params.language_hints_strict,
                 "context": context,
-                "enable_speaker_diarization": self._params.enable_speaker_diarization,
-                "enable_language_identification": self._params.enable_language_identification,
-                "client_reference_id": self._params.client_reference_id,
+                "enable_speaker_diarization": params.enable_speaker_diarization,
+                "enable_language_identification": params.enable_language_identification,
+                "client_reference_id": params.client_reference_id,
             }
 
             # Send the configuration message.

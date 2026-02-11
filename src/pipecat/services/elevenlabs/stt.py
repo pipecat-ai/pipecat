@@ -14,6 +14,7 @@ transcription results directly.
 import base64
 import io
 import json
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import AsyncGenerator, Optional
 
@@ -33,6 +34,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -167,6 +169,44 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass
+class ElevenLabsSTTSettings(STTSettings):
+    """Typed settings for the ElevenLabs file-based STT service.
+
+    Parameters:
+        tag_audio_events: Whether to include audio event tags in transcription.
+    """
+
+    tag_audio_events: bool = field(default_factory=lambda: NOT_GIVEN)
+
+
+@dataclass
+class ElevenLabsRealtimeSTTSettings(STTSettings):
+    """Typed settings for the ElevenLabs Realtime STT service.
+
+    See ``ElevenLabsRealtimeSTTService.InputParams`` for detailed descriptions.
+
+    Parameters:
+        commit_strategy: How to segment speech - manual (Pipecat VAD) or vad (ElevenLabs VAD).
+        vad_silence_threshold_secs: Seconds of silence before VAD commits (0.3-3.0).
+        vad_threshold: VAD sensitivity (0.1-0.9, lower is more sensitive).
+        min_speech_duration_ms: Minimum speech duration for VAD (50-2000ms).
+        min_silence_duration_ms: Minimum silence duration for VAD (50-2000ms).
+        include_timestamps: Whether to include word-level timestamps in transcripts.
+        enable_logging: Whether to enable logging on ElevenLabs' side.
+        include_language_detection: Whether to include language detection in transcripts.
+    """
+
+    commit_strategy: CommitStrategy = field(default_factory=lambda: NOT_GIVEN)
+    vad_silence_threshold_secs: float = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_duration_ms: int = field(default_factory=lambda: NOT_GIVEN)
+    min_silence_duration_ms: int = field(default_factory=lambda: NOT_GIVEN)
+    include_timestamps: bool = field(default_factory=lambda: NOT_GIVEN)
+    enable_logging: bool = field(default_factory=lambda: NOT_GIVEN)
+    include_language_detection: bool = field(default_factory=lambda: NOT_GIVEN)
+
+
 class ElevenLabsSTTService(SegmentedSTTService):
     """Speech-to-text service using ElevenLabs' file-based API.
 
@@ -223,13 +263,15 @@ class ElevenLabsSTTService(SegmentedSTTService):
         self._base_url = base_url
         self._session = aiohttp_session
         self._model_id = model
-        self._tag_audio_events = params.tag_audio_events
 
-        self._settings = {
-            "language": self.language_to_service_language(params.language)
+        self._settings: ElevenLabsSTTSettings = ElevenLabsSTTSettings(
+            model=model,
+            language=self.language_to_service_language(params.language)
             if params.language
             else "eng",
-        }
+            tag_audio_events=params.tag_audio_events,
+        )
+        self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -250,27 +292,30 @@ class ElevenLabsSTTService(SegmentedSTTService):
         """
         return language_to_elevenlabs_language(language)
 
-    async def set_language(self, language: Language):
-        """Set the transcription language.
+    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
+        """Apply a typed settings update.
+
+        Converts language to ElevenLabs format before applying and keeps
+        ``_model_id`` in sync with the model setting.
 
         Args:
-            language: The language to use for speech-to-text transcription.
+            update: A :class:`STTSettings` (or ``ElevenLabsSTTSettings``) delta.
+
+        Returns:
+            Set of field names whose values actually changed.
         """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._settings["language"] = self.language_to_service_language(language)
+        # Convert language to ElevenLabs format before applying
+        if is_given(update.language) and isinstance(update.language, Language):
+            converted = self.language_to_service_language(update.language)
+            if converted is not None:
+                update.language = converted
 
-    async def set_model(self, model: str):
-        """Set the STT model.
+        changed = await super()._update_settings_from_typed(update)
 
-        Args:
-            model: The model name to use for transcription.
+        if "model" in changed:
+            self._model_id = self._settings.model
 
-        Note:
-            ElevenLabs STT API does not currently support model selection.
-            This method is provided for interface compatibility.
-        """
-        await super().set_model(model)
-        logger.info(f"Model setting [{model}] noted, but ElevenLabs STT uses default model")
+        return changed
 
     async def _transcribe_audio(self, audio_data: bytes) -> dict:
         """Upload audio data to ElevenLabs and get transcription result.
@@ -298,8 +343,8 @@ class ElevenLabsSTTService(SegmentedSTTService):
 
         # Add required model_id, language_code, and tag_audio_events
         data.add_field("model_id", self._model_id)
-        data.add_field("language_code", self._settings["language"])
-        data.add_field("tag_audio_events", str(self._tag_audio_events).lower())
+        data.add_field("language_code", self._settings.language)
+        data.add_field("tag_audio_events", str(self._settings.tag_audio_events).lower())
 
         async with self._session.post(url, data=data, headers=headers) as response:
             if response.status != 200:
@@ -469,11 +514,22 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._base_url = base_url
         self._model_id = model
-        self._params = params
         self._audio_format = ""  # initialized in start()
         self._receive_task = None
 
-        self._settings = {"language": params.language_code}
+        self._settings: ElevenLabsRealtimeSTTSettings = ElevenLabsRealtimeSTTSettings(
+            model=model,
+            language=params.language_code,
+            commit_strategy=params.commit_strategy,
+            vad_silence_threshold_secs=params.vad_silence_threshold_secs,
+            vad_threshold=params.vad_threshold,
+            min_speech_duration_ms=params.min_speech_duration_ms,
+            min_silence_duration_ms=params.min_silence_duration_ms,
+            include_timestamps=params.include_timestamps,
+            enable_logging=params.enable_logging,
+            include_language_detection=params.include_language_detection,
+        )
+        self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -483,42 +539,35 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
-    async def set_language(self, language: Language):
-        """Set the transcription language.
+    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
+        """Apply a typed settings update and reconnect if anything changed.
+
+        Converts language to ElevenLabs format before applying and keeps
+        ``_model_id`` in sync.
 
         Args:
-            language: The language to use for speech-to-text transcription.
+            update: A :class:`STTSettings` (or ``ElevenLabsRealtimeSTTSettings``) delta.
 
-        Note:
-            Changing language requires reconnecting to the WebSocket.
+        Returns:
+            Set of field names whose values actually changed.
         """
-        logger.info(f"Switching STT language to: [{language}]")
-        new_language = (
-            language_to_elevenlabs_language(language)
-            if isinstance(language, Language)
-            else language
-        )
-        self._params.language_code = new_language
-        self._settings["language"] = new_language
-        # Reconnect with new settings
+        # Convert language to ElevenLabs format before applying
+        if is_given(update.language) and isinstance(update.language, Language):
+            converted = language_to_elevenlabs_language(update.language)
+            if converted is not None:
+                update.language = converted
+
+        changed = await super()._update_settings_from_typed(update)
+
+        if not changed:
+            return changed
+
+        if "model" in changed:
+            self._model_id = self._settings.model
+
         await self._disconnect()
         await self._connect()
-
-    async def set_model(self, model: str):
-        """Set the STT model.
-
-        Args:
-            model: The model name to use for transcription.
-
-        Note:
-            Changing model requires reconnecting to the WebSocket.
-        """
-        await super().set_model(model)
-        logger.info(f"Switching STT model to: [{model}]")
-        self._model_id = model
-        # Reconnect with new settings
-        await self._disconnect()
-        await self._connect()
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the STT service and establish WebSocket connection.
@@ -566,7 +615,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             await self._start_metrics()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send commit when user stops speaking (manual commit mode)
-            if self._params.commit_strategy == CommitStrategy.MANUAL:
+            if self._settings.commit_strategy == CommitStrategy.MANUAL:
                 if self._websocket and self._websocket.state is State.OPEN:
                     try:
                         commit_message = {
@@ -656,36 +705,40 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             # Build query parameters
             params = [f"model_id={self._model_id}"]
 
-            if self._params.language_code:
-                params.append(f"language_code={self._params.language_code}")
+            if self._settings.language:
+                params.append(f"language_code={self._settings.language}")
 
             params.append(f"audio_format={self._audio_format}")
-            params.append(f"commit_strategy={self._params.commit_strategy.value}")
+            params.append(f"commit_strategy={self._settings.commit_strategy.value}")
 
             # Add optional parameters
-            if self._params.include_timestamps:
-                params.append(f"include_timestamps={str(self._params.include_timestamps).lower()}")
-
-            if self._params.enable_logging:
-                params.append(f"enable_logging={str(self._params.enable_logging).lower()}")
-
-            if self._params.include_language_detection:
+            if self._settings.include_timestamps:
                 params.append(
-                    f"include_language_detection={str(self._params.include_language_detection).lower()}"
+                    f"include_timestamps={str(self._settings.include_timestamps).lower()}"
+                )
+
+            if self._settings.enable_logging:
+                params.append(f"enable_logging={str(self._settings.enable_logging).lower()}")
+
+            if self._settings.include_language_detection:
+                params.append(
+                    f"include_language_detection={str(self._settings.include_language_detection).lower()}"
                 )
 
             # Add VAD parameters if using VAD commit strategy and values are specified
-            if self._params.commit_strategy == CommitStrategy.VAD:
-                if self._params.vad_silence_threshold_secs is not None:
+            if self._settings.commit_strategy == CommitStrategy.VAD:
+                if self._settings.vad_silence_threshold_secs is not None:
                     params.append(
-                        f"vad_silence_threshold_secs={self._params.vad_silence_threshold_secs}"
+                        f"vad_silence_threshold_secs={self._settings.vad_silence_threshold_secs}"
                     )
-                if self._params.vad_threshold is not None:
-                    params.append(f"vad_threshold={self._params.vad_threshold}")
-                if self._params.min_speech_duration_ms is not None:
-                    params.append(f"min_speech_duration_ms={self._params.min_speech_duration_ms}")
-                if self._params.min_silence_duration_ms is not None:
-                    params.append(f"min_silence_duration_ms={self._params.min_silence_duration_ms}")
+                if self._settings.vad_threshold is not None:
+                    params.append(f"vad_threshold={self._settings.vad_threshold}")
+                if self._settings.min_speech_duration_ms is not None:
+                    params.append(f"min_speech_duration_ms={self._settings.min_speech_duration_ms}")
+                if self._settings.min_silence_duration_ms is not None:
+                    params.append(
+                        f"min_silence_duration_ms={self._settings.min_silence_duration_ms}"
+                    )
 
             ws_url = f"wss://{self._base_url}/v1/speech-to-text/realtime?{'&'.join(params)}"
 
@@ -817,7 +870,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         # If timestamps are enabled, skip this message and wait for the
         # committed_transcript_with_timestamps message which contains all the data
-        if self._params.include_timestamps:
+        if self._settings.include_timestamps:
             return
 
         text = data.get("text", "").strip()

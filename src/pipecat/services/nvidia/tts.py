@@ -100,7 +100,7 @@ class NvidiaTTSService(TTSService):
         self._function_id = model_function_map.get("function_id")
         self._use_ssl = use_ssl
         self.set_model_name(model_function_map.get("model_name"))
-        self.set_voice(voice_id)
+        self._voice_id = voice_id
 
         self._service = None
         self._config = None

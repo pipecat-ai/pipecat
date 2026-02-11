@@ -7,6 +7,7 @@
 """Kokoro TTS service implementation using kokoro-onnx."""
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
@@ -22,6 +23,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -87,6 +89,17 @@ def language_to_kokoro_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class KokoroTTSSettings(TTSSettings):
+    """Typed settings for the Kokoro TTS service.
+
+    Parameters:
+        lang_code: Kokoro language code for synthesis.
+    """
+
+    lang_code: str = field(default_factory=lambda: NOT_GIVEN)
+
+
 class KokoroTTSService(TTSService):
     """Kokoro TTS service implementation.
 
@@ -128,6 +141,12 @@ class KokoroTTSService(TTSService):
 
         self._voice_id = voice_id
         self._lang_code = language_to_kokoro_language(params.language)
+
+        self._settings: KokoroTTSSettings = KokoroTTSSettings(
+            voice=voice_id,
+            language=language_to_kokoro_language(params.language),
+            lang_code=language_to_kokoro_language(params.language),
+        )
 
         model = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
         voices = Path(voices_path) if voices_path else KOKORO_CACHE_DIR / "voices-v1.0.bin"

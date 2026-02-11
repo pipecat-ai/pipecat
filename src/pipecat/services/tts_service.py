@@ -52,6 +52,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.settings import ServiceSettings, TTSSettings, is_given
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -189,7 +190,6 @@ class TTSService(AIService):
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
         self._voice_id: str = ""
-        self._settings: Dict[str, Any] = {}
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         if text_aggregator:
             import warnings
@@ -263,18 +263,40 @@ class TTSService(AIService):
     async def set_model(self, model: str):
         """Set the TTS model to use.
 
+        When the service has been migrated to typed settings this routes
+        through :meth:`_update_settings_from_typed` so that concrete
+        services can react (e.g. reconnect) in a single place.
+
         Args:
             model: The name of the TTS model.
         """
-        self.set_model_name(model)
+        logger.info(f"Switching TTS model to: [{model}]")
+        if isinstance(self._settings, ServiceSettings):
+            settings_cls = type(self._settings)
+            await self._update_settings_from_typed(settings_cls(model=model))
+        else:
+            self.set_model_name(model)
 
-    def set_voice(self, voice: str):
+    async def set_voice(self, voice: str):
         """Set the voice for speech synthesis.
+
+        When the service has been migrated to typed settings this routes
+        through :meth:`_update_settings_from_typed` so that concrete
+        services can react (e.g. reconnect) in a single place.
+
+        .. versionchanged:: 0.0.103
+            Now ``async``.  In ``__init__`` methods, set
+            ``self._voice_id`` directly instead of calling this method.
 
         Args:
             voice: The voice identifier or name.
         """
-        self._voice_id = voice
+        logger.info(f"Switching TTS voice to: [{voice}]")
+        if isinstance(self._settings, ServiceSettings):
+            settings_cls = type(self._settings)
+            await self._update_settings_from_typed(settings_cls(voice=voice))
+        else:
+            self._voice_id = voice
 
     def create_context_id(self) -> str:
         """Generate a unique context ID for a TTS request.
@@ -416,12 +438,41 @@ class TTSService(AIService):
             elif key == "model":
                 self.set_model_name(value)
             elif key == "voice" or key == "voice_id":
-                self.set_voice(value)
+                self._voice_id = value
             elif key == "text_filter":
                 for filter in self._text_filters:
                     await filter.update_settings(value)
             else:
                 logger.warning(f"Unknown setting for TTS service: {key}")
+
+    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
+        """Apply a typed TTS settings update.
+
+        Handles ``model`` (via parent) and syncs ``_voice_id`` when voice
+        changes.  Translates language values before applying.  Does **not**
+        call ``set_voice`` or ``set_model`` directly — concrete services
+        should override this method and handle reconnect logic based on the
+        returned changed-field set.
+
+        Args:
+            update: A typed TTS settings delta.
+
+        Returns:
+            Set of field names whose values actually changed.
+        """
+        # Translate language *before* applying so the stored value is canonical
+        if is_given(update.language) and update.language is not None:
+            converted = self.language_to_service_language(update.language)
+            if converted is not None:
+                update.language = converted
+
+        changed = await super()._update_settings_from_typed(update)
+
+        # Keep _voice_id in sync for code that reads it directly
+        if "voice" in changed and isinstance(self._settings, TTSSettings):
+            self._voice_id = self._settings.voice
+
+        return changed
 
     async def say(self, text: str):
         """Immediately speak the provided text.
@@ -504,7 +555,16 @@ class TTSService(AIService):
             await self.flush_audio()
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
+            # New path: typed settings update object.
+            if frame.update is not None:
+                await self._update_settings_from_typed(frame.update)
+            # Legacy path: plain dict, but service uses typed settings — convert.
+            elif isinstance(self._settings, ServiceSettings):
+                update = type(self._settings).from_mapping(frame.settings)
+                await self._update_settings_from_typed(update)
+            # Legacy path: plain dict, service still uses dict-based settings.
+            else:
+                await self._update_settings(frame.settings)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)

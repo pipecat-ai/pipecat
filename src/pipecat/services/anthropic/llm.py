@@ -16,8 +16,8 @@ import copy
 import io
 import json
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Union
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Dict, List, Literal, Optional, Union
 
 import httpx
 from loguru import logger
@@ -42,7 +42,6 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    LLMUpdateSettingsFrame,
     UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -59,6 +58,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -67,6 +68,19 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class AnthropicLLMSettings(LLMSettings):
+    """Typed settings for Anthropic LLM services.
+
+    Parameters:
+        enable_prompt_caching: Whether to enable prompt caching.
+        thinking: Extended thinking configuration.
+    """
+
+    enable_prompt_caching: Any = field(default_factory=lambda: _NOT_GIVEN)
+    thinking: Any = field(default_factory=lambda: _NOT_GIVEN)
 
 
 @dataclass
@@ -210,9 +224,10 @@ class AnthropicLLMService(LLMService):
         self.set_model_name(model)
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self._settings = {
-            "max_tokens": params.max_tokens,
-            "enable_prompt_caching": (
+        self._settings = AnthropicLLMSettings(
+            model=model,
+            max_tokens=params.max_tokens,
+            enable_prompt_caching=(
                 params.enable_prompt_caching
                 if params.enable_prompt_caching is not None
                 else (
@@ -221,12 +236,12 @@ class AnthropicLLMService(LLMService):
                     else False
                 )
             ),
-            "temperature": params.temperature,
-            "top_k": params.top_k,
-            "top_p": params.top_p,
-            "thinking": params.thinking,
-            "extra": params.extra if isinstance(params.extra, dict) else {},
-        }
+            temperature=params.temperature,
+            top_k=params.top_k,
+            top_p=params.top_p,
+            thinking=params.thinking,
+            extra=params.extra if isinstance(params.extra, dict) else {},
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate usage metrics.
@@ -280,7 +295,7 @@ class AnthropicLLMService(LLMService):
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
             invocation_params = adapter.get_llm_invocation_params(
-                context, enable_prompt_caching=self._settings["enable_prompt_caching"]
+                context, enable_prompt_caching=self._settings.enable_prompt_caching
             )
             messages = invocation_params["messages"]
             system = invocation_params["system"]
@@ -294,20 +309,20 @@ class AnthropicLLMService(LLMService):
         # Build params using the same method as streaming completions
         params = {
             "model": self.model_name,
-            "max_tokens": max_tokens if max_tokens is not None else self._settings["max_tokens"],
+            "max_tokens": max_tokens if max_tokens is not None else self._settings.max_tokens,
             "stream": False,
-            "temperature": self._settings["temperature"],
-            "top_k": self._settings["top_k"],
-            "top_p": self._settings["top_p"],
+            "temperature": self._settings.temperature,
+            "top_k": self._settings.top_k,
+            "top_p": self._settings.top_p,
             "messages": messages,
             "system": system,
             "tools": tools,
             "betas": ["interleaved-thinking-2025-05-14"],
         }
-        if self._settings["thinking"]:
-            params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+        if self._settings.thinking:
+            params["thinking"] = self._settings.thinking.model_dump(exclude_unset=True)
 
-        params.update(self._settings["extra"])
+        params.update(self._settings.extra)
 
         # LLM completion
         response = await self._client.beta.messages.create(**params)
@@ -358,14 +373,14 @@ class AnthropicLLMService(LLMService):
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
             params = adapter.get_llm_invocation_params(
-                context, enable_prompt_caching=self._settings["enable_prompt_caching"]
+                context, enable_prompt_caching=self._settings.enable_prompt_caching
             )
             return params
 
         # Anthropic-specific context
         messages = (
             context.get_messages_with_cache_control_markers()
-            if self._settings["enable_prompt_caching"]
+            if self._settings.enable_prompt_caching
             else context.messages
         )
         return AnthropicLLMInvocationParams(
@@ -408,21 +423,21 @@ class AnthropicLLMService(LLMService):
 
             params = {
                 "model": self.model_name,
-                "max_tokens": self._settings["max_tokens"],
+                "max_tokens": self._settings.max_tokens,
                 "stream": True,
-                "temperature": self._settings["temperature"],
-                "top_k": self._settings["top_k"],
-                "top_p": self._settings["top_p"],
+                "temperature": self._settings.temperature,
+                "top_k": self._settings.top_k,
+                "top_p": self._settings.top_p,
             }
 
             # Add thinking parameter if set
-            if self._settings["thinking"]:
-                params["thinking"] = self._settings["thinking"].model_dump(exclude_unset=True)
+            if self._settings.thinking:
+                params["thinking"] = self._settings.thinking.model_dump(exclude_unset=True)
 
             # Messages, system, tools
             params.update(params_from_context)
 
-            params.update(self._settings["extra"])
+            params.update(self._settings.extra)
 
             # "Interleaved thinking" needed to allow thinking between sequences
             # of function calls, when extended thinking is enabled.
@@ -576,11 +591,9 @@ class AnthropicLLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = AnthropicLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
-            self._settings["enable_prompt_caching"] = frame.enable
+            self._settings.enable_prompt_caching = frame.enable
         else:
             await self.push_frame(frame, direction)
 

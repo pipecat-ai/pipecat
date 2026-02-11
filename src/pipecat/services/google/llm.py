@@ -15,8 +15,8 @@ import io
 import json
 import os
 import uuid
-from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator, ClassVar, Dict, List, Literal, Optional
 
 from loguru import logger
 from PIL import Image
@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    LLMUpdateSettingsFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -59,6 +58,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.services.settings import NOT_GIVEN, LLMSettings
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -673,6 +673,17 @@ class GoogleLLMContext(OpenAILLMContext):
         self._messages = [m for m in self._messages if m.parts]
 
 
+@dataclass
+class GoogleLLMSettings(LLMSettings):
+    """Typed settings for Google LLM services.
+
+    Parameters:
+        thinking: Thinking configuration.
+    """
+
+    thinking: Any = field(default_factory=lambda: NOT_GIVEN)
+
+
 class GoogleLLMService(LLMService):
     """Google AI (Gemini) LLM service implementation.
 
@@ -773,14 +784,15 @@ class GoogleLLMService(LLMService):
         self._system_instruction = system_instruction
         self._http_options = update_google_client_http_options(http_options)
 
-        self._settings = {
-            "max_tokens": params.max_tokens,
-            "temperature": params.temperature,
-            "top_k": params.top_k,
-            "top_p": params.top_p,
-            "thinking": params.thinking,
-            "extra": params.extra if isinstance(params.extra, dict) else {},
-        }
+        self._settings = GoogleLLMSettings(
+            model=model,
+            max_tokens=params.max_tokens,
+            temperature=params.temperature,
+            top_k=params.top_k,
+            top_p=params.top_p,
+            thinking=params.thinking,
+            extra=params.extra if isinstance(params.extra, dict) else {},
+        )
         self._tools = tools
         self._tool_config = tool_config
 
@@ -874,10 +886,10 @@ class GoogleLLMService(LLMService):
             k: v
             for k, v in {
                 "system_instruction": system_instruction,
-                "temperature": self._settings["temperature"],
-                "top_p": self._settings["top_p"],
-                "top_k": self._settings["top_k"],
-                "max_output_tokens": self._settings["max_tokens"],
+                "temperature": self._settings.temperature,
+                "top_p": self._settings.top_p,
+                "top_k": self._settings.top_k,
+                "max_output_tokens": self._settings.max_tokens,
                 "tools": tools,
                 "tool_config": tool_config,
             }.items()
@@ -885,13 +897,13 @@ class GoogleLLMService(LLMService):
         }
 
         # Add thinking parameters if configured
-        if self._settings["thinking"]:
-            generation_params["thinking_config"] = self._settings["thinking"].model_dump(
+        if self._settings.thinking:
+            generation_params["thinking_config"] = self._settings.thinking.model_dump(
                 exclude_unset=True
             )
 
-        if self._settings["extra"]:
-            generation_params.update(self._settings["extra"])
+        if self._settings.extra:
+            generation_params.update(self._settings.extra)
 
         return generation_params
 
@@ -1190,8 +1202,6 @@ class GoogleLLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = GoogleLLMContext(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 

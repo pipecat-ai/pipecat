@@ -12,7 +12,8 @@ using Rime's API for streaming and batch audio synthesis.
 
 import base64
 import json
-from typing import Any, AsyncGenerator, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
 from pipecat.services.tts_service import (
     AudioContextWordTTSService,
     InterruptibleTTSService,
@@ -66,6 +68,62 @@ def language_to_rime_language(language: Language) -> str:
         Language.HI: "hin",
     }
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+
+
+@dataclass
+class RimeTTSSettings(TTSSettings):
+    """Typed settings for Rime WS JSON and HTTP TTS services.
+
+    Parameters:
+        speaker: Voice speaker ID.
+        modelId: Rime model identifier.
+        audioFormat: Audio output format.
+        samplingRate: Audio sample rate.
+        lang: Rime language code.
+        speedAlpha: Speech speed multiplier. Defaults to 1.0.
+        reduceLatency: Whether to reduce latency at potential quality cost.
+        pauseBetweenBrackets: Whether to add pauses between bracketed content.
+        phonemizeBetweenBrackets: Whether to phonemize bracketed content.
+        inlineSpeedAlpha: Inline speed control markup.
+    """
+
+    speaker: str = field(default_factory=lambda: NOT_GIVEN)
+    modelId: str = field(default_factory=lambda: NOT_GIVEN)
+    audioFormat: str = field(default_factory=lambda: NOT_GIVEN)
+    samplingRate: int = field(default_factory=lambda: NOT_GIVEN)
+    lang: str = field(default_factory=lambda: NOT_GIVEN)
+    speedAlpha: float = field(default_factory=lambda: NOT_GIVEN)
+    reduceLatency: bool = field(default_factory=lambda: NOT_GIVEN)
+    pauseBetweenBrackets: bool = field(default_factory=lambda: NOT_GIVEN)
+    phonemizeBetweenBrackets: bool = field(default_factory=lambda: NOT_GIVEN)
+    inlineSpeedAlpha: str = field(default_factory=lambda: NOT_GIVEN)
+
+
+@dataclass
+class RimeNonJsonTTSSettings(TTSSettings):
+    """Typed settings for Rime non-JSON WS TTS service.
+
+    Parameters:
+        speaker: Voice speaker ID.
+        modelId: Rime model identifier.
+        audioFormat: Audio output format.
+        samplingRate: Audio sample rate.
+        lang: Rime language code.
+        segment: Text segmentation mode ("immediate", "bySentence", "never").
+        repetition_penalty: Token repetition penalty (1.0-2.0).
+        temperature: Sampling temperature (0.0-1.0).
+        top_p: Cumulative probability threshold (0.0-1.0).
+    """
+
+    speaker: str = field(default_factory=lambda: NOT_GIVEN)
+    modelId: str = field(default_factory=lambda: NOT_GIVEN)
+    audioFormat: str = field(default_factory=lambda: NOT_GIVEN)
+    samplingRate: int = field(default_factory=lambda: NOT_GIVEN)
+    lang: str = field(default_factory=lambda: NOT_GIVEN)
+    segment: str = field(default_factory=lambda: NOT_GIVEN)
+    repetition_penalty: float = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float = field(default_factory=lambda: NOT_GIVEN)
 
 
 class RimeTTSService(AudioContextWordTTSService):
@@ -149,19 +207,17 @@ class RimeTTSService(AudioContextWordTTSService):
         self._url = url
         self._voice_id = voice_id
         self._model = model
-        self._settings = {
-            "speaker": voice_id,
-            "modelId": model,
-            "audioFormat": "pcm",
-            "samplingRate": 0,
-            "lang": self.language_to_service_language(params.language)
-            if params.language
-            else "eng",
-            "speedAlpha": params.speed_alpha,
-            "reduceLatency": params.reduce_latency,
-            "pauseBetweenBrackets": json.dumps(params.pause_between_brackets),
-            "phonemizeBetweenBrackets": json.dumps(params.phonemize_between_brackets),
-        }
+        self._settings: RimeTTSSettings = RimeTTSSettings(
+            speaker=voice_id,
+            modelId=model,
+            audioFormat="pcm",
+            samplingRate=0,
+            lang=self.language_to_service_language(params.language) if params.language else "eng",
+            speedAlpha=params.speed_alpha,
+            reduceLatency=params.reduce_latency,
+            pauseBetweenBrackets=json.dumps(params.pause_between_brackets),
+            phonemizeBetweenBrackets=json.dumps(params.phonemize_between_brackets),
+        )
 
         # State tracking
         self._context_id = None  # Tracks current turn
@@ -188,15 +244,6 @@ class RimeTTSService(AudioContextWordTTSService):
         """
         return language_to_rime_language(language)
 
-    async def set_model(self, model: str):
-        """Update the TTS model.
-
-        Args:
-            model: The model name to use for synthesis.
-        """
-        self._model = model
-        await super().set_model(model)
-
     # A set of Rime-specific helpers for text transformations
     def SPELL(text: str) -> str:
         """Wrap text in Rime spell function."""
@@ -222,15 +269,15 @@ class RimeTTSService(AudioContextWordTTSService):
         self._extra_msg_fields["inlineSpeedAlpha"] = ",".join(speed_vals + [str(speed)])
         return f"[{text}]"
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if voice changed."""
+    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
+        """Apply a typed settings update and reconnect if voice changed."""
         prev_voice = self._voice_id
-        await super()._update_settings(settings)
-        if not prev_voice == self._voice_id:
-            self._settings["speaker"] = self._voice_id
-            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+        changed = await super()._update_settings_from_typed(update)
+        if "voice" in changed:
+            self._settings.speaker = self._voice_id
             await self._disconnect()
             await self._connect()
+        return changed
 
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Rime API."""
@@ -255,7 +302,7 @@ class RimeTTSService(AudioContextWordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["samplingRate"] = self.sample_rate
+        self._settings.samplingRate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -301,7 +348,20 @@ class RimeTTSService(AudioContextWordTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            params = "&".join(f"{k}={v}" for k, v in self._settings.items())
+            params = "&".join(
+                f"{k}={v}"
+                for k, v in {
+                    "speaker": self._settings.speaker,
+                    "modelId": self._settings.modelId,
+                    "audioFormat": self._settings.audioFormat,
+                    "samplingRate": self._settings.samplingRate,
+                    "lang": self._settings.lang,
+                    "speedAlpha": self._settings.speedAlpha,
+                    "reduceLatency": self._settings.reduceLatency,
+                    "pauseBetweenBrackets": self._settings.pauseBetweenBrackets,
+                    "phonemizeBetweenBrackets": self._settings.phonemizeBetweenBrackets,
+                }.items()
+            )
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await websocket_connect(url, additional_headers=headers)
@@ -525,20 +585,16 @@ class RimeHttpTTSService(TTSService):
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = "https://users.rime.ai/v1/rime-tts"
-        self._settings = {
-            "lang": self.language_to_service_language(params.language)
-            if params.language
-            else "eng",
-            "speedAlpha": params.speed_alpha,
-            "reduceLatency": params.reduce_latency,
-            "pauseBetweenBrackets": params.pause_between_brackets,
-            "phonemizeBetweenBrackets": params.phonemize_between_brackets,
-        }
-        self.set_voice(voice_id)
+        self._settings: RimeTTSSettings = RimeTTSSettings(
+            lang=self.language_to_service_language(params.language) if params.language else "eng",
+            speedAlpha=params.speed_alpha,
+            reduceLatency=params.reduce_latency,
+            pauseBetweenBrackets=params.pause_between_brackets,
+            phonemizeBetweenBrackets=params.phonemize_between_brackets,
+            inlineSpeedAlpha=params.inline_speed_alpha if params.inline_speed_alpha else NOT_GIVEN,
+        )
+        self._voice_id = voice_id
         self.set_model_name(model)
-
-        if params.inline_speed_alpha:
-            self._settings["inlineSpeedAlpha"] = params.inline_speed_alpha
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -578,7 +634,15 @@ class RimeHttpTTSService(TTSService):
             "Content-Type": "application/json",
         }
 
-        payload = self._settings.copy()
+        payload = {
+            "lang": self._settings.lang,
+            "speedAlpha": self._settings.speedAlpha,
+            "reduceLatency": self._settings.reduceLatency,
+            "pauseBetweenBrackets": self._settings.pauseBetweenBrackets,
+            "phonemizeBetweenBrackets": self._settings.phonemizeBetweenBrackets,
+        }
+        if is_given(self._settings.inlineSpeedAlpha):
+            payload["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
         payload["text"] = text
         payload["speaker"] = self._voice_id
         payload["modelId"] = self._model_name
@@ -699,26 +763,24 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         self._url = url
         self._voice_id = voice_id
         self._model = model
-        self._settings = {
-            "speaker": voice_id,
-            "modelId": model,
-            "audioFormat": audio_format,
-            "samplingRate": sample_rate,
-        }
-
-        if params.language:
-            self._settings["lang"] = self.language_to_service_language(params.language)
-        if params.segment is not None:
-            self._settings["segment"] = params.segment
-        if params.repetition_penalty is not None:
-            self._settings["repetition_penalty"] = params.repetition_penalty
-        if params.temperature is not None:
-            self._settings["temperature"] = params.temperature
-        if params.top_p is not None:
-            self._settings["top_p"] = params.top_p
+        self._settings: RimeNonJsonTTSSettings = RimeNonJsonTTSSettings(
+            speaker=voice_id,
+            modelId=model,
+            audioFormat=audio_format,
+            samplingRate=sample_rate,
+            lang=self.language_to_service_language(params.language)
+            if params.language
+            else NOT_GIVEN,
+            segment=params.segment if params.segment is not None else NOT_GIVEN,
+            repetition_penalty=params.repetition_penalty
+            if params.repetition_penalty is not None
+            else NOT_GIVEN,
+            temperature=params.temperature if params.temperature is not None else NOT_GIVEN,
+            top_p=params.top_p if params.top_p is not None else NOT_GIVEN,
+        )
         # Add any extra parameters for future compatibility
         if params.extra:
-            self._settings.update(params.extra)
+            self._settings.extra.update(params.extra)
 
         self._receive_task = None
         self._context_id: Optional[str] = None
@@ -750,7 +812,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["samplingRate"] = self.sample_rate
+        self._settings.samplingRate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -794,8 +856,26 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         try:
             if self._websocket and self._websocket.state is State.OPEN:
                 return
-            # Build URL with query parameters (only non-None values)
-            params = "&".join(f"{k}={v}" for k, v in self._settings.items() if v is not None)
+            # Build URL with query parameters (only given, non-None values)
+            settings_dict = {
+                "speaker": self._settings.speaker,
+                "modelId": self._settings.modelId,
+                "audioFormat": self._settings.audioFormat,
+                "samplingRate": self._settings.samplingRate,
+            }
+            if is_given(self._settings.lang):
+                settings_dict["lang"] = self._settings.lang
+            if is_given(self._settings.segment):
+                settings_dict["segment"] = self._settings.segment
+            if is_given(self._settings.repetition_penalty):
+                settings_dict["repetition_penalty"] = self._settings.repetition_penalty
+            if is_given(self._settings.temperature):
+                settings_dict["temperature"] = self._settings.temperature
+            if is_given(self._settings.top_p):
+                settings_dict["top_p"] = self._settings.top_p
+            # Include extras
+            settings_dict.update(self._settings.extra)
+            params = "&".join(f"{k}={v}" for k, v in settings_dict.items() if v is not None)
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await websocket_connect(
@@ -889,68 +969,23 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if necessary.
+    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
+        """Apply a typed settings update and reconnect if necessary.
 
         Since all settings are WebSocket URL query parameters,
         any setting change requires reconnecting to apply the new values.
         """
-        needs_reconnect = False
+        changed = await super()._update_settings_from_typed(update)
 
-        # Track previous values from self._settings only
-        prev_settings = self._settings.copy()
+        # Sync voice and model to settings dict fields
+        if "voice" in changed:
+            self._settings.speaker = self._voice_id
+        if "model" in changed:
+            self._settings.modelId = self._model_name
 
-        # Let parent class handle standard settings (voice, model, language)
-        await super()._update_settings(settings)
-
-        # Check if voice changed and update settings dict
-        if "voice" in settings or "voice_id" in settings:
-            self._settings["speaker"] = self._voice_id
-            if prev_settings.get("speaker") != self._voice_id:
-                logger.info(f"Switching TTS voice to: [{self._voice_id}]")
-                needs_reconnect = True
-
-        # Check if model changed and update settings dict
-        if "model" in settings:
-            self._settings["modelId"] = self._model
-            if prev_settings.get("modelId") != self._model:
-                logger.info(f"Switching TTS model to: [{self._model}]")
-                needs_reconnect = True
-
-        # Handle language explicitly
-        if "language" in settings:
-            new_lang = self.language_to_service_language(settings["language"])
-            if new_lang and new_lang != prev_settings.get("lang"):
-                logger.info(f"Updating language to: [{new_lang}]")
-                self._settings["lang"] = new_lang
-                needs_reconnect = True
-
-        # Check other parameters
-        for key in ["segment", "repetition_penalty", "temperature", "top_p"]:
-            if key in settings and settings[key] != prev_settings.get(key):
-                logger.info(f"Updating {key} to: [{settings[key]}]")
-                self._settings[key] = settings[key]
-                needs_reconnect = True
-
-        # Handle extra parameters
-        for key, value in settings.items():
-            if key not in [
-                "voice",
-                "voice_id",
-                "model",
-                "language",
-                "segment",
-                "repetition_penalty",
-                "temperature",
-                "top_p",
-            ]:
-                if value != prev_settings.get(key):
-                    logger.info(f"Updating extra parameter {key} to: [{value}]")
-                    self._settings[key] = value
-                    needs_reconnect = True
-
-        # Reconnect if any setting changed
-        if needs_reconnect:
+        if changed:
             logger.debug("Settings changed, reconnecting WebSocket with new parameters")
             await self._disconnect()
             await self._connect()
+
+        return changed

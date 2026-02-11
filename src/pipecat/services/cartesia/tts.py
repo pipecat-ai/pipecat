@@ -9,8 +9,9 @@
 import base64
 import json
 import warnings
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import AsyncGenerator, List, Literal, Optional
+from typing import Any, AsyncGenerator, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -27,6 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -191,6 +193,31 @@ class CartesiaEmotion(str, Enum):
     DETERMINED = "determined"
 
 
+@dataclass
+class CartesiaTTSSettings(TTSSettings):
+    """Typed settings for Cartesia TTS services.
+
+    Parameters:
+        output_container: Audio container format (e.g. "raw").
+        output_encoding: Audio encoding format (e.g. "pcm_s16le").
+        output_sample_rate: Audio sample rate in Hz.
+        speed: Voice speed control for non-Sonic-3 models (literal values).
+        emotion: List of emotion controls for non-Sonic-3 models.
+        generation_config: Generation configuration for Sonic-3 models. Includes volume,
+            speed (numeric), and emotion (string) parameters.
+        pronunciation_dict_id: The ID of the pronunciation dictionary to use for
+            custom pronunciations.
+    """
+
+    output_container: str = field(default_factory=lambda: NOT_GIVEN)
+    output_encoding: str = field(default_factory=lambda: NOT_GIVEN)
+    output_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+    speed: str = field(default_factory=lambda: NOT_GIVEN)
+    emotion: List[str] = field(default_factory=lambda: NOT_GIVEN)
+    generation_config: GenerationConfig = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict_id: str = field(default_factory=lambda: NOT_GIVEN)
+
+
 class CartesiaTTSService(AudioContextWordTTSService):
     """Cartesia TTS service with WebSocket streaming and word timestamps.
 
@@ -289,22 +316,20 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self._api_key = api_key
         self._cartesia_version = cartesia_version
         self._url = url
-        self._settings = {
-            "output_format": {
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
-            "language": self.language_to_service_language(params.language)
+        self._settings: CartesiaTTSSettings = CartesiaTTSSettings(
+            output_container=container,
+            output_encoding=encoding,
+            output_sample_rate=0,
+            language=self.language_to_service_language(params.language)
             if params.language
             else None,
-            "speed": params.speed,
-            "emotion": params.emotion,
-            "generation_config": params.generation_config,
-            "pronunciation_dict_id": params.pronunciation_dict_id,
-        }
+            speed=params.speed,
+            emotion=params.emotion,
+            generation_config=params.generation_config,
+            pronunciation_dict_id=params.pronunciation_dict_id,
+        )
         self.set_model_name(model)
-        self.set_voice(voice_id)
+        self._voice_id = voice_id
 
         self._context_id = None
         self._receive_task = None
@@ -316,16 +341,6 @@ class CartesiaTTSService(AudioContextWordTTSService):
             True, as Cartesia service supports metrics generation.
         """
         return True
-
-    async def set_model(self, model: str):
-        """Set the TTS model.
-
-        Args:
-            model: The model name to use for synthesis.
-        """
-        self._model_id = model
-        await super().set_model(model)
-        logger.info(f"Switching TTS model to: [{model}]")
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to Cartesia language format.
@@ -391,7 +406,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         Returns:
             List of (word, start_time) tuples processed for the language.
         """
-        current_language = self._settings.get("language")
+        current_language = self._settings.language
 
         # Check if this is a CJK language (if language is None, treat as non-CJK)
         if current_language and self._is_cjk_language(current_language):
@@ -414,7 +429,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         voice_config["mode"] = "id"
         voice_config["id"] = self._voice_id
 
-        if self._settings["emotion"]:
+        if is_given(self._settings.emotion) and self._settings.emotion:
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -423,8 +438,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                     stacklevel=2,
                 )
             voice_config["__experimental_controls"] = {}
-            if self._settings["emotion"]:
-                voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
+            voice_config["__experimental_controls"]["emotion"] = self._settings.emotion
 
         msg = {
             "transcript": text,
@@ -432,24 +446,28 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "context_id": self._context_id,
             "model_id": self.model_name,
             "voice": voice_config,
-            "output_format": self._settings["output_format"],
+            "output_format": {
+                "container": self._settings.output_container,
+                "encoding": self._settings.output_encoding,
+                "sample_rate": self._settings.output_sample_rate,
+            },
             "add_timestamps": add_timestamps,
             "use_original_timestamps": False if self.model_name == "sonic" else True,
         }
 
-        if self._settings["language"]:
-            msg["language"] = self._settings["language"]
+        if is_given(self._settings.language) and self._settings.language:
+            msg["language"] = self._settings.language
 
-        if self._settings["speed"]:
-            msg["speed"] = self._settings["speed"]
+        if is_given(self._settings.speed) and self._settings.speed:
+            msg["speed"] = self._settings.speed
 
-        if self._settings["generation_config"]:
-            msg["generation_config"] = self._settings["generation_config"].model_dump(
+        if is_given(self._settings.generation_config) and self._settings.generation_config:
+            msg["generation_config"] = self._settings.generation_config.model_dump(
                 exclude_none=True
             )
 
-        if self._settings["pronunciation_dict_id"]:
-            msg["pronunciation_dict_id"] = self._settings["pronunciation_dict_id"]
+        if is_given(self._settings.pronunciation_dict_id) and self._settings.pronunciation_dict_id:
+            msg["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
 
         return json.dumps(msg)
 
@@ -460,7 +478,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["output_format"]["sample_rate"] = self.sample_rate
+        self._settings.output_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -694,21 +712,21 @@ class CartesiaHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._cartesia_version = cartesia_version
-        self._settings = {
-            "output_format": {
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
-            "language": self.language_to_service_language(params.language)
+        self._settings: CartesiaTTSSettings = CartesiaTTSSettings(
+            model=model,
+            voice=voice_id,
+            output_container=container,
+            output_encoding=encoding,
+            output_sample_rate=0,
+            language=self.language_to_service_language(params.language)
             if params.language
             else None,
-            "speed": params.speed,
-            "emotion": params.emotion,
-            "generation_config": params.generation_config,
-            "pronunciation_dict_id": params.pronunciation_dict_id,
-        }
-        self.set_voice(voice_id)
+            speed=params.speed,
+            emotion=params.emotion,
+            generation_config=params.generation_config,
+            pronunciation_dict_id=params.pronunciation_dict_id,
+        )
+        self._voice_id = voice_id
         self.set_model_name(model)
 
         self._client = AsyncCartesia(
@@ -742,7 +760,7 @@ class CartesiaHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["output_format"]["sample_rate"] = self.sample_rate
+        self._settings.output_sample_rate = self.sample_rate
 
     async def stop(self, frame: EndFrame):
         """Stop the Cartesia HTTP TTS service.
@@ -778,7 +796,7 @@ class CartesiaHttpTTSService(TTSService):
         try:
             voice_config = {"mode": "id", "id": self._voice_id}
 
-            if self._settings["emotion"]:
+            if is_given(self._settings.emotion) and self._settings.emotion:
                 with warnings.catch_warnings():
                     warnings.simplefilter("always")
                     warnings.warn(
@@ -786,30 +804,39 @@ class CartesiaHttpTTSService(TTSService):
                         DeprecationWarning,
                         stacklevel=2,
                     )
-                voice_config["__experimental_controls"] = {"emotion": self._settings["emotion"]}
+                voice_config["__experimental_controls"] = {"emotion": self._settings.emotion}
 
             await self.start_ttfb_metrics()
+
+            output_format = {
+                "container": self._settings.output_container,
+                "encoding": self._settings.output_encoding,
+                "sample_rate": self._settings.output_sample_rate,
+            }
 
             payload = {
                 "model_id": self._model_name,
                 "transcript": text,
                 "voice": voice_config,
-                "output_format": self._settings["output_format"],
+                "output_format": output_format,
             }
 
-            if self._settings["language"]:
-                payload["language"] = self._settings["language"]
+            if is_given(self._settings.language) and self._settings.language:
+                payload["language"] = self._settings.language
 
-            if self._settings["speed"]:
-                payload["speed"] = self._settings["speed"]
+            if is_given(self._settings.speed) and self._settings.speed:
+                payload["speed"] = self._settings.speed
 
-            if self._settings["generation_config"]:
-                payload["generation_config"] = self._settings["generation_config"].model_dump(
+            if is_given(self._settings.generation_config) and self._settings.generation_config:
+                payload["generation_config"] = self._settings.generation_config.model_dump(
                     exclude_none=True
                 )
 
-            if self._settings["pronunciation_dict_id"]:
-                payload["pronunciation_dict_id"] = self._settings["pronunciation_dict_id"]
+            if (
+                is_given(self._settings.pronunciation_dict_id)
+                and self._settings.pronunciation_dict_id
+            ):
+                payload["pronunciation_dict_id"] = self._settings.pronunciation_dict_id
 
             yield TTSStartedFrame(context_id=context_id)
 
