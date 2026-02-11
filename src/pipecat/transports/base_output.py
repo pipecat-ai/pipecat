@@ -237,6 +237,18 @@ class BaseOutputTransport(FrameProcessor):
         else:
             await self._write_dtmf_audio(frame)
 
+    async def write_transport_frame(self, frame: Frame):
+        """Handle a queued frame after preceding audio has been sent.
+
+        Override in transport subclasses to handle custom frame types that
+        flow through the audio queue. Called by the media sender after the
+        frame has waited for any preceding audio to finish.
+
+        Args:
+            frame: The frame to handle.
+        """
+        pass
+
     def _supports_native_dtmf(self) -> bool:
         """Override in transport implementations that support native DTMF.
 
@@ -681,6 +693,8 @@ class BaseOutputTransport(FrameProcessor):
                 await self._transport.send_message(frame)
             elif isinstance(frame, OutputDTMFFrame):
                 await self._transport.write_dtmf(frame)
+            else:
+                await self._transport.write_transport_frame(frame)
 
         def _next_frame(self) -> AsyncGenerator[Frame, None]:
             """Generate the next frame for audio processing.
