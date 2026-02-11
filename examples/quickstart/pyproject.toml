@@ -18,6 +18,3 @@ dev = [
 line-length = 100
 [tool.ruff.lint]
 select = ["I"]
-
- [tool.uv.sources]
-pipecat-ai = { path = "../../", editable = true }
