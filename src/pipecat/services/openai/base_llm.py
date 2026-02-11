@@ -9,6 +9,7 @@
 import asyncio
 import base64
 import json
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
@@ -374,9 +375,19 @@ class BaseOpenAILLMService(LLMService):
             else self._stream_chat_completions_universal_context(context)
         )
 
-        # Use context manager to ensure stream is closed on cancellation/exception.
-        # Without this, CancelledError during iteration leaves the underlying socket open.
-        async with chunk_stream:
+        # Ensure stream is closed on cancellation/exception to prevent socket
+        # leaks. OpenAI's AsyncStream uses close(), async generators use aclose().
+        @asynccontextmanager
+        async def _closing(stream):
+            try:
+                yield stream
+            finally:
+                if hasattr(stream, "aclose"):
+                    await stream.aclose()
+                elif hasattr(stream, "close"):
+                    await stream.close()
+
+        async with _closing(chunk_stream):
             async for chunk in chunk_stream:
                 if chunk.usage:
                     cached_tokens = (
