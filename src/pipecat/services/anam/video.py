@@ -31,7 +31,6 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InputAudioRawFrame,
     InterruptionFrame,
     OutputImageRawFrame,
     OutputTransportReadyFrame,
@@ -70,7 +69,6 @@ class AnamVideoService(AIService):
         api_key: str,
         persona_config: PersonaConfig,
         ice_servers: Optional[list[dict]] = None,
-        enable_turnkey: bool = False,
         api_base_url: Optional[str] = None,
         api_version: Optional[str] = None,
         **kwargs,
@@ -81,7 +79,6 @@ class AnamVideoService(AIService):
             api_key: Anam API key for authentication.
             persona_config: Full persona configuration.
             ice_servers: Custom ICE servers for WebRTC (optional).
-            enable_turnkey: Whether to enable turnkey mode for Anam's all-in-one solution.
             api_base_url: Base URL for the Anam API.
             api_version: API version to use.
             **kwargs: Additional arguments passed to parent AIService.
@@ -90,7 +87,6 @@ class AnamVideoService(AIService):
         self._api_key = api_key
         self._persona_config = persona_config
         self._ice_servers = ice_servers
-        self._is_turnkey_session = enable_turnkey
         self._api_base_url = api_base_url
         self._api_version = api_version
 
@@ -120,7 +116,6 @@ class AnamVideoService(AIService):
         await super().setup(setup)
 
         # Create client options
-        # Enable audio input for turnkey solutions (Anam handles STT)
         options = ClientOptions(
             api_base_url=self._api_base_url or "https://api.anam.ai",
             ice_servers=self._ice_servers,
@@ -229,7 +224,6 @@ class AnamVideoService(AIService):
         Handles different types of frames to manage avatar interactions:
 
         - TTSAudioRawFrame: Processes audio for avatar speech (not pushed downstream)
-        - InputAudioRawFrame: Processes user audio (not pushed downstream for turnkey)
         - InterruptionFrame: Handles interruptions
         - OutputTransportReadyFrame: Sets transport ready flag
         - TTSStartedFrame: Starts TTFB metrics
@@ -244,13 +238,8 @@ class AnamVideoService(AIService):
 
         # Handle frames that should not be pushed downstream
         if isinstance(frame, TTSAudioRawFrame):
-            # Anam synchronises TTS with video frames for synchronised playback.
+            # Do not forward TTS audio downstream as Anam synchronises TTS with video frames for synchronised playback.
             await self._handle_audio_frame(frame)
-            return
-
-        if isinstance(frame, InputAudioRawFrame) and self._is_turnkey_session:
-            # Anam handles STT internally, so don't push raw audio downstream for turnkey sessions.
-            await self._handle_user_audio_frame(frame)
             return
 
         # Handle frames that need processing before being pushed downstream
@@ -402,30 +391,6 @@ class AnamVideoService(AIService):
             frame: The audio frame to process.
         """
         await self._queue.put(frame)
-
-    async def _handle_user_audio_frame(self, frame: InputAudioRawFrame):
-        """Handle user audio frame by sending it to Anam SDK - for turnkey sessions.
-
-        Anam handles STT internally. Send user audio through the SDK to Anam's service.
-        The SDK handles WebRTC transmission and format conversion internally.
-        This frame should not be pushed in the pipeline as it is not consumable downstream.
-
-        Args:
-            frame: The user audio frame to process (InputAudioRawFrame).
-        """
-        if self._anam_session is None:
-            return
-
-        try:
-            # Send raw audio samples to SDK for WebRTC transport to Anam's service
-            self._anam_session.send_user_audio(
-                audio_bytes=frame.audio,
-                sample_rate=frame.sample_rate,
-                num_channels=frame.num_channels,
-            )
-        except Exception as e:
-            logger.error(f"Failed to send user audio to Anam SDK: {e}")
-            await self.push_error(ErrorFrame(error=f"Failed to send user audio: {e}"))
 
     async def _send_task_handler(self):
         """Handle sending audio frames to the Anam client.

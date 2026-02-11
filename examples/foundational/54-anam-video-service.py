@@ -93,6 +93,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
     avatar_id = os.getenv("ANAM_AVATAR_ID", "").strip().strip('"')
+
+    # Create ephemeral persona config with only avatar_id set and audio passthrough enabled.
+    # This completely disables Anam's orchestration layer and feeds the TTS directly to the avatar generation.
     persona_config = PersonaConfig(
         avatar_id=avatar_id,
         enable_audio_passthrough=True,
