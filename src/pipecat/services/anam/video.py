@@ -100,8 +100,6 @@ class AnamVideoService(AIService):
         self._is_interrupting = False
         self._transport_ready = False
         self._session_ready_event = asyncio.Event()
-        self._audio_chunk_size = 0
-        self._event_id = None
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the Anam video service with necessary configuration.
@@ -212,7 +210,6 @@ class AnamVideoService(AIService):
         await self._cancel_audio_task()
         await self._cancel_send_task()
         self._agent_audio_stream = None
-        self._event_id = None
         self._is_interrupting = False
         self._transport_ready = False
         self._client = None
@@ -347,7 +344,7 @@ class AnamVideoService(AIService):
 
         Manages the interruption flow by:
         1. Setting the interruption flag
-        2. Signaling the session to interrupt current speech
+        2. Signaling the session to interrupt current speech and signal end_sequence
         3. Cancelling ongoing audio sending tasks
         4. Creating a new send task
         """
@@ -382,34 +379,20 @@ class AnamVideoService(AIService):
             self._send_task = None
 
     async def _handle_audio_frame(self, frame: TTSAudioRawFrame):
-        """Queue an audio frame for processing.
-
-        Places the audio frame in the processing queue for synchronized
-        delivery to the Anam service.
-
-        Args:
-            frame: The audio frame to process.
-        """
+        """Queue an audio frame for sending to Anam."""
         await self._queue.put(frame)
 
     async def _send_task_handler(self):
         """Handle sending audio frames to the Anam client.
 
-        Continuously processes audio frames from the queue and sends them to the
-        Anam client. Handles timeouts and silence detection for proper audio
-        streaming management.
+        Sends each TTS frame's audio directly to the backend without buffering.
+        Sends end_sequence when queue is empty.
 
         Anam works best with 16 bit PCM 24kHz mono audio.
-        Audio send to Anam is returned in-sync with the avatar without any resampling.
-        Sample rates lower than 24kHz will result in poor Avatar performance.
-        Sample rates higher than 24kHz might impact latency without any noticeable improvement in audio quality.
         """
         if not self._agent_audio_stream:
             logger.error("Agent audio stream not initialized")
             return
-
-        audio_buffer = bytearray()
-        self._event_id = None
 
         while True:
             try:
@@ -417,31 +400,12 @@ class AnamVideoService(AIService):
                 if self._is_interrupting:
                     break
 
-                if isinstance(frame, TTSAudioRawFrame):
-                    # Starting a new inference
-                    if self._event_id is None:
-                        self._event_id = str(frame.id)
+                if isinstance(frame, TTSAudioRawFrame) and frame.audio:
+                    await self._agent_audio_stream.send_audio_chunk(frame.audio)
 
-                    # 500ms of audio: sample_rate * 0.5 seconds * 2 bytes per sample (16-bit)
-                    self._audio_chunk_size = int(frame.sample_rate * 0.5 * 2)
-
-                    audio_buffer.extend(frame.audio)
-
-                    # Send chunks when we have enough data
-                    while len(audio_buffer) >= self._audio_chunk_size:
-                        chunk = bytes(audio_buffer[: self._audio_chunk_size])
-                        audio_buffer = audio_buffer[self._audio_chunk_size :]
-                        await self._agent_audio_stream.send_audio_chunk(chunk)
-
-                self._queue.task_done()
             except asyncio.TimeoutError:
-                # Bot has stopped speaking - signal end of sequence
-                if self._event_id is not None and self._agent_audio_stream:
-                    if len(audio_buffer) > 0:
-                        await self._agent_audio_stream.send_audio_chunk(bytes(audio_buffer))
-                    audio_buffer.clear()
+                if self._agent_audio_stream:
                     await self._agent_audio_stream.end_sequence()
-                    self._event_id = None
             except Exception as e:
                 logger.error(f"Error in audio send task: {e}")
                 await self.push_error(ErrorFrame(error=f"Anam audio send error: {e}"))
