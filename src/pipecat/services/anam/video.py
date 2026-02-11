@@ -3,12 +3,11 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
-
 """Anam video service implementation for Pipecat.
 
-This module provides integration with Anam.ai for creating conversational
-AI applications with avatars. It manages conversation sessions and provides
-real-time audio/video streaming capabilities through the Anam API.
+This module provides integration with Anam.ai for creating conversational AI applications with
+avatars. It manages conversation sessions and provides real-time audio/video streaming capabilities
+through the Anam API.
 """
 
 import asyncio
@@ -378,10 +377,11 @@ class AnamVideoService(AIService):
     async def _send_task_handler(self):
         """Handle sending audio frames to the Anam client.
 
-        Sends each TTS frame's audio directly to the backend without buffering.
-        Sends end_sequence when all audio frames have been sent.
+        Sends each TTS frame's audio directly to the backend without buffering. Sends end_sequence
+        when all audio frames have been sent.
 
-        Anam recommends 16 bit PCM 24kHz mono audio fo best trade-off between latency, audio quality and avatar performance.
+        Anam accepts any sample rate but recommends 16 bit PCM 24kHz mono audio for best trade-off
+        between latency, audio quality and avatar performance.
         """
         if not self._agent_audio_stream:
             logger.error("Agent audio stream not initialized")
