@@ -25,7 +25,6 @@ from pydantic import BaseModel
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
-    ControlFrame,
     DataFrame,
     EndFrame,
     Frame,
@@ -214,34 +213,14 @@ class DailySIPReferFrame(DataFrame):
 
 
 @dataclass
-class DailyUpdateRemoteParticipantsFrame(ControlFrame):
+class DailyUpdateRemoteParticipantsFrame(DataFrame):
     """Frame to update remote participants in Daily calls.
-
-    .. deprecated:: 0.0.87
-        `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a future version.
-        Create your own custom frame and use a custom processor to handle it or use, for example,
-        `on_after_push_frame` event instead in the output transport.
 
     Parameters:
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
-    remote_participants: Mapping[str, Any] = None
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "DailyUpdateRemoteParticipantsFrame is deprecated and will be removed in a future version."
-                "Instead, create your own custom frame and handle it in the "
-                '`@transport.output().event_handler("on_after_push_frame")` event handler or a '
-                "custom processor.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+    remote_participants: Mapping[str, Any] = field(default_factory=dict)
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -1977,18 +1956,6 @@ class DailyOutputTransport(BaseOutputTransport):
         # Leave the room.
         await self._client.leave()
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process outgoing frames, including transport messages.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame flow in the pipeline.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, DailyUpdateRemoteParticipantsFrame):
-            await self._client.update_remote_participants(frame.remote_participants)
-
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
     ):
@@ -1999,7 +1966,7 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         error = await self._client.send_message(frame)
         if error:
-            await self.push_error(f"{self}: Unable to send message: {error}")
+            await self.push_error(f"Unable to send message: {error}")
 
     async def register_video_destination(self, destination: str):
         """Register a video output destination.
@@ -2051,11 +2018,15 @@ class DailyOutputTransport(BaseOutputTransport):
         if isinstance(frame, DailySIPTransferFrame):
             error = await self._client.sip_call_transfer(frame.settings)
             if error:
-                await self.push_error(f"{self}: Unable to transfer SIP call: {error}")
+                await self.push_error(f"Unable to transfer SIP call: {error}")
         elif isinstance(frame, DailySIPReferFrame):
             error = await self._client.sip_refer(frame.settings)
             if error:
-                await self.push_error(f"{self}: Unable to perform SIP REFER: {error}")
+                await self.push_error(f"Unable to perform SIP REFER: {error}")
+        elif isinstance(frame, DailyUpdateRemoteParticipantsFrame):
+            error = await self._client.update_remote_participants(frame.remote_participants)
+            if error:
+                await self.push_error(f"Unable to update remote participants: {error}")
 
     def _supports_native_dtmf(self) -> bool:
         """Daily supports native DTMF via telephone events.
