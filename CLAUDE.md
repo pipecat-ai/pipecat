@@ -153,11 +153,3 @@ When adding a new service:
 
 Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
 
-## Pull Requests
-
-To submit a PR you should:
-
-1. Create a new branch. Ask the user if they want a specific prefix for the branch name.
-2. Commit the changes using multiple commits if the changes are unrelated.
-3. After creating the PR, use `/changelog <pr_number>` to generate the changelog files, commit and push them.
-4. Use `/pr-description <pr_number>` to update the PR description.
