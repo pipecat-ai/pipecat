@@ -582,7 +582,6 @@ class GoogleSTTService(STTService):
         Args:
             model: The new recognition model to use.
         """
-        logger.debug(f"Switching STT model to: {model}")
         await super().set_model(model)
         self._settings["model"] = model
         # Recreate stream with new model

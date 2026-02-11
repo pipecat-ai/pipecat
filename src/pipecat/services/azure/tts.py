@@ -7,6 +7,7 @@
 """Azure Cognitive Services Text-to-Speech service implementations."""
 
 import asyncio
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -25,6 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import TTSService, WordTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -63,6 +65,31 @@ def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputForma
         48000: SpeechSynthesisOutputFormat.Raw48Khz16BitMonoPcm,
     }
     return sample_rate_map.get(sample_rate, SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm)
+
+
+@dataclass
+class AzureTTSSettings(TTSSettings):
+    """Typed settings for Azure TTS services.
+
+    Parameters:
+        emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
+        language: Language for synthesis. Defaults to English (US).
+        pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
+        rate: Speech rate adjustment (e.g., "1.0", "1.25", "slow", "fast").
+        role: Voice role for expression (e.g., "YoungAdultFemale").
+        style: Speaking style (e.g., "cheerful", "sad", "excited").
+        style_degree: Intensity of the speaking style (0.01 to 2.0).
+        volume: Volume level (e.g., "+20%", "loud", "x-soft").
+    """
+
+    emphasis: str = field(default_factory=lambda: NOT_GIVEN)
+    language: str = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str = field(default_factory=lambda: NOT_GIVEN)
+    rate: str = field(default_factory=lambda: NOT_GIVEN)
+    role: str = field(default_factory=lambda: NOT_GIVEN)
+    style: str = field(default_factory=lambda: NOT_GIVEN)
+    style_degree: str = field(default_factory=lambda: NOT_GIVEN)
+    volume: str = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureBaseTTSService:
@@ -126,18 +153,18 @@ class AzureBaseTTSService:
         """
         params = params or AzureBaseTTSService.InputParams()
 
-        self._settings = {
-            "emphasis": params.emphasis,
-            "language": self.language_to_service_language(params.language)
+        self._settings: AzureTTSSettings = AzureTTSSettings(
+            emphasis=params.emphasis,
+            language=self.language_to_service_language(params.language)
             if params.language
             else "en-US",
-            "pitch": params.pitch,
-            "rate": params.rate,
-            "role": params.role,
-            "style": params.style,
-            "style_degree": params.style_degree,
-            "volume": params.volume,
-        }
+            pitch=params.pitch,
+            rate=params.rate,
+            role=params.role,
+            style=params.style,
+            style_degree=params.style_degree,
+            volume=params.volume,
+        )
 
         self._api_key = api_key
         self._region = region
@@ -156,7 +183,7 @@ class AzureBaseTTSService:
         return language_to_azure_language(language)
 
     def _construct_ssml(self, text: str) -> str:
-        language = self._settings["language"]
+        language = self._settings.language
 
         # Escape special characters
         escaped_text = self._escape_text(text)
@@ -169,38 +196,38 @@ class AzureBaseTTSService:
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
         )
 
-        if self._settings["style"]:
-            ssml += f"<mstts:express-as style='{self._settings['style']}'"
-            if self._settings["style_degree"]:
-                ssml += f" styledegree='{self._settings['style_degree']}'"
-            if self._settings["role"]:
-                ssml += f" role='{self._settings['role']}'"
+        if self._settings.style:
+            ssml += f"<mstts:express-as style='{self._settings.style}'"
+            if self._settings.style_degree:
+                ssml += f" styledegree='{self._settings.style_degree}'"
+            if self._settings.role:
+                ssml += f" role='{self._settings.role}'"
             ssml += ">"
 
         prosody_attrs = []
-        if self._settings["rate"]:
-            prosody_attrs.append(f"rate='{self._settings['rate']}'")
-        if self._settings["pitch"]:
-            prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
-        if self._settings["volume"]:
-            prosody_attrs.append(f"volume='{self._settings['volume']}'")
+        if self._settings.rate:
+            prosody_attrs.append(f"rate='{self._settings.rate}'")
+        if self._settings.pitch:
+            prosody_attrs.append(f"pitch='{self._settings.pitch}'")
+        if self._settings.volume:
+            prosody_attrs.append(f"volume='{self._settings.volume}'")
 
         # Only wrap in prosody tag if there are prosody attributes
         if prosody_attrs:
             ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
-        if self._settings["emphasis"]:
-            ssml += f"<emphasis level='{self._settings['emphasis']}'>"
+        if self._settings.emphasis:
+            ssml += f"<emphasis level='{self._settings.emphasis}'>"
 
         ssml += escaped_text
 
-        if self._settings["emphasis"]:
+        if self._settings.emphasis:
             ssml += "</emphasis>"
 
         if prosody_attrs:
             ssml += "</prosody>"
 
-        if self._settings["style"]:
+        if self._settings.style:
             ssml += "</mstts:express-as>"
 
         ssml += "</voice></speak>"
@@ -314,7 +341,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             subscription=self._api_key,
             region=self._region,
         )
-        self._speech_config.speech_synthesis_language = self._settings["language"]
+        self._speech_config.speech_synthesis_language = self._settings.language
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )
@@ -364,7 +391,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         Returns:
             True if the language is CJK, False otherwise.
         """
-        language = self._settings.get("language", "").lower()
+        language = (self._settings.language if self._settings.language else "").lower()
         # Check if language starts with CJK language codes
         return language.startswith(("zh", "ja", "ko", "cmn", "yue", "wuu"))
 
@@ -735,7 +762,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             subscription=self._api_key,
             region=self._region,
         )
-        self._speech_config.speech_synthesis_language = self._settings["language"]
+        self._speech_config.speech_synthesis_language = self._settings.language
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )

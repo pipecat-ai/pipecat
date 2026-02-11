@@ -13,7 +13,8 @@ text-to-speech API for real-time audio synthesis.
 import asyncio
 import base64
 import json
-from typing import Any, AsyncGenerator, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -34,6 +35,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -70,6 +72,23 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
+
+
+@dataclass
+class NeuphonicTTSSettings(TTSSettings):
+    """Typed settings for Neuphonic TTS service.
+
+    Parameters:
+        lang_code: Neuphonic language code.
+        speed: Speech speed multiplier. Defaults to 1.0.
+        encoding: Audio encoding format.
+        sampling_rate: Audio sample rate.
+    """
+
+    lang_code: str = field(default_factory=lambda: NOT_GIVEN)
+    speed: float = field(default_factory=lambda: NOT_GIVEN)
+    encoding: str = field(default_factory=lambda: NOT_GIVEN)
+    sampling_rate: int = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
@@ -127,13 +146,13 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
         self._api_key = api_key
         self._url = url
-        self._settings = {
-            "lang_code": self.language_to_service_language(params.language),
-            "speed": params.speed,
-            "encoding": encoding,
-            "sampling_rate": sample_rate,
-        }
-        self.set_voice(voice_id)
+        self._settings: NeuphonicTTSSettings = NeuphonicTTSSettings(
+            lang_code=self.language_to_service_language(params.language),
+            speed=params.speed,
+            encoding=encoding,
+            sampling_rate=sample_rate,
+        )
+        self._voice_id = voice_id
 
         self._cumulative_time = 0
 
@@ -160,15 +179,14 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         return language_to_neuphonic_lang_code(language)
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect with new configuration."""
-        if "voice_id" in settings:
-            self.set_voice(settings["voice_id"])
-
-        await super()._update_settings(settings)
-        await self._disconnect()
-        await self._connect()
-        logger.info(f"Switching TTS to settings: [{self._settings}]")
+    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
+        """Apply a typed settings update and reconnect with new configuration."""
+        changed = await super()._update_settings_from_typed(update)
+        if changed:
+            await self._disconnect()
+            await self._connect()
+            logger.info(f"Switching TTS to settings: [{self._settings}]")
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the Neuphonic TTS service.
@@ -266,7 +284,10 @@ class NeuphonicTTSService(InterruptibleTTSService):
             logger.debug("Connecting to Neuphonic")
 
             tts_config = {
-                **self._settings,
+                "lang_code": self._settings.lang_code,
+                "speed": self._settings.speed,
+                "encoding": self._settings.encoding,
+                "sampling_rate": self._settings.sampling_rate,
                 "voice_id": self._voice_id,
             }
 
@@ -275,7 +296,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 if value is not None:
                     query_params.append(f"{key}={value}")
 
-            url = f"{self._url}/speak/{self._settings['lang_code']}"
+            url = f"{self._url}/speak/{self._settings.lang_code}"
             if query_params:
                 url += f"?{'&'.join(query_params)}"
 
@@ -429,7 +450,7 @@ class NeuphonicHttpTTSService(TTSService):
         self._lang_code = self.language_to_service_language(params.language) or "en"
         self._speed = params.speed
         self._encoding = encoding
-        self.set_voice(voice_id)
+        self._voice_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

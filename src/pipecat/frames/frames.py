@@ -42,6 +42,7 @@ from pipecat.utils.utils import obj_count, obj_id
 if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.services.settings import ServiceSettings
 
 
 class DeprecatedKeypadEntry:
@@ -2112,13 +2113,17 @@ class TTSStoppedFrame(ControlFrame):
 class ServiceUpdateSettingsFrame(ControlFrame):
     """Base frame for updating service settings.
 
-    A control frame containing a request to update service settings.
+    Supports both the legacy ``settings`` dict and the new typed ``update``
+    object.  When both are provided, ``update`` takes precedence.
 
     Parameters:
-        settings: Dictionary of setting name to value mappings.
+        settings: Dictionary of setting name to value mappings (legacy).
+        update: Typed :class:`~pipecat.services.settings.ServiceSettings`
+            object describing the delta to apply.
     """
 
-    settings: Mapping[str, Any]
+    settings: Mapping[str, Any] = field(default_factory=dict)
+    update: Optional["ServiceSettings"] = None
 
 
 @dataclass

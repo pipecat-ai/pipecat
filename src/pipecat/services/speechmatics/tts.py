@@ -95,7 +95,7 @@ class SpeechmaticsTTSService(TTSService):
         self._params = params or SpeechmaticsTTSService.InputParams()
 
         # Set voice from constructor parameter
-        self.set_voice(voice_id)
+        self._voice_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
