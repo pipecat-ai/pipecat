@@ -153,6 +153,3 @@ When adding a new service:
 
 Test utilities live in `src/pipecat/tests/utils.py`. Use `run_test()` to send frames through a pipeline and assert expected output frames in each direction. Use `SleepFrame(sleep=N)` to add delays between frames.
 
-## Pull Requests
-
-After creating a PR, use `/changelog <pr_number>` to generate the changelog file and `/pr-description <pr_number>` to update the PR description.
