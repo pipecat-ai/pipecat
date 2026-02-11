@@ -15,7 +15,7 @@ import asyncio
 import time
 from concurrent.futures import CancelledError as FuturesCancelledError
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Tuple
 
 import aiohttp
@@ -26,6 +26,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
     ControlFrame,
+    DataFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -180,6 +181,36 @@ class DailyInputTransportMessageUrgentFrame(DailyInputTransportMessageFrame):
                 DeprecationWarning,
                 stacklevel=2,
             )
+
+
+@dataclass
+class DailySIPTransferFrame(DataFrame):
+    """SIP call transfer frame for transport queuing.
+
+    A SIP call transfer that will be queued. The transfer will happen after any
+    preceding audio finishes playing, allowing the bot to complete its current
+    utterance before the transfer occurs.
+
+    Parameters:
+        settings: SIP call transfer settings.
+    """
+
+    settings: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DailySIPReferFrame(DataFrame):
+    """SIP REFER frame for transport queuing.
+
+    A SIP REFER that will be queued. The REFER will happen after any preceding
+    audio finishes playing, allowing the bot to complete its current utterance
+    before the REFER occurs.
+
+    Parameters:
+        settings: SIP REFER settings.
+    """
+
+    settings: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -1968,7 +1999,7 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         error = await self._client.send_message(frame)
         if error:
-            logger.error(f"Unable to send message: {error}")
+            await self.push_error(f"{self}: Unable to send message: {error}")
 
     async def register_video_destination(self, destination: str):
         """Register a video output destination.
@@ -2010,6 +2041,21 @@ class DailyOutputTransport(BaseOutputTransport):
             True if the video frame was written successfully, False otherwise.
         """
         return await self._client.write_video_frame(frame)
+
+    async def write_transport_frame(self, frame: Frame):
+        """Handle queued SIP frames after preceding audio has been sent.
+
+        Args:
+            frame: The frame to handle.
+        """
+        if isinstance(frame, DailySIPTransferFrame):
+            error = await self._client.sip_call_transfer(frame.settings)
+            if error:
+                await self.push_error(f"{self}: Unable to transfer SIP call: {error}")
+        elif isinstance(frame, DailySIPReferFrame):
+            error = await self._client.sip_refer(frame.settings)
+            if error:
+                await self.push_error(f"{self}: Unable to perform SIP REFER: {error}")
 
     def _supports_native_dtmf(self) -> bool:
         """Daily supports native DTMF via telephone events.
