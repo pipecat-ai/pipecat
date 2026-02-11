@@ -16,11 +16,16 @@ Inworld’s text-to-speech (TTS) models offer ultra-realistic, context-aware spe
 import asyncio
 import base64
 import json
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 import aiohttp
 import websockets
 from loguru import logger
+
+from pipecat import version as pipecat_version
+
+USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
 
 try:
@@ -236,9 +241,12 @@ class InworldHttpTTSService(WordTTSService):
         # Use WORD timestamps for simplicity and correct spacing/capitalization
         payload["timestampType"] = self._timestamp_type
 
+        request_id = str(uuid.uuid4())
         headers = {
             "Authorization": f"Basic {self._api_key}",
             "Content-Type": "application/json",
+            "X-User-Agent": USER_AGENT,
+            "X-Request-Id": request_id,
         }
 
         try:
@@ -252,7 +260,7 @@ class InworldHttpTTSService(WordTTSService):
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Inworld API error: {error_text}")
+                    logger.error(f"Inworld API error (request_id={request_id}): {error_text}")
                     yield ErrorFrame(error=f"Inworld API error: {error_text}")
                     return
 
@@ -693,8 +701,13 @@ class InworldTTSService(AudioContextWordTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            logger.debug("Connecting to Inworld WebSocket TTS")
-            headers = [("Authorization", f"Basic {self._api_key}")]
+            request_id = str(uuid.uuid4())
+            logger.debug(f"Connecting to Inworld WebSocket TTS (request_id={request_id})")
+            headers = [
+                ("Authorization", f"Basic {self._api_key}"),
+                ("X-User-Agent", USER_AGENT),
+                ("X-Request-Id", request_id),
+            ]
             self._websocket = await websocket_connect(self._url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
