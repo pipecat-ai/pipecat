@@ -77,16 +77,19 @@ class AICModelManager:
         """Run the actual load (file or download). Separate to allow create_task and deduplication."""
         if model_path is not None:
             logger.debug(f"Loading AIC model from file: {model_path}")
-            return Model.from_file(str(model_path))
+            model_path_str = str(model_path)
 
-        if model_id is not None and model_download_dir is not None:
+        elif model_id is not None and model_download_dir is not None:
             logger.debug(f"Downloading AIC model: {model_id}")
             model_download_dir.mkdir(parents=True, exist_ok=True)
-            path = await Model.download_async(model_id, str(model_download_dir))
-            logger.debug(f"Model downloaded to: {path}")
-            return Model.from_file(path)
+            model_path_str = await Model.download_async(model_id, str(model_download_dir))
+            logger.debug(f"Model downloaded to: {model_path_str}")
 
-        raise ValueError("Unexpected model_path or (model_id and model_download_dir) state.")
+        else:
+            raise ValueError("Unexpected model_path or (model_id and model_download_dir) state.")
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: Model.from_file(model_path_str))
 
     @staticmethod
     def _get_cache_key(
