@@ -452,6 +452,72 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(AGGREGATION_TIMEOUT + 0.1)
         self.assertTrue(should_start)
 
+    async def test_finalized_transcript_does_not_trigger_early_with_slow_stt(self):
+        """Test that a finalized transcript arriving after user_speech_timeout
+        but before the full timeout does not trigger immediately.
+
+        This reproduces a race condition where:
+        - STT has high latency (effective_stt_wait > user_speech_timeout)
+        - User pauses briefly, VAD fires stop
+        - The full timeout = max(effective_stt_wait, user_speech_timeout)
+        - The finalized transcript arrives after user_speech_timeout from VAD stop
+          but before the full timeout
+        - The user resumes speaking before the full timeout
+
+        Previously, the early trigger path would fire because
+        time.time() - vad_stopped_time >= user_speech_timeout, even though the
+        user was about to resume speaking.
+        """
+        user_speech_timeout = 0.1
+        strategy = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=user_speech_timeout)
+        await strategy.setup(self.task_manager)
+
+        # Set high STT P99 latency so effective_stt_wait > user_speech_timeout
+        stt_timeout = 0.5
+        stop_secs = 0.1
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=stt_timeout)
+        )
+        # effective_stt_wait = max(0, 0.5 - 0.1) = 0.4
+        # timeout = max(0.4, 0.1) = 0.4
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S - user starts speaking
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+
+        # E - user pauses briefly
+        await strategy.process_frame(VADUserStoppedSpeakingFrame(stop_secs=stop_secs))
+
+        # Wait for user_speech_timeout to elapse but NOT the full timeout
+        await asyncio.sleep(user_speech_timeout + 0.05)  # 0.15s elapsed
+        self.assertIsNone(should_start)
+
+        # Finalized transcript arrives (simulating slow STT).
+        # At this point, elapsed from VAD stop (~0.15s) > user_speech_timeout (0.1s).
+        # The old code would trigger immediately here.
+        await strategy.process_frame(
+            TranscriptionFrame(text="Hello!", user_id="cat", timestamp="", finalized=True)
+        )
+
+        # Should NOT trigger — the full timeout (0.4s) hasn't elapsed yet,
+        # giving the user time to resume speaking
+        self.assertIsNone(should_start)
+
+        # User resumes speaking — this cancels the timeout
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+
+        # Wait well past the original timeout
+        await asyncio.sleep(0.5)
+
+        # Should still not have triggered — user resumed speaking
+        self.assertIsNone(should_start)
+
     async def test_sie_delay_it(self):
         strategy = await self._create_strategy()
 

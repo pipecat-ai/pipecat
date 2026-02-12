@@ -126,8 +126,26 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         self._text += frame.text
         if frame.finalized:
             self._transcript_finalized = True
-            # For finalized transcripts, check if we can trigger early
-            await self._maybe_trigger_user_turn_stopped()
+            # With the transcript finalized, we no longer need to wait for
+            # STT latency. If a timeout is running (from VAD stop), recalculate
+            # to use only user_speech_timeout, potentially shortening the wait.
+            if self._timeout_task and self._vad_stopped_time is not None:
+                elapsed = time.time() - self._vad_stopped_time
+                remaining = self._user_speech_timeout - elapsed
+                if remaining > 0:
+                    # Shorten timeout: replace STT+speech timeout with just
+                    # remaining speech timeout since STT is done.
+                    await self.task_manager.cancel_task(self._timeout_task)
+                    self._timeout_task = self.task_manager.create_task(
+                        self._timeout_handler(remaining), f"{self}::_timeout_handler"
+                    )
+                # If remaining <= 0: user_speech_timeout has elapsed, but the
+                # original timeout (which may include extra STT wait time) is
+                # still running. Let it complete naturally — this provides a
+                # buffer for VAD to detect any resumed speech before triggering.
+            elif self._timeout_task is None:
+                # Timeout already completed, check if we should trigger now
+                await self._maybe_trigger_user_turn_stopped()
 
         # Fallback: handle transcripts when no VAD stop was received.
         # This handles edge cases where transcripts arrive without VAD firing.
@@ -178,25 +196,10 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
         Conditions:
         - User is not currently speaking
         - We have transcription text
-        - Either the timeout has elapsed OR we have a finalized transcript
-          and user_speech_timeout has elapsed
+        - The timeout has fully elapsed (timeout task completed)
         """
         if self._vad_user_speaking or not self._text:
             return
 
-        # For finalized transcripts, check if user_speech_timeout has elapsed.
-        # If elapsed, trigger user turn stopped immediately. Else, wait for user resume
-        # speaking timeout.
-        if self._transcript_finalized and self._vad_stopped_time is not None:
-            elapsed = time.time() - self._vad_stopped_time
-            if elapsed >= self._user_speech_timeout:
-                # Cancel any remaining timeout since we're triggering now
-                if self._timeout_task:
-                    await self.task_manager.cancel_task(self._timeout_task)
-                    self._timeout_task = None
-                await self.trigger_user_turn_stopped()
-                return
-
-        # For non-finalized, only trigger if timeout task has completed
         if self._timeout_task is None:
             await self.trigger_user_turn_stopped()
