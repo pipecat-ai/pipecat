@@ -286,6 +286,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         if not self._run_in_parallel:
             await self._create_sequential_runner_task()
         self._tracing_enabled = frame.enable_tracing
+        self._tracing_context = frame.tracing_context
 
     async def stop(self, frame: EndFrame):
         """Stop the LLM service.

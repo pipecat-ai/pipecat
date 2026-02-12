@@ -42,6 +42,7 @@ from pipecat.utils.utils import obj_count, obj_id
 if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.utils.tracing.tracing_context import TracingContext
 
 
 class DeprecatedKeypadEntry:
@@ -1036,6 +1037,7 @@ class StartFrame(SystemFrame):
                 Use  `LLMUserAggregator`'s new `user_turn_strategies` parameter instead.
 
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
+        tracing_context: Pipeline-scoped tracing context for span hierarchy.
     """
 
     audio_in_sample_rate: int = 16000
@@ -1046,6 +1048,7 @@ class StartFrame(SystemFrame):
     enable_usage_metrics: bool = False
     interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
     report_only_initial_ttfb: bool = False
+    tracing_context: Optional["TracingContext"] = None
 
 
 @dataclass

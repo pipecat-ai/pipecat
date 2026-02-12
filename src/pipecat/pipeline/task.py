@@ -53,6 +53,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIObserverParams, RTVIProcessor
 from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
+from pipecat.utils.tracing.tracing_context import TracingContext
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
 HEARTBEAT_SECS = 1.0
@@ -290,10 +291,13 @@ class PipelineTask(BasePipelineTask):
         self._turn_tracking_observer: Optional[TurnTrackingObserver] = None
         self._user_bot_latency_observer: Optional[UserBotLatencyObserver] = None
         self._turn_trace_observer: Optional[TurnTraceObserver] = None
+        self._tracing_context: Optional[TracingContext] = None
         if self._enable_turn_tracking:
             self._turn_tracking_observer = TurnTrackingObserver()
             observers.append(self._turn_tracking_observer)
         if self._enable_tracing and self._turn_tracking_observer:
+            # Create pipeline-scoped tracing context
+            self._tracing_context = TracingContext()
             # Create latency observer for tracing
             self._user_bot_latency_observer = UserBotLatencyObserver()
             observers.append(self._user_bot_latency_observer)
@@ -303,6 +307,7 @@ class PipelineTask(BasePipelineTask):
                 latency_tracker=self._user_bot_latency_observer,
                 conversation_id=self._conversation_id,
                 additional_span_attributes=self._additional_span_attributes,
+                tracing_context=self._tracing_context,
             )
             observers.append(self._turn_trace_observer)
 
@@ -813,6 +818,7 @@ class PipelineTask(BasePipelineTask):
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             interruption_strategies=self._params.interruption_strategies,
+            tracing_context=self._tracing_context,
         )
         start_frame.metadata = self._create_start_metadata()
         await self._pipeline.queue_frame(start_frame)

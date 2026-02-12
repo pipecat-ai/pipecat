@@ -350,6 +350,7 @@ class TTSService(AIService):
         if self._push_stop_frames and not self._stop_frame_task:
             self._stop_frame_task = self.create_task(self._stop_frame_handler())
         self._tracing_enabled = frame.enable_tracing
+        self._tracing_context = frame.tracing_context
 
     async def stop(self, frame: EndFrame):
         """Stop the TTS service.

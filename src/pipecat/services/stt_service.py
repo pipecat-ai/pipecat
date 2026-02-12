@@ -203,6 +203,7 @@ class STTService(AIService):
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
         self._tracing_enabled = frame.enable_tracing
+        self._tracing_context = frame.tracing_context
 
     async def cleanup(self):
         """Clean up STT service resources."""
