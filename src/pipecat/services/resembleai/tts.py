@@ -70,6 +70,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
         """
         super().__init__(
             sample_rate=sample_rate,
+            supports_concurrent_tts=True,
             **kwargs,
         )
 
