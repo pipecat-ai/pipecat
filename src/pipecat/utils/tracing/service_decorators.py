@@ -82,11 +82,12 @@ def _get_parent_service_context(self):
     if not is_tracing_available():
         return None
 
-    # The parent span was created when Traceable was initialized and stored as self._span
+    # TODO: Remove this block and delete class_decorators.py once Traceable is removed.
+    # Legacy: support for classes inheriting from Traceable (currently unused, deprecated).
     if hasattr(self, "_span") and self._span:
         return trace.set_span_in_context(self._span)
 
-    # Fall back to conversation context if available
+    # Use the conversation context set by TurnTraceObserver via TracingContext.
     tracing_ctx = getattr(self, "_tracing_context", None)
     conversation_context = tracing_ctx.get_conversation_context() if tracing_ctx else None
     if conversation_context:
