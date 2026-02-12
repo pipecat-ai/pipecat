@@ -11,6 +11,7 @@ API. It supports real-time transcription with Voice Activity Detection (VAD) and
 can handle multiple audio formats for Indian language speech recognition.
 """
 
+import asyncio
 import base64
 from dataclasses import dataclass
 from typing import AsyncGenerator, Dict, Literal, Optional
@@ -239,6 +240,7 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        self._keepalive_task = None
 
         if self._vad_signals:
             self._register_event_handler("on_speech_started")
@@ -463,6 +465,10 @@ class SarvamSTTService(STTService):
             # Start receive task using Pipecat's task management
             self._receive_task = self.create_task(self._receive_task_handler())
 
+            # Start keepalive to prevent server idle timeout (~60s).
+            # Mirrors the pattern used in SarvamTTSService.
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
+
             logger.info("Connected to Sarvam successfully")
 
         except ApiError as e:
@@ -476,6 +482,10 @@ class SarvamSTTService(STTService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -508,6 +518,50 @@ class SarvamSTTService(STTService):
             await self._socket_client.start_listening()
         except Exception as e:
             await self.push_error(error_msg=f"Sarvam receive task error: {e}", exception=e)
+
+    async def _keepalive_task_handler(self):
+        """Send periodic silent audio to prevent Sarvam server idle timeout.
+
+        Sarvam's WebSocket server closes connections after ~60s of inactivity.
+        This mirrors the keepalive pattern used in SarvamTTSService (tts.py),
+        but sends silent audio through the SDK's public API instead of a raw
+        ``{"type": "ping"}``, since SarvamSTTService uses the SDK client
+        (not a raw WebSocket).
+
+        See: https://github.com/pipecat-ai/pipecat/issues/3699
+        """
+        KEEPALIVE_INTERVAL = 20  # seconds, matches SarvamTTSService
+        while True:
+            await asyncio.sleep(KEEPALIVE_INTERVAL)
+            await self._send_keepalive()
+
+    async def _send_keepalive(self):
+        """Send a silent audio chunk to keep the STT WebSocket alive."""
+        if not self._socket_client:
+            return
+        try:
+            # 100ms of silence at the configured sample rate (16-bit mono PCM)
+            num_bytes = int(self.sample_rate * 0.1) * 2
+            silent_audio = base64.b64encode(b"\x00" * num_bytes).decode("utf-8")
+
+            encoding = (
+                self._input_audio_codec
+                if self._input_audio_codec.startswith("audio/")
+                else f"audio/{self._input_audio_codec}"
+            )
+
+            method_kwargs = {
+                "audio": silent_audio,
+                "encoding": encoding,
+                "sample_rate": self.sample_rate,
+            }
+
+            if self._config.use_translate_method:
+                await self._socket_client.translate(**method_kwargs)
+            else:
+                await self._socket_client.transcribe(**method_kwargs)
+        except Exception as e:
+            logger.debug(f"Sarvam STT keepalive failed: {e}")
 
     async def _handle_message(self, message):
         """Handle incoming WebSocket message from Sarvam SDK.
