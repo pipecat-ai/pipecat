@@ -142,7 +142,6 @@ dev = [
     "python-dotenv>=1.0.1,<2.0.0",
     "towncrier~=25.8.0",
     "pipecat-ai",
-    "docformatter>=1.7.7",
 ]
 
 docs = [
