@@ -43,7 +43,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.ai_service import AIService
 
 # Time between TTS frames to signal end_sequence. Makes avatar return to listening mode.
-TTS_TIMEOUT = 0.25  # seconds
+TTS_TIMEOUT = 0.2  # seconds
 
 
 class AnamVideoService(AIService):
