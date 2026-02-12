@@ -700,9 +700,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             try:
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame(context_id=context_id)
-                self._cumulative_time = 0
-                self._partial_word = ""
-                self._partial_word_start_time = 0.0
                 # If a context ID does not exist, use the provided one.
                 # If an ID exists, that means the Pipeline doesn't allow
                 # user interruptions, so continue using the current ID.
@@ -710,6 +707,12 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 # an interruption, which resets the context ID.
                 if not self._context_id:
                     self._context_id = context_id
+                    # Reset timing state only when starting a new context.
+                    # Within a context, cumulative_time must accumulate across
+                    # sentences so word timestamps are properly sequenced.
+                    self._cumulative_time = 0
+                    self._partial_word = ""
+                    self._partial_word_start_time = 0.0
                 if not self.audio_context_available(self._context_id):
                     await self.create_audio_context(self._context_id)
 
