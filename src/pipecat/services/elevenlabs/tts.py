@@ -13,6 +13,7 @@ with support for streaming audio, word timestamps, and voice customization.
 import asyncio
 import base64
 import json
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, Tuple, Union
 
 import aiohttp
@@ -680,6 +681,20 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             msg = {"text": text, "context_id": self._context_id}
             await self._websocket.send(json.dumps(msg))
 
+    def create_context_id(self) -> str:
+        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
+
+        Returns:
+            A unique string identifier for the TTS context.
+        """
+        # If a context ID does not exist, create a new one.
+        # If an ID exists, continue using the current ID.
+        # When interruptions happens, user speech results in
+        # an interruption, which resets the context ID.
+        if not self._context_id:
+            return str(uuid.uuid4())
+        return self._context_id
+
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs' streaming WebSocket API.
@@ -698,31 +713,28 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
-                self._cumulative_time = 0
-                self._partial_word = ""
-                self._partial_word_start_time = 0.0
-                # If a context ID does not exist, use the provided one.
-                # If an ID exists, that means the Pipeline doesn't allow
-                # user interruptions, so continue using the current ID.
-                # When interruptions are allowed, user speech results in
-                # an interruption, which resets the context ID.
                 if not self._context_id:
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._context_id = context_id
-                if not self.audio_context_available(self._context_id):
-                    await self.create_audio_context(self._context_id)
+                    self._cumulative_time = 0
+                    self._partial_word = ""
+                    self._partial_word_start_time = 0.0
 
-                # Initialize context with voice settings and pronunciation dictionaries
-                msg = {"text": " ", "context_id": self._context_id}
-                if self._voice_settings:
-                    msg["voice_settings"] = self._voice_settings
-                if self._pronunciation_dictionary_locators:
-                    msg["pronunciation_dictionary_locators"] = [
-                        locator.model_dump() for locator in self._pronunciation_dictionary_locators
-                    ]
-                await self._websocket.send(json.dumps(msg))
-                logger.trace(f"Created new context {self._context_id}")
+                    if not self.audio_context_available(self._context_id):
+                        await self.create_audio_context(self._context_id)
+
+                    # Initialize context with voice settings and pronunciation dictionaries
+                    msg = {"text": " ", "context_id": self._context_id}
+                    if self._voice_settings:
+                        msg["voice_settings"] = self._voice_settings
+                    if self._pronunciation_dictionary_locators:
+                        msg["pronunciation_dictionary_locators"] = [
+                            locator.model_dump()
+                            for locator in self._pronunciation_dictionary_locators
+                        ]
+                    await self._websocket.send(json.dumps(msg))
+                    logger.trace(f"Created new context {self._context_id}")
 
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
