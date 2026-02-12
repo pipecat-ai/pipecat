@@ -332,7 +332,7 @@ class AnamVideoService(AIService):
         Manages the interruption flow by:
         1. Signaling the session to interrupt current speech
         2. Cancelling the send task (stops sending; discards old queue)
-        3. Calling end_sequence to set avatar back to listening mode
+        3. Calling end_sequence to set avatar in listening mode
         4. Creating a new send task with a fresh queue
         """
         if self._anam_session:
