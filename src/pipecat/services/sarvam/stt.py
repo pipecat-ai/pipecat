@@ -167,6 +167,8 @@ class SarvamSTTService(STTService):
         input_audio_codec: str = "wav",
         params: Optional[InputParams] = None,
         ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
+        keepalive_timeout: Optional[float] = None,
+        keepalive_interval: float = 5.0,
         **kwargs,
     ):
         """Initialize the Sarvam STT service.
@@ -182,6 +184,9 @@ class SarvamSTTService(STTService):
             params: Configuration parameters for Sarvam STT service.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            keepalive_timeout: Seconds of no audio before sending silence to keep the
+                connection alive. None disables keepalive.
+            keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to the parent STTService.
         """
         params = params or SarvamSTTService.InputParams()
@@ -203,7 +208,13 @@ class SarvamSTTService(STTService):
                 f"Model '{model}' does not support language parameter (auto-detects language)."
             )
 
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=keepalive_timeout,
+            keepalive_interval=keepalive_interval,
+            **kwargs,
+        )
 
         self.set_model_name(model)
         self._api_key = api_key
@@ -463,6 +474,8 @@ class SarvamSTTService(STTService):
             # Start receive task using Pipecat's task management
             self._receive_task = self.create_task(self._receive_task_handler())
 
+            self._create_keepalive_task()
+
             logger.info("Connected to Sarvam successfully")
 
         except ApiError as e:
@@ -476,6 +489,8 @@ class SarvamSTTService(STTService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
+        await self._cancel_keepalive_task()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -599,6 +614,32 @@ class SarvamSTTService(STTService):
             "as-IN": Language.AS_IN,
         }
         return mapping.get(language_code, Language.HI_IN)
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the Sarvam SDK websocket client is connected."""
+        return self._socket_client is not None
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio via the Sarvam SDK to keep the connection alive.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        audio_base64 = base64.b64encode(silence).decode("utf-8")
+        encoding = (
+            self._input_audio_codec
+            if self._input_audio_codec.startswith("audio/")
+            else f"audio/{self._input_audio_codec}"
+        )
+        method_kwargs = {
+            "audio": audio_base64,
+            "encoding": encoding,
+            "sample_rate": self.sample_rate,
+        }
+        if self._config.use_translate_method:
+            await self._socket_client.translate(**method_kwargs)
+        else:
+            await self._socket_client.transcribe(**method_kwargs)
 
     async def _start_metrics(self):
         """Start processing metrics collection."""
