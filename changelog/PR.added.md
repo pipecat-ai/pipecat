@@ -1,0 +1,1 @@
+- Added `AnamVideoService` for interactive avatar generation with synchronised audio/video frames using Anam.ai's Python SDK.
