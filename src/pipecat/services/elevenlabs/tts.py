@@ -365,6 +365,13 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         """
         return language_to_elevenlabs_language(language)
 
+    def _reset_state(self):
+        """Reset internal state variables."""
+        self._cumulative_time = 0
+        self._partial_word = ""
+        self._partial_word_start_time = 0.0
+        logger.debug(f"{self}: Reset internal state")
+
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
@@ -431,6 +438,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         """
         await super().start(frame)
         self._output_format = output_format_from_sample_rate(self.sample_rate)
+        self._reset_state()
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -468,6 +476,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         """
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
+            # Reset timing on interruption or stop
+            self._reset_state()
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)], self._context_id)
 
@@ -580,8 +590,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._context_id = None
-            self._partial_word = ""
-            self._partial_word_start_time = 0.0
 
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from ElevenLabs."""
@@ -700,9 +708,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             try:
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame(context_id=context_id)
-                self._cumulative_time = 0
-                self._partial_word = ""
-                self._partial_word_start_time = 0.0
                 # If a context ID does not exist, use the provided one.
                 # If an ID exists, that means the Pipeline doesn't allow
                 # user interruptions, so continue using the current ID.
