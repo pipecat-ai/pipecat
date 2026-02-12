@@ -3,11 +3,12 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
 """Anam video service implementation for Pipecat.
 
-This module provides integration with Anam.ai for creating conversational AI applications with
-avatars. It manages conversation sessions and provides real-time audio/video streaming capabilities
-through the Anam API.
+This module provides integration with Anam.ai for creating interactive avatars
+through Anam's Python SDK. It uses audio input and provides realistic avatars
+as synchronized raw audio/video frames.
 """
 
 import asyncio
@@ -41,24 +42,24 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 
-# Using the same values that we do in the BaseOutputTransport
-AVATAR_VAD_STOP_SECS = 0.35
+# Time between TTS frames to signal end_sequence. Makes avatar return to listening mode.
+TTS_TIMEOUT = 0.25  # seconds
 
 
 class AnamVideoService(AIService):
-    """A service that integrates Anam.ai's avatar capabilities into the pipeline.
+    """Anam.ai's Video service that generates real-time interactive avatars from audio.
 
-    This service manages the lifecycle of an Anam avatar session by handling
-    bidirectional audio/video streaming, avatar animations, and user interactions.
-    It processes various frame types to coordinate the avatar's behavior and
-    maintains synchronization between audio and video streams.
+    This service uses Anam's Python SDK to manage sessions and communication with Anam's backend.
+    It consumes audio and user interactions and receives synchronized audio/video frames. The SDK
+    provides decoded WebRTC audio and video frames as PyAV objects. Ingested audio is passed through
+    without resampling, but has been resampled to 48kHz stereo for webRTC delivery to the SDK.
+
 
     The service supports:
 
     - Real-time avatar animation based on audio input
     - Voice activity detection for natural interactions
     - Interrupt handling for more natural conversations
-    - Audio resampling for optimal playback quality
     - Automatic session management
     """
 
@@ -96,7 +97,6 @@ class AnamVideoService(AIService):
         self._video_task: Optional[asyncio.Task] = None
         self._audio_task: Optional[asyncio.Task] = None
         self._anam_resampler = AudioResampler("s16", "mono", 48000)
-        self._is_interrupting = False
         self._transport_ready = False
         self._session_ready_event = asyncio.Event()
 
@@ -104,8 +104,7 @@ class AnamVideoService(AIService):
         """Set up the Anam video service with necessary configuration.
 
         Initializes the Anam client and prepares the service for audio/video
-        processing. This includes setting up audio/video streams and
-        configuring callbacks.
+        processing. Sets up audio/video streams and registers event handlers.
 
         Args:
             setup: Configuration parameters for the frame processor.
@@ -123,15 +122,12 @@ class AnamVideoService(AIService):
             ),
         )
 
-        # Register event handlers (only for connection events)
+        # Register event handlers
         self._client.add_listener(AnamEvent.SESSION_READY, self._on_session_ready)
         self._client.add_listener(AnamEvent.CONNECTION_CLOSED, self._on_connection_closed)
 
     async def cleanup(self):
-        """Clean up the service and release resources.
-
-        Terminates the Anam client session and cleans up associated resources.
-        """
+        """Clean up the service and release resources."""
         await super().cleanup()
         await self._close_session()
         await self._cleanup()
@@ -139,9 +135,8 @@ class AnamVideoService(AIService):
     async def start(self, frame: StartFrame):
         """Start the Anam video service and initialize the avatar session.
 
-        Creates necessary tasks for audio/video processing and establishes
-        the connection with the Anam service. Blocks until sessionready is
-        received so that audio is only forwarded when the backend is ready.
+        Creates an Anam session and creates tasks to forward audio/video. Blocks until
+        sessionready is received so audio is not dropped before backend is ready to receive audio.
 
         Args:
             frame: The start frame containing initialization parameters.
@@ -200,7 +195,6 @@ class AnamVideoService(AIService):
         await self._cancel_audio_task()
         await self._cancel_send_task()
         self._agent_audio_stream = None
-        self._is_interrupting = False
         self._transport_ready = False
         self._client = None
         self._anam_session = None
@@ -225,7 +219,7 @@ class AnamVideoService(AIService):
 
         # Handle frames that should not be pushed downstream
         if isinstance(frame, TTSAudioRawFrame):
-            # Do not forward TTS audio downstream as Anam synchronises TTS with video frames for synchronised playback.
+            # Do not forward TTS audio downstream; Anam syncs TTS with video
             await self._handle_audio_frame(frame)
             return
 
@@ -317,7 +311,8 @@ class AnamVideoService(AIService):
     async def _on_connection_closed(self, code: str, reason: Optional[str]) -> None:
         """Handle connection closed event.
 
-        Client and session have been closed by the SDK before emitting this event.
+        Client and session are closed by the SDK before emitting this event.
+        No need to close again, just cleanup resources.
 
         Args:
             code: Connection close code (from ConnectionClosedCode enum).
@@ -335,19 +330,17 @@ class AnamVideoService(AIService):
         """Handle interruption events by resetting send tasks and notifying client.
 
         Manages the interruption flow by:
-        1. Setting the interruption flag
-        2. Signaling the session to interrupt current speech and signal end_sequence
-        3. Cancelling ongoing audio sending tasks
-        4. Creating a new send task
+        1. Signaling the session to interrupt current speech
+        2. Cancelling the send task (stops sending; discards old queue)
+        3. Calling end_sequence to set avatar back to listening mode
+        4. Creating a new send task with a fresh queue
         """
-        self._is_interrupting = True
         if self._anam_session:
             await self._anam_session.interrupt()
-            if self._agent_audio_stream:
-                await self._agent_audio_stream.end_sequence()
 
         await self._cancel_send_task()
-        self._is_interrupting = False
+        if self._agent_audio_stream:
+            await self._agent_audio_stream.end_sequence()
         await self._create_send_task()
 
     async def _close_session(self):
@@ -377,8 +370,8 @@ class AnamVideoService(AIService):
     async def _send_task_handler(self):
         """Handle sending audio frames to the Anam client.
 
-        Sends each TTS frame's audio directly to the backend without buffering. Sends end_sequence
-        when all audio frames have been sent.
+        Forwards each TTS frame's audio without buffering. Requires end_sequence after last
+        audio frame. Using timeout as TTSStoppedFrame can arrive too soon.
 
         Anam accepts any sample rate but recommends 16 bit PCM 24kHz mono audio for best trade-off
         between latency, audio quality and avatar performance.
@@ -389,10 +382,7 @@ class AnamVideoService(AIService):
 
         while True:
             try:
-                frame = await asyncio.wait_for(self._queue.get(), timeout=AVATAR_VAD_STOP_SECS)
-                if self._is_interrupting:
-                    break
-
+                frame = await asyncio.wait_for(self._queue.get(), timeout=TTS_TIMEOUT)
                 if isinstance(frame, TTSAudioRawFrame) and frame.audio:
                     await self._agent_audio_stream.send_audio_chunk(frame.audio)
 
