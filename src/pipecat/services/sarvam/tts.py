@@ -462,11 +462,12 @@ class SarvamHttpTTSService(TTSService):
         self._settings["sample_rate"] = self.sample_rate
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Sarvam AI's API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -503,7 +504,7 @@ class SarvamHttpTTSService(TTSService):
 
             url = f"{self._base_url}/text-to-speech"
 
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
 
             async with self._session.post(url, json=payload, headers=headers) as response:
                 if response.status != 200:
@@ -525,7 +526,7 @@ class SarvamHttpTTSService(TTSService):
             audio_data = base64.b64decode(base64_audio)
 
             # Strip WAV header (first 44 bytes) if present
-            if audio_data.startswith(b"RIFF"):
+            if len(audio_data) > 44 and audio_data.startswith(b"RIFF"):
                 logger.debug("Stripping WAV header from Sarvam audio data")
                 audio_data = audio_data[44:]
 
@@ -533,6 +534,7 @@ class SarvamHttpTTSService(TTSService):
                 audio=audio_data,
                 sample_rate=self.sample_rate,
                 num_channels=1,
+                context_id=context_id,
             )
 
             yield frame
@@ -541,7 +543,7 @@ class SarvamHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Error generating TTS: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
 
 class SarvamTTSService(InterruptibleTTSService):
@@ -789,10 +791,9 @@ class SarvamTTSService(InterruptibleTTSService):
         elif params.temperature != 0.6:
             logger.warning(f"temperature parameter is ignored for {model}")
 
-        self._started = False
         self._receive_task = None
         self._keepalive_task = None
-        self._disconnecting = False
+        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -844,10 +845,13 @@ class SarvamTTSService(InterruptibleTTSService):
         await self._disconnect()
 
     async def flush_audio(self):
-        """Flush any pending audio synthesis by sending stop command."""
-        if self._websocket:
-            msg = {"type": "flush"}
-            await self._websocket.send(json.dumps(msg))
+        """Flush any pending audio synthesis by sending flush command."""
+        try:
+            if self._websocket:
+                msg = {"type": "flush"}
+                await self._websocket.send(json.dumps(msg))
+        except Exception as e:
+            await self.push_error(error_msg=f"Error sending flush to Sarvam: {e}", exception=e)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with special handling for stop conditions.
@@ -857,8 +861,6 @@ class SarvamTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            self._started = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame and flush audio if it's the end of a full response."""
@@ -894,29 +896,15 @@ class SarvamTTSService(InterruptibleTTSService):
         """Disconnect from Sarvam WebSocket and clean up tasks."""
         await super()._disconnect()
 
-        try:
-            # First, set a flag to prevent new operations
-            self._disconnecting = True
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
 
-            # Cancel background tasks BEFORE closing websocket
-            if self._receive_task:
-                await self.cancel_task(self._receive_task, timeout=2.0)
-                self._receive_task = None
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
 
-            if self._keepalive_task:
-                await self.cancel_task(self._keepalive_task, timeout=2.0)
-                self._keepalive_task = None
-
-            # Now close the websocket
-            await self._disconnect_websocket()
-
-        except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-        finally:
-            # Reset state only after everything is cleaned up
-            self._started = False
-            self._websocket = None
-            self._disconnecting = False
+        await self._disconnect_websocket()
 
     async def _connect_websocket(self):
         """Establish WebSocket connection to Sarvam API."""
@@ -968,7 +956,7 @@ class SarvamTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error closing websocket: {e}", exception=e)
         finally:
-            self._started = False
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -986,7 +974,9 @@ class SarvamTTSService(InterruptibleTTSService):
                     # Check for interruption before processing audio
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(msg["data"]["audio"])
-                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                    frame = TTSAudioRawFrame(
+                        audio, self.sample_rate, 1, context_id=self._context_id
+                    )
                     await self.push_frame(frame)
                 elif msg.get("type") == "error":
                     error_msg = msg["data"]["message"]
@@ -1007,19 +997,12 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _send_keepalive(self):
         """Send keepalive message to maintain connection."""
-        if self._disconnecting:
-            return
-
         if self._websocket and self._websocket.state == State.OPEN:
             msg = {"type": "ping"}
             await self._websocket.send(json.dumps(msg))
 
     async def _send_text(self, text: str):
         """Send text to Sarvam WebSocket for synthesis."""
-        if self._disconnecting:
-            logger.warning("Service is disconnecting, ignoring text send")
-            return
-
         if self._websocket and self._websocket.state == State.OPEN:
             msg = {"type": "text", "data": {"text": text}}
             await self._websocket.send(json.dumps(msg))
@@ -1027,16 +1010,17 @@ class SarvamTTSService(InterruptibleTTSService):
             logger.warning("WebSocket not ready, cannot send text")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech audio frames from input text using Sarvam TTS.
 
         Sends text over WebSocket for synthesis and yields corresponding audio or status frames.
 
         Args:
             text: The text input to synthesize.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
-            Frame objects including TTSStartedFrame, TTSAudioRawFrame(s), or TTSStoppedFrame.
+            Frame objects including TTSStartedFrame, TTSAudioRawFrame(s, context_id=context_id), or TTSStoppedFrame.
         """
         logger.debug(f"Generating TTS: [{text}]")
 
@@ -1045,15 +1029,15 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                if not self._started:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._started = True
+                await self.start_ttfb_metrics()
+                # Store context_id for use in _receive_messages
+                self._context_id = context_id
+                yield TTSStartedFrame(context_id=context_id)
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return

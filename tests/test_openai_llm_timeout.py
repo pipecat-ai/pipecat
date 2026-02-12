@@ -149,13 +149,9 @@ async def test_openai_llm_stream_closed_on_cancellation():
             def __init__(self):
                 self.iteration_count = 0
 
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc_val, exc_tb):
+            async def close(self):
                 nonlocal stream_closed
                 stream_closed = True
-                return False
 
             def __aiter__(self):
                 return self

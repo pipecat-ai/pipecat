@@ -9,6 +9,7 @@
 import asyncio
 import base64
 import json
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
@@ -265,11 +266,15 @@ class BaseOpenAILLMService(LLMService):
         params.update(self._settings["extra"])
         return params
 
-    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+    ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens/max_completion_tokens setting.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -290,6 +295,14 @@ class BaseOpenAILLMService(LLMService):
         # Override for non-streaming
         params["stream"] = False
         params.pop("stream_options", None)
+
+        # Override max_tokens if provided
+        if max_tokens is not None:
+            # Use max_completion_tokens for newer models, fallback to max_tokens
+            if "max_completion_tokens" in params:
+                params["max_completion_tokens"] = max_tokens
+            else:
+                params["max_tokens"] = max_tokens
 
         # LLM completion
         response = await self._client.chat.completions.create(**params)
@@ -362,9 +375,19 @@ class BaseOpenAILLMService(LLMService):
             else self._stream_chat_completions_universal_context(context)
         )
 
-        # Use context manager to ensure stream is closed on cancellation/exception.
-        # Without this, CancelledError during iteration leaves the underlying socket open.
-        async with chunk_stream:
+        # Ensure stream is closed on cancellation/exception to prevent socket
+        # leaks. OpenAI's AsyncStream uses close(), async generators use aclose().
+        @asynccontextmanager
+        async def _closing(stream):
+            try:
+                yield stream
+            finally:
+                if hasattr(stream, "aclose"):
+                    await stream.aclose()
+                elif hasattr(stream, "close"):
+                    await stream.close()
+
+        async with _closing(chunk_stream):
             async for chunk in chunk_stream:
                 if chunk.usage:
                     cached_tokens = (

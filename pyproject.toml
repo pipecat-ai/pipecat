@@ -38,6 +38,8 @@ dependencies = [
     # Pinning numba to resolve package dependencies
     "numba==0.61.2",
     "wait_for2>=0.4.1; python_version<'3.12'",
+    # Pipecat optionals
+    "pipecat-ai[local-smart-turn-v3]",
 ]
 
 [project.urls]
@@ -84,7 +86,7 @@ livekit = [ "livekit~=1.0.13", "livekit-api~=1.0.5", "tenacity>=8.2.3,<10.0.0", 
 lmnt = [ "pipecat-ai[websockets-base]" ]
 local = [ "pyaudio~=0.2.14" ]
 local-smart-turn = [ "coremltools>=8.0", "transformers", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3" ]
-local-smart-turn-v3 = [ "transformers", "onnxruntime>=1.20.1,<2" ]
+local-smart-turn-v3 = [ "transformers", "onnxruntime~=1.23.2" ]
 mcp = [ "mcp[cli]>=1.11.0,<2" ]
 mem0 = [ "mem0ai~=0.1.94" ]
 mistral = []
@@ -110,7 +112,7 @@ sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.21", "pipecat-ai[websockets-base]" ]
 sentry = [ "sentry-sdk>=2.28.0,<3" ]
-silero = [ "onnxruntime>=1.20.1,<2" ]
+silero = [ "onnxruntime~=1.23.2" ]
 simli = [ "simli-ai~=1.0.3"]
 soniox = [ "pipecat-ai[websockets-base]" ]
 soundfile = [ "soundfile~=0.13.1" ]

@@ -284,11 +284,12 @@ class MiniMaxHttpTTSService(TTSService):
         logger.debug(f"MiniMax TTS initialized with sample_rate: {self.sample_rate}")
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text using MiniMax's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -318,7 +319,7 @@ class MiniMaxHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 # Process the streaming response
                 buffer = bytearray()
@@ -377,6 +378,7 @@ class MiniMaxHttpTTSService(TTSService):
                                             audio=audio_chunk,
                                             sample_rate=self.sample_rate,
                                             num_channels=1,
+                                            context_id=context_id,
                                         )
                                 except ValueError as e:
                                     logger.error(
@@ -394,4 +396,4 @@ class MiniMaxHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}", exception=e)
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)

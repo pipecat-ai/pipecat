@@ -9,6 +9,7 @@
 from dataclasses import dataclass
 from typing import List, Optional
 
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -18,7 +19,7 @@ from pipecat.turns.user_start import (
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
-    TranscriptionUserTurnStopStrategy,
+    TurnAnalyzerUserTurnStopStrategy,
 )
 
 
@@ -29,7 +30,7 @@ class UserTurnStrategies:
     If no strategies are specified, the following defaults are used:
 
         start: [VADUserTurnStartStrategy, TranscriptionUserTurnStartStrategy]
-         stop: [TranscriptionUserTurnStopStrategy]
+         stop: [TurnAnalyzerUserTurnStopStrategy(LocalSmartTurnAnalyzerV3)]
 
     Attributes:
         start: A list of user turn start strategies used to detect when
@@ -46,7 +47,7 @@ class UserTurnStrategies:
         if not self.start:
             self.start = [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
         if not self.stop:
-            self.stop = [TranscriptionUserTurnStopStrategy()]
+            self.stop = [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
 
 
 @dataclass
