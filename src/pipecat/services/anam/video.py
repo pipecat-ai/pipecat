@@ -146,7 +146,12 @@ class AnamVideoService(AIService):
 
         self._session_ready_event.clear()
 
-        self._anam_session = await self._client.connect_async()
+        try:
+            self._anam_session = await self._client.connect_async()
+        except Exception as e:
+            logger.error(f"Error connecting to Anam: {e}")
+            await self.push_error(ErrorFrame(error=f"Anam connection error: {e}"))
+            raise
 
         # Block until sessionready so the backend is ready to receive TTS
         await self._session_ready_event.wait()
@@ -160,7 +165,14 @@ class AnamVideoService(AIService):
             sample_rate=24000,
             channels=1,
         )
-        self._agent_audio_stream = self._anam_session.create_agent_audio_input_stream(audio_config)
+        try:
+            self._agent_audio_stream = self._anam_session.create_agent_audio_input_stream(
+                audio_config
+            )
+        except Exception as e:
+            logger.error(f"Error creating agent audio stream: {e}")
+            await self.push_error(ErrorFrame(error=f"Anam agent audio stream error: {e}"))
+            raise
 
         # Create tasks for consuming video and audio frames
         self._video_task = self.create_task(self._consume_video_frames())
@@ -346,10 +358,14 @@ class AnamVideoService(AIService):
     async def _close_session(self):
         """Close the Anam client."""
         if self._client and self._anam_session and self._anam_session.is_active:
-            logger.debug("Disconnecting from Anam")
-            await self._anam_session.close()
-            self._anam_session = None
-            self._client = None
+            try:
+                logger.debug("Disconnecting from Anam")
+                await self._anam_session.close()
+            except Exception as e:
+                logger.warning(f"Error closing Anam session: {e}")
+            finally:
+                self._anam_session = None
+                self._client = None
 
     async def _create_send_task(self):
         """Create the audio sending task if it doesn't exist."""
