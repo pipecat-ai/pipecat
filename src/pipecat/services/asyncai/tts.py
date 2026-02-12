@@ -9,6 +9,7 @@
 import asyncio
 import base64
 import json
+import uuid
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -270,6 +271,20 @@ class AsyncAITTSService(AudioContextTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
+    def create_context_id(self) -> str:
+        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
+
+        Returns:
+            A unique string identifier for the TTS context.
+        """
+        # If a context ID does not exist, create a new one.
+        # If an ID exists, continue using the current ID.
+        # When interruptions happen, user speech results in
+        # an interruption, which resets the context ID.
+        if not self._context_id:
+            return str(uuid.uuid4())
+        return self._context_id
+
     async def flush_audio(self):
         """Flush any pending audio."""
         if not self._context_id or not self._websocket:
@@ -379,13 +394,14 @@ class AsyncAITTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
-
                 if not self._context_id:
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
+
                     self._context_id = context_id
-                if not self.audio_context_available(self._context_id):
-                    await self.create_audio_context(self._context_id)
+
+                    if not self.audio_context_available(self._context_id):
+                        await self.create_audio_context(self._context_id)
 
                 msg = self._build_msg(text=text, force=True, context_id=self._context_id)
                 await self._get_websocket().send(msg)
