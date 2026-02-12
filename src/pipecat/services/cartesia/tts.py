@@ -8,6 +8,7 @@
 
 import base64
 import json
+import uuid
 import warnings
 from enum import Enum
 from typing import AsyncGenerator, List, Literal, Optional
@@ -538,6 +539,20 @@ class CartesiaTTSService(AudioContextWordTTSService):
             cancel_msg = json.dumps({"context_id": self._context_id, "cancel": True})
             await self._get_websocket().send(cancel_msg)
             self._context_id = None
+
+    def create_context_id(self) -> str:
+        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
+
+        Returns:
+            A unique string identifier for the TTS context.
+        """
+        # If a context ID does not exist, create a new one.
+        # If an ID exists, continue using the current ID.
+        # When interruptions happen, user speech results in
+        # an interruption, which resets the context ID.
+        if not self._context_id:
+            return str(uuid.uuid4())
+        return self._context_id
 
     async def flush_audio(self):
         """Flush any pending audio and finalize the current context."""
