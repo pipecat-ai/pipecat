@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from pipecat.services.stt_latency import SAMBANOVA_TTFS_P99
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
 from pipecat.transcriptions.language import Language
 
@@ -30,6 +31,7 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
         language: Optional[Language] = Language.EN,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
+        ttfs_p99_latency: Optional[float] = SAMBANOVA_TTFS_P99,
         **kwargs: Any,
     ) -> None:
         """Initialize SambaNova STT service.
@@ -41,6 +43,8 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
             language: Language of the audio input. Defaults to English.
             prompt: Optional text to guide the model's style or continue a previous segment.
             temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to `pipecat.services.whisper.base_stt.BaseWhisperSTTService`.
         """
         super().__init__(
@@ -50,6 +54,7 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
             language=language,
             prompt=prompt,
             temperature=temperature,
+            ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
 

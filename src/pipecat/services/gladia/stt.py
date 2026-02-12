@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
+from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -205,6 +206,7 @@ class GladiaSTTService(WebsocketSTTService):
         params: Optional[GladiaInputParams] = None,
         max_buffer_size: int = 1024 * 1024 * 20,  # 20MB default buffer
         should_interrupt: bool = True,
+        ttfs_p99_latency: Optional[float] = GLADIA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Gladia STT service.
@@ -225,9 +227,17 @@ class GladiaSTTService(WebsocketSTTService):
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
             should_interrupt: Determine whether the bot should be interrupted when
                 Gladia VAD detects user speech. Defaults to True.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService parent class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=20,
+            keepalive_interval=5,
+            **kwargs,
+        )
 
         params = params or GladiaInputParams()
 
@@ -257,7 +267,6 @@ class GladiaSTTService(WebsocketSTTService):
         self.set_model_name(model)
         self._params = params
         self._receive_task = None
-        self._keepalive_task = None
         self._settings = {}
 
         # Session management
@@ -412,8 +421,6 @@ class GladiaSTTService(WebsocketSTTService):
 
         Initializes the session if needed and establishes websocket connection.
         """
-        await super()._connect()
-
         # Initialize session if needed
         if not self._session_url:
             settings = self._prepare_settings()
@@ -424,11 +431,10 @@ class GladiaSTTService(WebsocketSTTService):
 
         await self._connect_websocket()
 
+        await super()._connect()
+
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
-
-        if self._websocket and not self._keepalive_task:
-            self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
         """Disconnect from the Gladia service.
@@ -438,10 +444,6 @@ class GladiaSTTService(WebsocketSTTService):
         await super()._disconnect()
 
         self._connection_active = False
-
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
 
         if self._receive_task:
             await self.cancel_task(self._receive_task)
@@ -640,21 +642,10 @@ class GladiaSTTService(WebsocketSTTService):
             except json.JSONDecodeError:
                 logger.warning(f"{self} Received non-JSON message: {message}")
 
-    async def _keepalive_task_handler(self):
-        """Send periodic empty audio chunks to keep the connection alive."""
-        try:
-            KEEPALIVE_SLEEP = 20
-            while self._connection_active:
-                # Send keepalive (Gladia times out after 30 seconds)
-                await asyncio.sleep(KEEPALIVE_SLEEP)
-                if self._websocket and self._websocket.state is State.OPEN:
-                    # Send an empty audio chunk as keepalive
-                    empty_audio = b""
-                    await self._send_audio(empty_audio)
-                else:
-                    logger.debug(f"{self} Websocket closed, stopping keepalive")
-                    break
-        except websockets.exceptions.ConnectionClosed:
-            logger.debug(f"{self} Connection closed during keepalive")
-        except Exception as e:
-            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+    async def _send_keepalive(self, silence: bytes):
+        """Send an empty audio chunk to keep the Gladia connection alive.
+
+        Args:
+            silence: Silent PCM audio bytes (unused, Gladia accepts empty chunks).
+        """
+        await self._send_audio(b"")

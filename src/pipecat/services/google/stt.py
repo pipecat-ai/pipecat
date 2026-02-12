@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -438,6 +439,7 @@ class GoogleSTTService(STTService):
         location: str = "global",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = GOOGLE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Google STT service.
@@ -448,9 +450,11 @@ class GoogleSTTService(STTService):
             location: Google Cloud location (e.g., "global", "us-central1").
             sample_rate: Audio sample rate in Hertz.
             params: Configuration parameters for the service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         params = params or GoogleSTTService.InputParams()
 

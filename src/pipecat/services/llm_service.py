@@ -39,6 +39,8 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMConfigureOutputFrame,
+    LLMContextSummaryRequestFrame,
+    LLMContextSummaryResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -57,6 +59,9 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
+from pipecat.utils.context.llm_context_summarization import (
+    LLMContextSummarizationUtil,
+)
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -195,6 +200,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._sequential_runner_task: Optional[asyncio.Task] = None
         self._tracing_enabled: bool = False
         self._skip_tts: Optional[bool] = None
+        self._summary_task: Optional[asyncio.Task] = None
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
@@ -218,13 +224,17 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         """
         return self.get_llm_adapter().create_llm_specific_message(message)
 
-    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+    ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Must be implemented by subclasses.
 
         Args:
             context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens/max_completion_tokens setting.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -286,6 +296,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         await super().stop(frame)
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
+        await self._cancel_summary_task()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the LLM service.
@@ -296,6 +307,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         await super().cancel(frame)
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
+        await self._cancel_summary_task()
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Update LLM service settings.
@@ -339,6 +351,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._handle_interruptions(frame)
         elif isinstance(frame, LLMConfigureOutputFrame):
             self._skip_tts = frame.skip_tts
+        elif isinstance(frame, LLMContextSummaryRequestFrame):
+            await self._handle_summary_request(frame)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Pushes a frame.
@@ -371,6 +385,121 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         for function_name, entry in self._functions.items():
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
+
+    async def _handle_summary_request(self, frame: LLMContextSummaryRequestFrame):
+        """Handle context summarization request from aggregator.
+
+        Processes a summarization request by generating a compressed summary
+        of conversation history. Uses the adapter to format the summary
+        according to the provider's requirements. Broadcasts the result back
+        to the aggregator for context reconstruction.
+
+        Args:
+            frame: The summary request frame containing context and parameters.
+        """
+        logger.debug(f"{self}: Processing summarization request {frame.request_id}")
+
+        # Create a background task to generate the summary without blocking
+        self._summary_task = self.create_task(self._generate_summary_task(frame))
+
+    async def _generate_summary_task(self, frame: LLMContextSummaryRequestFrame):
+        """Background task to generate summary without blocking the pipeline.
+
+        Args:
+            frame: The summary request frame containing context and parameters.
+        """
+        summary = ""
+        last_index = -1
+        error = None
+
+        try:
+            summary, last_index = await self._generate_summary(frame)
+        except Exception as e:
+            error = f"Error generating context summary: {e}"
+            await self.push_error(error, exception=e)
+
+        await self.broadcast_frame(
+            LLMContextSummaryResultFrame,
+            request_id=frame.request_id,
+            summary=summary,
+            last_summarized_index=last_index,
+            error=error,
+        )
+
+        self._summary_task = None
+
+    async def _generate_summary(self, frame: LLMContextSummaryRequestFrame) -> tuple[str, int]:
+        """Generate a compressed summary of conversation context.
+
+        Uses the message selection logic to identify which messages
+        to summarize, formats them as a transcript, and invokes the LLM to
+        generate a concise summary. The summary is formatted according to the
+        LLM provider's requirements using the adapter.
+
+        Args:
+            frame: The summary request frame containing context and configuration.
+
+        Returns:
+            Tuple of (formatted summary message, last_summarized_index).
+
+        Raises:
+            RuntimeError: If there are no messages to summarize, the service doesn't
+                support run_inference(), or the LLM returns an empty summary.
+
+        Note:
+            Requires the service to implement run_inference() method for
+            synchronous LLM calls.
+        """
+        # Get messages to summarize using utility method
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(
+            frame.context, frame.min_messages_to_keep
+        )
+
+        if not result.messages:
+            logger.debug(f"{self}: No messages to summarize")
+            raise RuntimeError("No messages to summarize")
+
+        logger.debug(
+            f"{self}: Generating summary for {len(result.messages)} messages "
+            f"(index 0 to {result.last_summarized_index}), "
+            f"target_context_tokens={frame.target_context_tokens}"
+        )
+
+        # Create summary context
+        transcript = LLMContextSummarizationUtil.format_messages_for_summary(result.messages)
+        prompt_messages = [
+            {
+                "role": "system",
+                "content": frame.summarization_prompt,
+            },
+            {
+                "role": "user",
+                "content": f"Conversation history:\n{transcript}",
+            },
+        ]
+        summary_context = LLMContext(messages=prompt_messages)
+
+        # Generate summary using run_inference
+        # This will be overridden by each LLM service implementation
+        try:
+            summary_text = await self.run_inference(
+                summary_context, max_tokens=frame.target_context_tokens
+            )
+        except NotImplementedError:
+            raise RuntimeError(
+                f"LLM service {self.__class__.__name__} does not implement run_inference"
+            )
+
+        if not summary_text:
+            raise RuntimeError("LLM returned empty summary")
+
+        summary_text = summary_text.strip()
+        logger.info(
+            f"{self}: Generated summary of {len(summary_text)} characters "
+            f"for {len(result.messages)} messages"
+        )
+
+        return summary_text, result.last_summarized_index
 
     def register_function(
         self,
@@ -588,6 +717,11 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self.cancel_task(self._sequential_runner_task)
             self._sequential_runner_task = None
 
+    async def _cancel_summary_task(self):
+        if self._summary_task:
+            await self.cancel_task(self._summary_task)
+            self._summary_task = None
+
     async def _sequential_runner_handler(self):
         while True:
             runner_item = await self._sequential_runner_queue.get()
@@ -745,8 +879,9 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                     await self.cancel_task(task)
                     cancelled_tasks.add(task)
 
-                frame = FunctionCallCancelFrame(function_name=name, tool_call_id=tool_call_id)
-                await self.push_frame(frame)
+                await self.broadcast_frame(
+                    FunctionCallCancelFrame, function_name=name, tool_call_id=tool_call_id
+                )
 
                 logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
 

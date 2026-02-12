@@ -28,18 +28,32 @@ from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 ValidVoice = Literal[
-    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
+    "alloy",
+    "ash",
+    "ballad",
+    "cedar",
+    "coral",
+    "echo",
+    "fable",
+    "marin",
+    "nova",
+    "onyx",
+    "sage",
+    "shimmer",
+    "verse",
 ]
 
 VALID_VOICES: Dict[str, ValidVoice] = {
     "alloy": "alloy",
     "ash": "ash",
     "ballad": "ballad",
+    "cedar": "cedar",
     "coral": "coral",
     "echo": "echo",
     "fable": "fable",
-    "onyx": "onyx",
+    "marin": "marin",
     "nova": "nova",
+    "onyx": "onyx",
     "sage": "sage",
     "shimmer": "shimmer",
     "verse": "verse",
@@ -154,11 +168,12 @@ class OpenAITTSService(TTSService):
             )
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using OpenAI's TTS API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech data.
@@ -198,12 +213,12 @@ class OpenAITTSService(TTSService):
 
                 CHUNK_SIZE = self.chunk_size
 
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
                 async for chunk in r.iter_bytes(CHUNK_SIZE):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                         yield frame
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
         except BadRequestError as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")

@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024–2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 """Sarvam AI Speech-to-Text service implementation.
 
 This module provides a streaming Speech-to-Text service using Sarvam AI's WebSocket-based
@@ -7,7 +13,7 @@ can handle multiple audio formats for Indian language speech recognition.
 
 import base64
 from dataclasses import dataclass
-from typing import Dict, Literal, Optional
+from typing import AsyncGenerator, Dict, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -26,6 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
+from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -148,8 +155,8 @@ class SarvamSTTService(STTService):
         language: Optional[Language] = None
         prompt: Optional[str] = None
         mode: Optional[Literal["transcribe", "translate", "verbatim", "translit", "codemix"]] = None
-        vad_signals: bool = None
-        high_vad_sensitivity: bool = None
+        vad_signals: Optional[bool] = None
+        high_vad_sensitivity: Optional[bool] = None
 
     def __init__(
         self,
@@ -159,6 +166,7 @@ class SarvamSTTService(STTService):
         sample_rate: Optional[int] = None,
         input_audio_codec: str = "wav",
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Sarvam STT service.
@@ -172,6 +180,8 @@ class SarvamSTTService(STTService):
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
         """
         params = params or SarvamSTTService.InputParams()
@@ -193,7 +203,7 @@ class SarvamSTTService(STTService):
                 f"Model '{model}' does not support language parameter (auto-detects language)."
             )
 
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         self.set_model_name(model)
         self._api_key = api_key
@@ -229,6 +239,12 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+
+        if self._vad_signals:
+            self._register_event_handler("on_speech_started")
+            self._register_event_handler("on_speech_stopped")
+            self._register_event_handler("on_utterance_end")
+
         logger.info(f"Sarvam STT initialized with SDK headers: {self._sdk_headers}")
 
     def language_to_service_language(self, language: Language) -> str:
@@ -333,7 +349,7 @@ class SarvamSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def run_stt(self, audio: bytes):
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Send audio data to Sarvam for transcription.
 
         Args:
@@ -381,17 +397,24 @@ class SarvamSTTService(STTService):
         logger.debug("Connecting to Sarvam")
 
         try:
-            # Convert boolean parameters to string for SDK
-            vad_signals_str = "true" if self._vad_signals else "false"
-            high_vad_sensitivity_str = "true" if self._high_vad_sensitivity else "false"
-
             # Build common connection parameters
             connect_kwargs = {
                 "model": self.model_name,
-                "vad_signals": vad_signals_str,
-                "high_vad_sensitivity": high_vad_sensitivity_str,
                 "sample_rate": str(self.sample_rate),
             }
+
+            # Enable flush signal when using Pipecat's VAD (not Sarvam's) so that
+            # the flush() call on user-stopped-speaking is honored by the server.
+            if not self._vad_signals:
+                connect_kwargs["flush_signal"] = "true"
+
+            # Only send vad parameters when explicitly set (avoid overriding server defaults)
+            if self._vad_signals is not None:
+                connect_kwargs["vad_signals"] = "true" if self._vad_signals else "false"
+            if self._high_vad_sensitivity is not None:
+                connect_kwargs["high_vad_sensitivity"] = (
+                    "true" if self._high_vad_sensitivity else "false"
+                )
 
             # Add language_code for models that support it
             if self._language_string is not None:
@@ -443,6 +466,8 @@ class SarvamSTTService(STTService):
             logger.info("Connected to Sarvam successfully")
 
         except ApiError as e:
+            self._socket_client = None
+            self._websocket_context = None
             await self.push_error(error_msg=f"Sarvam API error: {e}", exception=e)
         except Exception as e:
             self._socket_client = None

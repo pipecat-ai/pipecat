@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     Frame,
     TranscriptionFrame,
 )
+from pipecat.services.stt_latency import HATHORA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -53,6 +54,7 @@ class HathoraSTTService(SegmentedSTTService):
         api_key: Optional[str] = None,
         base_url: str = "https://api.models.hathora.dev/inference/v1/stt",
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = HATHORA_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Hathora STT service.
@@ -66,10 +68,13 @@ class HathoraSTTService(SegmentedSTTService):
                 provision one [here](https://models.hathora.dev/tokens).
             base_url: Base API URL for the Hathora STT service.
             params: Configuration parameters.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent class.
         """
         super().__init__(
             sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
         self._model = model

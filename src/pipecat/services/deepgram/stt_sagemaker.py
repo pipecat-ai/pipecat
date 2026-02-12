@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -81,6 +82,7 @@ class DeepgramSageMakerSTTService(STTService):
         region: str,
         sample_rate: Optional[int] = None,
         live_options: Optional[LiveOptions] = None,
+        ttfs_p99_latency: Optional[float] = DEEPGRAM_SAGEMAKER_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Deepgram SageMaker STT service.
@@ -93,10 +95,12 @@ class DeepgramSageMakerSTTService(STTService):
                 live_options or defaults to the value from StartFrame.
             live_options: Deepgram LiveOptions for detailed configuration. If None,
                 uses sensible defaults (nova-3 model, English, interim results enabled).
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         self._endpoint_name = endpoint_name
         self._region = region

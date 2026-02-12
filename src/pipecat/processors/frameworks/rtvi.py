@@ -67,6 +67,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserMuteStartedFrame,
+    UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -689,7 +691,7 @@ class RTVILLMFunctionCallInProgressMessageData(BaseModel):
 
     tool_call_id: str
     function_name: Optional[str] = None
-    args: Optional[Mapping[str, Any]] = None
+    arguments: Optional[Mapping[str, Any]] = None
 
 
 class RTVILLMFunctionCallInProgressMessage(BaseModel):
@@ -891,6 +893,20 @@ class RTVIUserStoppedSpeakingMessage(BaseModel):
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
+class RTVIUserMuteStartedMessage(BaseModel):
+    """Message indicating user has been muted."""
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["user-mute-started"] = "user-mute-started"
+
+
+class RTVIUserMuteStoppedMessage(BaseModel):
+    """Message indicating user has been unmuted."""
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["user-mute-stopped"] = "user-mute-stopped"
+
+
 class RTVIBotStartedSpeakingMessage(BaseModel):
     """Message indicating bot has started speaking."""
 
@@ -1023,7 +1039,7 @@ class RTVIObserverParams:
             sets the default level for unlisted functions::
 
                 function_call_report_level={
-                    "*": RTVIFunctionCallReportLevel.DISABLED,  # Default: no events
+                    "*": RTVIFunctionCallReportLevel.NONE,  # Default: events with no metadata
                     "get_weather": RTVIFunctionCallReportLevel.FULL,  # Expose everything
                 }
 
@@ -1043,6 +1059,7 @@ class RTVIObserverParams:
     bot_audio_level_enabled: bool = False
     user_llm_enabled: bool = True
     user_speaking_enabled: bool = True
+    user_mute_enabled: bool = True
     user_transcription_enabled: bool = True
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
@@ -1199,6 +1216,12 @@ class RTVIObserver(BaseObserver):
         frame = data.frame
         direction = data.direction
 
+        # Only process downstream frames. Some frames are broadcast in both
+        # directions (e.g. UserStartedSpeakingFrame, FunctionCallResultFrame),
+        # and we only want to send one RTVI message per event.
+        if direction != FrameDirection.DOWNSTREAM:
+            return
+
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
             return
@@ -1212,6 +1235,11 @@ class RTVIObserver(BaseObserver):
             and self._params.user_speaking_enabled
         ):
             await self._handle_interruptions(frame)
+        elif (
+            isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame))
+            and self._params.user_mute_enabled
+        ):
+            await self._handle_user_mute(frame)
         elif (
             isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame))
             and self._params.bot_speaking_enabled
@@ -1271,7 +1299,7 @@ class RTVIObserver(BaseObserver):
                 ):
                     data.function_name = frame.function_name
                 if report_level == RTVIFunctionCallReportLevel.FULL:
-                    data.args = frame.arguments
+                    data.arguments = frame.arguments
                 message = RTVILLMFunctionCallInProgressMessage(data=data)
                 await self.send_rtvi_message(message)
         elif isinstance(frame, FunctionCallCancelFrame):
@@ -1339,6 +1367,17 @@ class RTVIObserver(BaseObserver):
             message = RTVIUserStartedSpeakingMessage()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             message = RTVIUserStoppedSpeakingMessage()
+
+        if message:
+            await self.send_rtvi_message(message)
+
+    async def _handle_user_mute(self, frame: Frame):
+        """Handle user mute/unmute frames."""
+        message = None
+        if isinstance(frame, UserMuteStartedFrame):
+            message = RTVIUserMuteStartedMessage()
+        elif isinstance(frame, UserMuteStoppedFrame):
+            message = RTVIUserMuteStoppedMessage()
 
         if message:
             await self.send_rtvi_message(message)

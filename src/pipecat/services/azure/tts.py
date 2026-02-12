@@ -277,7 +277,6 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._audio_queue = asyncio.Queue()
         self._word_boundary_queue = asyncio.Queue()
         self._word_processor_task = None
-        self._started = False
         self._first_chunk = True
         self._cumulative_audio_offset: float = 0.0  # Cumulative audio duration in seconds
         self._current_sentence_base_offset: float = 0.0  # Base offset for current sentence
@@ -287,6 +286,9 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         )
         self._last_word: Optional[str] = None  # Track last word for punctuation merging
         self._last_timestamp: Optional[float] = None  # Track last timestamp
+        self._current_context_id: Optional[str] = (
+            None  # Track current context_id for word timestamps
+        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -478,7 +480,10 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         while True:
             try:
                 word, timestamp_seconds = await self._word_boundary_queue.get()
-                await self.add_word_timestamps([(word, timestamp_seconds)])
+                if self._current_context_id:
+                    await self.add_word_timestamps(
+                        [(word, timestamp_seconds)], self._current_context_id
+                    )
                 self._word_boundary_queue.task_done()
             except asyncio.CancelledError:
                 break
@@ -536,12 +541,11 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._reset_state()
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)])
+            if isinstance(frame, TTSStoppedFrame) and self._current_context_id:
+                await self.add_word_timestamps([("Reset", 0)], self._current_context_id)
 
     def _reset_state(self):
         """Reset TTS state between turns."""
-        self._started = False
         self._first_chunk = True
         self._cumulative_audio_offset = 0.0
         self._current_sentence_base_offset = 0.0
@@ -549,6 +553,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
         self._current_sentence_max_word_offset = 0.0
         self._last_word = None
         self._last_timestamp = None
+        self._current_context_id = None
 
     async def flush_audio(self):
         """Flush any pending audio data."""
@@ -592,11 +597,12 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                 break
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Azure's streaming synthesis.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing synthesized speech data.
@@ -615,11 +621,10 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                 return
 
             try:
-                if not self._started:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._started = True
-                    self._first_chunk = True
+                await self.start_ttfb_metrics()
+                yield TTSStartedFrame(context_id=context_id)
+                self._first_chunk = True
+                self._current_context_id = context_id
 
                 # Capture base offset BEFORE starting synthesis to avoid race conditions
                 # Word boundary callbacks will use this value
@@ -647,6 +652,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
                         audio=chunk,
                         sample_rate=self.sample_rate,
                         num_channels=1,
+                        context_id=context_id,
                     )
                     yield frame
 
@@ -662,7 +668,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
 
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 self._reset_state()
                 return
 
@@ -738,11 +744,12 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         )
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Azure's HTTP synthesis API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the complete synthesized speech.
@@ -758,14 +765,15 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             await self.start_tts_usage_metrics(text)
             await self.stop_ttfb_metrics()
-            yield TTSStartedFrame()
+            yield TTSStartedFrame(context_id=context_id)
             # Azure always sends a 44-byte header. Strip it off.
             yield TTSAudioRawFrame(
                 audio=result.audio_data[44:],
                 sample_rate=self.sample_rate,
                 num_channels=1,
+                context_id=context_id,
             )
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
             logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")

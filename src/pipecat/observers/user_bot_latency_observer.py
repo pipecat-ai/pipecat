@@ -72,8 +72,10 @@ class UserBotLatencyObserver(BaseObserver):
             # Reset when user starts speaking
             self._user_stopped_time = None
         elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
-            # Record timestamp when user stops speaking
-            self._user_stopped_time = time.time()
+            # Record the actual time the user stopped speaking, which is
+            # the VAD determination time minus the stop_secs silence duration
+            # that had to elapse before the VAD confirmed speech ended.
+            self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
         elif isinstance(data.frame, BotStartedSpeakingFrame) and self._user_stopped_time:
             # Calculate and emit latency
             latency = time.time() - self._user_stopped_time
