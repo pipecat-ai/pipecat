@@ -924,6 +924,20 @@ class InworldTTSService(AudioContextWordTTSService):
         msg = {"close_context": {}, "contextId": context_id}
         await self.send_with_retry(json.dumps(msg), self._report_error)
 
+    def create_context_id(self) -> str:
+        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
+
+        Returns:
+            A unique string identifier for the TTS context.
+        """
+        # If a context ID does not exist, create a new one.
+        # If an ID exists, continue using the current ID.
+        # When interruptions happen, user speech results in
+        # an interruption, which resets the context ID.
+        if not self._context_id:
+            return str(uuid.uuid4())
+        return self._context_id
+
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio for the given text using the Inworld WebSocket TTS service.
@@ -942,10 +956,9 @@ class InworldTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
-
                 if not self._context_id:
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._context_id = context_id
                     logger.trace(f"{self}: Creating new context {self._context_id}")
                     await self.create_audio_context(self._context_id)
