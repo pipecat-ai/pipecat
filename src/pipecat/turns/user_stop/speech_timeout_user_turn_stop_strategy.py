@@ -34,8 +34,12 @@ class SpeechTimeoutUserTurnStopStrategy(BaseUserTurnStopStrategy):
       after the user stops speaking, adjusted by the VAD stop_secs.
 
     For services that support finalization (TranscriptionFrame.finalized=True),
-    the turn can be triggered immediately once the finalized transcript is
-    received and the user resume speaking timeout has elapsed.
+    receiving the finalized transcript allows the strategy to shorten the
+    timeout by removing the STT wait component, since only the
+    `user_speech_timeout` portion is still needed. If `user_speech_timeout`
+    has already elapsed when the transcript arrives, the original timeout
+    continues running to provide a buffer for VAD to detect any resumed
+    speech before triggering.
     """
 
     def __init__(self, *, user_speech_timeout: float = 0.6, **kwargs):
