@@ -11,6 +11,7 @@ API. It supports real-time transcription with Voice Activity Detection (VAD) and
 can handle multiple audio formats for Indian language speech recognition.
 """
 
+import asyncio
 import base64
 from dataclasses import dataclass
 from typing import AsyncGenerator, Dict, Literal, Optional
@@ -63,16 +64,26 @@ def language_to_sarvam_language(language: Language) -> str:
         Language.GU_IN: "gu-IN",
         Language.HI_IN: "hi-IN",
         Language.KN_IN: "kn-IN",
+        Language.KOK_IN: "kok-IN",
         Language.ML_IN: "ml-IN",
+        Language.MAI_IN: "mai-IN",
         Language.MR_IN: "mr-IN",
         Language.TA_IN: "ta-IN",
         Language.TE_IN: "te-IN",
         Language.PA_IN: "pa-IN",
         Language.OR_IN: "od-IN",
+        Language.SD_IN: "sd-IN",
+        Language.UR_IN: "ur-IN",
         Language.EN_IN: "en-IN",
         Language.AS_IN: "as-IN",
     }
 
+    if language not in LANGUAGE_MAP:
+        supported = ", ".join(sorted(code.value for code in LANGUAGE_MAP.keys()))
+        raise ValueError(
+            "Unsupported language for Sarvam STT: "
+            f"{language.value}. Supported languages: {supported}."
+        )
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
@@ -239,6 +250,9 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        self._keepalive_task = None
+        self._disconnecting = False
+        self._reconnecting = False
 
         if self._vad_signals:
             self._register_event_handler("on_speech_started")
@@ -364,104 +378,28 @@ class SarvamSTTService(STTService):
             return
 
         try:
-            # Convert audio bytes to base64 for Sarvam API
-            audio_base64 = base64.b64encode(audio).decode("utf-8")
-
-            # Convert input_audio_codec to encoding format (prepend "audio/" if needed)
-            encoding = (
-                self._input_audio_codec
-                if self._input_audio_codec.startswith("audio/")
-                else f"audio/{self._input_audio_codec}"
-            )
-
-            # Build method arguments
-            method_kwargs = {
-                "audio": audio_base64,
-                "encoding": encoding,
-                "sample_rate": self.sample_rate,
-            }
-
-            # Use appropriate method based on model configuration
-            if self._config.use_translate_method:
-                await self._socket_client.translate(**method_kwargs)
-            else:
-                await self._socket_client.transcribe(**method_kwargs)
-
+            await self._send_audio(audio)
         except Exception as e:
             yield ErrorFrame(error=f"Error sending audio to Sarvam: {e}", exception=e)
+            await self._reconnect()
 
         yield None
 
     async def _connect(self):
         """Connect to Sarvam WebSocket API using the SDK."""
         logger.debug("Connecting to Sarvam")
+        self._disconnecting = False
 
         try:
-            # Build common connection parameters
-            connect_kwargs = {
-                "model": self.model_name,
-                "sample_rate": str(self.sample_rate),
-            }
-
-            # Enable flush signal when using Pipecat's VAD (not Sarvam's) so that
-            # the flush() call on user-stopped-speaking is honored by the server.
-            if not self._vad_signals:
-                connect_kwargs["flush_signal"] = "true"
-
-            # Only send vad parameters when explicitly set (avoid overriding server defaults)
-            if self._vad_signals is not None:
-                connect_kwargs["vad_signals"] = "true" if self._vad_signals else "false"
-            if self._high_vad_sensitivity is not None:
-                connect_kwargs["high_vad_sensitivity"] = (
-                    "true" if self._high_vad_sensitivity else "false"
-                )
-
-            # Add language_code for models that support it
-            if self._language_string is not None:
-                connect_kwargs["language_code"] = self._language_string
-
-            # Add mode for models that support it
-            if self._config.supports_mode and self._mode is not None:
-                connect_kwargs["mode"] = self._mode
-
-            def _connect_with_sdk_headers(connect_fn, **kwargs):
-                # Different SDK versions may use different kwarg names.
-                for header_kw in ("headers", "additional_headers", "extra_headers"):
-                    try:
-                        return connect_fn(**kwargs, **{header_kw: self._sdk_headers})
-                    except TypeError:
-                        pass
-                return connect_fn(**kwargs)
-
-            # Choose the appropriate endpoint based on model configuration
-            if self._config.use_translate_endpoint:
-                self._websocket_context = _connect_with_sdk_headers(
-                    self._sarvam_client.speech_to_text_translate_streaming.connect,
-                    **connect_kwargs,
-                )
-            else:
-                self._websocket_context = _connect_with_sdk_headers(
-                    self._sarvam_client.speech_to_text_streaming.connect,
-                    **connect_kwargs,
-                )
-
-            # Enter the async context manager
-            self._socket_client = await self._websocket_context.__aenter__()
-
-            # Set prompt if provided (only for models that support prompts)
-            if self._prompt is not None and self._config.supports_prompt:
-                await self._socket_client.set_prompt(self._prompt)
-
-            # Register event handler for incoming messages
-            def _message_handler(message):
-                """Wrapper to handle async response handler."""
-                # Use Pipecat's built-in task management
-                self.create_task(self._handle_message(message))
-
-            self._socket_client.on(EventType.MESSAGE, _message_handler)
+            await self._connect_websocket()
 
             # Start receive task using Pipecat's task management
-            self._receive_task = self.create_task(self._receive_task_handler())
+            if not self._receive_task:
+                self._receive_task = self.create_task(self._receive_task_handler())
+
+            # Start keepalive task
+            if not self._keepalive_task:
+                self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
             logger.info("Connected to Sarvam successfully")
 
@@ -476,10 +414,86 @@ class SarvamSTTService(STTService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
+        self._disconnecting = True
+
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
+        await self._disconnect_websocket()
+        self._disconnecting = False
+
+    async def _connect_websocket(self):
+        """Establish WebSocket connection only (no task management)."""
+        # Build common connection parameters
+        connect_kwargs = {
+            "model": self.model_name,
+            "sample_rate": str(self.sample_rate),
+        }
+
+        # Enable flush signal when using Pipecat's VAD (not Sarvam's) so that
+        # the flush() call on user-stopped-speaking is honored by the server.
+        if not self._vad_signals:
+            connect_kwargs["flush_signal"] = "true"
+
+        # Only send vad parameters when explicitly set (avoid overriding server defaults)
+        if self._vad_signals is not None:
+            connect_kwargs["vad_signals"] = "true" if self._vad_signals else "false"
+        if self._high_vad_sensitivity is not None:
+            connect_kwargs["high_vad_sensitivity"] = (
+                "true" if self._high_vad_sensitivity else "false"
+            )
+
+        # Add language_code for models that support it
+        if self._language_string is not None:
+            connect_kwargs["language_code"] = self._language_string
+
+        # Add mode for models that support it
+        if self._config.supports_mode and self._mode is not None:
+            connect_kwargs["mode"] = self._mode
+
+        def _connect_with_sdk_headers(connect_fn, **kwargs):
+            # Different SDK versions may use different kwarg names.
+            for header_kw in ("headers", "additional_headers", "extra_headers"):
+                try:
+                    return connect_fn(**kwargs, **{header_kw: self._sdk_headers})
+                except TypeError:
+                    pass
+            return connect_fn(**kwargs)
+
+        # Choose the appropriate endpoint based on model configuration
+        if self._config.use_translate_endpoint:
+            self._websocket_context = _connect_with_sdk_headers(
+                self._sarvam_client.speech_to_text_translate_streaming.connect,
+                **connect_kwargs,
+            )
+        else:
+            self._websocket_context = _connect_with_sdk_headers(
+                self._sarvam_client.speech_to_text_streaming.connect,
+                **connect_kwargs,
+            )
+
+        # Enter the async context manager
+        self._socket_client = await self._websocket_context.__aenter__()
+
+        # Set prompt if provided (only for models that support prompts)
+        if self._prompt is not None and self._config.supports_prompt:
+            await self._socket_client.set_prompt(self._prompt)
+
+        # Register event handler for incoming messages
+        def _message_handler(message):
+            """Wrapper to handle async response handler."""
+            # Use Pipecat's built-in task management
+            self.create_task(self._handle_message(message))
+
+        self._socket_client.on(EventType.MESSAGE, _message_handler)
+
+    async def _disconnect_websocket(self):
+        """Close WebSocket connection only (no task management)."""
         if self._websocket_context and self._socket_client:
             try:
                 # Exit the async context manager
@@ -493,6 +507,68 @@ class SarvamSTTService(STTService):
                 self._socket_client = None
                 self._websocket_context = None
 
+    async def _keepalive_task_handler(self):
+        """Send periodic keepalive audio to prevent idle timeout."""
+        keepalive_sleep = 20
+        while True:
+            await asyncio.sleep(keepalive_sleep)
+            await self._send_keepalive()
+
+    async def _send_keepalive(self):
+        """Send a short silent audio chunk to keep the connection alive."""
+        if self._disconnecting or not self._socket_client:
+            return
+
+        try:
+            silence = self._build_silence_audio(duration_ms=20)
+            await self._send_audio(silence)
+        except Exception as e:
+            logger.debug(f"Sarvam STT keepalive send failed: {e}")
+
+    def _build_silence_audio(self, duration_ms: int = 20) -> bytes:
+        """Generate a short silence buffer for keepalive."""
+        bytes_per_sample = 2
+        if self._input_audio_codec in ("mulaw", "alaw", "audio/mulaw", "audio/alaw"):
+            bytes_per_sample = 1
+        samples = int(self.sample_rate * (duration_ms / 1000.0))
+        return b"\x00" * samples * bytes_per_sample
+
+    async def _send_audio(self, audio: bytes):
+        """Send audio bytes to Sarvam for transcription."""
+        # Convert audio bytes to base64 for Sarvam API
+        audio_base64 = base64.b64encode(audio).decode("utf-8")
+
+        # Convert input_audio_codec to encoding format (prepend "audio/" if needed)
+        encoding = (
+            self._input_audio_codec
+            if self._input_audio_codec.startswith("audio/")
+            else f"audio/{self._input_audio_codec}"
+        )
+
+        # Build method arguments
+        method_kwargs = {
+            "audio": audio_base64,
+            "encoding": encoding,
+            "sample_rate": self.sample_rate,
+        }
+
+        # Use appropriate method based on model configuration
+        if self._config.use_translate_method:
+            await self._socket_client.translate(**method_kwargs)
+        else:
+            await self._socket_client.transcribe(**method_kwargs)
+
+    async def _reconnect(self):
+        """Reconnect the WebSocket after a send failure."""
+        if self._disconnecting or self._reconnecting:
+            return
+        self._reconnecting = True
+        try:
+            await self._disconnect()
+            await self._connect()
+        finally:
+            self._reconnecting = False
+
     async def _receive_task_handler(self):
         """Handle incoming messages from Sarvam WebSocket.
 
@@ -502,12 +578,49 @@ class SarvamSTTService(STTService):
         if not self._socket_client:
             return
 
-        try:
-            # Start listening for messages from the Sarvam SDK
-            # Messages will be handled via the _message_handler callback
-            await self._socket_client.start_listening()
-        except Exception as e:
-            await self.push_error(error_msg=f"Sarvam receive task error: {e}", exception=e)
+        max_reconnect_attempts = 3
+        attempt = 0
+
+        while not self._disconnecting:
+            if not self._socket_client:
+                return
+
+            try:
+                # Start listening for messages from the Sarvam SDK
+                # Messages will be handled via the _message_handler callback
+                await self._socket_client.start_listening()
+            except Exception as e:
+                if self._disconnecting:
+                    return
+                logger.warning(f"Sarvam STT connection lost: {e}")
+
+            if self._disconnecting:
+                return
+
+            attempt += 1
+            if attempt > max_reconnect_attempts:
+                await self.push_error(
+                    error_msg=(
+                        "Sarvam STT reconnection failed after max attempts "
+                        f"({max_reconnect_attempts})"
+                    )
+                )
+                return
+
+            backoff = 2.0 * (2 ** (attempt - 1))
+            logger.info(
+                "Sarvam STT: reconnecting in "
+                f"{backoff:.0f}s (attempt {attempt}/{max_reconnect_attempts})"
+            )
+            await asyncio.sleep(backoff)
+
+            try:
+                await self._disconnect_websocket()
+                await self._connect_websocket()
+                attempt = 0
+                logger.info("Sarvam STT: reconnected successfully")
+            except Exception as e:
+                logger.error(f"Sarvam STT: reconnect failed: {e}")
 
     async def _handle_message(self, message):
         """Handle incoming WebSocket message from Sarvam SDK.
