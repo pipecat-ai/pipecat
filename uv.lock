@@ -588,6 +588,20 @@ wheels = [
 ]
 
 [[package]]
+name = "azure-communication-callautomation"
+version = "1.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "azure-core" },
+    { name = "isodate" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ab/0a/92abae9910a3fc6b52b0e900728dc25b0ba230934b243125a5c775e53f0d/azure_communication_callautomation-1.5.0.tar.gz", hash = "sha256:0ecce73791f061a1b6d351ff151a71ee1a9ddd4cf64fd0725cf15c94f6186779", size = 145748, upload-time = "2025-09-10T20:26:24.693Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/a4/26654151bccba19f1d192d7540d8a209993aa363bd08a01ed1e7d32af4aa/azure_communication_callautomation-1.5.0-py3-none-any.whl", hash = "sha256:4d0926c1b3dc1650adf0b249ef7c5d1cfe0c01b98acef978470ce429bcddc41d", size = 142661, upload-time = "2025-09-10T20:26:25.912Z" },
+]
+
+[[package]]
 name = "azure-core"
 version = "1.39.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4644,6 +4658,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+acs-serializer = [
+    { name = "azure-communication-callautomation" },
+    { name = "azure-core" },
+]
 aic = [
     { name = "aic-sdk" },
 ]
@@ -4893,6 +4911,8 @@ requires-dist = [
     { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.4.0" },
     { name = "aws-sdk-sagemaker-runtime-http2", marker = "python_full_version >= '3.12' and extra == 'sagemaker'" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = ">=1.47.0,<2" },
+    { name = "azure-communication-callautomation", marker = "extra == 'acs-serializer'", specifier = ">=1.4.0,<2" },
+    { name = "azure-core", marker = "extra == 'acs-serializer'", specifier = ">=1.29.0,<2" },
     { name = "camb-sdk", marker = "extra == 'camb'", specifier = ">=1.5.4,<2" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
     { name = "daily-python", marker = "extra == 'daily'", specifier = "~=0.27.0" },
@@ -4990,7 +5010,7 @@ requires-dist = [
     { name = "wait-for2", marker = "python_full_version < '3.12'", specifier = ">=0.4.1,<1" },
     { name = "websockets", marker = "extra == 'websockets-base'", specifier = ">=13.1,<16.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "kokoro", "krisp", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "novita", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "piper", "qwen", "remote-smart-turn", "resembleai", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper", "xai"]
+provides-extras = ["acs-serializer", "aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "camb", "cerebras", "daily", "deepgram", "deepseek", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "gradium", "grok", "groq", "gstreamer", "heygen", "hume", "inworld", "koala", "kokoro", "krisp", "langchain", "lemonslice", "livekit", "lmnt", "local", "local-smart-turn", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "neuphonic", "noisereduce", "novita", "nvidia", "openai", "rnnoise", "openpipe", "openrouter", "perplexity", "piper", "qwen", "remote-smart-turn", "resembleai", "rime", "riva", "runner", "sagemaker", "sambanova", "sarvam", "sentry", "silero", "simli", "smallest", "soniox", "soundfile", "speechmatics", "strands", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "websockets-base", "whisper", "xai"]
 
 [package.metadata.requires-dev]
 dev = [
