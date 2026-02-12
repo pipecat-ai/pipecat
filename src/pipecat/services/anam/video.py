@@ -179,8 +179,9 @@ class AnamVideoService(AIService):
                 audio_config
             )
         except Exception as e:
-            logger.error(f"Error creating agent audio stream: {e}")
-            await self.push_error_frame(ErrorFrame(error=f"Anam agent audio stream error: {e}"))
+            error_msg = f"Anam agent audio stream error: {e}"
+            logger.error(error_msg)
+            await self.push_error_frame(ErrorFrame(error=error_msg))
             raise
 
         # Create tasks for consuming video and audio frames
@@ -280,8 +281,9 @@ class AnamVideoService(AIService):
 
                 await self.push_frame(frame)
         except Exception as e:
-            logger.error(f"Error consuming video frames: {e}")
-            await self.push_error_frame(ErrorFrame(error=f"Anam video frame error: {e}"))
+            error_msg = f"Anam error consuming video frames: {e}"
+            logger.error(error_msg)
+            await self.push_error_frame(ErrorFrame(error=error_msg))
 
     async def _consume_audio_frames(self) -> None:
         """Consume audio frames from Anam iterator and push them downstream.
@@ -307,8 +309,9 @@ class AnamVideoService(AIService):
                     await self.push_frame(frame)
 
         except Exception as e:
-            logger.error(f"Error consuming audio frames: {e}")
-            await self.push_error_frame(ErrorFrame(error=f"Anam audio frame error: {e}"))
+            error_msg = f"Anam error consuming audio frames: {e}"
+            logger.error(error_msg)
+            await self.push_error_frame(ErrorFrame(error=error_msg))
 
     async def _cancel_video_task(self):
         """Cancel the video frame consumption task if it exists."""
@@ -411,6 +414,7 @@ class AnamVideoService(AIService):
                 if self._agent_audio_stream:
                     await self._agent_audio_stream.end_sequence()
             except Exception as e:
-                logger.error(f"Error in audio send task: {e}")
-                await self.push_error_frame(ErrorFrame(error=f"Anam audio send error: {e}"))
+                error_msg = f"Anam audio send error: {e}"
+                logger.error(error_msg)
+                await self.push_error_frame(ErrorFrame(error=error_msg))
                 break
