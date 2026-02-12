@@ -136,7 +136,7 @@ class AnamVideoService(AIService):
         """Start the Anam video service and initialize the avatar session.
 
         Creates an Anam session and creates tasks to forward audio/video. Blocks until
-        sessionready is received so audio is not dropped before backend is ready to receive audio.
+        session_ready is received so audio is not dropped before backend is ready to receive audio.
 
         Args:
             frame: The start frame containing initialization parameters.
@@ -217,13 +217,11 @@ class AnamVideoService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        # Handle frames that should not be pushed downstream
         if isinstance(frame, TTSAudioRawFrame):
             # Do not forward TTS audio downstream; Anam syncs TTS with video
-            await self._handle_audio_frame(frame)
+            await self._queue.put(frame)
             return
 
-        # Handle frames that need processing before being pushed downstream
         if isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
         if isinstance(frame, OutputTransportReadyFrame):
@@ -233,7 +231,6 @@ class AnamVideoService(AIService):
         if isinstance(frame, BotStartedSpeakingFrame):
             await self.stop_ttfb_metrics()
 
-        # Push frames downstream
         await self.push_frame(frame, direction)
 
     def can_generate_metrics(self) -> bool:
@@ -266,7 +263,10 @@ class AnamVideoService(AIService):
             await self.push_error(ErrorFrame(error=f"Anam video frame error: {e}"))
 
     async def _consume_audio_frames(self) -> None:
-        """Consume audio frames from Anam iterator and push them downstream."""
+        """Consume audio frames from Anam iterator and push them downstream.
+
+        Audio frames are decoded WebRTC OPUS: 16 bit 48kHz stereo PCM samples.
+        """
         if not self._anam_session:
             return
 
@@ -275,6 +275,7 @@ class AnamVideoService(AIService):
                 if not self._transport_ready:
                     continue
 
+                # Resample to mono as some downstream transports cannot handle stereo audio.
                 resampled_audio = self._anam_resampler.resample(audio_frame)
                 for resampled_frame in resampled_audio:
                     frame = SpeechOutputAudioRawFrame(
@@ -283,6 +284,7 @@ class AnamVideoService(AIService):
                         num_channels=self._anam_resampler.layout.nb_channels,
                     )
                     await self.push_frame(frame)
+
         except Exception as e:
             logger.error(f"Error consuming audio frames: {e}")
             await self.push_error(ErrorFrame(error=f"Anam audio frame error: {e}"))
@@ -302,8 +304,7 @@ class AnamVideoService(AIService):
     async def _on_session_ready(self) -> None:
         """Handle session ready event (backend service is ready to receive audio).
 
-        Unblocks the pipeline so StartFrame can propagate and audio can be forwarded to the backend.
-        Any audio pushed before this point has been discarded and lost.
+        Unblocks the pipeline to propagate StartFrame and allow audio to be ingested.
         """
         logger.info("Anam connection established")
         self._session_ready_event.set()
@@ -311,8 +312,7 @@ class AnamVideoService(AIService):
     async def _on_connection_closed(self, code: str, reason: Optional[str]) -> None:
         """Handle connection closed event.
 
-        Client and session are closed by the SDK before emitting this event.
-        No need to close again, just cleanup resources.
+        Client and session are closed by the SDK prior to emitting this event.
 
         Args:
             code: Connection close code (from ConnectionClosedCode enum).
@@ -362,10 +362,6 @@ class AnamVideoService(AIService):
         if self._send_task:
             await self.cancel_task(self._send_task)
             self._send_task = None
-
-    async def _handle_audio_frame(self, frame: TTSAudioRawFrame):
-        """Queue an audio frame for sending to Anam."""
-        await self._queue.put(frame)
 
     async def _send_task_handler(self):
         """Handle sending audio frames to the Anam client.
