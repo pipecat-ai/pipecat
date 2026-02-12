@@ -1116,6 +1116,10 @@ class RTVIObserver(BaseObserver):
         self._last_user_audio_level = 0
         self._last_bot_audio_level = 0
 
+        # Track bot speaking state for queuing aggregated text frames
+        self._bot_is_speaking = False
+        self._queued_aggregated_text_frames: List[AggregatedTextFrame] = []
+
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
 
@@ -1384,17 +1388,30 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_bot_speaking(self, frame: Frame):
         """Handle bot speaking event frames."""
-        message = None
         if isinstance(frame, BotStartedSpeakingFrame):
             message = RTVIBotStartedSpeakingMessage()
+            await self.send_rtvi_message(message)
+            # Flush any queued aggregated text frames
+            for queued_frame in self._queued_aggregated_text_frames:
+                await self._send_aggregated_llm_text(queued_frame)
+            self._queued_aggregated_text_frames.clear()
+            self._bot_is_speaking = True
         elif isinstance(frame, BotStoppedSpeakingFrame):
             message = RTVIBotStoppedSpeakingMessage()
-
-        if message:
             await self.send_rtvi_message(message)
+            self._bot_is_speaking = False
 
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Handle aggregated LLM text output frames."""
+        if self._bot_is_speaking:
+            # Bot has already started speaking, send directly
+            await self._send_aggregated_llm_text(frame)
+        else:
+            # Bot hasn't started speaking yet, queue the frame
+            self._queued_aggregated_text_frames.append(frame)
+
+    async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
+        """Send aggregated LLM text messages."""
         # Skip certain aggregator types if configured to do so.
         if (
             self._params.skip_aggregator_types

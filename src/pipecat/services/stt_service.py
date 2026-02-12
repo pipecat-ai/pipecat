@@ -49,6 +49,12 @@ class STTService(AIService):
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
 
+    Includes an optional keepalive mechanism that sends silent audio when no real
+    audio has been sent for a configurable timeout, preventing servers from closing
+    idle connections (e.g. when behind a ServiceSwitcher). Subclasses that enable
+    keepalive must override ``_send_keepalive()`` to deliver the silence in the
+    appropriate service-specific protocol.
+
     Event handlers:
         on_connected: Called when connected to the STT service.
         on_disconnected: Called when disconnected from the STT service.
@@ -76,6 +82,8 @@ class STTService(AIService):
         sample_rate: Optional[int] = None,
         stt_ttfb_timeout: float = 2.0,
         ttfs_p99_latency: Optional[float] = None,
+        keepalive_timeout: Optional[float] = None,
+        keepalive_interval: float = 5.0,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -95,6 +103,10 @@ class STTService(AIService):
                 This is broadcast via STTMetadataFrame at pipeline start for downstream
                 processors (e.g., turn strategies) to optimize timing. Subclasses provide
                 measured defaults; pass a value here to override for your deployment.
+            keepalive_timeout: Seconds of no audio before sending silence to keep the
+                connection alive. None disables keepalive. Useful for services that
+                close idle connections (e.g. behind a ServiceSwitcher).
+            keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -115,6 +127,12 @@ class STTService(AIService):
         self._last_transcription_time: Optional[float] = None
         self._finalize_pending: bool = False
         self._finalize_requested: bool = False
+
+        # Keepalive state
+        self._keepalive_timeout = keepalive_timeout
+        self._keepalive_interval = keepalive_interval
+        self._keepalive_task: Optional[asyncio.Task] = None
+        self._last_audio_time: float = 0
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -208,6 +226,7 @@ class STTService(AIService):
         """Clean up STT service resources."""
         await super().cleanup()
         await self._cancel_ttfb_timeout()
+        await self._cancel_keepalive_task()
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         logger.info(f"Updating STT settings: {self._settings}")
@@ -238,6 +257,8 @@ class STTService(AIService):
         """
         if self._muted:
             return
+
+        self._last_audio_time = time.monotonic()
 
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
         if hasattr(frame, "user_id"):
@@ -436,6 +457,66 @@ class STTService(AIService):
                 )
                 await super().push_frame(MetricsFrame(data=[ttfb_data]))
 
+    def _create_keepalive_task(self):
+        """Start the keepalive task if keepalive is enabled."""
+        if self._keepalive_timeout is not None:
+            self._last_audio_time = time.monotonic()
+            self._keepalive_task = self.create_task(
+                self._keepalive_task_handler(), name="keepalive"
+            )
+
+    async def _cancel_keepalive_task(self):
+        """Stop the keepalive task if running."""
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
+    async def _keepalive_task_handler(self):
+        """Send periodic silent audio to prevent the server from closing the connection.
+
+        When keepalive is enabled, this task checks periodically if the connection
+        has been idle (no audio sent) for longer than keepalive_timeout seconds.
+        If so, it generates silent 16-bit mono PCM audio and passes it to
+        _send_keepalive() for service-specific formatting and sending.
+        """
+        while True:
+            await asyncio.sleep(self._keepalive_interval)
+            try:
+                if not self._is_keepalive_ready():
+                    continue
+                elapsed = time.monotonic() - self._last_audio_time
+                if elapsed < self._keepalive_timeout:
+                    continue
+                num_samples = int(self.sample_rate * _KEEPALIVE_SILENCE_DURATION)
+                silence = b"\x00" * (num_samples * 2)
+                await self._send_keepalive(silence)
+                self._last_audio_time = time.monotonic()
+                logger.trace(f"{self} sent keepalive silence")
+            except Exception as e:
+                logger.warning(f"{self} keepalive error: {e}")
+                break
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the service is ready to send keepalive.
+
+        Subclasses should override this to check their connection state.
+
+        Returns:
+            True if keepalive can be sent.
+        """
+        return True
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio to keep the connection alive.
+
+        Subclasses that enable keepalive must override this to deliver silence
+        in their service-specific protocol.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        raise NotImplementedError("Subclasses must override _send_keepalive")
+
 
 class SegmentedSTTService(STTService):
     """STT service that processes speech in segments using VAD events.
@@ -549,46 +630,27 @@ class WebsocketSTTService(STTService, WebsocketService):
     Combines STT functionality with websocket connectivity, providing automatic
     error handling, reconnection capabilities, and optional silence-based keepalive.
 
-    The keepalive feature sends silent audio when no real audio has been sent for
-    a configurable timeout, preventing servers from closing idle connections (e.g.
-    when behind a ServiceSwitcher). Subclasses can override ``_send_keepalive()``
-    to wrap the silence in a service-specific protocol.
+    The keepalive feature (inherited from STTService) sends silent audio when no
+    real audio has been sent for a configurable timeout, preventing servers from
+    closing idle connections (e.g. when behind a ServiceSwitcher). Subclasses can
+    override ``_send_keepalive()`` to wrap the silence in a service-specific protocol.
     """
 
     def __init__(
         self,
         *,
         reconnect_on_error: bool = True,
-        keepalive_timeout: Optional[float] = None,
-        keepalive_interval: float = 5.0,
         **kwargs,
     ):
         """Initialize the Websocket STT service.
 
         Args:
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
-            keepalive_timeout: Seconds of no audio before sending silence to keep the
-                connection alive. None disables keepalive. Useful for services that
-                close idle connections (e.g. behind a ServiceSwitcher).
-            keepalive_interval: Seconds between idle checks when keepalive is enabled.
-            **kwargs: Additional arguments passed to parent classes.
+            **kwargs: Additional arguments passed to parent classes (including
+                keepalive_timeout and keepalive_interval for STTService).
         """
         STTService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        self._keepalive_timeout = keepalive_timeout
-        self._keepalive_interval = keepalive_interval
-        self._keepalive_task: Optional[asyncio.Task] = None
-        self._last_audio_time: float = 0
-
-    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
-        """Process an audio frame, tracking the last audio time for keepalive.
-
-        Args:
-            frame: The audio frame to process.
-            direction: The direction of frame processing.
-        """
-        self._last_audio_time = time.monotonic()
-        await super().process_audio_frame(frame, direction)
 
     async def _connect(self):
         """Connect and start keepalive task if enabled."""
@@ -612,44 +674,9 @@ class WebsocketSTTService(STTService, WebsocketService):
             self._create_keepalive_task()
         return result
 
-    def _create_keepalive_task(self):
-        """Start the keepalive task if keepalive is enabled."""
-        if self._keepalive_timeout is not None:
-            self._last_audio_time = time.monotonic()
-            self._keepalive_task = self.create_task(
-                self._keepalive_task_handler(), name="keepalive"
-            )
-
-    async def _cancel_keepalive_task(self):
-        """Stop the keepalive task if running."""
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
-
-    async def _keepalive_task_handler(self):
-        """Send periodic silent audio to prevent the server from closing the connection.
-
-        When keepalive is enabled, this task checks periodically if the connection
-        has been idle (no audio sent) for longer than keepalive_timeout seconds.
-        If so, it generates silent 16-bit mono PCM audio and passes it to
-        _send_keepalive() for service-specific formatting and sending.
-        """
-        while True:
-            await asyncio.sleep(self._keepalive_interval)
-            try:
-                if not self._websocket or self._websocket.state is not State.OPEN:
-                    continue
-                elapsed = time.monotonic() - self._last_audio_time
-                if elapsed < self._keepalive_timeout:
-                    continue
-                num_samples = int(self.sample_rate * _KEEPALIVE_SILENCE_DURATION)
-                silence = b"\x00" * (num_samples * 2)
-                await self._send_keepalive(silence)
-                self._last_audio_time = time.monotonic()
-                logger.trace(f"{self} sent keepalive silence")
-            except Exception as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the websocket is open and ready for keepalive."""
+        return self._websocket is not None and self._websocket.state is State.OPEN
 
     async def _send_keepalive(self, silence: bytes):
         """Send silent audio over the websocket to keep the connection alive.
