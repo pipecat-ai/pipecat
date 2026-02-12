@@ -12,6 +12,7 @@ using Rime's API for streaming and batch audio synthesis.
 
 import base64
 import json
+import uuid
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
@@ -368,6 +369,20 @@ class RimeTTSService(AudioContextWordTTSService):
                 word_pairs.append((word, adjusted_start))
 
         return word_pairs
+
+    def create_context_id(self) -> str:
+        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
+
+        Returns:
+            A unique string identifier for the TTS context.
+        """
+        # If a context ID does not exist, create a new one.
+        # If an ID exists, continue using the current ID.
+        # When interruptions happen, user speech results in
+        # an interruption, which resets the context ID.
+        if not self._context_id:
+            return str(uuid.uuid4())
+        return self._context_id
 
     async def flush_audio(self):
         """Flush any pending audio synthesis."""
