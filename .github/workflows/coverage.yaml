@@ -41,6 +41,7 @@ jobs:
             --extra livekit \
             --extra local-smart-turn-v3 \
             --extra piper \
+            --extra tracing \
             --extra websocket
 
       - name: Run tests with coverage
