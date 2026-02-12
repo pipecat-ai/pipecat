@@ -51,6 +51,7 @@ Changelog = "https://github.com/pipecat-ai/pipecat/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 aic = [ "aic-sdk~=2.0.1" ]
+anam = [ "anam~=0.2.0" ]
 anthropic = [ "anthropic~=0.49.0" ]
 assemblyai = [ "pipecat-ai[websockets-base]" ]
 asyncai = [ "pipecat-ai[websockets-base]" ]
