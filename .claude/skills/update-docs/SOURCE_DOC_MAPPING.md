@@ -22,7 +22,8 @@ These source paths don't follow the standard `services/{provider}/{type}.py` →
 | `processors/user_idle_processor.py` | `server/utilities/user-idle-processor.mdx` |
 | `processors/idle_frame_processor.py` | `server/pipeline/pipeline-idle-detection.mdx` |
 | `pipeline/task.py` | `server/pipeline/pipeline-task.mdx` |
-| `runner/run.py` | `server/utilities/runner/guide.mdx` |
+| `pipeline/runner.py` | `server/utilities/runner/guide.mdx` |
+| `transports/base_transport.py` | `server/services/transport/transport-params.mdx` |
 
 ## Skip list
 
@@ -40,7 +41,6 @@ These files should never trigger doc updates.
 | `services/gemini_multimodal_live/**` | Deprecated |
 | `services/aws/agent_core.py` | Internal |
 | `services/aws/sagemaker/**` | No doc page |
-| `transports/base_transport.py` | Internal base class |
 | `transports/base_input.py` | Internal base class |
 | `transports/base_output.py` | Internal base class |
 | `transports/websocket/client.py` | No doc page |

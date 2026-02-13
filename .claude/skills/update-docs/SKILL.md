@@ -146,16 +146,16 @@ Guide directories:
 - `guides/features/` — feature-specific guides (Gemini Live, OpenAI audio, WhatsApp, etc.)
 - `guides/telephony/` — telephony integration guides (Twilio, Plivo, Telnyx, etc.)
 
-### Step 8: Handle unmapped files
+### Step 8: Identify doc gaps
 
-After processing all mapped pairs, report any source files that:
-- Had no doc page mapping (neither tier 1, 2, nor 3)
-- Are not marked as "(skip)" in the tier-1 table
+After processing all mapped pairs, check for two kinds of gaps:
 
-For each unmapped file, tell the user:
+**Missing pages**: Source files that had no doc page mapping (neither tier 1, 2, nor 3) and are not marked as "(skip)". For each, tell the user:
 - The source file path
 - The main class(es) it defines
 - Whether a new doc page should be created
+
+**Missing sections**: Mapped doc pages that are missing standard sections compared to the source. For example, a transport page with no Configuration section, or a service page with no InputParams table when the source defines `InputParams(BaseModel)`. Flag these and offer to add the missing sections.
 
 If the user wants a new page, create it using this template structure:
 ```
