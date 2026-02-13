@@ -59,7 +59,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import LLMSettings, ServiceSettings, is_given
+from pipecat.services.settings import LLMSettings, is_given
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationUtil,
@@ -313,16 +313,16 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
 
-    async def _update_settings_from_typed(self, update: LLMSettings) -> set[str]:
-        """Apply a typed settings update, handling turn-completion fields.
+    async def _update_settings(self, update: LLMSettings) -> set[str]:
+        """Apply a settings update, handling turn-completion fields.
 
         Args:
-            update: A typed LLM settings delta.
+            update: An LLM settings delta.
 
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if "filter_incomplete_user_turns" in changed:
             self._filter_incomplete_user_turns = self._settings.filter_incomplete_user_turns
@@ -335,35 +335,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             self.set_user_turn_completion_config(self._settings.user_turn_completion_config)
 
         return changed
-
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update LLM service settings.
-
-        Handles turn completion settings specially since they are not model
-        parameters and should not be passed to the underlying LLM API.
-
-        Args:
-            settings: Dictionary of settings to update.
-        """
-        # Turn completion settings to extract (not model parameters)
-        turn_completion_keys = {"filter_incomplete_user_turns", "user_turn_completion_config"}
-
-        # Handle turn completion settings
-        if "filter_incomplete_user_turns" in settings:
-            self._filter_incomplete_user_turns = settings["filter_incomplete_user_turns"]
-            logger.info(
-                f"{self}: Incomplete turn filtering {'enabled' if self._filter_incomplete_user_turns else 'disabled'}"
-            )
-
-            # Configure the mixin with config object
-            if self._filter_incomplete_user_turns and "user_turn_completion_config" in settings:
-                self.set_user_turn_completion_config(settings["user_turn_completion_config"])
-
-        # Remove turn completion settings before passing to parent
-        settings = {k: v for k, v in settings.items() if k not in turn_completion_keys}
-
-        # Let the parent handle remaining model parameters
-        await super()._update_settings(settings)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame.
@@ -379,16 +350,12 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         elif isinstance(frame, LLMConfigureOutputFrame):
             self._skip_tts = frame.skip_tts
         elif isinstance(frame, LLMUpdateSettingsFrame):
-            # New path: typed settings update object.
             if frame.update is not None:
-                await self._update_settings_from_typed(frame.update)
-            # Legacy path: plain dict, but service uses typed settings — convert.
-            elif isinstance(self._settings, ServiceSettings):
+                await self._update_settings(frame.update)
+            elif frame.settings:
+                # Backward-compatible path: convert legacy dict to settings object.
                 update = type(self._settings).from_mapping(frame.settings)
-                await self._update_settings_from_typed(update)
-            # Legacy path: plain dict, service still uses dict-based settings.
-            else:
-                await self._update_settings(frame.settings)
+                await self._update_settings(update)
         elif isinstance(frame, LLMContextSummaryRequestFrame):
             await self._handle_summary_request(frame)
 

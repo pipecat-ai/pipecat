@@ -93,14 +93,14 @@ def language_to_nvidia_riva_language(language: Language) -> Optional[str]:
 
 @dataclass
 class NvidiaSTTSettings(STTSettings):
-    """Typed settings for the NVIDIA Riva streaming STT service."""
+    """Settings for the NVIDIA Riva streaming STT service."""
 
     pass
 
 
 @dataclass
 class NvidiaSegmentedSTTSettings(STTSettings):
-    """Typed settings for the NVIDIA Riva segmented STT service.
+    """Settings for the NVIDIA Riva segmented STT service.
 
     Parameters:
         profanity_filter: Whether to filter profanity from results.
@@ -579,8 +579,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         self._config = self._create_recognition_config()
         logger.debug(f"Initialized NvidiaSegmentedSTTService with model: {self.model_name}")
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update and sync internal state.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update and sync internal state.
 
         Args:
             update: A :class:`STTSettings` (or ``NvidiaSegmentedSTTSettings``) delta.
@@ -588,7 +588,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if changed:
             self._config = self._create_recognition_config()

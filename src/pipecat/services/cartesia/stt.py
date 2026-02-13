@@ -46,7 +46,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class CartesiaSTTSettings(STTSettings):
-    """Typed settings for the Cartesia STT service.
+    """Settings for the Cartesia STT service.
 
     Parameters:
         encoding: Audio encoding format (e.g. ``"pcm_s16le"``).
@@ -294,8 +294,8 @@ class CartesiaSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update and reconnect if anything changed.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update and reconnect if anything changed.
 
         Args:
             update: A :class:`STTSettings` (or ``CartesiaSTTSettings``) delta.
@@ -303,7 +303,7 @@ class CartesiaSTTService(WebsocketSTTService):
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
         if changed:
             await self._disconnect()
             await self._connect()

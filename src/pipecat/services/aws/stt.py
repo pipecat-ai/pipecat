@@ -47,7 +47,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AWSTranscribeSTTSettings(STTSettings):
-    """Typed settings for the AWS Transcribe STT service.
+    """Settings for the AWS Transcribe STT service.
 
     Parameters:
         sample_rate: Audio sample rate in Hz (8000 or 16000).
@@ -140,13 +140,13 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         }
         return encoding_map.get(encoding, encoding)
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update, reconnecting if needed.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update, reconnecting if needed.
 
         Any change to connection-relevant settings (model, language, etc.)
         triggers a WebSocket reconnect so the new configuration takes effect.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if changed and self._websocket:
             await self._disconnect()

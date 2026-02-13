@@ -150,7 +150,7 @@ def language_to_fal_language(language: Language) -> Optional[str]:
 
 @dataclass
 class FalSTTSettings(STTSettings):
-    """Typed settings for the Fal Wizper STT service.
+    """Settings for the Fal Wizper STT service.
 
     Parameters:
         task: Task to perform ('transcribe' or 'translate'). Defaults to
@@ -251,9 +251,9 @@ class FalSTTService(SegmentedSTTService):
         """
         return language_to_fal_language(language)
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update, converting language if changed."""
-        changed = await super()._update_settings_from_typed(update)
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update, converting language if changed."""
+        changed = await super()._update_settings(update)
 
         if "language" in changed:
             # Convert the Language enum to a Fal language code.

@@ -89,7 +89,7 @@ def language_to_minimax_language(language: Language) -> Optional[str]:
 
 @dataclass
 class MiniMaxTTSSettings(TTSSettings):
-    """Typed settings for MiniMax TTS service.
+    """Settings for MiniMax TTS service.
 
     Parameters:
         stream: Whether to use streaming mode.

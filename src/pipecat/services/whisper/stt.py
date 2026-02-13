@@ -176,7 +176,7 @@ def language_to_whisper_language(language: Language) -> Optional[str]:
 
 @dataclass
 class WhisperSTTSettings(STTSettings):
-    """Typed settings for the local Whisper (Faster Whisper) STT service.
+    """Settings for the local Whisper (Faster Whisper) STT service.
 
     Parameters:
         device: Inference device ('cpu', 'cuda', or 'auto').
@@ -191,7 +191,7 @@ class WhisperSTTSettings(STTSettings):
 
 @dataclass
 class WhisperMLXSTTSettings(STTSettings):
-    """Typed settings for the MLX Whisper STT service.
+    """Settings for the MLX Whisper STT service.
 
     Parameters:
         no_speech_prob: Probability threshold for filtering non-speech segments.

@@ -12,7 +12,7 @@ import time
 import warnings
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, Mapping, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from websockets.protocol import State
@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import ServiceSettings, STTSettings
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
@@ -183,11 +183,8 @@ class STTService(AIService):
                 stacklevel=2,
             )
         logger.info(f"Switching STT model to: [{model}]")
-        if isinstance(self._settings, ServiceSettings):
-            settings_cls = type(self._settings)
-            await self._update_settings_from_typed(settings_cls(model=model))
-        else:
-            self.set_model_name(model)
+        settings_cls = type(self._settings)
+        await self._update_settings(settings_cls(model=model))
 
     async def set_language(self, language: Language):
         """Set the language for speech recognition.
@@ -206,11 +203,8 @@ class STTService(AIService):
                 stacklevel=2,
             )
         logger.info(f"Switching STT language to: [{language}]")
-        if isinstance(self._settings, ServiceSettings):
-            settings_cls = type(self._settings)
-            await self._update_settings_from_typed(settings_cls(language=language))
-        else:
-            pass
+        settings_cls = type(self._settings)
+        await self._update_settings(settings_cls(language=language))
 
     @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -242,23 +236,8 @@ class STTService(AIService):
         await super().cleanup()
         await self._cancel_ttfb_timeout()
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        logger.info(f"Updating STT settings: {self._settings}")
-        for key, value in settings.items():
-            if key in self._settings:
-                logger.info(f"Updating STT setting {key} to: [{value}]")
-                self._settings[key] = value
-                if key == "language":
-                    await self.set_language(value)
-            elif key == "language":
-                await self.set_language(value)
-            elif key == "model":
-                self.set_model_name(value)
-            else:
-                logger.warning(f"Unknown setting for STT service: {key}")
-
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed STT settings update.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply an STT settings update.
 
         Handles ``model`` (via parent). Does **not** call ``set_language``
         — concrete services should override this method and handle language
@@ -266,12 +245,12 @@ class STTService(AIService):
         changed-field set.
 
         Args:
-            update: A typed STT settings delta.
+            update: An STT settings delta.
 
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
         return changed
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
@@ -335,16 +314,12 @@ class STTService(AIService):
             await self._handle_vad_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
-            # New path: typed settings update object.
             if frame.update is not None:
-                await self._update_settings_from_typed(frame.update)
-            # Legacy path: plain dict, but service uses typed settings — convert.
-            elif isinstance(self._settings, ServiceSettings):
+                await self._update_settings(frame.update)
+            elif frame.settings:
+                # Backward-compatible path: convert legacy dict to settings object.
                 update = type(self._settings).from_mapping(frame.settings)
-                await self._update_settings_from_typed(update)
-            # Legacy path: plain dict, service still uses dict-based settings.
-            else:
-                await self._update_settings(frame.settings)
+                await self._update_settings(update)
         elif isinstance(frame, STTMuteFrame):
             self._muted = frame.mute
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")

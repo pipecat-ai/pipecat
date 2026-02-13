@@ -72,7 +72,7 @@ def language_to_xtts_language(language: Language) -> Optional[str]:
 
 @dataclass
 class XTTSTTSSettings(TTSSettings):
-    """Typed settings for XTTS TTS service.
+    """Settings for XTTS TTS service.
 
     Parameters:
         base_url: Base URL of the XTTS streaming server.

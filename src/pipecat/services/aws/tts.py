@@ -125,7 +125,7 @@ def language_to_aws_language(language: Language) -> Optional[str]:
 
 @dataclass
 class AWSPollyTTSSettings(TTSSettings):
-    """Typed settings for AWS Polly TTS service.
+    """Settings for AWS Polly TTS service.
 
     Parameters:
         engine: TTS engine to use ('standard', 'neural', etc.).

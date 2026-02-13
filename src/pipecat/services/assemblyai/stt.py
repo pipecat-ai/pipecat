@@ -56,7 +56,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AssemblyAISTTSettings(STTSettings):
-    """Typed settings for the AssemblyAI STT service.
+    """Settings for the AssemblyAI STT service.
 
     See :class:`AssemblyAIConnectionParams` for detailed parameter descriptions.
 
@@ -184,8 +184,8 @@ class AssemblyAISTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update and reconnect if anything changed.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update and reconnect if anything changed.
 
         Any change triggers a WebSocket reconnect since all connection
         parameters are encoded in the WebSocket URL.
@@ -196,7 +196,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed

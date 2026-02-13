@@ -58,7 +58,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import NOT_GIVEN, LLMSettings
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -675,13 +675,25 @@ class GoogleLLMContext(OpenAILLMContext):
 
 @dataclass
 class GoogleLLMSettings(LLMSettings):
-    """Typed settings for Google LLM services.
+    """Settings for Google LLM services.
 
     Parameters:
         thinking: Thinking configuration.
     """
 
     thinking: Any = field(default_factory=lambda: NOT_GIVEN)
+
+    @classmethod
+    def from_mapping(cls, settings):
+        """Convert a plain dict to settings, coercing thinking dicts.
+
+        For backward compatibility, a ``thinking`` value that is a plain dict
+        is converted to a :class:`GoogleLLMService.ThinkingConfig`.
+        """
+        instance = super().from_mapping(settings)
+        if is_given(instance.thinking) and isinstance(instance.thinking, dict):
+            instance.thinking = GoogleLLMService.ThinkingConfig(**instance.thinking)
+        return instance
 
 
 class GoogleLLMService(LLMService):
@@ -1226,14 +1238,6 @@ class GoogleLLMService(LLMService):
         except Exception:
             # Do nothing - we're shutting down anyway
             pass
-
-    async def _update_settings(self, settings):
-        """Override to handle ThinkingConfig validation."""
-        # Convert thinking dict to ThinkingConfig if needed
-        if "thinking" in settings and isinstance(settings["thinking"], dict):
-            settings = dict(settings)  # Make a copy to avoid modifying the original
-            settings["thinking"] = self.ThinkingConfig(**settings["thinking"])
-        await super()._update_settings(settings)
 
     def create_context_aggregator(
         self,

@@ -101,7 +101,7 @@ def language_to_playht_language(language: Language) -> Optional[str]:
 
 @dataclass
 class PlayHTTTSSettings(TTSSettings):
-    """Typed settings for PlayHT TTS services.
+    """Settings for PlayHT TTS services.
 
     Parameters:
         output_format: Audio output format.

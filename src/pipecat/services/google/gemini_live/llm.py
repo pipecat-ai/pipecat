@@ -604,7 +604,7 @@ class InputParams(BaseModel):
 
 @dataclass
 class GeminiLiveLLMSettings(LLMSettings):
-    """Typed settings for Gemini Live LLM services.
+    """Settings for Gemini Live LLM services.
 
     Parameters:
         modalities: Response modalities.
@@ -976,7 +976,8 @@ class GeminiLiveLLMService(LLMService):
             # (we have an example that does just that, actually).
             await self._create_single_response(frame.messages)
         elif isinstance(frame, LLMSetToolsFrame):
-            await self._update_settings()
+            # TODO: implement runtime tool updates for Gemini Live.
+            pass
         else:
             await self.push_frame(frame, direction)
 

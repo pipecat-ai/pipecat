@@ -138,7 +138,7 @@ def _prepare_language_hints(
 
 @dataclass
 class SonioxSTTSettings(STTSettings):
-    """Typed settings for Soniox STT service.
+    """Settings for Soniox STT service.
 
     Parameters:
         input_params: Soniox ``SonioxInputParams`` for detailed configuration.
@@ -217,8 +217,8 @@ class SonioxSTTService(WebsocketSTTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings_from_typed(self, update: SonioxSTTSettings) -> set[str]:
-        """Apply a typed settings update, keeping ``input_params`` in sync.
+    async def _update_settings(self, update: SonioxSTTSettings) -> set[str]:
+        """Apply a settings update, keeping ``input_params`` in sync.
 
         Top-level ``model`` is the source of truth.  When it is given in
         *update* its value is propagated into ``input_params``.  When only
@@ -228,14 +228,14 @@ class SonioxSTTService(WebsocketSTTService):
         Any change triggers a WebSocket reconnect.
 
         Args:
-            update: A typed settings delta.
+            update: A settings delta.
 
         Returns:
             Set of field names whose values actually changed.
         """
         model_given = is_given(getattr(update, "model", NOT_GIVEN))
 
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed

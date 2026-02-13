@@ -360,7 +360,7 @@ def language_to_google_stt_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GoogleSTTSettings(STTSettings):
-    """Typed settings for Google Cloud Speech-to-Text V2.
+    """Settings for Google Cloud Speech-to-Text V2.
 
     Parameters:
         languages: List of ``Language`` enums for recognition
@@ -628,10 +628,10 @@ class GoogleSTTService(STTService):
                 DeprecationWarning,
             )
         logger.debug(f"Switching STT languages to: {languages}")
-        await self._update_settings_from_typed(GoogleSTTSettings(languages=list(languages)))
+        await self._update_settings(GoogleSTTSettings(languages=list(languages)))
 
-    async def _update_settings_from_typed(self, update: GoogleSTTSettings) -> set[str]:
-        """Apply typed settings update and reconnect if anything changed.
+    async def _update_settings(self, update: GoogleSTTSettings) -> set[str]:
+        """Apply settings update and reconnect if anything changed.
 
         Handles ``language`` from base ``set_language`` by converting it to
         ``languages``. Emits a deprecation warning if ``language_codes`` is
@@ -639,7 +639,7 @@ class GoogleSTTService(STTService):
         Reconnects the stream on any change.
 
         Args:
-            update: A typed settings delta.
+            update: A settings delta.
 
         Returns:
             Set of field names whose values actually changed.
@@ -663,7 +663,7 @@ class GoogleSTTService(STTService):
                     stacklevel=2,
                 )
 
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if changed:
             await self._reconnect_if_needed()
@@ -742,7 +742,7 @@ class GoogleSTTService(STTService):
                 "GoogleSTTSettings(...) instead.",
                 DeprecationWarning,
             )
-        # Build a typed settings delta from the provided options
+        # Build a settings delta from the provided options
         update = GoogleSTTSettings()
 
         if languages is not None:
@@ -770,7 +770,7 @@ class GoogleSTTService(STTService):
             logger.debug(f"Updating location to: {location}")
             self._location = location
 
-        await self._update_settings_from_typed(update)
+        await self._update_settings(update)
 
     async def _connect(self):
         """Initialize streaming recognition config and stream."""

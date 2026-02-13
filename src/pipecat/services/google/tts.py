@@ -478,7 +478,7 @@ def language_to_gemini_tts_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GoogleHttpTTSSettings(TTSSettings):
-    """Typed settings for Google HTTP TTS service.
+    """Settings for Google HTTP TTS service.
 
     Parameters:
         pitch: Voice pitch adjustment (e.g., "+2st", "-50%").
@@ -505,7 +505,7 @@ class GoogleHttpTTSSettings(TTSSettings):
 
 @dataclass
 class GoogleStreamTTSSettings(TTSSettings):
-    """Typed settings for Google streaming TTS service.
+    """Settings for Google streaming TTS service.
 
     Parameters:
         language: Language for synthesis. Defaults to English.
@@ -518,7 +518,7 @@ class GoogleStreamTTSSettings(TTSSettings):
 
 @dataclass
 class GeminiTTSSettings(TTSSettings):
-    """Typed settings for Gemini TTS service.
+    """Settings for Gemini TTS service.
 
     Parameters:
         language: Language for synthesis. Defaults to English.
@@ -680,11 +680,11 @@ class GoogleHttpTTSService(TTSService):
         """
         return language_to_google_tts_language(language)
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
         """Override to handle speaking_rate validation.
 
         Args:
-            update: Typed settings delta. Can include 'speaking_rate' (float).
+            update: Settings delta. Can include 'speaking_rate' (float).
         """
         if isinstance(update, GoogleHttpTTSSettings) and is_given(update.speaking_rate):
             rate_value = float(update.speaking_rate)
@@ -693,7 +693,7 @@ class GoogleHttpTTSService(TTSService):
                     f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 2.0"
                 )
                 update.speaking_rate = NOT_GIVEN
-        return await super()._update_settings_from_typed(update)
+        return await super()._update_settings(update)
 
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
@@ -1024,11 +1024,11 @@ class GoogleTTSService(GoogleBaseTTSService):
             credentials, credentials_path
         )
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
         """Override to handle speaking_rate validation.
 
         Args:
-            update: Typed settings delta. Can include 'speaking_rate' (float).
+            update: Settings delta. Can include 'speaking_rate' (float).
         """
         if isinstance(update, GoogleStreamTTSSettings) and is_given(update.speaking_rate):
             rate_value = float(update.speaking_rate)
@@ -1037,7 +1037,7 @@ class GoogleTTSService(GoogleBaseTTSService):
                     f"Invalid speaking_rate value: {rate_value}. Must be between 0.25 and 2.0"
                 )
                 update.speaking_rate = NOT_GIVEN
-        return await super()._update_settings_from_typed(update)
+        return await super()._update_settings(update)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -1259,11 +1259,11 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update with voice validation.
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update with voice validation.
 
         Args:
-            update: Typed settings delta. Can include 'voice', 'prompt', etc.
+            update: Settings delta. Can include 'voice', 'prompt', etc.
 
         Returns:
             Set of field names whose values actually changed.
@@ -1271,7 +1271,7 @@ class GeminiTTSService(GoogleBaseTTSService):
         if is_given(update.voice) and update.voice not in self.AVAILABLE_VOICES:
             logger.warning(f"Voice '{update.voice}' not in known voices list. Using anyway.")
 
-        return await super()._update_settings_from_typed(update)
+        return await super()._update_settings(update)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:

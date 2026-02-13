@@ -31,7 +31,7 @@ from .utils import ConfigOption
 
 @dataclass
 class HathoraSTTSettings(STTSettings):
-    """Typed settings for the Hathora STT service.
+    """Settings for the Hathora STT service.
 
     Parameters:
         config: Some models support additional config, refer to

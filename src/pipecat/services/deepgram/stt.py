@@ -49,7 +49,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class DeepgramSTTSettings(STTSettings):
-    """Typed settings for the Deepgram STT service.
+    """Settings for the Deepgram STT service.
 
     Parameters:
         live_options: Deepgram ``LiveOptions`` for detailed configuration.
@@ -195,8 +195,8 @@ class DeepgramSTTService(STTService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update, keeping ``live_options`` in sync.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update, keeping ``live_options`` in sync.
 
         Top-level ``model`` and ``language`` are the source of truth.  When
         they are given in *update* their values are propagated into
@@ -213,7 +213,7 @@ class DeepgramSTTService(STTService):
             getattr(update, "language", NOT_GIVEN)
         )
 
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed

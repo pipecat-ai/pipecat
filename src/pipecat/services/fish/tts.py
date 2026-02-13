@@ -49,7 +49,7 @@ FishAudioOutputFormat = Literal["opus", "mp3", "pcm", "wav"]
 
 @dataclass
 class FishAudioTTSSettings(TTSSettings):
-    """Typed settings for Fish Audio TTS service.
+    """Settings for Fish Audio TTS service.
 
     Parameters:
         fish_sample_rate: Audio sample rate sent to the API.
@@ -184,8 +184,8 @@ class FishAudioTTSService(InterruptibleTTSService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update and reconnect if needed.
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update and reconnect if needed.
 
         Any change to voice or model triggers a WebSocket reconnect.
 
@@ -195,7 +195,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
         if changed:
             await self._disconnect()
             await self._connect()

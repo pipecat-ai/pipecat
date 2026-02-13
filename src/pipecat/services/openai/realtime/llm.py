@@ -93,7 +93,7 @@ class CurrentAudioResponse:
 
 @dataclass
 class OpenAIRealtimeLLMSettings(LLMSettings):
-    """Typed settings for OpenAI Realtime LLM services.
+    """Settings for OpenAI Realtime LLM services.
 
     Parameters:
         session_properties: OpenAI Realtime session configuration.
@@ -411,13 +411,13 @@ class OpenAIRealtimeLLMService(LLMService):
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
-        # Legacy dict path: frame.settings contains SessionProperties fields,
-        # not our Settings fields, so we construct SessionProperties directly.
-        # The new typed path (frame.update) falls through to super, which calls
-        # _update_settings_from_typed → our override handles the rest.
+        # Backward-compatible dict path: frame.settings contains SessionProperties
+        # fields, not our Settings fields, so we construct SessionProperties
+        # directly. The frame.update path falls through to super, which calls
+        # _update_settings → our override handles the rest.
         if isinstance(frame, LLMUpdateSettingsFrame) and frame.update is None:
             self._settings.session_properties = events.SessionProperties(**frame.settings)
-            await self._update_settings()
+            await self._send_session_update()
             await self.push_frame(frame, direction)
             return
 
@@ -449,7 +449,7 @@ class OpenAIRealtimeLLMService(LLMService):
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
         elif isinstance(frame, LLMSetToolsFrame):
-            await self._update_settings()
+            await self._send_session_update()
 
         await self.push_frame(frame, direction)
 
@@ -534,14 +534,14 @@ class OpenAIRealtimeLLMService(LLMService):
             # treat a send-side error as fatal.
             await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
 
-    async def _update_settings_from_typed(self, update):
-        """Apply a typed settings update, sending a session update if needed."""
-        changed = await super()._update_settings_from_typed(update)
+    async def _update_settings(self, update):
+        """Apply a settings update, sending a session update if needed."""
+        changed = await super()._update_settings(update)
         if "session_properties" in changed:
-            await self._update_settings()
+            await self._send_session_update()
         return changed
 
-    async def _update_settings(self):
+    async def _send_session_update(self):
         settings = self._settings.session_properties
         adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
 
@@ -613,7 +613,7 @@ class OpenAIRealtimeLLMService(LLMService):
     async def _handle_evt_session_created(self, evt):
         # session.created is received right after connecting. Send a message
         # to configure the session properties.
-        await self._update_settings()
+        await self._send_session_update()
 
     async def _handle_evt_session_updated(self, evt):
         # If this is our first context frame, run the LLM
@@ -896,7 +896,7 @@ class OpenAIRealtimeLLMService(LLMService):
                 await self.send_client_event(evt)
 
             # Send new settings if needed
-            await self._update_settings()
+            await self._send_session_update()
 
             # We're done configuring the LLM for this session
             self._llm_needs_conversation_setup = False

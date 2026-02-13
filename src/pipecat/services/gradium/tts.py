@@ -41,7 +41,7 @@ SAMPLE_RATE = 48000
 
 @dataclass
 class GradiumTTSSettings(TTSSettings):
-    """Typed settings for the Gradium TTS service.
+    """Settings for the Gradium TTS service.
 
     Parameters:
         output_format: Audio output format.
@@ -119,8 +119,8 @@ class GradiumTTSService(InterruptibleWordTTSService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update and reconnect if voice changed.
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update and reconnect if voice changed.
 
         Args:
             update: A :class:`TTSSettings` (or ``GradiumTTSSettings``) delta.
@@ -129,7 +129,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
             Set of field names whose values actually changed.
         """
         prev_voice = self._voice_id
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
         if self._voice_id != prev_voice:
             await self._disconnect()
             await self._connect()

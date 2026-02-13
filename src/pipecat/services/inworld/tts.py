@@ -52,7 +52,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 @dataclass
 class InworldTTSSettings(TTSSettings):
-    """Typed settings for Inworld TTS services.
+    """Settings for Inworld TTS services.
 
     Parameters:
         audio_encoding: Audio encoding format (e.g. LINEAR16).

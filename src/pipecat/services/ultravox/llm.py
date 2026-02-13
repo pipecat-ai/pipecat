@@ -325,8 +325,8 @@ class UltravoxRealtimeLLMService(LLMService):
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
 
-    async def _update_settings_from_typed(self, update: UltravoxRealtimeLLMSettings):
-        changed = await super()._update_settings_from_typed(update)
+    async def _update_settings(self, update: UltravoxRealtimeLLMSettings):
+        changed = await super()._update_settings(update)
         if "output_medium" in changed:
             await self._update_output_medium(self._settings.output_medium)
         return changed

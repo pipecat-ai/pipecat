@@ -154,7 +154,7 @@ def build_elevenlabs_voice_settings(
     """Build voice settings dictionary for ElevenLabs based on provided settings.
 
     Args:
-        settings: Dictionary or typed settings containing voice settings parameters.
+        settings: Dictionary or settings containing voice settings parameters.
 
     Returns:
         Dictionary of voice settings or None if no valid settings are provided.
@@ -186,7 +186,7 @@ class PronunciationDictionaryLocator(BaseModel):
 
 @dataclass
 class ElevenLabsTTSSettings(TTSSettings):
-    """Typed settings for the ElevenLabs WebSocket TTS service.
+    """Settings for the ElevenLabs WebSocket TTS service.
 
     Fields that appear in the WebSocket URL (``voice``, ``model``,
     ``language``) require a full reconnect when changed.  Fields that
@@ -230,7 +230,7 @@ class ElevenLabsTTSSettings(TTSSettings):
 
 @dataclass
 class ElevenLabsHttpTTSSettings(TTSSettings):
-    """Typed settings for the ElevenLabs HTTP TTS service.
+    """Settings for the ElevenLabs HTTP TTS service.
 
     Parameters:
         optimize_streaming_latency: Latency optimization level (0-4).
@@ -471,8 +471,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 voice_settings[key] = val
         return voice_settings or None
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update, reconnecting as needed.
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update, reconnecting as needed.
 
         Uses the declarative ``URL_FIELDS`` and ``VOICE_SETTINGS_FIELDS``
         sets on :class:`ElevenLabsTTSSettings` to decide whether to
@@ -484,7 +484,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed
@@ -958,8 +958,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update and rebuild voice settings.
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update and rebuild voice settings.
 
         Args:
             update: A :class:`TTSSettings` (or ``ElevenLabsHttpTTSSettings``) delta.
@@ -967,7 +967,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
         if changed:
             self._voice_settings = self._set_voice_settings()
         return changed

@@ -10,7 +10,7 @@ Provides the foundation for all AI services in the Pipecat framework, including
 model management, settings handling, and frame processing lifecycle methods.
 """
 
-from typing import Any, AsyncGenerator, Dict, Mapping, Set
+from typing import Any, AsyncGenerator, Dict, Set
 
 from loguru import logger
 
@@ -43,7 +43,7 @@ class AIService(FrameProcessor):
         """
         super().__init__(**kwargs)
         self._model_name: str = ""
-        self._settings: Dict[str, Any] | ServiceSettings = {}
+        self._settings: ServiceSettings = ServiceSettings()
         self._session_properties: Dict[str, Any] = {}
 
     @property
@@ -97,71 +97,22 @@ class AIService(FrameProcessor):
         """
         pass
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        from pipecat.services.openai.realtime.events import SessionProperties
+    async def _update_settings(self, update: ServiceSettings) -> Set[str]:
+        """Apply a settings update and return the set of changed field names.
 
-        for key, value in settings.items():
-            logger.debug("Update request for:", key, value)
+        The update is applied to ``_settings`` and the changed-field set is
+        returned.  The ``model`` field is handled specially: when it changes,
+        ``set_model_name`` is called.
 
-            if key in self._settings:
-                logger.info(f"Updating LLM setting {key} to: [{value}]")
-                self._settings[key] = value
-            elif key in SessionProperties.model_fields:
-                logger.debug("Attempting to update", key, value)
-
-                try:
-                    from pipecat.services.openai.realtime.events import TurnDetection
-
-                    if isinstance(self._session_properties, SessionProperties):
-                        current_properties = self._session_properties
-                    else:
-                        current_properties = SessionProperties(**self._session_properties)
-
-                    if key == "turn_detection" and isinstance(value, dict):
-                        turn_detection = TurnDetection(**value)
-                        setattr(current_properties, key, turn_detection)
-                    else:
-                        setattr(current_properties, key, value)
-
-                    validated_properties = SessionProperties.model_validate(
-                        current_properties.model_dump()
-                    )
-                    logger.info(f"Updating LLM setting {key} to: [{value}]")
-                    self._session_properties = validated_properties.model_dump()
-                except Exception as e:
-                    logger.warning(f"Unexpected error updating session property {key}: {e}")
-            elif key == "model":
-                logger.info(f"Updating LLM setting {key} to: [{value}]")
-                self.set_model_name(value)
-            else:
-                logger.warning(f"Unknown setting for {self.name} service: {key}")
-
-    async def _update_settings_from_typed(self, update: ServiceSettings) -> Set[str]:
-        """Apply a typed settings update and return the set of changed field names.
-
-        If ``_settings`` is a :class:`ServiceSettings` object, the update is
-        applied to it and the changed-field set is returned.  The ``model``
-        field is handled specially: when it changes, ``set_model_name`` is
-        called.
-
-        Services that have been migrated to typed settings should override
-        this method (calling ``super()``) to react to specific changed fields
-        (e.g. reconnect on voice change).
+        Concrete services should override this method (calling ``super()``)
+        to react to specific changed fields (e.g. reconnect on voice change).
 
         Args:
-            update: A typed settings delta.
+            update: A settings delta.
 
         Returns:
             Set of field names whose values actually changed.
         """
-        if not isinstance(self._settings, ServiceSettings):
-            logger.warning(
-                f"{self.name}: received typed settings update but _settings "
-                f"is not a ServiceSettings — falling back to dict-based update"
-            )
-            await self._update_settings(update.to_dict())
-            return set()
-
         changed = self._settings.apply_update(update)
 
         if "model" in changed:

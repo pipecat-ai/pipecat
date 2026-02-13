@@ -171,7 +171,7 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
 
 @dataclass
 class ElevenLabsSTTSettings(STTSettings):
-    """Typed settings for the ElevenLabs file-based STT service.
+    """Settings for the ElevenLabs file-based STT service.
 
     Parameters:
         tag_audio_events: Whether to include audio event tags in transcription.
@@ -182,7 +182,7 @@ class ElevenLabsSTTSettings(STTSettings):
 
 @dataclass
 class ElevenLabsRealtimeSTTSettings(STTSettings):
-    """Typed settings for the ElevenLabs Realtime STT service.
+    """Settings for the ElevenLabs Realtime STT service.
 
     See ``ElevenLabsRealtimeSTTService.InputParams`` for detailed descriptions.
 
@@ -294,8 +294,8 @@ class ElevenLabsSTTService(SegmentedSTTService):
         """
         return language_to_elevenlabs_language(language)
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update.
 
         Converts language to ElevenLabs format before applying and keeps
         ``_model_id`` in sync with the model setting.
@@ -312,7 +312,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             if converted is not None:
                 update.language = converted
 
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if "model" in changed:
             self._model_id = self._settings.model
@@ -543,8 +543,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update and reconnect if anything changed.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update and reconnect if anything changed.
 
         Converts language to ElevenLabs format before applying and keeps
         ``_model_id`` in sync.
@@ -561,7 +561,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             if converted is not None:
                 update.language = converted
 
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed

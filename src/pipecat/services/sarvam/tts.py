@@ -247,7 +247,7 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
 
 @dataclass
 class SarvamHttpTTSSettings(TTSSettings):
-    """Typed settings for Sarvam HTTP TTS service.
+    """Settings for Sarvam HTTP TTS service.
 
     Parameters:
         language: Sarvam language code.
@@ -277,7 +277,7 @@ class SarvamHttpTTSSettings(TTSSettings):
 
 @dataclass
 class SarvamWSTTSSettings(TTSSettings):
-    """Typed settings for Sarvam WebSocket TTS service.
+    """Settings for Sarvam WebSocket TTS service.
 
     Parameters:
         target_language_code: Sarvam language code.
@@ -953,9 +953,9 @@ class SarvamTTSService(InterruptibleTTSService):
         if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update and resend config if voice changed."""
-        changed = await super()._update_settings_from_typed(update)
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update and resend config if voice changed."""
+        changed = await super()._update_settings(update)
         if "voice" in changed:
             await self._send_config()
         return changed

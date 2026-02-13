@@ -72,7 +72,7 @@ def language_to_rime_language(language: Language) -> str:
 
 @dataclass
 class RimeTTSSettings(TTSSettings):
-    """Typed settings for Rime WS JSON and HTTP TTS services.
+    """Settings for Rime WS JSON and HTTP TTS services.
 
     Parameters:
         speaker: Voice speaker ID.
@@ -101,7 +101,7 @@ class RimeTTSSettings(TTSSettings):
 
 @dataclass
 class RimeNonJsonTTSSettings(TTSSettings):
-    """Typed settings for Rime non-JSON WS TTS service.
+    """Settings for Rime non-JSON WS TTS service.
 
     Parameters:
         speaker: Voice speaker ID.
@@ -271,10 +271,10 @@ class RimeTTSService(AudioContextWordTTSService):
         self._extra_msg_fields["inlineSpeedAlpha"] = ",".join(speed_vals + [str(speed)])
         return f"[{text}]"
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update and reconnect if voice changed."""
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update and reconnect if voice changed."""
         prev_voice = self._voice_id
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
         if "voice" in changed:
             self._settings.speaker = self._voice_id
             await self._disconnect()
@@ -975,13 +975,13 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update and reconnect if necessary.
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update and reconnect if necessary.
 
         Since all settings are WebSocket URL query parameters,
         any setting change requires reconnecting to apply the new values.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         # Sync voice and model to settings dict fields
         if "voice" in changed:

@@ -47,7 +47,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class DeepgramTTSSettings(TTSSettings):
-    """Typed settings for Deepgram TTS service.
+    """Settings for Deepgram TTS service.
 
     Parameters:
         encoding: Audio encoding format (linear16, mulaw, alaw).

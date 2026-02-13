@@ -51,7 +51,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class DeepgramSageMakerSTTSettings(STTSettings):
-    """Typed settings for the Deepgram SageMaker STT service.
+    """Settings for the Deepgram SageMaker STT service.
 
     Parameters:
         live_options: Deepgram ``LiveOptions`` for detailed configuration.
@@ -163,8 +163,8 @@ class DeepgramSageMakerSTTService(STTService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update, keeping ``live_options`` in sync.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update, keeping ``live_options`` in sync.
 
         Top-level ``model`` and ``language`` are the source of truth.  When
         they change their values are propagated into ``live_options``.
@@ -178,7 +178,7 @@ class DeepgramSageMakerSTTService(STTService):
             getattr(update, "language", NOT_GIVEN)
         )
 
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed

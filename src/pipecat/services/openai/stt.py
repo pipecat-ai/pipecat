@@ -127,7 +127,7 @@ _OPENAI_SAMPLE_RATE = 24000
 
 @dataclass
 class OpenAIRealtimeSTTSettings(STTSettings):
-    """Typed settings for the OpenAI Realtime STT service.
+    """Settings for the OpenAI Realtime STT service.
 
     Parameters:
         prompt: Optional prompt text to guide transcription style.
@@ -268,10 +268,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update and send session update if needed.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update and send session update if needed.
 
-        Keeps ``_language_code`` and ``_prompt`` in sync with typed settings
+        Keeps ``_language_code`` and ``_prompt`` in sync with settings
         and sends a ``session.update`` to the server when the session is active.
 
         Args:
@@ -280,7 +280,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed

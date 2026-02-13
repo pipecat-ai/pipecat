@@ -28,7 +28,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 @dataclass
 class BaseWhisperSTTSettings(STTSettings):
-    """Typed settings for Whisper API-based STT services.
+    """Settings for Whisper API-based STT services.
 
     Parameters:
         base_url: API base URL.
@@ -174,13 +174,13 @@ class BaseWhisperSTTService(SegmentedSTTService):
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update, syncing instance variables.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update, syncing instance variables.
 
         Keeps ``_language``, ``_prompt``, and ``_temperature`` in sync with
-        the typed settings fields.
+        the settings fields.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if "language" in changed:
             self._language = self.language_to_service_language(Language(self._settings.language))

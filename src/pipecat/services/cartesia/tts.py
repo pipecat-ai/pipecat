@@ -195,7 +195,7 @@ class CartesiaEmotion(str, Enum):
 
 @dataclass
 class CartesiaTTSSettings(TTSSettings):
-    """Typed settings for Cartesia TTS services.
+    """Settings for Cartesia TTS services.
 
     Parameters:
         output_container: Audio container format (e.g. "raw").

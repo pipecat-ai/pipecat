@@ -36,7 +36,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class GroqTTSSettings(TTSSettings):
-    """Typed settings for the Groq TTS service.
+    """Settings for the Groq TTS service.
 
     Parameters:
         output_format: Audio output format.

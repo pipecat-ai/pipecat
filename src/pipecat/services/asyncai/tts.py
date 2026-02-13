@@ -76,7 +76,7 @@ def language_to_async_language(language: Language) -> Optional[str]:
 
 @dataclass
 class AsyncAITTSSettings(TTSSettings):
-    """Typed settings for Async AI TTS services.
+    """Settings for Async AI TTS services.
 
     Parameters:
         output_container: Audio container format (e.g. "raw").

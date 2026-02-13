@@ -68,7 +68,7 @@ def language_to_gradium_language(language: Language) -> Optional[str]:
 
 @dataclass
 class GradiumSTTSettings(STTSettings):
-    """Typed settings for the Gradium STT service.
+    """Settings for the Gradium STT service.
 
     Parameters:
         delay_in_frames: Delay in audio frames (80ms each) before text is
@@ -171,8 +171,8 @@ class GradiumSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update, sync params, and reconnect.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update, sync params, and reconnect.
 
         Args:
             update: A :class:`STTSettings` (or ``GradiumSTTSettings``) delta.
@@ -180,7 +180,7 @@ class GradiumSTTService(WebsocketSTTService):
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
         if not changed:
             return changed
 

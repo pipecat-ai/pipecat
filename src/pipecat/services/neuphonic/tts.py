@@ -76,7 +76,7 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
 
 @dataclass
 class NeuphonicTTSSettings(TTSSettings):
-    """Typed settings for Neuphonic TTS service.
+    """Settings for Neuphonic TTS service.
 
     Parameters:
         lang_code: Neuphonic language code.
@@ -181,9 +181,9 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         return language_to_neuphonic_lang_code(language)
 
-    async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Apply a typed settings update and reconnect with new configuration."""
-        changed = await super()._update_settings_from_typed(update)
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update and reconnect with new configuration."""
+        changed = await super()._update_settings(update)
         if changed:
             await self._disconnect()
             await self._connect()

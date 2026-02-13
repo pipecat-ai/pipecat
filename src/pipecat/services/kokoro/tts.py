@@ -91,7 +91,7 @@ def language_to_kokoro_language(language: Language) -> str:
 
 @dataclass
 class KokoroTTSSettings(TTSSettings):
-    """Typed settings for the Kokoro TTS service.
+    """Settings for the Kokoro TTS service.
 
     Parameters:
         lang_code: Kokoro language code for synthesis.

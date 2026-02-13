@@ -4,13 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Typed settings infrastructure for Pipecat AI services.
+"""Settings infrastructure for Pipecat AI services.
 
-This module provides typed dataclass-based settings objects that replace the
-stringly-typed ``Mapping[str, Any]`` dictionaries previously used for service
-configuration. Each service type has a corresponding settings class (e.g.
-``TTSSettings``, ``LLMSettings``) whose fields use the ``NOT_GIVEN`` sentinel
-to distinguish "leave unchanged" from an explicit ``None``.
+This module provides dataclass-based settings objects for service configuration.
+Each service type has a corresponding settings class (e.g. ``TTSSettings``,
+``LLMSettings``) whose fields use the ``NOT_GIVEN`` sentinel to distinguish
+"leave unchanged" from an explicit ``None``.
 
 Key concepts:
 
@@ -21,7 +20,7 @@ Key concepts:
   ``NOT_GIVEN`` are simply skipped when applying an update.
 - **apply_update**: Applies a delta onto a target settings object and returns
   the set of field names that actually changed.
-- **from_mapping**: Constructs a typed settings object from a plain dict,
+- **from_mapping**: Constructs a settings object from a plain dict,
   supporting field aliases (e.g. ``"voice_id"`` → ``"voice"``).
 - **Extras**: Unknown keys land in the ``extra`` dict so services that have
   non-standard settings don't lose data.
@@ -91,7 +90,7 @@ _S = TypeVar("_S", bound="ServiceSettings")
 
 @dataclass
 class ServiceSettings:
-    """Base class for typed service settings.
+    """Base class for service settings.
 
     Every AI service type (LLM, TTS, STT) extends this with its own fields.
     Fields default to ``NOT_GIVEN`` so that an instance can represent either
@@ -188,7 +187,10 @@ class ServiceSettings:
 
     @classmethod
     def from_mapping(cls: Type[_S], settings: Mapping[str, Any]) -> _S:
-        """Construct a typed settings object from a plain dictionary.
+        """Construct a settings object from a plain dictionary.
+
+        This exists for backward compatibility with code that passes plain
+        dicts via ``*UpdateSettingsFrame(settings={...})``.
 
         Keys are matched to dataclass fields by name.  Keys listed in
         ``_aliases`` are translated to their canonical name first.  Any
@@ -250,7 +252,7 @@ class ServiceSettings:
 
 @dataclass
 class LLMSettings(ServiceSettings):
-    """Typed settings for LLM services.
+    """Settings for LLM services.
 
     Parameters:
         model: LLM model identifier.
@@ -285,7 +287,7 @@ class LLMSettings(ServiceSettings):
 
 @dataclass
 class TTSSettings(ServiceSettings):
-    """Typed settings for TTS services.
+    """Settings for TTS services.
 
     Parameters:
         model: TTS model identifier.
@@ -301,7 +303,7 @@ class TTSSettings(ServiceSettings):
 
 @dataclass
 class STTSettings(ServiceSettings):
-    """Typed settings for STT services.
+    """Settings for STT services.
 
     Parameters:
         model: STT model identifier.

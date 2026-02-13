@@ -85,7 +85,7 @@ class TurnDetectionMode(str, Enum):
 
 @dataclass
 class SpeechmaticsSTTSettings(STTSettings):
-    """Typed settings for Speechmatics STT service.
+    """Settings for Speechmatics STT service.
 
     See ``SpeechmaticsSTTService.InputParams`` for detailed descriptions of each field.
 
@@ -415,7 +415,7 @@ class SpeechmaticsSTTService(STTService):
             )
         speaker_passive_format = params.speaker_passive_format or speaker_active_format
 
-        # Typed settings — seeded from InputParams
+        # Settings — seeded from InputParams
         self._settings = SpeechmaticsSTTSettings(
             language=params.language,
             domain=params.domain,
@@ -480,8 +480,8 @@ class SpeechmaticsSTTService(STTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings_from_typed(self, update: SpeechmaticsSTTSettings) -> set[str]:
-        """Apply typed settings update, reconnecting only when necessary.
+    async def _update_settings(self, update: SpeechmaticsSTTSettings) -> set[str]:
+        """Apply settings update, reconnecting only when necessary.
 
         Fields are classified into three categories (see
         ``SpeechmaticsSTTSettings``):
@@ -494,12 +494,12 @@ class SpeechmaticsSTTService(STTService):
           time and therefore require a full disconnect / reconnect.
 
         Args:
-            update: A typed settings delta.
+            update: A settings delta.
 
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed

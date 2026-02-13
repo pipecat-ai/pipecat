@@ -137,7 +137,7 @@ def _get_aligned_audio(buffer: bytes) -> tuple[bytes, bytes]:
 
 @dataclass
 class CambTTSSettings(TTSSettings):
-    """Typed settings for Camb.ai TTS service.
+    """Settings for Camb.ai TTS service.
 
     Parameters:
         user_instructions: Custom instructions for mars-instruct model only.

@@ -49,7 +49,7 @@ def _decode_audio_payload(
 
 @dataclass
 class HathoraTTSSettings(TTSSettings):
-    """Typed settings for Hathora TTS service.
+    """Settings for Hathora TTS service.
 
     Parameters:
         speed: Speech speed multiplier (if supported by model).

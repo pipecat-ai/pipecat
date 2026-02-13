@@ -73,7 +73,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AWSBedrockLLMSettings(LLMSettings):
-    """Typed settings for AWS Bedrock LLM services.
+    """Settings for AWS Bedrock LLM services.
 
     Parameters:
         latency: Performance mode - "standard" or "optimized".

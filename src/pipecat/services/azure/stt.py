@@ -52,7 +52,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AzureSTTSettings(STTSettings):
-    """Typed settings for the Azure STT service.
+    """Settings for the Azure STT service.
 
     Parameters:
         region: Azure region for the Speech service.
@@ -123,13 +123,13 @@ class AzureSTTService(STTService):
         """
         return True
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update, reconfiguring the recognizer if needed.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update, reconfiguring the recognizer if needed.
 
         When ``language`` changes the ``SpeechConfig`` is updated and the
         speech recognizer is restarted so that the new language takes effect.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if "language" in changed:
             # Convert Language enum to Azure language code if needed.

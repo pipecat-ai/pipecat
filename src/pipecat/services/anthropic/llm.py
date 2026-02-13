@@ -59,7 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -72,7 +72,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AnthropicLLMSettings(LLMSettings):
-    """Typed settings for Anthropic LLM services.
+    """Settings for Anthropic LLM services.
 
     Parameters:
         enable_prompt_caching: Whether to enable prompt caching.
@@ -81,6 +81,18 @@ class AnthropicLLMSettings(LLMSettings):
 
     enable_prompt_caching: Any = field(default_factory=lambda: _NOT_GIVEN)
     thinking: Any = field(default_factory=lambda: _NOT_GIVEN)
+
+    @classmethod
+    def from_mapping(cls, settings):
+        """Convert a plain dict to settings, coercing thinking dicts.
+
+        For backward compatibility, a ``thinking`` value that is a plain dict
+        is converted to a :class:`AnthropicLLMService.ThinkingConfig`.
+        """
+        instance = super().from_mapping(settings)
+        if is_given(instance.thinking) and isinstance(instance.thinking, dict):
+            instance.thinking = AnthropicLLMService.ThinkingConfig(**instance.thinking)
+        return instance
 
 
 @dataclass

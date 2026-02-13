@@ -133,7 +133,7 @@ MODEL_CONFIGS: Dict[str, ModelConfig] = {
 
 @dataclass
 class SarvamSTTSettings(STTSettings):
-    """Typed settings for the Sarvam STT service.
+    """Settings for the Sarvam STT service.
 
     Parameters:
         prompt: Optional prompt to guide transcription/translation style.
@@ -306,8 +306,8 @@ class SarvamSTTService(STTService):
                 if self._socket_client:
                     await self._socket_client.flush()
 
-    async def _update_settings_from_typed(self, update: STTSettings) -> set[str]:
-        """Apply a typed settings update, validate, sync state, and reconnect.
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update, validate, sync state, and reconnect.
 
         Args:
             update: A :class:`STTSettings` (or ``SarvamSTTSettings``) delta.
@@ -336,7 +336,7 @@ class SarvamSTTService(STTService):
                 if not self._config.supports_mode:
                     raise ValueError(f"Model '{self.model_name}' does not support mode parameter.")
 
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed

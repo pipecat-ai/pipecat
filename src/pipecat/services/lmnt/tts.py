@@ -75,7 +75,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
 
 @dataclass
 class LmntTTSSettings(TTSSettings):
-    """Typed settings for LMNT TTS service.
+    """Settings for LMNT TTS service.
 
     Parameters:
         format: Audio output format. Defaults to "raw".

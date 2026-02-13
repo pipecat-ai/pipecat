@@ -42,7 +42,7 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class ResembleAITTSSettings(TTSSettings):
-    """Typed settings for Resemble AI TTS service.
+    """Settings for Resemble AI TTS service.
 
     Parameters:
         precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).

@@ -182,7 +182,7 @@ class _InputParamsDescriptor:
 
 @dataclass
 class GladiaSTTSettings(STTSettings):
-    """Typed settings for Gladia STT service.
+    """Settings for Gladia STT service.
 
     Parameters:
         input_params: Gladia ``GladiaInputParams`` for detailed configuration.
@@ -379,19 +379,19 @@ class GladiaSTTService(WebsocketSTTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings_from_typed(self, update: GladiaSTTSettings) -> set[str]:
-        """Apply typed settings update.
+    async def _update_settings(self, update: GladiaSTTSettings) -> set[str]:
+        """Apply settings update.
 
         Gladia sessions are fixed at creation time, so any change requires
         a full session teardown and reconnect.
 
         Args:
-            update: A typed settings delta.
+            update: A settings delta.
 
         Returns:
             Set of field names whose values actually changed.
         """
-        changed = await super()._update_settings_from_typed(update)
+        changed = await super()._update_settings(update)
 
         if not changed:
             return changed
