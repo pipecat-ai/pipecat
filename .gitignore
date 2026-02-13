@@ -69,3 +69,6 @@ htmlcov/
 
 # Pipecat
 whisker_setup.py
+
+# MoQ transport
+*.pem
