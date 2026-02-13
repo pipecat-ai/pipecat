@@ -12,7 +12,6 @@ using Rime's API for streaming and batch audio synthesis.
 
 import base64
 import json
-import uuid
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp

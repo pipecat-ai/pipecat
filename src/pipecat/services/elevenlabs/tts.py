@@ -13,7 +13,6 @@ with support for streaming audio, word timestamps, and voice customization.
 import asyncio
 import base64
 import json
-import uuid
 from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, Tuple, Union
 
 import aiohttp

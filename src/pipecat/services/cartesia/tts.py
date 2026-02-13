@@ -8,7 +8,6 @@
 
 import base64
 import json
-import uuid
 import warnings
 from enum import Enum
 from typing import AsyncGenerator, List, Literal, Optional

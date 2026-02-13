@@ -9,7 +9,6 @@
 import asyncio
 import base64
 import json
-import uuid
 from typing import AsyncGenerator, Optional
 
 import aiohttp

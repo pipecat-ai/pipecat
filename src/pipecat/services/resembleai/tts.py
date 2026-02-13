@@ -25,8 +25,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import AudioContextWordTTSService
-from pipecat.transcriptions.language import Language
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
