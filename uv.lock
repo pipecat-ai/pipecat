@@ -4734,7 +4734,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'ultravox'" },
     { name = "pipecat-ai", extras = ["websockets-base"], marker = "extra == 'websocket'" },
     { name = "pipecat-ai-krisp", marker = "extra == 'krisp'", specifier = "~=0.4.0" },
-    { name = "pipecat-ai-small-webrtc-prebuilt", marker = "extra == 'runner'", specifier = ">=2.1.0" },
+    { name = "pipecat-ai-small-webrtc-prebuilt", marker = "extra == 'runner'", specifier = ">=2.2.0" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.3.0,<2" },
     { name = "protobuf", specifier = "~=5.29.6" },
     { name = "pvkoala", marker = "extra == 'koala'", specifier = "~=2.0.3" },
@@ -4805,14 +4805,14 @@ sdist = { url = "https://files.pythonhosted.org/packages/1d/37/0f1d11d1dc33234a3
 
 [[package]]
 name = "pipecat-ai-small-webrtc-prebuilt"
-version = "2.1.0"
+version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi", extra = ["all"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4a/8b/c945a27503560d50c56f497e43209f43c81616ede5d3d2b38eeb4044dbbc/pipecat_ai_small_webrtc_prebuilt-2.1.0.tar.gz", hash = "sha256:c883304a159dee01eec74b162e51352b32c362ca19d281226a71d92b5ba1c600", size = 596971, upload-time = "2026-02-05T17:01:08.074Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/9f/b06cc0e2eaeda811959c216dade3ed38c30d20e6327a2b22f80125072c5a/pipecat_ai_small_webrtc_prebuilt-2.2.0.tar.gz", hash = "sha256:5d73fe619225b97e383863a901060d1c986f088f4de004477856b085aaba76c4", size = 466005, upload-time = "2026-02-13T19:28:54.626Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/f6/5754d86d513822fb4466549eb6bca05c7246676f1b5b199c9646a5475182/pipecat_ai_small_webrtc_prebuilt-2.1.0-py3-none-any.whl", hash = "sha256:0882d147f69d8cc07397ee68b75c554f4d2d75d8023207e7fb86760616bc58aa", size = 597535, upload-time = "2026-02-05T17:01:06.622Z" },
+    { url = "https://files.pythonhosted.org/packages/26/71/20a015cea25dc57129ed6426fdf37a09aefe37f4dd60e3a42ba2d9e3bd1b/pipecat_ai_small_webrtc_prebuilt-2.2.0-py3-none-any.whl", hash = "sha256:e7917d23f51e5418667541a3e241b2de28a43eea35a5a9486721be3da04e719d", size = 466257, upload-time = "2026-02-13T19:28:53.188Z" },
 ]
 
 [[package]]
