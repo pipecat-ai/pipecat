@@ -59,7 +59,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.services.settings import ServiceSettings
+from pipecat.services.settings import LLMSettings, ServiceSettings, is_given
 from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServiceMixin
 from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationUtil,
@@ -310,6 +310,29 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         if not self._run_in_parallel:
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
+
+    async def _update_settings_from_typed(self, update: LLMSettings) -> set[str]:
+        """Apply a typed settings update, handling turn-completion fields.
+
+        Args:
+            update: A typed LLM settings delta.
+
+        Returns:
+            Set of field names whose values actually changed.
+        """
+        changed = await super()._update_settings_from_typed(update)
+
+        if "filter_incomplete_user_turns" in changed:
+            self._filter_incomplete_user_turns = self._settings.filter_incomplete_user_turns
+            logger.info(
+                f"{self}: Incomplete turn filtering "
+                f"{'enabled' if self._filter_incomplete_user_turns else 'disabled'}"
+            )
+
+        if "user_turn_completion_config" in changed and self._filter_incomplete_user_turns:
+            self.set_user_turn_completion_config(self._settings.user_turn_completion_config)
+
+        return changed
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         """Update LLM service settings.

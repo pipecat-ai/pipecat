@@ -31,9 +31,12 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field, fields
-from typing import Any, ClassVar, Dict, Mapping, Optional, Set, Type, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Set, Type, TypeVar
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
 # ---------------------------------------------------------------------------
 # NOT_GIVEN sentinel
@@ -258,6 +261,13 @@ class LLMSettings(ServiceSettings):
         frequency_penalty: Frequency penalty.
         presence_penalty: Presence penalty.
         seed: Random seed for reproducibility.
+        filter_incomplete_user_turns: Enable LLM-based turn completion detection
+            to suppress bot responses when the user was cut off mid-thought.
+            See ``examples/foundational/22-filter-incomplete-turns.py`` and
+            ``UserTurnCompletionLLMServiceMixin``.
+        user_turn_completion_config: Configuration for turn completion behavior
+            when ``filter_incomplete_user_turns`` is enabled. Controls timeouts
+            and prompts for incomplete turns.
     """
 
     temperature: Any = field(default_factory=lambda: NOT_GIVEN)
@@ -267,6 +277,10 @@ class LLMSettings(ServiceSettings):
     frequency_penalty: Any = field(default_factory=lambda: NOT_GIVEN)
     presence_penalty: Any = field(default_factory=lambda: NOT_GIVEN)
     seed: Any = field(default_factory=lambda: NOT_GIVEN)
+    filter_incomplete_user_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    user_turn_completion_config: UserTurnCompletionConfig | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 @dataclass
