@@ -1073,8 +1073,8 @@ class AudioContextTTSService(WebsocketTTSService):
         Args:
             context_id: Unique identifier for the audio context.
         """
-        # Set the context ID if not already set (for single-context mode)
-        if not self._supports_concurrent_contexts and not self._context_id:
+        # Set the context ID if not already set
+        if not self._context_id:
             self._context_id = context_id
 
         await self._contexts_queue.put(context_id)
@@ -1100,9 +1100,6 @@ class AudioContextTTSService(WebsocketTTSService):
         Args:
             context_id: The context to remove.
         """
-        if not context_id:
-            return
-
         if self.audio_context_available(context_id):
             # We just mark the audio context for deletion by appending
             # None. Once we reach None while handling audio we know we can
@@ -1112,14 +1109,30 @@ class AudioContextTTSService(WebsocketTTSService):
         else:
             logger.warning(f"{self} unable to remove context {context_id}")
 
-    async def remove_current_audio_context(self):
-        """Remove the current audio context."""
+    def has_active_audio_context(self) -> bool:
+        """Check if there is an active audio context.
+
+        Returns:
+            True if an active audio context exists, False otherwise.
+        """
+        return self._context_id is not None
+
+    def get_active_audio_context_id(self) -> Optional[str]:
+        """Get the active audio context ID.
+
+        Returns:
+            The active context ID, or None if no context is active.
+        """
+        return self._context_id
+
+    async def remove_active_audio_context(self):
+        """Remove the active audio context."""
         if self._context_id:
             await self.remove_audio_context(self._context_id)
             self._context_id = None
 
-    def reset_current_audio_context(self):
-        """Reset the current audio context."""
+    def reset_active_audio_context(self):
+        """Reset the active audio context."""
         self._context_id = None
 
     def audio_context_available(self, context_id: str) -> bool:

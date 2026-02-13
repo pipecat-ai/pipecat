@@ -253,7 +253,7 @@ class AsyncAITTSService(AudioContextTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from Async")
                 # Close all contexts and the socket
-                if self._context_id:
+                if self.has_active_audio_context():
                     await self._websocket.send(json.dumps({"terminate": True}))
                 await self._websocket.close()
                 logger.debug("Disconnected from Async")
@@ -261,7 +261,7 @@ class AsyncAITTSService(AudioContextTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._websocket = None
-            await self.remove_current_audio_context()
+            await self.remove_active_audio_context()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -271,7 +271,7 @@ class AsyncAITTSService(AudioContextTTSService):
 
     async def flush_audio(self):
         """Flush any pending audio."""
-        context_id = self._context_id
+        context_id = self.get_active_audio_context_id()
         if not context_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
@@ -303,7 +303,7 @@ class AsyncAITTSService(AudioContextTTSService):
 
             # Check if this message belongs to the current context.
             if not self.audio_context_available(received_ctx_id):
-                if self._context_id == received_ctx_id:
+                if self.get_active_audio_context_id() == received_ctx_id:
                     logger.debug(
                         f"Received a delayed message, recreating the context: {received_ctx_id}"
                     )
@@ -328,7 +328,7 @@ class AsyncAITTSService(AudioContextTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    context_id = self._context_id
+                    context_id = self.get_active_audio_context_id()
                     if context_id:
                         keepalive_message = {
                             "transcript": " ",
@@ -348,7 +348,7 @@ class AsyncAITTSService(AudioContextTTSService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle interruption by closing the current context."""
-        context_id = self._context_id
+        context_id = self.get_active_audio_context_id()
         await super()._handle_interruption(frame, direction)
         # Close the current context when interrupted without closing the websocket
         if context_id and self._websocket:
@@ -377,12 +377,9 @@ class AsyncAITTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                if not self._context_id:
+                if not self.has_active_audio_context():
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
-
-                    self._context_id = context_id
-
                     if not self.audio_context_available(context_id):
                         await self.create_audio_context(context_id)
 

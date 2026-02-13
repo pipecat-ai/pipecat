@@ -233,7 +233,7 @@ class RimeTTSService(AudioContextWordTTSService):
 
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Rime API."""
-        msg = {"text": text, "contextId": self._context_id}
+        msg = {"text": text, "contextId": self.get_active_audio_context_id()}
         if self._extra_msg_fields:
             msg |= self._extra_msg_fields
             self._extra_msg_fields = {}
@@ -321,7 +321,7 @@ class RimeTTSService(AudioContextWordTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
-            self.remove_current_audio_context()
+            await self.remove_active_audio_context()
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -333,7 +333,7 @@ class RimeTTSService(AudioContextWordTTSService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle interruption by clearing current context."""
-        context_id = self._context_id
+        context_id = self.get_active_audio_context_id()
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
         if context_id:
@@ -370,13 +370,13 @@ class RimeTTSService(AudioContextWordTTSService):
 
     async def flush_audio(self):
         """Flush any pending audio synthesis."""
-        context_id = self._context_id
+        context_id = self.get_active_audio_context_id()
         if not context_id or not self._websocket:
             return
 
         logger.trace(f"{self}: flushing audio")
         await self._get_websocket().send(json.dumps({"operation": "flush"}))
-        self.reset_current_audio_context()
+        self.reset_active_audio_context()
 
     async def _receive_messages(self):
         """Process incoming websocket messages."""
@@ -418,7 +418,7 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Error: {msg['message']}")
-                self.reset_current_audio_context()
+                self.reset_active_audio_context()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push frame and handle end-of-turn conditions.
@@ -449,11 +449,10 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                if not self._context_id:
+                if not self.has_active_audio_context():
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
                     self._cumulative_time = 0
-                    self._context_id = context_id
                     await self.create_audio_context(context_id)
 
                 msg = self._build_msg(text=text)

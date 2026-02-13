@@ -562,7 +562,7 @@ class InworldTTSService(AudioContextWordTTSService):
         keeping the context open for subsequent text. The context is only
         closed on interruption, disconnect, or end of session.
         """
-        context_id = self._context_id
+        context_id = self.get_active_audio_context_id()
         if context_id and self._websocket:
             logger.trace(f"Flushing audio for context {context_id}")
             await self._send_flush(context_id)
@@ -630,7 +630,7 @@ class InworldTTSService(AudioContextWordTTSService):
             frame: The interruption frame.
             direction: The direction of the interruption.
         """
-        old_context_id = self._context_id
+        old_context_id = self.get_active_audio_context_id()
         logger.trace(f"{self}: Handling interruption, old context: {old_context_id}")
 
         await super()._handle_interruption(frame, direction)
@@ -725,7 +725,7 @@ class InworldTTSService(AudioContextWordTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Inworld WebSocket TTS")
-                context_id = self._context_id
+                context_id = self.get_active_audio_context_id()
                 if context_id:
                     try:
                         await self._send_close_context(context_id)
@@ -736,7 +736,7 @@ class InworldTTSService(AudioContextWordTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self.reset_current_audio_context()
+            self.reset_active_audio_context()
             self._websocket = None
             self._cumulative_time = 0.0
             self._generation_end_time = 0.0
@@ -762,7 +762,7 @@ class InworldTTSService(AudioContextWordTTSService):
             ]
             logger.debug(
                 f"{self}: Received message types={msg_types}, ctx_id={ctx_id}, "
-                f"current_ctx={self._context_id}, available={self.audio_context_available(ctx_id) if ctx_id else 'N/A'}"
+                f"current_ctx={self.get_active_audio_context_id()}, available={self.audio_context_available(ctx_id) if ctx_id else 'N/A'}"
             )
 
             # Check for errors
@@ -774,7 +774,9 @@ class InworldTTSService(AudioContextWordTTSService):
                 # Handle "Context not found" error (code 5)
                 # This can happen when a keepalive message is sent but no context is available.
                 if error_code == 5 and "not found" in error_msg.lower():
-                    logger.debug(f"{self}: Context {ctx_id or self._context_id} not found.")
+                    logger.debug(
+                        f"{self}: Context {ctx_id or self.get_active_audio_context_id()} not found."
+                    )
                     continue
 
                 # For other errors, push error frame
@@ -789,7 +791,7 @@ class InworldTTSService(AudioContextWordTTSService):
             # If the context isn't available but matches our current context ID,
             # recreate it (handles race conditions during interruption recovery).
             if ctx_id and not self.audio_context_available(ctx_id):
-                if self._context_id == ctx_id:
+                if self.get_active_audio_context_id() == ctx_id:
                     logger.trace(f"{self}: Recreating audio context for current context: {ctx_id}")
                     await self.create_audio_context(ctx_id)
                 else:
@@ -837,8 +839,8 @@ class InworldTTSService(AudioContextWordTTSService):
                 logger.trace(f"{self}: Context closed on server: {ctx_id}")
                 await self.stop_ttfb_metrics()
                 # Only reset if this is our current context
-                if ctx_id == self._context_id:
-                    self.reset_current_audio_context()
+                if ctx_id == self.get_active_audio_context_id():
+                    self.reset_active_audio_context()
                 if ctx_id and self.audio_context_available(ctx_id):
                     await self.remove_audio_context(ctx_id)
                 await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
@@ -850,7 +852,7 @@ class InworldTTSService(AudioContextWordTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    context_id = self._context_id
+                    context_id = self.get_active_audio_context_id()
                     if context_id:
                         keepalive_message = {
                             "send_text": {"text": ""},
@@ -941,11 +943,9 @@ class InworldTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                if not self._context_id:
+                if not self.has_active_audio_context():
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
-                    self._context_id = context_id
-                    logger.trace(f"{self}: Creating new context {context_id}")
                     await self.create_audio_context(context_id)
                     await self._send_context(context_id)
                 elif not self.audio_context_available(context_id):
