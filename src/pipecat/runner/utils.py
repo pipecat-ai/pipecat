@@ -41,6 +41,7 @@ from loguru import logger
 from pipecat.runner.types import (
     DailyRunnerArguments,
     LiveKitRunnerArguments,
+    MOQRunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
     WebSocketRunnerArguments,
@@ -644,5 +645,25 @@ async def create_transport(
             runner_args.token,
             params=params,
         )
+    elif isinstance(runner_args, MOQRunnerArguments):
+        params = _get_transport_params("moq", transport_params)
+
+        from pipecat.transports.moq.transport import MOQParams, MOQTransport
+
+        # Convert TransportParams to MOQParams if needed, applying runner args
+        if not isinstance(params, MOQParams):
+            params = MOQParams(**params.model_dump())
+        params.verify_ssl = runner_args.verify_ssl
+        params.namespace = runner_args.namespace
+        params.participant_id = runner_args.participant_id
+        params.peer_id = runner_args.peer_id
+
+        return MOQTransport(
+            params=params,
+            host=runner_args.host,
+            port=runner_args.port,
+            path=runner_args.path,
+        )
+
     else:
         raise ValueError(f"Unsupported runner arguments type: {type(runner_args)}")

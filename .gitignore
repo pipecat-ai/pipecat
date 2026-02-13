@@ -64,3 +64,6 @@ docs/api/api
 
 # Pipecat
 whisker_setup.py
+
+# MoQ transport
+*.pem

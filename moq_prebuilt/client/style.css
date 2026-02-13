@@ -1,0 +1,242 @@
+/* Palette borrowed from @pipecat-ai/voice-ui-kit (dark theme) so this
+   custom MOQ client visually matches the smallwebrtc playground. */
+:root {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --border: oklch(1 0 0 / 10%);
+  --border-strong: oklch(1 0 0 / 16%);
+  --primary: oklch(0.85 0.13 162);          /* green Connect */
+  --primary-hover: oklch(0.78 0.14 162);
+  --destructive: oklch(0.577 0.245 27.325); /* red Disconnect */
+  --destructive-hover: oklch(0.52 0.225 27.325);
+  --warning: oklch(0.795 0.184 86.047);
+  --user-bubble: oklch(0.305 0.045 265);
+  --assistant-bubble: oklch(0.255 0.012 286);
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 48px 24px 80px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container {
+  max-width: 720px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+h1 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--foreground);
+  margin: 0 0 8px 4px;
+}
+
+/* ---------- Card ---------- */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+}
+
+.card h3 {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin-bottom: 14px;
+}
+
+/* ---------- Connection card (status + buttons) ---------- */
+
+.status {
+  font-size: 1rem;
+  font-weight: 500;
+  padding: 4px 0 14px;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.status.disconnected { color: var(--muted-foreground); }
+.status.disconnected::before { background: var(--muted-foreground); }
+.status.connecting { color: var(--warning); }
+.status.connecting::before { background: var(--warning); }
+.status.connected { color: var(--primary); }
+.status.connected::before { background: var(--primary); box-shadow: 0 0 0 4px oklch(0.85 0.13 162 / 0.15); }
+.status.error { color: var(--destructive); }
+.status.error::before { background: var(--destructive); }
+
+.controls {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+#connectBtn {
+  background: var(--primary);
+  color: oklch(0.16 0.02 162);
+}
+
+#connectBtn:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+#disconnectBtn {
+  background: transparent;
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+
+#disconnectBtn:hover:not(:disabled) {
+  background: oklch(0.577 0.245 27.325 / 0.15);
+}
+
+/* ---------- Transcript ---------- */
+
+.transcript {
+  font-size: 0.95rem;
+  line-height: 1.55;
+  max-height: 360px;
+  min-height: 48px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.transcript:empty::before {
+  content: "Waiting for conversation…";
+  color: var(--muted-foreground);
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.transcript-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  max-width: 88%;
+  align-self: flex-start;
+  background: var(--assistant-bubble);
+}
+
+.transcript-user {
+  background: var(--user-bubble);
+}
+
+.transcript-role {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.transcript-text {
+  color: var(--foreground);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* ---------- Log ---------- */
+
+.log {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.7;
+  max-height: 360px;
+  overflow-y: auto;
+  color: var(--muted-foreground);
+}
+
+.log div {
+  padding: 2px 0;
+  border-bottom: 1px solid oklch(1 0 0 / 0.04);
+}
+
+.log div:last-child {
+  border-bottom: none;
+}
+
+/* ---------- Scrollbar polish ---------- */
+
+.transcript::-webkit-scrollbar,
+.log::-webkit-scrollbar {
+  width: 6px;
+}
+
+.transcript::-webkit-scrollbar-thumb,
+.log::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+.transcript::-webkit-scrollbar-track,
+.log::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -57,6 +57,7 @@ Supported transports:
 
 - Daily - Creates rooms and tokens, runs bot as participant
 - WebRTC - Provides local WebRTC interface with prebuilt UI
+- MOQ - Media over QUIC, connects to a MOQ relay for pub/sub streaming
 - Telephony - Handles webhook and WebSocket connections for Twilio, Telnyx, Plivo, Exotel
 
 The ``/start`` endpoint accepts::
@@ -79,12 +80,13 @@ The ``/start`` endpoint accepts::
 To run locally:
 
 - All transports (default): ``python bot.py``
-- WebRTC only: ``python bot.py -t webrtc``
-- ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - Daily only: ``python bot.py -t daily``
 - Daily (direct, testing only): ``python bot.py -d``
-- Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
+- ESP32: ``python bot.py -t webrtc --esp32 --host 192.168.1.100``
 - Exotel: ``python bot.py -t exotel`` (no proxy needed, but ngrok connection to HTTP 7860 is required)
+- MOQ: `python bot.py -t moq --moq-host relay.example.com --moq-insecure`
+- Telephony: ``python bot.py -t twilio -x your_username.ngrok.io``
+- WebRTC only: ``python bot.py -t webrtc``
 - WhatsApp: ``python bot.py --whatsapp``
 """
 
@@ -107,6 +109,7 @@ from loguru import logger
 
 from pipecat.runner.types import (
     DailyRunnerArguments,
+    MOQRunnerArguments,
     RunnerArguments,
     SmallWebRTCRunnerArguments,
     VonageRunnerArguments,
@@ -119,7 +122,7 @@ try:
     from dotenv import load_dotenv
     from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 except ImportError as e:
     logger.error(f"Runner dependencies not available: {e}")
     logger.error("To use Pipecat runners, install with: pip install pipecat-ai[runner]")
@@ -280,6 +283,15 @@ def _print_startup_message(args: argparse.Namespace):
     elif args.transport == "vonage":
         print()
         print("🚀 Bot ready!")
+    elif args.transport == "moq":
+        print()
+        print(f"🚀 Bot ready! (MOQ)")
+        print(f"   → Connecting to MOQ relay at {args.moq_host}:{args.moq_port}")
+        print(f"   → Namespace: {args.moq_namespace}")
+        print(f"   → Status page: http://{args.host}:{args.port}")
+        print()
+        print(f"   Connect a MOQ client to the same relay and namespace to start talking.")
+        print()        
     print()
 
 
@@ -388,6 +400,10 @@ def _configure_server_app(args: argparse.Namespace):
 
     if args.whatsapp:
         _setup_whatsapp_routes(app, args)
+
+    #### hmmm, this might not be right
+    if args.transport == "moq":
+        _setup_moq_routes(app, args)
 
 
 def _setup_unified_start_route(
@@ -576,7 +592,6 @@ def _setup_unified_start_route(
                 status_code=400,
                 detail=f"Unknown transport '{transport}'.",
             )
-
 
 def _resolve_download_path(folder: str, filename: str) -> Path:
     """Resolve a download path and ensure it stays within the downloads folder."""
@@ -1043,6 +1058,131 @@ def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
             }
 
 
+
+def _setup_moq_routes(app: FastAPI, args: argparse.Namespace):
+    """Set up MOQ (Media over QUIC) specific routes."""
+    MOQPrebuiltUI = None
+    try:
+        from moq_prebuilt.frontend import MOQPrebuiltUI
+    except ImportError:
+        # Fallback: look for moq_prebuilt relative to the pipecat repo root
+        try:
+            import pipecat
+
+            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(pipecat.__file__)))
+            client_dir = os.path.join(repo_root, "moq_prebuilt", "client")
+            if os.path.isdir(client_dir):
+                from starlette.staticfiles import StaticFiles
+
+                MOQPrebuiltUI = StaticFiles(directory=client_dir, html=True)
+        except Exception:
+            pass
+    if not MOQPrebuiltUI:
+        logger.warning("moq_prebuilt client not found, MOQ client UI will not be available")
+
+    # Track active MOQ sessions
+    moq_sessions: Dict[str, Any] = {}
+
+    # Mount the frontend
+    if MOQPrebuiltUI:
+        app.mount("/client", MOQPrebuiltUI)
+
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        """Redirect root requests to client interface."""
+        return RedirectResponse(url="/client/")
+
+    @app.get("/api/config")
+    async def moq_config():
+        """Return MOQ relay connection config for the browser client."""
+        cert_hash = None
+        if getattr(args, "moq_cert", None):
+            try:
+                import base64
+                import hashlib
+
+                from cryptography import x509
+                from cryptography.hazmat.primitives import serialization
+
+                with open(args.moq_cert, "rb") as f:
+                    cert = x509.load_pem_x509_certificate(f.read())
+                der_bytes = cert.public_bytes(serialization.Encoding.DER)
+                digest = hashlib.sha256(der_bytes).digest()
+                cert_hash = base64.b64encode(digest).decode()
+            except Exception as e:
+                logger.warning(f"Could not compute cert fingerprint: {e}")
+
+        return {
+            "relay_host": args.moq_host,
+            "relay_port": args.moq_port,
+            "path": args.moq_path,
+            "namespace": args.moq_namespace,
+            "insecure": args.moq_insecure,
+            "cert_hash": cert_hash,
+            # Per-participant broadcast paths. Browser publishes its mic
+            # under <namespace>/<client_id>/<publish_track> and subscribes
+            # to the bot under <namespace>/<bot_id>/<subscribe_track>.
+            "client_id": args.moq_client_id,
+            "bot_id": args.moq_bot_id,
+            "publish_track": "user-audio",
+            "subscribe_track": "bot-audio",
+            "transcript_track": "transcript",
+        }
+
+    @app.post("/start")
+    async def start_moq_bot(request: Request):
+        """Start a MOQ bot session."""
+        try:
+            request_data = await request.json()
+            logger.debug(f"Received MOQ start request: {request_data}")
+        except Exception:
+            request_data = {}
+
+        body = request_data.get("body", {})
+        namespace = request_data.get("namespace", args.moq_namespace)
+
+        bot_module = _get_bot_module()
+
+        ready_event = asyncio.Event()
+        runner_args = MOQRunnerArguments(
+            host=args.moq_host,
+            port=args.moq_port,
+            path=args.moq_path,
+            namespace=namespace,
+            participant_id=args.moq_bot_id,
+            peer_id=args.moq_client_id,
+            verify_ssl=not args.moq_insecure,
+            body=body,
+            ready_event=ready_event,
+        )
+        runner_args.cli_args = args
+
+        session_id = str(uuid.uuid4())
+        moq_sessions[session_id] = {
+            "namespace": namespace,
+            "host": args.moq_host,
+            "port": args.moq_port,
+        }
+
+        # Spawn the bot and wait until it signals it has finished the MOQ
+        # handshake, so the browser's SUBSCRIBE arrives at a publisher the
+        # relay already knows about.
+        asyncio.create_task(bot_module.bot(runner_args))
+        try:
+            await asyncio.wait_for(ready_event.wait(), timeout=15.0)
+        except asyncio.TimeoutError:
+            return JSONResponse(
+                status_code=504,
+                content={"error": "Bot did not connect to MOQ relay within 15s"},
+            )
+
+        return {
+            "sessionId": session_id,
+            "namespace": namespace,
+            "relay": f"{args.moq_host}:{args.moq_port}",
+        }
+
+
 def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
     """Set up telephony-specific routes.
 
@@ -1229,8 +1369,8 @@ def main(parser: argparse.ArgumentParser | None = None):
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "vonage", "webrtc", *TELEPHONY_TRANSPORTS],
-        default=None,
+        choices=["daily", "moq", "vonage", "webrtc", *TELEPHONY_TRANSPORTS],
+        default="webrtc",
         help=(
             "Restrict the server to a single transport and set it as the default for /start. "
             "Omit to support all transports simultaneously (default behaviour)."
@@ -1267,6 +1407,62 @@ def main(parser: argparse.ArgumentParser | None = None):
         help="Ensure required WhatsApp environment variables are present",
     )
 
+    # MOQ-specific arguments
+    parser.add_argument(
+        "--moq-host",
+        type=str,
+        default="localhost",
+        help="MOQ relay host address (default: localhost)",
+    )
+    parser.add_argument(
+        "--moq-port",
+        type=int,
+        default=4080,
+        help="MOQ relay port (default: 4080)",
+    )
+    parser.add_argument(
+        "--moq-path",
+        type=str,
+        default="/moq",
+        help="MOQ endpoint path (default: /moq)",
+    )
+    parser.add_argument(
+        "--moq-namespace",
+        type=str,
+        default="pipecat",
+        help="MOQ namespace/room (default: pipecat)",
+    )
+    parser.add_argument(
+        "--moq-bot-id",
+        type=str,
+        default="bot0",
+        help="This bot's participant id; broadcasts under <namespace>/<bot-id> (default: bot0)",
+    )
+    parser.add_argument(
+        "--moq-client-id",
+        type=str,
+        default="client0",
+        help="Peer client's participant id the bot subscribes to (default: client0)",
+    )
+    parser.add_argument(
+        "--moq-insecure",
+        action="store_true",
+        default=False,
+        help="Disable SSL certificate verification for MOQ relay",
+    )
+    parser.add_argument(
+        "--moq-cert",
+        type=str,
+        default=None,
+        help="Path to relay TLS certificate (PEM) for WebTransport cert pinning",
+    )
+    parser.add_argument(
+        "--moq-web-port",
+        type=int,
+        default=None,
+        help="MOQ relay WebTransport port for browser clients (defaults to --moq-port)",
+    )
+
     args = parser.parse_args()
 
     # Validate and clean proxy hostname
@@ -1297,7 +1493,6 @@ def main(parser: argparse.ArgumentParser | None = None):
 
     # Handle direct Daily connection (no FastAPI server)
     if args.direct:
-        print()
         print("🚀 Connecting directly to Daily room...")
         print()
 
@@ -1321,7 +1516,6 @@ def main(parser: argparse.ArgumentParser | None = None):
 
     # Run the server
     uvicorn.run(app, host=args.host, port=args.port)
-
 
 if __name__ == "__main__":
     main()

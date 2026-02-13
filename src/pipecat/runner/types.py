@@ -11,8 +11,9 @@ information to bot functions.
 """
 
 import argparse
+import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import WebSocket
 from pydantic import BaseModel
@@ -154,3 +155,29 @@ class LiveKitRunnerArguments(RunnerArguments):
     room_name: str
     url: str
     token: str
+
+
+@dataclass
+class MOQRunnerArguments(RunnerArguments):
+    """MOQ (Media over QUIC) transport session arguments for the runner.
+
+    Parameters:
+        host: MOQ relay server hostname.
+        port: MOQ relay server port.
+        path: MOQ endpoint path on the relay.
+        namespace: MOQ namespace (like a room identifier).
+        verify_ssl: Whether to verify SSL certificates.
+        ready_event: Optional event the bot sets once it has connected to the
+            relay and finished the MOQ handshake. Lets the HTTP `/start`
+            endpoint block until the bot is reachable before telling the
+            browser to open its WebTransport.
+    """
+
+    host: str
+    port: int
+    path: str = "/moq"
+    namespace: str = "pipecat"
+    participant_id: str = "bot0"
+    peer_id: str = "client0"
+    verify_ssl: bool = True
+    ready_event: Optional[asyncio.Event] = field(default=None, kw_only=True)
