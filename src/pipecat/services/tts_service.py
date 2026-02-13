@@ -8,6 +8,7 @@
 
 import asyncio
 import uuid
+import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import (
@@ -265,13 +266,19 @@ class TTSService(AIService):
     async def set_model(self, model: str):
         """Set the TTS model to use.
 
-        When the service has been migrated to typed settings this routes
-        through :meth:`_update_settings_from_typed` so that concrete
-        services can react (e.g. reconnect) in a single place.
+        .. deprecated:: 0.0.103
+            Use ``TTSUpdateSettingsFrame(model=...)`` instead.
 
         Args:
             model: The name of the TTS model.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated, use 'TTSUpdateSettingsFrame(model=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         logger.info(f"Switching TTS model to: [{model}]")
         if isinstance(self._settings, ServiceSettings):
             settings_cls = type(self._settings)
@@ -282,17 +289,19 @@ class TTSService(AIService):
     async def set_voice(self, voice: str):
         """Set the voice for speech synthesis.
 
-        When the service has been migrated to typed settings this routes
-        through :meth:`_update_settings_from_typed` so that concrete
-        services can react (e.g. reconnect) in a single place.
-
-        .. versionchanged:: 0.0.103
-            Now ``async``.  In ``__init__`` methods, set
-            ``self._voice_id`` directly instead of calling this method.
+        .. deprecated:: 0.0.103
+            Use ``TTSUpdateSettingsFrame(voice=...)`` instead.
 
         Args:
             voice: The voice identifier or name.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_voice' is deprecated, use 'TTSUpdateSettingsFrame(voice=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         logger.info(f"Switching TTS voice to: [{voice}]")
         if isinstance(self._settings, ServiceSettings):
             settings_cls = type(self._settings)

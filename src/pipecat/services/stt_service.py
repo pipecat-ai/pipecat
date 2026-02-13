@@ -9,6 +9,7 @@
 import asyncio
 import io
 import time
+import warnings
 import wave
 from abc import abstractmethod
 from typing import Any, AsyncGenerator, Dict, Mapping, Optional
@@ -168,13 +169,19 @@ class STTService(AIService):
     async def set_model(self, model: str):
         """Set the speech recognition model.
 
-        When the service has been migrated to typed settings this routes
-        through :meth:`_update_settings_from_typed` so that concrete
-        services can react (e.g. reconnect) in a single place.
+        .. deprecated:: 0.0.103
+            Use ``STTUpdateSettingsFrame(model=...)`` instead.
 
         Args:
             model: The name of the model to use for speech recognition.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated, use 'STTUpdateSettingsFrame(model=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         logger.info(f"Switching STT model to: [{model}]")
         if isinstance(self._settings, ServiceSettings):
             settings_cls = type(self._settings)
@@ -185,13 +192,19 @@ class STTService(AIService):
     async def set_language(self, language: Language):
         """Set the language for speech recognition.
 
-        When the service has been migrated to typed settings this routes
-        through :meth:`_update_settings_from_typed` so that concrete
-        services can react (e.g. reconnect) in a single place.
+        .. deprecated:: 0.0.103
+            Use ``STTUpdateSettingsFrame(language=...)`` instead.
 
         Args:
             language: The language to use for speech recognition.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_language' is deprecated, use 'STTUpdateSettingsFrame(language=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         logger.info(f"Switching STT language to: [{language}]")
         if isinstance(self._settings, ServiceSettings):
             settings_cls = type(self._settings)
