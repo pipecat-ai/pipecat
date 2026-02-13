@@ -1046,19 +1046,23 @@ class AudioContextTTSService(WebsocketTTSService):
     """
 
     def __init__(
-        self, *, supports_concurrent_tts: bool = False, reconnect_on_error: bool = True, **kwargs
+        self,
+        *,
+        supports_concurrent_contexts: bool = False,
+        reconnect_on_error: bool = True,
+        **kwargs,
     ):
         """Initialize the Audio Context TTS service.
 
         Args:
-            supports_concurrent_tts: Whether the service can handle multiple concurrent
+            supports_concurrent_contexts: Whether the service can handle multiple concurrent
                 TTS requests with different contexts. If False (default), the service will
                 reuse the same context ID for all requests until an interruption occurs.
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
         super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)
-        self._supports_concurrent_tts = supports_concurrent_tts
+        self._supports_concurrent_contexts = supports_concurrent_contexts
         self._context_id = None
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
@@ -1070,7 +1074,7 @@ class AudioContextTTSService(WebsocketTTSService):
             context_id: Unique identifier for the audio context.
         """
         # Set the context ID if not already set (for single-context mode)
-        if not self._supports_concurrent_tts and not self._context_id:
+        if not self._supports_concurrent_contexts and not self._context_id:
             self._context_id = context_id
 
         await self._contexts_queue.put(context_id)
@@ -1132,14 +1136,14 @@ class AudioContextTTSService(WebsocketTTSService):
     def create_context_id(self) -> str:
         """Generate or reuse a context ID based on concurrent TTS support.
 
-        If supports_concurrent_tts is False and a context already exists,
+        If _supports_concurrent_contexts is False and a context already exists,
         the existing context ID is returned. Otherwise, a new unique context
         ID is generated.
 
         Returns:
             A context ID string for the TTS request.
         """
-        if not self._supports_concurrent_tts and self._context_id:
+        if not self._supports_concurrent_contexts and self._context_id:
             return self._context_id
         return super().create_context_id()
 
