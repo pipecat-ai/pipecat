@@ -1246,16 +1246,6 @@ class GeminiTTSService(GoogleBaseTTSService):
         """
         return language_to_gemini_tts_language(language)
 
-    async def set_voice(self, voice_id: str):
-        """Set the voice for TTS generation.
-
-        Args:
-            voice_id: Name of the voice to use from AVAILABLE_VOICES.
-        """
-        if voice_id not in self.AVAILABLE_VOICES:
-            logger.warning(f"Voice '{voice_id}' not in known voices list. Using anyway.")
-        self._voice_id = voice_id
-
     async def start(self, frame: StartFrame):
         """Start the Gemini TTS service.
 
@@ -1270,11 +1260,17 @@ class GeminiTTSService(GoogleBaseTTSService):
             )
 
     async def _update_settings_from_typed(self, update: TTSSettings) -> set[str]:
-        """Override to handle prompt updates.
+        """Apply a typed settings update with voice validation.
 
         Args:
-            update: Typed settings delta. Can include 'prompt' (str).
+            update: Typed settings delta. Can include 'voice', 'prompt', etc.
+
+        Returns:
+            Set of field names whose values actually changed.
         """
+        if is_given(update.voice) and update.voice not in self.AVAILABLE_VOICES:
+            logger.warning(f"Voice '{update.voice}' not in known voices list. Using anyway.")
+
         return await super()._update_settings_from_typed(update)
 
     @traced_tts

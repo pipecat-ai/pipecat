@@ -106,18 +106,32 @@ class NvidiaTTSService(TTSService):
         self._config = None
 
     async def set_model(self, model: str):
-        """Attempt to set the TTS model.
+        """Set the TTS model.
 
-        Note: Model cannot be changed after initialization for Riva service.
+        .. deprecated:: 0.0.103
+            Model cannot be changed after initialization for NVIDIA Riva TTS.
+            Set model and function id in the constructor instead, e.g.::
+
+                NvidiaTTSService(
+                    api_key=...,
+                    model_function_map={"function_id": "<UUID>", "model_name": "<model_name>"},
+                )
 
         Args:
-            model: The model name to set (operation not supported).
+            model: The model name to set.
         """
-        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
-        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
-        logger.warning(
-            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated. Model cannot be changed after initialization"
+                " for NVIDIA Riva TTS. Set model and function id in the constructor"
+                " instead, e.g.: NvidiaTTSService(api_key=..., model_function_map="
+                "{'function_id': '<UUID>', 'model_name': '<model_name>'})",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     def _initialize_client(self):
         if self._service is not None:

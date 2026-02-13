@@ -241,18 +241,31 @@ class NvidiaSTTService(STTService):
     async def set_model(self, model: str):
         """Set the ASR model for transcription.
 
+        .. deprecated:: 0.0.103
+            Model cannot be changed after initialization for NVIDIA Riva streaming STT.
+            Set model and function id in the constructor instead, e.g.::
+
+                NvidiaSTTService(
+                    api_key=...,
+                    model_function_map={"function_id": "<UUID>", "model_name": "<model_name>"},
+                )
+
         Args:
             model: Model name to set.
-
-        Note:
-            Model cannot be changed after initialization. Use model_function_map
-            parameter in constructor instead.
         """
-        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
-        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
-        logger.warning(
-            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated. Model cannot be changed after initialization"
+                " for NVIDIA Riva streaming STT. Set model and function id in the"
+                " constructor instead, e.g.:"
+                " NvidiaSTTService(api_key=..., model_function_map="
+                "{'function_id': '<UUID>', 'model_name': '<model_name>'})",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     async def start(self, frame: StartFrame):
         """Start the NVIDIA Riva STT service and initialize streaming configuration.
@@ -554,22 +567,6 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             True - this service supports metrics generation.
         """
         return True
-
-    async def set_model(self, model: str):
-        """Set the ASR model for transcription.
-
-        Args:
-            model: Model name to set.
-
-        Note:
-            Model cannot be changed after initialization. Use model_function_map
-            parameter in constructor instead.
-        """
-        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
-        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
-        logger.warning(
-            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
-        )
 
     async def start(self, frame: StartFrame):
         """Initialize the service when the pipeline starts.
