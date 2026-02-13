@@ -73,6 +73,20 @@ class DeepgramFluxSTTService(WebsocketSTTService):
     Provides real-time speech recognition using Deepgram's WebSocket API with Flux capabilities.
     Supports configurable models, VAD events, and various audio processing options
     including advanced turn detection and EagerEndOfTurn events for improved conversational AI performance.
+
+    Event handlers available (in addition to WebsocketSTTService events):
+
+    - on_speech_started(service): Deepgram detected start of speech
+    - on_utterance_end(service): Deepgram detected end of utterance
+    - on_end_of_turn(service): Deepgram detected end of turn (EOT)
+    - on_eager_end_of_turn(service): Deepgram predicted end of turn (EagerEOT)
+    - on_turn_resumed(service): User resumed speaking after EagerEOT
+
+    Example::
+
+        @stt.event_handler("on_end_of_turn")
+        async def on_end_of_turn(service):
+            ...
     """
 
     class InputParams(BaseModel):

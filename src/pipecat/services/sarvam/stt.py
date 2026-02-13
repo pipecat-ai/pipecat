@@ -134,6 +134,18 @@ class SarvamSTTService(STTService):
     """Sarvam speech-to-text service.
 
     Provides real-time speech recognition using Sarvam's WebSocket API.
+
+    Event handlers available (in addition to STTService events):
+
+    - on_connected(service): Connected to Sarvam WebSocket
+    - on_disconnected(service): Disconnected from Sarvam WebSocket
+    - on_connection_error(service, error): Connection error occurred
+
+    Example::
+
+        @stt.event_handler("on_connected")
+        async def on_connected(service):
+            ...
     """
 
     class InputParams(BaseModel):
