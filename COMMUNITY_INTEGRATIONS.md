@@ -235,22 +235,54 @@ def can_generate_metrics(self) -> bool:
 
 ### Dynamic Settings Updates
 
-STT, LLM, and TTS services support `ServiceUpdateSettingsFrame` for dynamic configuration changes. The base STTService has an `_update_settings()` method that handles settings, and the private `_settings` `Dict` is used to store settings and provide access to the subclass.
+STT, LLM, and TTS services support runtime configuration changes via `*UpdateSettingsFrame`s (e.g. `STTUpdateSettingsFrame`, `TTSUpdateSettingsFrame`, `LLMUpdateSettingsFrame`).
+
+Each service declares a settings dataclass that extends the appropriate base (`STTSettings`, `TTSSettings`, `LLMSettings`). Fields default to `NOT_GIVEN` so that update objects can represent sparse deltas:
 
 ```python
-async def set_language(self, language: Language):
-    """Set the recognition language and reconnect.
+from dataclasses import dataclass, field
 
-    Args:
-        language: The language to use for speech recognition.
+from pipecat.services.settings import STTSettings, NOT_GIVEN
+
+@dataclass
+class MySTTSettings(STTSettings):
+    """Settings for my STT service.
+
+    Parameters:
+        region: Cloud region for the service.
     """
-    logger.info(f"Switching STT language to: [{language}]")
-    self._settings["language"] = language
-    await self._disconnect()
-    await self._connect()
+
+    region: str = field(default_factory=lambda: NOT_GIVEN)
 ```
 
-Note that, in this example, Deepgram requires the websocket connection be disconnected and reconnected to reinitialize the service with the new value. Consider if your service requires reconnection.
+The service stores its current settings in `self._settings` and declares the type with a class-level annotation for editor support:
+
+```python
+class MySTTService(STTService):
+
+    _settings: MySTTSettings
+
+    def __init__(self, *, model: str, region: str, **kwargs):
+        super().__init__(**kwargs)
+        self._settings = MySTTSettings(model=model, region=region)
+```
+
+To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns the set of field names that changed. Your override should call `super()` first, then act on the changed fields:
+
+```python
+async def _update_settings(self, update: STTSettings) -> set[str]:
+    """Apply a settings update, reconfiguring the recognizer if needed."""
+    changed = await super()._update_settings(update)
+
+    if "language" in changed:
+        # Restart the recognizer with the new language.
+        await self._disconnect()
+        await self._connect()
+
+    return changed
+```
+
+Note that, in this example, the service requires a reconnect to apply the new language. Consider whether your service requires reconnection or can apply changes in-place.
 
 ### Sample Rate Handling
 
@@ -260,7 +292,7 @@ Sample rates are set via PipelineParams and passed to each frame processor at in
 async def start(self, frame: StartFrame):
     """Start the service."""
     await super().start(frame)
-    self._settings["output_format"]["sample_rate"] = self.sample_rate
+    self._settings.output_sample_rate = self.sample_rate
     await self._connect()
 ```
 
