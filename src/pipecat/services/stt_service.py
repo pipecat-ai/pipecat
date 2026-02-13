@@ -114,7 +114,6 @@ class STTService(AIService):
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
         self._settings: Dict[str, Any] = {}
-        self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
         self._ttfs_p99_latency = ttfs_p99_latency
@@ -220,7 +219,6 @@ class STTService(AIService):
         """
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
-        self._tracing_enabled = frame.enable_tracing
 
     async def cleanup(self):
         """Clean up STT service resources."""
