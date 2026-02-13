@@ -61,6 +61,20 @@ Then, run the example with:
 uv run 07-interruptible.py -t twilio -x NGROK_HOST_NAME
 ```
 
+### Vonage
+
+It is also possible to run the example through a Vonage session. Just provide the values for the following variables in
+the `.env` file:
+* VONAGE_APPLICATION_ID
+* VONAGE_SESSION_ID
+* VONAGE_TOKEN
+
+Then, run the example with:
+
+```bash
+uv run 40-interruptible.py -t vonage
+```
+
 ## Examples by Feature
 
 ### Basics

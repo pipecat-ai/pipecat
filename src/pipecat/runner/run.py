@@ -84,8 +84,10 @@ from pipecat.runner.types import (
     DailyRunnerArguments,
     RunnerArguments,
     SmallWebRTCRunnerArguments,
+    VonageRunnerArguments,
     WebSocketRunnerArguments,
 )
+from pipecat.runner.vonage import configure as configure_vonage
 
 try:
     import uvicorn
@@ -830,6 +832,25 @@ async def _run_daily_direct():
         await bot_module.bot(runner_args)
 
 
+async def _run_vonage():
+    """Run Vonage bot (no FastAPI server)."""
+    logger.info("Running Vonage transport...")
+
+    application_id, session_id, token = configure_vonage()
+    runner_args = VonageRunnerArguments(
+        application_id=application_id, session_id=session_id, token=token
+    )
+    runner_args.handle_sigint = True
+
+    # Get the bot module and run it directly
+    bot_module = _get_bot_module()
+
+    print(f"Joining Vonage session: {runner_args.session_id}")
+    print()
+
+    await bot_module.bot(runner_args)
+
+
 def _validate_and_clean_proxy(proxy: str) -> str:
     """Validate and clean proxy hostname, removing protocol if present."""
     if not proxy:
@@ -895,7 +916,7 @@ def main():
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "webrtc", *TELEPHONY_TRANSPORTS],
+        choices=["daily", "vonage", "webrtc", *TELEPHONY_TRANSPORTS],
         default="webrtc",
         help="Transport type",
     )
@@ -989,6 +1010,12 @@ def main():
         else:
             print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
         print()
+    elif args.transport == "vonage":
+        print()
+        print(f"🚀 Bot ready!")
+        asyncio.run(_run_vonage())
+        print()
+        return
 
     RUNNER_DOWNLOADS_FOLDER = args.folder
     RUNNER_HOST = args.host
