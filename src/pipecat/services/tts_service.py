@@ -208,8 +208,6 @@ class TTSService(AIService):
         # TODO: Deprecate _text_filters when added to LLMTextProcessor
         self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
-        self._tracing_enabled: bool = False
-
         if text_filter:
             import warnings
 
@@ -349,8 +347,6 @@ class TTSService(AIService):
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
         if self._push_stop_frames and not self._stop_frame_task:
             self._stop_frame_task = self.create_task(self._stop_frame_handler())
-        self._tracing_enabled = frame.enable_tracing
-        self._tracing_context = frame.tracing_context
 
     async def stop(self, frame: EndFrame):
         """Stop the TTS service.

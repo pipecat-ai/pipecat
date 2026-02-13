@@ -54,6 +54,19 @@ def _noop_decorator(func):
     return func
 
 
+def _get_turn_context(self):
+    """Get the current turn's tracing context if available.
+
+    Args:
+        self: The service instance.
+
+    Returns:
+        The turn context, or None if unavailable.
+    """
+    tracing_ctx = getattr(self, "_tracing_context", None)
+    return tracing_ctx.get_turn_context() if tracing_ctx else None
+
+
 def _get_parent_service_context(self):
     """Get the parent service span context (internal use only).
 
@@ -182,9 +195,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             span_name = "tts"
 
             # Get parent context
-            tracing_ctx = getattr(self, "_tracing_context", None)
-            turn_context = tracing_ctx.get_turn_context() if tracing_ctx else None
-            parent_context = turn_context or _get_parent_service_context(self)
+            parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
             # Create span
             tracer = trace.get_tracer("pipecat")
@@ -290,9 +301,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 span_name = "stt"
 
                 # Get the turn context first, then fall back to service context
-                tracing_ctx = getattr(self, "_tracing_context", None)
-                turn_context = tracing_ctx.get_turn_context() if tracing_ctx else None
-                parent_context = turn_context or _get_parent_service_context(self)
+                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
@@ -373,9 +382,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 span_name = "llm"
 
                 # Get the parent context - turn context if available, otherwise service context
-                tracing_ctx = getattr(self, "_tracing_context", None)
-                turn_context = tracing_ctx.get_turn_context() if tracing_ctx else None
-                parent_context = turn_context or _get_parent_service_context(self)
+                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
@@ -584,9 +591,7 @@ def traced_gemini_live(operation: str) -> Callable:
                 span_name = f"{operation}"
 
                 # Get the parent context - turn context if available, otherwise service context
-                tracing_ctx = getattr(self, "_tracing_context", None)
-                turn_context = tracing_ctx.get_turn_context() if tracing_ctx else None
-                parent_context = turn_context or _get_parent_service_context(self)
+                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
@@ -892,9 +897,7 @@ def traced_openai_realtime(operation: str) -> Callable:
                 span_name = f"{operation}"
 
                 # Get the parent context - turn context if available, otherwise service context
-                tracing_ctx = getattr(self, "_tracing_context", None)
-                turn_context = tracing_ctx.get_turn_context() if tracing_ctx else None
-                parent_context = turn_context or _get_parent_service_context(self)
+                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")

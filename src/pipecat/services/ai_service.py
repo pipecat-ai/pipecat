@@ -44,6 +44,8 @@ class AIService(FrameProcessor):
         self._model_name: str = ""
         self._settings: Dict[str, Any] = {}
         self._session_properties: Dict[str, Any] = {}
+        self._tracing_enabled: bool = False
+        self._tracing_context = None
 
     @property
     def model_name(self) -> str:
@@ -72,7 +74,8 @@ class AIService(FrameProcessor):
         Args:
             frame: The start frame containing initialization parameters.
         """
-        pass
+        self._tracing_enabled = frame.enable_tracing
+        self._tracing_context = frame.tracing_context
 
     async def stop(self, frame: EndFrame):
         """Stop the AI service.
