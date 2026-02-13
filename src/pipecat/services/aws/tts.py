@@ -150,6 +150,8 @@ class AWSPollyTTSService(TTSService):
     options including prosody controls.
     """
 
+    _settings: AWSPollyTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for AWS Polly TTS configuration.
 
@@ -206,7 +208,7 @@ class AWSPollyTTSService(TTSService):
         }
 
         self._aws_session = aioboto3.Session()
-        self._settings: AWSPollyTTSSettings = AWSPollyTTSSettings(
+        self._settings = AWSPollyTTSSettings(
             voice=voice_id,
             engine=params.engine,
             language=self.language_to_service_language(params.language)

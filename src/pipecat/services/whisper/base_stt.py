@@ -124,6 +124,8 @@ class BaseWhisperSTTService(SegmentedSTTService):
     including metrics generation and error handling.
     """
 
+    _settings: BaseWhisperSTTSettings
+
     def __init__(
         self,
         *,
@@ -161,7 +163,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         self._temperature = temperature
         self._include_prob_metrics = include_prob_metrics
 
-        self._settings: BaseWhisperSTTSettings = BaseWhisperSTTSettings(
+        self._settings = BaseWhisperSTTSettings(
             model=model,
             language=self._language,
             base_url=base_url,

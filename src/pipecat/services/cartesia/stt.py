@@ -149,6 +149,8 @@ class CartesiaSTTService(WebsocketSTTService):
     See: https://docs.cartesia.ai/api-reference/stt/stt
     """
 
+    _settings: CartesiaSTTSettings
+
     def __init__(
         self,
         *,
@@ -194,7 +196,7 @@ class CartesiaSTTService(WebsocketSTTService):
                 k: v for k, v in merged_options.items() if not isinstance(v, str) or v != "None"
             }
 
-        self._settings: CartesiaSTTSettings = CartesiaSTTSettings(
+        self._settings = CartesiaSTTSettings(
             model=merged_options["model"],
             language=merged_options.get("language"),
             encoding=merged_options.get("encoding", "pcm_s16le"),

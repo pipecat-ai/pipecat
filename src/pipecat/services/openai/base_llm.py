@@ -70,6 +70,8 @@ class BaseOpenAILLMService(LLMService):
     configurations.
     """
 
+    _settings: OpenAILLMSettings
+
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
 

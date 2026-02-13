@@ -692,6 +692,8 @@ class GoogleLLMService(LLMService):
     expected by the Google AI model.
     """
 
+    _settings: GoogleLLMSettings
+
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 

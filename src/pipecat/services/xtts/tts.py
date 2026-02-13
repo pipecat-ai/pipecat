@@ -89,6 +89,8 @@ class XTTSService(TTSService):
     studio speakers configuration.
     """
 
+    _settings: XTTSTTSSettings
+
     def __init__(
         self,
         *,
@@ -111,7 +113,7 @@ class XTTSService(TTSService):
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._settings: XTTSTTSSettings = XTTSTTSSettings(
+        self._settings = XTTSTTSSettings(
             voice=voice_id,
             language=self.language_to_service_language(language),
             base_url=base_url,

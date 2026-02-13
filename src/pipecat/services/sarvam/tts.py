@@ -371,6 +371,8 @@ class SarvamHttpTTSService(TTSService):
         )
     """
 
+    _settings: SarvamHttpTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Sarvam TTS configuration.
 
@@ -478,7 +480,7 @@ class SarvamHttpTTSService(TTSService):
             pace = max(pace_min, min(pace_max, pace))
 
         # Build base settings
-        self._settings: SarvamHttpTTSSettings = SarvamHttpTTSSettings(
+        self._settings = SarvamHttpTTSSettings(
             language=(
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
@@ -684,6 +686,8 @@ class SarvamTTSService(InterruptibleTTSService):
     See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for API details.
     """
 
+    _settings: SarvamWSTTSSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam TTS WebSocket service.
 
@@ -837,7 +841,7 @@ class SarvamTTSService(InterruptibleTTSService):
             pace = max(pace_min, min(pace_max, pace))
 
         # Build base settings
-        self._settings: SarvamWSTTSSettings = SarvamWSTTSSettings(
+        self._settings = SarvamWSTTSSettings(
             target_language_code=(
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),

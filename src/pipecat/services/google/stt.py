@@ -412,6 +412,8 @@ class GoogleSTTService(STTService):
         ValueError: If project ID is not found in credentials.
     """
 
+    _settings: GoogleSTTSettings
+
     # Google Cloud's STT service has a connection time limit of 5 minutes per stream.
     # They've shared an "endless streaming" example that guided this implementation:
     # https://cloud.google.com/speech-to-text/docs/transcribe-streaming-audio#endless-streaming

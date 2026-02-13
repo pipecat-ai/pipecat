@@ -169,6 +169,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         )
     """
 
+    _settings: OpenAIRealtimeSTTSettings
+
     def __init__(
         self,
         *,
@@ -231,7 +233,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         self._noise_reduction = noise_reduction
         self._should_interrupt = should_interrupt
 
-        self._settings: OpenAIRealtimeSTTSettings = OpenAIRealtimeSTTSettings(
+        self._settings = OpenAIRealtimeSTTSettings(
             model=model,
             language=language,
             prompt=prompt,

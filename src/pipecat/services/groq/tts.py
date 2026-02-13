@@ -57,6 +57,8 @@ class GroqTTSService(TTSService):
     and output formats.
     """
 
+    _settings: GroqTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Groq TTS configuration.
 
@@ -109,7 +111,7 @@ class GroqTTSService(TTSService):
         self._voice_id = voice_id
         self._params = params
 
-        self._settings: GroqTTSSettings = GroqTTSSettings(
+        self._settings = GroqTTSSettings(
             model=model_name,
             voice=voice_id,
             language=str(params.language) if params.language else "en",

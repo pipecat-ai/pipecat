@@ -78,6 +78,8 @@ class FishAudioTTSService(InterruptibleTTSService):
     audio generation with interruption handling.
     """
 
+    _settings: FishAudioTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Fish Audio TTS configuration.
 
@@ -161,7 +163,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         self._receive_task = None
         self._request_id = None
 
-        self._settings: FishAudioTTSSettings = FishAudioTTSSettings(
+        self._settings = FishAudioTTSSettings(
             voice=reference_id,
             fish_sample_rate=0,
             latency=params.latency,

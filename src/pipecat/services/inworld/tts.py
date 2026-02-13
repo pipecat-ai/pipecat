@@ -82,6 +82,8 @@ class InworldHttpTTSService(WordTTSService):
     Outputs LINEAR16 audio at configurable sample rates with word-level timestamps.
     """
 
+    _settings: InworldTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Inworld TTS configuration.
 
@@ -138,7 +140,7 @@ class InworldHttpTTSService(WordTTSService):
         else:
             self._base_url = "https://api.inworld.ai/tts/v1/voice"
 
-        self._settings: InworldTTSSettings = InworldTTSSettings(
+        self._settings = InworldTTSSettings(
             model=model,
             voice=voice_id,
             audio_encoding=encoding,
@@ -438,6 +440,8 @@ class InworldTTSService(AudioContextWordTTSService):
     with word-level timestamps.
     """
 
+    _settings: InworldTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Inworld WebSocket TTS configuration.
 
@@ -503,7 +507,7 @@ class InworldTTSService(AudioContextWordTTSService):
 
         self._api_key = api_key
         self._url = url
-        self._settings: InworldTTSSettings = InworldTTSSettings(
+        self._settings = InworldTTSSettings(
             model=model,
             voice=voice_id,
             audio_encoding=encoding,

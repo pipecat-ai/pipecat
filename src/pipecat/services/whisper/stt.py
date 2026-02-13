@@ -211,6 +211,8 @@ class WhisperSTTService(SegmentedSTTService):
     segments. It supports multiple languages and various model sizes.
     """
 
+    _settings: WhisperSTTSettings
+
     def __init__(
         self,
         *,
@@ -238,7 +240,7 @@ class WhisperSTTService(SegmentedSTTService):
         self._no_speech_prob = no_speech_prob
         self._model: Optional[WhisperModel] = None
 
-        self._settings: WhisperSTTSettings = WhisperSTTSettings(
+        self._settings = WhisperSTTSettings(
             model=model if isinstance(model, str) else model.value,
             language=language,
             device=self._device,
@@ -346,6 +348,8 @@ class WhisperSTTServiceMLX(WhisperSTTService):
     segments. It's optimized for Apple Silicon and supports multiple languages and quantizations.
     """
 
+    _settings: WhisperMLXSTTSettings
+
     def __init__(
         self,
         *,
@@ -371,7 +375,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         self._no_speech_prob = no_speech_prob
         self._temperature = temperature
 
-        self._settings: WhisperMLXSTTSettings = WhisperMLXSTTSettings(
+        self._settings = WhisperMLXSTTSettings(
             model=model if isinstance(model, str) else model.value,
             language=language,
             no_speech_prob=self._no_speech_prob,

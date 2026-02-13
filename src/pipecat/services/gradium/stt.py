@@ -86,6 +86,8 @@ class GradiumSTTService(WebsocketSTTService):
     for audio processing and connection management.
     """
 
+    _settings: GradiumSTTSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Gradium STT API.
 
@@ -145,7 +147,7 @@ class GradiumSTTService(WebsocketSTTService):
 
         params = params or GradiumSTTService.InputParams()
 
-        self._settings: GradiumSTTSettings = GradiumSTTSettings(
+        self._settings = GradiumSTTSettings(
             language=params.language,
             delay_in_frames=params.delay_in_frames if params.delay_in_frames else NOT_GIVEN,
         )

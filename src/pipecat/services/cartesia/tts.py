@@ -226,6 +226,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
     customization options including speed and emotion controls.
     """
 
+    _settings: CartesiaTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Cartesia TTS configuration.
 
@@ -316,7 +318,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self._api_key = api_key
         self._cartesia_version = cartesia_version
         self._url = url
-        self._settings: CartesiaTTSSettings = CartesiaTTSSettings(
+        self._settings = CartesiaTTSSettings(
             output_container=container,
             output_encoding=encoding,
             output_sample_rate=0,
@@ -655,6 +657,8 @@ class CartesiaHttpTTSService(TTSService):
     integration is preferred.
     """
 
+    _settings: CartesiaTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Cartesia HTTP TTS configuration.
 
@@ -712,7 +716,7 @@ class CartesiaHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = base_url
         self._cartesia_version = cartesia_version
-        self._settings: CartesiaTTSSettings = CartesiaTTSSettings(
+        self._settings = CartesiaTTSSettings(
             model=model,
             voice=voice_id,
             output_container=container,

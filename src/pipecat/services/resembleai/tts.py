@@ -63,6 +63,8 @@ class ResembleAITTSService(AudioContextWordTTSService):
     multiple simultaneous synthesis requests with proper interruption support.
     """
 
+    _settings: ResembleAITTSSettings
+
     def __init__(
         self,
         *,
@@ -93,7 +95,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
         self._api_key = api_key
         self._voice_id = voice_id
         self._url = url
-        self._settings: ResembleAITTSSettings = ResembleAITTSSettings(
+        self._settings = ResembleAITTSSettings(
             voice=voice_id,
             precision=precision,
             output_format=output_format,

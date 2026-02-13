@@ -104,6 +104,8 @@ class TTSService(AIService):
             logger.debug(f"TTS request: {context_id} - {text}")
     """
 
+    _settings: TTSSettings
+
     def __init__(
         self,
         *,

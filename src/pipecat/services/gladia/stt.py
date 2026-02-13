@@ -204,6 +204,8 @@ class GladiaSTTService(WebsocketSTTService):
         Use :class:`~pipecat.services.gladia.config.GladiaInputParams` directly instead.
     """
 
+    _settings: GladiaSTTSettings
+
     # Maintain backward compatibility
     InputParams = _InputParamsDescriptor()
 

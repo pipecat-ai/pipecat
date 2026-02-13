@@ -88,6 +88,8 @@ class DeepgramSageMakerSTTService(STTService):
         )
     """
 
+    _settings: DeepgramSageMakerSTTSettings
+
     def __init__(
         self,
         *,
@@ -143,7 +145,7 @@ class DeepgramSageMakerSTTService(STTService):
 
         self.set_model_name(merged_options["model"])
         merged_live_options = LiveOptions(**merged_options)
-        self._settings: DeepgramSageMakerSTTSettings = DeepgramSageMakerSTTSettings(
+        self._settings = DeepgramSageMakerSTTSettings(
             model=merged_options.get("model"),
             language=merged_options.get("language"),
             live_options=merged_live_options,

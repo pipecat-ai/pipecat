@@ -95,6 +95,8 @@ class AsyncAITTSService(AudioContextTTSService):
     Provides text-to-speech using Async's streaming WebSocket API.
     """
 
+    _settings: AsyncAITTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Async TTS configuration.
 
@@ -148,7 +150,7 @@ class AsyncAITTSService(AudioContextTTSService):
         self._api_key = api_key
         self._api_version = version
         self._url = url
-        self._settings: AsyncAITTSSettings = AsyncAITTSSettings(
+        self._settings = AsyncAITTSSettings(
             model=model,
             voice=voice_id,
             output_format={
@@ -431,6 +433,8 @@ class AsyncAIHttpTTSService(TTSService):
     connection is not required or desired.
     """
 
+    _settings: AsyncAITTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Async API.
 
@@ -477,7 +481,7 @@ class AsyncAIHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = url
         self._api_version = version
-        self._settings: AsyncAITTSSettings = AsyncAITTSSettings(
+        self._settings = AsyncAITTSSettings(
             model=model,
             voice=voice_id,
             output_container=container,

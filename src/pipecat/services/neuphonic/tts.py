@@ -99,6 +99,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
     parameters for high-quality speech generation.
     """
 
+    _settings: NeuphonicTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Neuphonic TTS configuration.
 
@@ -146,7 +148,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
         self._api_key = api_key
         self._url = url
-        self._settings: NeuphonicTTSSettings = NeuphonicTTSSettings(
+        self._settings = NeuphonicTTSSettings(
             lang_code=self.language_to_service_language(params.language),
             speed=params.speed,
             encoding=encoding,

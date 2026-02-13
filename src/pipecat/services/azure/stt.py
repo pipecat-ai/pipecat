@@ -71,6 +71,8 @@ class AzureSTTService(STTService):
     provides real-time transcription results with timing information.
     """
 
+    _settings: AzureSTTSettings
+
     def __init__(
         self,
         *,
@@ -107,7 +109,7 @@ class AzureSTTService(STTService):
 
         self._audio_stream = None
         self._speech_recognizer = None
-        self._settings: AzureSTTSettings = AzureSTTSettings(
+        self._settings = AzureSTTSettings(
             region=region,
             language=language_to_azure_language(language),
             sample_rate=sample_rate,

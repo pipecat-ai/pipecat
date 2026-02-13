@@ -171,6 +171,8 @@ class FalSTTService(SegmentedSTTService):
     segments. It inherits from SegmentedSTTService to handle audio buffering and speech detection.
     """
 
+    _settings: FalSTTSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Fal's Wizper API.
 
@@ -221,7 +223,7 @@ class FalSTTService(SegmentedSTTService):
             )
 
         self._fal_client = fal_client.AsyncClient(key=api_key or os.getenv("FAL_KEY"))
-        self._settings: FalSTTSettings = FalSTTSettings(
+        self._settings = FalSTTSettings(
             language=self.language_to_service_language(params.language)
             if params.language
             else "en",

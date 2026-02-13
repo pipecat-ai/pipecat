@@ -53,6 +53,8 @@ class GradiumTTSSettings(TTSSettings):
 class GradiumTTSService(InterruptibleWordTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
 
+    _settings: GradiumTTSSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Gradium TTS service.
 
@@ -99,7 +101,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
         self._url = url
         self._voice_id = voice_id
         self._json_config = json_config
-        self._settings: GradiumTTSSettings = GradiumTTSSettings(
+        self._settings = GradiumTTSSettings(
             model=model,
             voice=voice_id,
             output_format="pcm",

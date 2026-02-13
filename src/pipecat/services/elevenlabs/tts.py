@@ -321,6 +321,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
     customization options including stability, similarity boost, and speed controls.
     """
 
+    _settings: ElevenLabsTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs TTS configuration.
 
@@ -401,7 +403,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
         self._api_key = api_key
         self._url = url
-        self._settings: ElevenLabsTTSSettings = ElevenLabsTTSSettings(
+        self._settings = ElevenLabsTTSSettings(
             model=model,
             voice=voice_id,
             language=(
@@ -836,6 +838,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
     connection is not required or desired.
     """
 
+    _settings: ElevenLabsHttpTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs HTTP TTS configuration.
 
@@ -902,7 +906,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self._params = params
         self._session = aiohttp_session
 
-        self._settings: ElevenLabsHttpTTSSettings = ElevenLabsHttpTTSSettings(
+        self._settings = ElevenLabsHttpTTSSettings(
             model=model,
             voice=voice_id,
             language=self.language_to_service_language(params.language)

@@ -215,6 +215,8 @@ class ElevenLabsSTTService(SegmentedSTTService):
     The service uploads audio files to ElevenLabs and receives transcription results directly.
     """
 
+    _settings: ElevenLabsSTTSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs STT API.
 
@@ -264,7 +266,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
         self._session = aiohttp_session
         self._model_id = model
 
-        self._settings: ElevenLabsSTTSettings = ElevenLabsSTTSettings(
+        self._settings = ElevenLabsSTTSettings(
             model=model,
             language=self.language_to_service_language(params.language)
             if params.language
@@ -449,6 +451,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     commit transcript segments, providing consistency with other STT services.
     """
 
+    _settings: ElevenLabsRealtimeSTTSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs Realtime STT API.
 
@@ -517,7 +521,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._audio_format = ""  # initialized in start()
         self._receive_task = None
 
-        self._settings: ElevenLabsRealtimeSTTSettings = ElevenLabsRealtimeSTTSettings(
+        self._settings = ElevenLabsRealtimeSTTSettings(
             model=model,
             language=params.language_code,
             commit_strategy=params.commit_strategy,

@@ -125,6 +125,8 @@ class NvidiaSTTService(STTService):
     processing for low-latency applications.
     """
 
+    _settings: NvidiaSTTSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva STT service.
 
@@ -178,7 +180,7 @@ class NvidiaSTTService(STTService):
         self._custom_configuration = ""
         self._function_id = model_function_map.get("function_id")
 
-        self._settings: NvidiaSTTSettings = NvidiaSTTSettings(
+        self._settings = NvidiaSTTSettings(
             language=params.language,
         )
 
@@ -399,6 +401,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
     audio buffering and speech detection.
     """
 
+    _settings: NvidiaSegmentedSTTSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for NVIDIA Riva segmented STT service.
 
@@ -470,7 +474,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
         self._config = None
         self._asr_service = None
-        self._settings: NvidiaSegmentedSTTSettings = NvidiaSegmentedSTTSettings(
+        self._settings = NvidiaSegmentedSTTSettings(
             language=params.language or Language.EN_US,
             profanity_filter=params.profanity_filter,
             automatic_punctuation=params.automatic_punctuation,

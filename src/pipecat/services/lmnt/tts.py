@@ -92,6 +92,8 @@ class LmntTTSService(InterruptibleTTSService):
     language settings.
     """
 
+    _settings: LmntTTSSettings
+
     def __init__(
         self,
         *,
@@ -122,7 +124,7 @@ class LmntTTSService(InterruptibleTTSService):
         self._api_key = api_key
         self._voice_id = voice_id
         self.set_model_name(model)
-        self._settings: LmntTTSSettings = LmntTTSSettings(
+        self._settings = LmntTTSSettings(
             model=model,
             voice=voice_id,
             language=self.language_to_service_language(language),

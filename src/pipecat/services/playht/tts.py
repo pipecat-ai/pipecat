@@ -131,6 +131,8 @@ class PlayHTTTSService(InterruptibleTTSService):
     language settings.
     """
 
+    _settings: PlayHTTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for PlayHT TTS configuration.
 
@@ -191,7 +193,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         self._receive_task = None
         self._context_id = None
 
-        self._settings: PlayHTTTSSettings = PlayHTTTSSettings(
+        self._settings = PlayHTTTSSettings(
             model=voice_engine,
             voice=voice_url,
             language=self.language_to_service_language(params.language)
@@ -444,6 +446,8 @@ class PlayHTHttpTTSService(TTSService):
     required and simpler integration is preferred.
     """
 
+    _settings: PlayHTTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for PlayHT HTTP TTS configuration.
 
@@ -522,7 +526,7 @@ class PlayHTHttpTTSService(TTSService):
             # Extract the base engine name
             voice_engine = voice_engine.replace("-ws", "")
 
-        self._settings: PlayHTTTSSettings = PlayHTTTSSettings(
+        self._settings = PlayHTTTSSettings(
             voice=voice_url,
             language=self.language_to_service_language(params.language)
             if params.language

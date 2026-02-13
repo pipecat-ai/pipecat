@@ -170,6 +170,8 @@ class CambTTSService(TTSService):
         )
     """
 
+    _settings: CambTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Camb.ai TTS configuration.
 
@@ -226,7 +228,7 @@ class CambTTSService(TTSService):
             )
 
         # Build settings
-        self._settings: CambTTSSettings = CambTTSSettings(
+        self._settings = CambTTSSettings(
             model=model,
             voice=voice_id,
             language=(

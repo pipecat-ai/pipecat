@@ -547,6 +547,8 @@ class GoogleHttpTTSService(TTSService):
         Chirp and Journey voices don't support SSML and will use plain text input.
     """
 
+    _settings: GoogleHttpTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Google HTTP TTS voice customization.
 
@@ -597,7 +599,7 @@ class GoogleHttpTTSService(TTSService):
         params = params or GoogleHttpTTSService.InputParams()
 
         self._location = location
-        self._settings: GoogleHttpTTSSettings = GoogleHttpTTSSettings(
+        self._settings = GoogleHttpTTSSettings(
             pitch=params.pitch,
             rate=params.rate,
             speaking_rate=params.speaking_rate,
@@ -968,6 +970,8 @@ class GoogleTTSService(GoogleBaseTTSService):
         )
     """
 
+    _settings: GoogleStreamTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Google streaming TTS configuration.
 
@@ -1008,7 +1012,7 @@ class GoogleTTSService(GoogleBaseTTSService):
         params = params or GoogleTTSService.InputParams()
 
         self._location = location
-        self._settings: GoogleStreamTTSSettings = GoogleStreamTTSSettings(
+        self._settings = GoogleStreamTTSSettings(
             language=self.language_to_service_language(params.language)
             if params.language
             else "en-US",
@@ -1108,6 +1112,8 @@ class GeminiTTSService(GoogleBaseTTSService):
             )
         )
     """
+
+    _settings: GeminiTTSSettings
 
     GOOGLE_SAMPLE_RATE = 24000  # Google TTS always outputs at 24kHz
 
@@ -1216,7 +1222,7 @@ class GeminiTTSService(GoogleBaseTTSService):
         self._location = location
         self._model = model
         self._voice_id = voice_id
-        self._settings: GeminiTTSSettings = GeminiTTSSettings(
+        self._settings = GeminiTTSSettings(
             language=self.language_to_service_language(params.language)
             if params.language
             else "en-US",

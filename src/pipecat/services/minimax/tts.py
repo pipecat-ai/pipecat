@@ -132,6 +132,8 @@ class MiniMaxHttpTTSService(TTSService):
     https://www.minimax.io/platform/document/T2A%20V2?key=66719005a427f0c8a5701643
     """
 
+    _settings: MiniMaxTTSSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for MiniMax TTS.
 
@@ -208,7 +210,7 @@ class MiniMaxHttpTTSService(TTSService):
         self._voice_id = voice_id
 
         # Create voice settings
-        self._settings: MiniMaxTTSSettings = MiniMaxTTSSettings(
+        self._settings = MiniMaxTTSSettings(
             model=model,
             voice=voice_id,
             stream=True,

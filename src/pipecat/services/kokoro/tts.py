@@ -107,6 +107,8 @@ class KokoroTTSService(TTSService):
     Automatically downloads model files on first use.
     """
 
+    _settings: KokoroTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Kokoro TTS configuration.
 
@@ -142,7 +144,7 @@ class KokoroTTSService(TTSService):
         self._voice_id = voice_id
         self._lang_code = language_to_kokoro_language(params.language)
 
-        self._settings: KokoroTTSSettings = KokoroTTSSettings(
+        self._settings = KokoroTTSSettings(
             voice=voice_id,
             language=language_to_kokoro_language(params.language),
             lang_code=language_to_kokoro_language(params.language),

@@ -75,6 +75,8 @@ class AssemblyAISTTService(WebsocketSTTService):
     for audio processing and connection management.
     """
 
+    _settings: AssemblyAISTTSettings
+
     def __init__(
         self,
         *,
@@ -111,7 +113,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         )
 
         self._api_key = api_key
-        self._settings: AssemblyAISTTSettings = AssemblyAISTTSettings(
+        self._settings = AssemblyAISTTSettings(
             language=language,
             connection_params=connection_params,
         )

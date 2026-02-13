@@ -154,6 +154,8 @@ class SarvamSTTService(STTService):
     Provides real-time speech recognition using Sarvam's WebSocket API.
     """
 
+    _settings: SarvamSTTSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam STT service.
 
@@ -247,7 +249,7 @@ class SarvamSTTService(STTService):
         # Resolve mode default from model config
         mode = params.mode if params.mode is not None else self._config.default_mode
 
-        self._settings: SarvamSTTSettings = SarvamSTTSettings(
+        self._settings = SarvamSTTSettings(
             model=model,
             language=params.language,
             prompt=params.prompt if params.prompt is not None else NOT_GIVEN,

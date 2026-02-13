@@ -100,6 +100,8 @@ class AzureBaseTTSService:
     This is a mixin class and should be used alongside TTSService or its subclasses.
     """
 
+    _settings: AzureTTSSettings
+
     # Define SSML escape mappings based on SSML reserved characters
     # See - https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure
     SSML_ESCAPE_CHARS = {
@@ -153,7 +155,7 @@ class AzureBaseTTSService:
         """
         params = params or AzureBaseTTSService.InputParams()
 
-        self._settings: AzureTTSSettings = AzureTTSSettings(
+        self._settings = AzureTTSSettings(
             emphasis=params.emphasis,
             language=self.language_to_service_language(params.language)
             if params.language

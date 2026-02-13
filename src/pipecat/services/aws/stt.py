@@ -72,6 +72,8 @@ class AWSTranscribeSTTService(WebsocketSTTService):
     final transcription results.
     """
 
+    _settings: AWSTranscribeSTTSettings
+
     def __init__(
         self,
         *,
@@ -99,7 +101,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         """
         super().__init__(ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
-        self._settings: AWSTranscribeSTTSettings = AWSTranscribeSTTSettings(
+        self._settings = AWSTranscribeSTTSettings(
             language=language,
             sample_rate=sample_rate,
             media_encoding="linear16",

@@ -134,6 +134,8 @@ class RimeTTSService(AudioContextWordTTSService):
     within a turn.
     """
 
+    _settings: RimeTTSSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Rime TTS service.
 
@@ -207,7 +209,7 @@ class RimeTTSService(AudioContextWordTTSService):
         self._url = url
         self._voice_id = voice_id
         self._model = model
-        self._settings: RimeTTSSettings = RimeTTSSettings(
+        self._settings = RimeTTSSettings(
             speaker=voice_id,
             modelId=model,
             audioFormat="pcm",
@@ -537,6 +539,8 @@ class RimeHttpTTSService(TTSService):
     Suitable for use cases where streaming is not required.
     """
 
+    _settings: RimeTTSSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Rime HTTP TTS service.
 
@@ -585,7 +589,7 @@ class RimeHttpTTSService(TTSService):
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = "https://users.rime.ai/v1/rime-tts"
-        self._settings: RimeTTSSettings = RimeTTSSettings(
+        self._settings = RimeTTSSettings(
             lang=self.language_to_service_language(params.language) if params.language else "eng",
             speedAlpha=params.speed_alpha,
             reduceLatency=params.reduce_latency,
@@ -706,6 +710,8 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
           future. This service focuses on the current plain text protocol.
     """
 
+    _settings: RimeNonJsonTTSSettings
+
     class InputParams(BaseModel):
         """Configuration parameters for Rime Non-JSON WebSocket TTS service.
 
@@ -763,7 +769,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         self._url = url
         self._voice_id = voice_id
         self._model = model
-        self._settings: RimeNonJsonTTSSettings = RimeNonJsonTTSSettings(
+        self._settings = RimeNonJsonTTSSettings(
             speaker=voice_id,
             modelId=model,
             audioFormat=audio_format,

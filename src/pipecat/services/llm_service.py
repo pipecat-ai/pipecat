@@ -174,6 +174,8 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             logger.info(f"Starting {len(function_calls)} function calls")
     """
 
+    _settings: LLMSettings
+
     # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
     # However, subclasses should override this with a more specific adapter when necessary.
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter

@@ -65,6 +65,8 @@ class DeepgramSTTService(STTService):
     Supports configurable models, languages, and various audio processing options.
     """
 
+    _settings: DeepgramSTTSettings
+
     def __init__(
         self,
         *,
@@ -143,7 +145,7 @@ class DeepgramSTTService(STTService):
 
         self.set_model_name(merged_options["model"])
         merged_live_options = LiveOptions(**merged_options)
-        self._settings: DeepgramSTTSettings = DeepgramSTTSettings(
+        self._settings = DeepgramSTTSettings(
             model=merged_options.get("model"),
             language=merged_options.get("language"),
             live_options=merged_live_options,

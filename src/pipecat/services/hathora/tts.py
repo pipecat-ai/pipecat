@@ -68,6 +68,8 @@ class HathoraTTSService(TTSService):
     [Documentation](https://models.hathora.dev)
     """
 
+    _settings: HathoraTTSSettings
+
     class InputParams(BaseModel):
         """Optional input parameters for Hathora TTS configuration.
 
@@ -115,7 +117,7 @@ class HathoraTTSService(TTSService):
 
         params = params or HathoraTTSService.InputParams()
 
-        self._settings: HathoraTTSSettings = HathoraTTSSettings(
+        self._settings = HathoraTTSSettings(
             model=model,
             voice=voice_id,
             speed=params.speed,

@@ -166,6 +166,8 @@ class SpeechmaticsSTTService(STTService):
     and speaker diarization.
     """
 
+    _settings: SpeechmaticsSTTSettings
+
     # Export related classes as class attributes
     TurnDetectionMode = TurnDetectionMode
     AudioEncoding = AudioEncoding

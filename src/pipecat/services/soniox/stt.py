@@ -157,6 +157,8 @@ class SonioxSTTService(WebsocketSTTService):
     For complete API documentation, see: https://soniox.com/docs/speech-to-text/api-reference/websocket-api
     """
 
+    _settings: SonioxSTTSettings
+
     def __init__(
         self,
         *,

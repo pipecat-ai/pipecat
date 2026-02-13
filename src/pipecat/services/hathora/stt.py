@@ -48,6 +48,8 @@ class HathoraSTTService(SegmentedSTTService):
     [Documentation](https://models.hathora.dev)
     """
 
+    _settings: HathoraSTTSettings
+
     class InputParams(BaseModel):
         """Optional input parameters for Hathora STT configuration.
 
@@ -98,7 +100,7 @@ class HathoraSTTService(SegmentedSTTService):
 
         params = params or HathoraSTTService.InputParams()
 
-        self._settings: HathoraSTTSettings = HathoraSTTSettings(
+        self._settings = HathoraSTTSettings(
             model=model,
             language=params.language,
             config=params.config,

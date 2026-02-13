@@ -70,6 +70,8 @@ class STTService(AIService):
             logger.error(f"STT connection error: {error}")
     """
 
+    _settings: STTSettings
+
     def __init__(
         self,
         *,
