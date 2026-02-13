@@ -421,6 +421,19 @@ class WebsocketServerTransport(BaseTransport):
     Provides a complete WebSocket server implementation with separate input and
     output transports, client connection management, and event handling for
     real-time audio and data streaming applications.
+
+    Event handlers available:
+
+    - on_client_connected(transport, websocket): Client WebSocket connected
+    - on_client_disconnected(transport, websocket): Client WebSocket disconnected
+    - on_session_timeout(transport, websocket): Session timed out
+    - on_websocket_ready(transport): WebSocket server is ready to accept connections
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, websocket):
+            ...
     """
 
     def __init__(

@@ -864,6 +864,18 @@ class SmallWebRTCTransport(BaseTransport):
 
     Provides bidirectional audio and video streaming over WebRTC connections
     with support for application messaging and connection event handling.
+
+    Event handlers available:
+
+    - on_client_connected(transport, client): Client connected to WebRTC session
+    - on_client_disconnected(transport, client): Client disconnected from WebRTC session
+    - on_client_message(transport, message, client): Received a data channel message
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            ...
     """
 
     def __init__(

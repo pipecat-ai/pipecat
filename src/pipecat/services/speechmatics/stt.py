@@ -86,6 +86,16 @@ class SpeechmaticsSTTService(STTService):
     This service provides real-time speech-to-text transcription using the Speechmatics API.
     It supports partial and final transcriptions, multiple languages, various audio formats,
     and speaker diarization.
+
+    Event handlers available (in addition to STTService events):
+
+    - on_speakers_result(service, speakers): Speaker diarization results received
+
+    Example::
+
+        @stt.event_handler("on_speakers_result")
+        async def on_speakers_result(service, speakers):
+            ...
     """
 
     # Export related classes as class attributes

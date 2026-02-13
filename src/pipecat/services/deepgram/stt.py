@@ -50,6 +50,17 @@ class DeepgramSTTService(STTService):
 
     Provides real-time speech recognition using Deepgram's WebSocket API.
     Supports configurable models, languages, and various audio processing options.
+
+    Event handlers available (in addition to STTService events):
+
+    - on_speech_started(service): Deepgram detected start of speech
+    - on_utterance_end(service): Deepgram detected end of utterance
+
+    Example::
+
+        @stt.event_handler("on_speech_started")
+        async def on_speech_started(service):
+            ...
     """
 
     def __init__(
