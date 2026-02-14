@@ -689,6 +689,9 @@ class LLMUserAggregator(LLMContextAggregator):
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
+        if self._user_idle_controller:
+            await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
+
         if params.enable_interruptions and self._allow_interruptions:
             await self.push_interruption_task_frame_and_wait()
 
@@ -704,6 +707,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
+
+        if self._user_idle_controller:
+            await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._maybe_emit_user_turn_stopped(strategy)
 
