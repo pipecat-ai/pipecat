@@ -549,12 +549,10 @@ class LLMUserAggregator(LLMContextAggregator):
             await s.cleanup()
 
     async def _maybe_mute_frame(self, frame: Frame):
-        # Control frames must flow unconditionally — never feed them to mute
-        # strategies.  Without this guard, strategies like
-        # MuteUntilFirstBotCompleteUserMuteStrategy fire on_user_mute_started
-        # and broadcast UserMuteStartedFrame before StartFrame is pushed
-        # downstream, causing downstream processors to receive frames before
-        # StartFrame and log errors.
+        # Lifecycle frames should never be muted and should not trigger mute
+        # state changes. Evaluating mute strategies on StartFrame would
+        # broadcast UserMuteStartedFrame before StartFrame reaches downstream
+        # processors.
         if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
             return False
 
