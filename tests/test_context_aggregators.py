@@ -16,9 +16,12 @@ from pipecat.frames.frames import (
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
+    FunctionCallsStartedFrame,
     InterimTranscriptionFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
@@ -840,6 +843,193 @@ class BaseTestAssistantContextAggregator:
         )
         self.check_function_call_result(context, -1, {"conditions": "Sunny"})
         assert context_updated
+
+    async def test_function_call_cancel_before_in_progress(self):
+        """Function call cancelled before FunctionCallInProgressFrame should not get stuck.
+
+        When a function call is interrupted before it starts executing (before
+        FunctionCallInProgressFrame is sent), the aggregator should still properly
+        clean up the function call tracking state.
+        """
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+
+        # Send FunctionCallsStartedFrame - this adds entry with None value
+        frames_to_send = [
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="test_fn", tool_call_id="123", arguments={}, context=None
+                    )
+                ]
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # At this point, function call is tracked but not yet in progress
+        assert aggregator.has_function_calls_in_progress
+
+        # Now send cancel WITHOUT FunctionCallInProgressFrame first
+        # This simulates interruption before function started executing
+        frames_to_send = [
+            FunctionCallCancelFrame(function_name="test_fn", tool_call_id="123"),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # The function call should be cleaned up, not stuck forever
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_function_call_cancel_after_in_progress(self):
+        """Function call cancelled after FunctionCallInProgressFrame should be cleaned up.
+
+        This is the normal case where the function started executing before being
+        interrupted.
+        """
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+
+        # Send FunctionCallsStartedFrame and FunctionCallInProgressFrame
+        frames_to_send = [
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="test_fn", tool_call_id="123", arguments={}, context=None
+                    )
+                ]
+            ),
+            FunctionCallInProgressFrame(
+                function_name="test_fn",
+                tool_call_id="123",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # Function call should be tracked and in progress
+        assert aggregator.has_function_calls_in_progress
+
+        # Now send cancel - function was in progress with cancel_on_interruption=True
+        frames_to_send = [
+            FunctionCallCancelFrame(function_name="test_fn", tool_call_id="123"),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # The function call should be cleaned up
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_function_call_not_cancelled_when_cancel_on_interruption_false(self):
+        """Function call with cancel_on_interruption=False should not be cancelled.
+
+        When a function is registered with cancel_on_interruption=False, it should
+        continue executing and complete even if a FunctionCallCancelFrame is received.
+        """
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+
+        # Send FunctionCallsStartedFrame and FunctionCallInProgressFrame with cancel_on_interruption=False
+        frames_to_send = [
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="test_fn", tool_call_id="123", arguments={}, context=None
+                    )
+                ]
+            ),
+            FunctionCallInProgressFrame(
+                function_name="test_fn",
+                tool_call_id="123",
+                arguments={},
+                cancel_on_interruption=False,  # Should NOT be cancelled
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # Function call should be tracked and in progress
+        assert aggregator.has_function_calls_in_progress
+
+        # Send cancel frame - but function should NOT be cancelled because cancel_on_interruption=False
+        frames_to_send = [
+            FunctionCallCancelFrame(function_name="test_fn", tool_call_id="123"),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # Function call should STILL be in progress (not cancelled)
+        assert aggregator.has_function_calls_in_progress
+
+        # Function completes normally with result
+        frames_to_send = [
+            FunctionCallResultFrame(
+                function_name="test_fn",
+                tool_call_id="123",
+                arguments={},
+                result={"status": "completed"},
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # Now the function call should be cleaned up
+        assert not aggregator.has_function_calls_in_progress
+
+    async def test_function_call_cancel_then_in_progress_frame_arrives(self):
+        """Cancel followed by InProgress frame should not leave function stuck.
+
+        Edge case: If FunctionCallCancelFrame arrives before FunctionCallInProgressFrame
+        (due to frame priority/timing), the subsequent InProgress frame should not
+        re-add the function to tracking.
+
+        Sequence: Start → Cancel → InProgress
+        Expected: Function should NOT be stuck in tracking.
+        """
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+
+        # 1. FunctionCallsStartedFrame - adds entry with None
+        frames_to_send = [
+            FunctionCallsStartedFrame(
+                function_calls=[
+                    FunctionCallFromLLM(
+                        function_name="test_fn", tool_call_id="123", arguments={}, context=None
+                    )
+                ]
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        assert aggregator.has_function_calls_in_progress
+
+        # 2. FunctionCallCancelFrame - removes entry (before InProgress arrived)
+        frames_to_send = [
+            FunctionCallCancelFrame(function_name="test_fn", tool_call_id="123"),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+        assert not aggregator.has_function_calls_in_progress
+
+        # 3. FunctionCallInProgressFrame arrives late (it's UninterruptibleFrame)
+        # This should NOT re-add the function to tracking since it was already cancelled
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="test_fn",
+                tool_call_id="123",
+                arguments={},
+                cancel_on_interruption=True,
+            ),
+        ]
+        await run_test(aggregator, frames_to_send=frames_to_send)
+
+        # Function should NOT be stuck - InProgress is ignored for cancelled calls
+        assert not aggregator.has_function_calls_in_progress
 
 
 #

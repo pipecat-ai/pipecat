@@ -975,6 +975,16 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         logger.debug(
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
+
+        # If the function call was already cancelled (entry removed), don't re-add it.
+        # This can happen if FunctionCallCancelFrame arrived before this frame due to
+        # frame priority differences (SystemFrame vs UninterruptibleFrame).
+        if frame.tool_call_id not in self._function_calls_in_progress:
+            logger.debug(
+                f"{self} FunctionCallInProgressFrame ignored - function call was already cancelled"
+            )
+            return
+
         await self.handle_function_call_in_progress(frame)
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
@@ -1024,9 +1034,20 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         logger.debug(
             f"{self} FunctionCallCancelFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
+        if frame.tool_call_id not in self._function_calls_in_progress:
+            return
+
         function_call = self._function_calls_in_progress.get(frame.tool_call_id)
-        if function_call and function_call.cancel_on_interruption:
-            await self.handle_function_call_cancel(frame)
+
+        # Handle two cases:
+        # 1. function_call is None: cancelled before FunctionCallInProgressFrame was sent
+        #    (interrupted before function started executing). Just clean up tracking.
+        # 2. function_call is a frame with cancel_on_interruption=True: update context
+        #    with CANCELLED result and clean up tracking.
+        if function_call is None or function_call.cancel_on_interruption:
+            if function_call is not None:
+                # Only update context if we have the frame (function actually started)
+                await self.handle_function_call_cancel(frame)
             del self._function_calls_in_progress[frame.tool_call_id]
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
