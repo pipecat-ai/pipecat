@@ -1220,11 +1220,15 @@ class RTVIObserver(BaseObserver):
         frame = data.frame
         direction = data.direction
 
-        # Only process downstream frames. Some frames are broadcast in both
-        # directions (e.g. UserStartedSpeakingFrame, FunctionCallResultFrame),
-        # and we only want to send one RTVI message per event.
-        if direction != FrameDirection.DOWNSTREAM:
-            return
+        # Many frames are broadcast in both directions (e.g.
+        # UserStartedSpeakingFrame, FunctionCallResultFrame), so we default
+        # to only processing downstream copies to avoid duplicate RTVI
+        # messages. However, some frame types (like transcriptions) may only
+        # flow upstream (e.g. from Realtime LLMs), so we allow those
+        # regardless of direction.
+        if not isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+            if direction != FrameDirection.DOWNSTREAM:
+                return
 
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
