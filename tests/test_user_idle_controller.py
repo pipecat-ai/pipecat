@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
 )
 from pipecat.turns.user_idle_controller import UserIdleController
@@ -244,6 +245,76 @@ class TestUserIdleController(unittest.IsolatedAsyncioTestCase):
         # Now the timer should start and fire
         await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
         self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_disabled_by_default(self):
+        """Test that timeout=0 means idle detection is disabled."""
+        controller = UserIdleController()
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_enable_via_frame(self):
+        """Test enabling idle detection at runtime via UserIdleTimeoutUpdateFrame."""
+        controller = UserIdleController()
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # Initially disabled — no idle fires
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+        self.assertFalse(idle_triggered)
+
+        # Enable idle detection
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=USER_IDLE_TIMEOUT))
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertTrue(idle_triggered)
+
+        await controller.cleanup()
+
+    async def test_disable_via_frame(self):
+        """Test disabling idle detection at runtime via UserIdleTimeoutUpdateFrame."""
+        controller = UserIdleController(user_idle_timeout=USER_IDLE_TIMEOUT)
+        await controller.setup(self.task_manager)
+
+        idle_triggered = False
+
+        @controller.event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(controller):
+            nonlocal idle_triggered
+            idle_triggered = True
+
+        # Start the timer
+        await controller.process_frame(BotStoppedSpeakingFrame())
+        await asyncio.sleep(USER_IDLE_TIMEOUT * 0.3)
+
+        # Disable — should cancel running timer
+        await controller.process_frame(UserIdleTimeoutUpdateFrame(timeout=0))
+
+        await asyncio.sleep(USER_IDLE_TIMEOUT + 0.1)
+
+        self.assertFalse(idle_triggered)
 
         await controller.cleanup()
 

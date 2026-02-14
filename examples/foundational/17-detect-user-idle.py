@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMRunFrame,
     TTSSpeakFrame,
+    UserIdleTimeoutUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -210,6 +211,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
+        await asyncio.sleep(30)
+        logger.info(f"Disabling idle detection")
+        await task.queue_frames([UserIdleTimeoutUpdateFrame(timeout=0)])
+        await asyncio.sleep(30)
+        logger.info(f"Enabling idle detection")
+        await task.queue_frames([UserIdleTimeoutUpdateFrame(timeout=5)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

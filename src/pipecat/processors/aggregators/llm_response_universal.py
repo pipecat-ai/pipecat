@@ -92,9 +92,9 @@ class LLMUserAggregatorParams:
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Time in seconds to wait before considering the
             user's turn finished.
-        user_idle_timeout: Optional timeout in seconds for detecting user idle state.
-            If set, the aggregator will emit an `on_user_turn_idle` event when the user
-            has been idle (not speaking) for this duration. Set to None to disable
+        user_idle_timeout: Timeout in seconds for detecting user idle state.
+            The aggregator will emit an `on_user_turn_idle` event when the user
+            has been idle (not speaking) for this duration. Set to 0 to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         filter_incomplete_user_turns: Whether to filter out incomplete user turns.
@@ -109,7 +109,7 @@ class LLMUserAggregatorParams:
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
-    user_idle_timeout: Optional[float] = None
+    user_idle_timeout: float = 0
     vad_analyzer: Optional[VADAnalyzer] = None
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
@@ -404,15 +404,10 @@ class LLMUserAggregator(LLMContextAggregator):
             "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
         )
 
-        # Optional user idle controller
-        self._user_idle_controller: Optional[UserIdleController] = None
-        if self._params.user_idle_timeout:
-            self._user_idle_controller = UserIdleController(
-                user_idle_timeout=self._params.user_idle_timeout
-            )
-            self._user_idle_controller.add_event_handler(
-                "on_user_turn_idle", self._on_user_turn_idle
-            )
+        self._user_idle_controller = UserIdleController(
+            user_idle_timeout=self._params.user_idle_timeout
+        )
+        self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
 
         # VAD controller
         self._vad_controller: Optional[VADController] = None
@@ -489,8 +484,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
         await self._user_turn_controller.process_frame(frame)
 
-        if self._user_idle_controller:
-            await self._user_idle_controller.process_frame(frame)
+        await self._user_idle_controller.process_frame(frame)
 
     async def push_aggregation(self) -> str:
         """Push the current aggregation."""
@@ -507,8 +501,7 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _start(self, frame: StartFrame):
         await self._user_turn_controller.setup(self.task_manager)
 
-        if self._user_idle_controller:
-            await self._user_idle_controller.setup(self.task_manager)
+        await self._user_idle_controller.setup(self.task_manager)
 
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
@@ -541,9 +534,7 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _cleanup(self):
         await self._user_turn_controller.cleanup()
-
-        if self._user_idle_controller:
-            await self._user_idle_controller.cleanup()
+        await self._user_idle_controller.cleanup()
 
         for s in self._params.user_mute_strategies:
             await s.cleanup()
@@ -689,8 +680,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
-        if self._user_idle_controller:
-            await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
+        await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
 
         if params.enable_interruptions and self._allow_interruptions:
             await self.push_interruption_task_frame_and_wait()
@@ -708,8 +698,7 @@ class LLMUserAggregator(LLMContextAggregator):
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
 
-        if self._user_idle_controller:
-            await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
+        await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._maybe_emit_user_turn_stopped(strategy)
 
