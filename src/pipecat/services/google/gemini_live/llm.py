@@ -1534,6 +1534,21 @@ class GeminiLiveLLMService(LLMService):
     @traced_gemini_live(operation="llm_tool_call")
     async def _handle_msg_tool_call(self, message: LiveServerMessage):
         """Handle tool call messages."""
+        # Gemini Live pauses generation when issuing a tool call and may not emit a
+        # `turn_complete` until tool responses are provided and the model continues.
+        # If a tool chooses FunctionCallResultProperties(run_llm=False) and ends the
+        # session (pushes EndTaskFrame), we must not keep the EndFrame blocked
+        # Close out the current response segment before running tool calls.
+        if self._bot_is_responding:
+            text = self._bot_text_buffer
+            self._bot_text_buffer = ""
+            self._llm_output_buffer = ""
+
+            await self._set_bot_is_responding(False)
+            if not text:
+                await self.push_frame(TTSStoppedFrame())
+            await self.push_frame(LLMFullResponseEndFrame()) #emit LLMFullResponseEndFrame to close the response segment
+
         function_calls = message.tool_call.function_calls
         if not function_calls:
             return
