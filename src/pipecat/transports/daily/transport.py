@@ -501,6 +501,7 @@ class DailyTransportClient(EventHandler):
         self._event_task = None
         self._audio_task = None
         self._video_task = None
+        self._join_message_queue: list = []
 
         # Input and ouput sample rates. They will be initialize on setup().
         self._in_sample_rate = 0
@@ -567,7 +568,8 @@ class DailyTransportClient(EventHandler):
             error: An error description or None.
         """
         if not self._joined:
-            return "Unable to send messages before joining."
+            self._join_message_queue.append(frame)
+            return None
 
         participant_id = None
         if isinstance(
@@ -768,6 +770,8 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_joined(data)
 
             self._joined_event.set()
+
+            await self._flush_join_messages()
         else:
             error_msg = f"Error joining {self._room_url}: {error}"
             logger.error(error_msg)
@@ -1540,6 +1544,12 @@ class DailyTransportClient(EventHandler):
             (callback, *args) = await queue.get()
             await callback(*args)
             queue.task_done()
+
+    async def _flush_join_messages(self):
+        """Send any messages that were queued before join completed."""
+        for frame in self._join_message_queue:
+            await self.send_message(frame)
+        self._join_message_queue.clear()
 
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
         """Get the event loop from the task manager."""
