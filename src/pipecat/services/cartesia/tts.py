@@ -8,7 +8,6 @@
 
 import base64
 import json
-import uuid
 import warnings
 from enum import Enum
 from typing import AsyncGenerator, List, Literal, Optional
@@ -307,7 +306,6 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self.set_model_name(model)
         self.set_voice(voice_id)
 
-        self._context_id = None
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
@@ -430,7 +428,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         msg = {
             "transcript": text,
             "continue": continue_transcript,
-            "context_id": self._context_id,
+            "context_id": self.get_active_audio_context_id(),
             "model_id": self.model_name,
             "voice": voice_config,
             "output_format": self._settings["output_format"],
@@ -523,7 +521,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._context_id = None
+            await self.remove_active_audio_context()
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -533,35 +531,22 @@ class CartesiaTTSService(AudioContextWordTTSService):
         raise Exception("Websocket not connected")
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        context_id = self.get_active_audio_context_id()
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        if self._context_id:
-            cancel_msg = json.dumps({"context_id": self._context_id, "cancel": True})
+        if context_id:
+            cancel_msg = json.dumps({"context_id": context_id, "cancel": True})
             await self._get_websocket().send(cancel_msg)
-            self._context_id = None
-
-    def create_context_id(self) -> str:
-        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
-
-        Returns:
-            A unique string identifier for the TTS context.
-        """
-        # If a context ID does not exist, create a new one.
-        # If an ID exists, continue using the current ID.
-        # When interruptions happen, user speech results in
-        # an interruption, which resets the context ID.
-        if not self._context_id:
-            return str(uuid.uuid4())
-        return self._context_id
 
     async def flush_audio(self):
         """Flush any pending audio and finalize the current context."""
-        if not self._context_id or not self._websocket:
+        context_id = self.get_active_audio_context_id()
+        if not context_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
         msg = self._build_msg(text="", continue_transcript=False)
         await self._websocket.send(msg)
-        self._context_id = None
+        self.reset_active_audio_context()
 
     async def _process_messages(self):
         async for message in self._get_websocket():
@@ -593,7 +578,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self.push_frame(TTSStoppedFrame(context_id=ctx_id))
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Error: {msg}")
-                self._context_id = None
+                self.reset_active_audio_context()
             else:
                 await self.push_error(error_msg=f"Error, unknown message type: {msg}")
 
@@ -622,11 +607,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self._context_id:
+            if not self.has_active_audio_context():
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame(context_id=context_id)
-                self._context_id = context_id
-                await self.create_audio_context(self._context_id)
+                await self.create_audio_context(context_id)
 
             msg = self._build_msg(text=text)
 

@@ -13,7 +13,6 @@ with support for streaming audio, word timestamps, and voice customization.
 import asyncio
 import base64
 import json
-import uuid
 from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, Tuple, Union
 
 import aiohttp
@@ -343,7 +342,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         self._partial_word_start_time = 0.0
 
         # Context management for v1 multi API
-        self._context_id = None
         self._receive_task = None
         self._keepalive_task = None
 
@@ -411,18 +409,19 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             )
             await self._disconnect()
             await self._connect()
-        elif voice_settings_changed and self._context_id:
+        elif voice_settings_changed and self.has_active_audio_context():
             # Voice settings can be updated by closing current context
             # so new one gets created with updated voice settings
             logger.debug(f"Voice settings changed, closing current context to apply changes")
+            context_id = self.get_active_audio_context_id()
             try:
                 if self._websocket:
                     await self._websocket.send(
-                        json.dumps({"context_id": self._context_id, "close_context": True})
+                        json.dumps({"context_id": context_id, "close_context": True})
                     )
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            self._context_id = None
+            self.reset_active_audio_context()
 
     async def start(self, frame: StartFrame):
         """Start the ElevenLabs TTS service.
@@ -454,10 +453,11 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
     async def flush_audio(self):
         """Flush any pending audio and finalize the current context."""
-        if not self._context_id or not self._websocket:
+        context_id = self.get_active_audio_context_id()
+        if not context_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = {"context_id": self._context_id, "flush": True}
+        msg = {"context_id": context_id, "flush": True}
         await self._websocket.send(json.dumps(msg))
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -470,7 +470,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("Reset", 0)], self._context_id)
+                await self.add_word_timestamps([("Reset", 0)], self.get_active_audio_context_id())
 
     async def _connect(self):
         await super()._connect()
@@ -545,14 +545,14 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from ElevenLabs")
                 # Close all contexts and the socket
-                if self._context_id:
+                if self.has_active_audio_context():
                     await self._websocket.send(json.dumps({"close_socket": True}))
                 await self._websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._context_id = None
+            await self.remove_active_audio_context()
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -563,11 +563,12 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle interruption by closing the current context."""
+        # Close the current context when interrupted without closing the websocket
+        context_id = self.get_active_audio_context_id()
         await super()._handle_interruption(frame, direction)
 
-        # Close the current context when interrupted without closing the websocket
-        if self._context_id and self._websocket:
-            logger.trace(f"Closing context {self._context_id} due to interruption")
+        if context_id and self._websocket:
+            logger.trace(f"Closing context {context_id} due to interruption")
             try:
                 # ElevenLabs requires that Pipecat manages the contexts and closes them
                 # when they're not longer in use. Since an InterruptionFrame is pushed
@@ -576,11 +577,10 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 # Note: We do not need to call remove_audio_context here, as the context is
                 # automatically reset when super ()._handle_interruption is called.
                 await self._websocket.send(
-                    json.dumps({"context_id": self._context_id, "close_context": True})
+                    json.dumps({"context_id": context_id, "close_context": True})
                 )
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            self._context_id = None
             self._partial_word = ""
             self._partial_word_start_time = 0.0
 
@@ -600,11 +600,11 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             # Check if this message belongs to the current context.
             if not self.audio_context_available(received_ctx_id):
-                if self._context_id == received_ctx_id:
+                if self.get_active_audio_context_id() == received_ctx_id:
                     logger.debug(
-                        f"Received a delayed message, recreating the context: {self._context_id}"
+                        f"Received a delayed message, recreating the context: {received_ctx_id}"
                     )
-                    await self.create_audio_context(self._context_id)
+                    await self.create_audio_context(received_ctx_id)
                 else:
                     # This can happen if a message is received _after_ we have closed a context
                     # due to user interruption but _before_ the `isFinal` message for the context
@@ -657,13 +657,14 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    if self._context_id:
+                    context_id = self.get_active_audio_context_id()
+                    if context_id:
                         # Send keepalive with context ID to keep the connection alive
                         keepalive_message = {
                             "text": "",
-                            "context_id": self._context_id,
+                            "context_id": context_id,
                         }
-                        logger.trace(f"Sending keepalive for context {self._context_id}")
+                        logger.trace(f"Sending keepalive for context {context_id}")
                     else:
                         # It's possible to have a user interruption which clears the context
                         # without generating a new TTS response. In this case, we'll just send
@@ -677,23 +678,10 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
     async def _send_text(self, text: str):
         """Send text to the WebSocket for synthesis."""
-        if self._websocket and self._context_id:
-            msg = {"text": text, "context_id": self._context_id}
+        context_id = self.get_active_audio_context_id()
+        if self._websocket and context_id:
+            msg = {"text": text, "context_id": context_id}
             await self._websocket.send(json.dumps(msg))
-
-    def create_context_id(self) -> str:
-        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
-
-        Returns:
-            A unique string identifier for the TTS context.
-        """
-        # If a context ID does not exist, create a new one.
-        # If an ID exists, continue using the current ID.
-        # When interruptions happens, user speech results in
-        # an interruption, which resets the context ID.
-        if not self._context_id:
-            return str(uuid.uuid4())
-        return self._context_id
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -713,19 +701,18 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                if not self._context_id:
+                if not self.has_active_audio_context():
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
-                    self._context_id = context_id
                     self._cumulative_time = 0
                     self._partial_word = ""
                     self._partial_word_start_time = 0.0
 
-                    if not self.audio_context_available(self._context_id):
-                        await self.create_audio_context(self._context_id)
+                    if not self.audio_context_available(context_id):
+                        await self.create_audio_context(context_id)
 
                     # Initialize context with voice settings and pronunciation dictionaries
-                    msg = {"text": " ", "context_id": self._context_id}
+                    msg = {"text": " ", "context_id": context_id}
                     if self._voice_settings:
                         msg["voice_settings"] = self._voice_settings
                     if self._pronunciation_dictionary_locators:
@@ -734,7 +721,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                             for locator in self._pronunciation_dictionary_locators
                         ]
                     await self._websocket.send(json.dumps(msg))
-                    logger.trace(f"Created new context {self._context_id}")
+                    logger.trace(f"Created new context {context_id}")
 
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)

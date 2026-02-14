@@ -9,7 +9,6 @@
 import asyncio
 import base64
 import json
-import uuid
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -148,7 +147,6 @@ class AsyncAITTSService(AudioContextTTSService):
 
         self._receive_task = None
         self._keepalive_task = None
-        self._context_id = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -255,7 +253,7 @@ class AsyncAITTSService(AudioContextTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from Async")
                 # Close all contexts and the socket
-                if self._context_id:
+                if self.has_active_audio_context():
                     await self._websocket.send(json.dumps({"terminate": True}))
                 await self._websocket.close()
                 logger.debug("Disconnected from Async")
@@ -263,7 +261,7 @@ class AsyncAITTSService(AudioContextTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._websocket = None
-            self._context_id = None
+            await self.remove_active_audio_context()
             await self._call_event_handler("on_disconnected")
 
     def _get_websocket(self):
@@ -271,26 +269,13 @@ class AsyncAITTSService(AudioContextTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    def create_context_id(self) -> str:
-        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
-
-        Returns:
-            A unique string identifier for the TTS context.
-        """
-        # If a context ID does not exist, create a new one.
-        # If an ID exists, continue using the current ID.
-        # When interruptions happen, user speech results in
-        # an interruption, which resets the context ID.
-        if not self._context_id:
-            return str(uuid.uuid4())
-        return self._context_id
-
     async def flush_audio(self):
         """Flush any pending audio."""
-        if not self._context_id or not self._websocket:
+        context_id = self.get_active_audio_context_id()
+        if not context_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = self._build_msg(text=" ", context_id=self._context_id, force=True)
+        msg = self._build_msg(text=" ", context_id=context_id, force=True)
         await self._websocket.send(msg)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -318,11 +303,11 @@ class AsyncAITTSService(AudioContextTTSService):
 
             # Check if this message belongs to the current context.
             if not self.audio_context_available(received_ctx_id):
-                if self._context_id == received_ctx_id:
+                if self.get_active_audio_context_id() == received_ctx_id:
                     logger.debug(
-                        f"Received a delayed message, recreating the context: {self._context_id}"
+                        f"Received a delayed message, recreating the context: {received_ctx_id}"
                     )
-                    await self.create_audio_context(self._context_id)
+                    await self.create_audio_context(received_ctx_id)
                 else:
                     # This can happen if a message is received _after_ we have closed a context
                     # due to user interruption but _before_ the `isFinal` message for the context
@@ -343,10 +328,11 @@ class AsyncAITTSService(AudioContextTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    if self._context_id:
+                    context_id = self.get_active_audio_context_id()
+                    if context_id:
                         keepalive_message = {
                             "transcript": " ",
-                            "context_id": self._context_id,
+                            "context_id": context_id,
                         }
                         logger.trace("Sending keepalive message")
                     else:
@@ -362,19 +348,16 @@ class AsyncAITTSService(AudioContextTTSService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle interruption by closing the current context."""
+        context_id = self.get_active_audio_context_id()
         await super()._handle_interruption(frame, direction)
-
         # Close the current context when interrupted without closing the websocket
-        if self._context_id and self._websocket:
+        if context_id and self._websocket:
             try:
                 await self._websocket.send(
-                    json.dumps(
-                        {"context_id": self._context_id, "close_context": True, "transcript": ""}
-                    )
+                    json.dumps({"context_id": context_id, "close_context": True, "transcript": ""})
                 )
             except Exception as e:
                 logger.error(f"Error closing context on interruption: {e}")
-            self._context_id = None
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -394,16 +377,13 @@ class AsyncAITTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                if not self._context_id:
+                if not self.has_active_audio_context():
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
+                    if not self.audio_context_available(context_id):
+                        await self.create_audio_context(context_id)
 
-                    self._context_id = context_id
-
-                    if not self.audio_context_available(self._context_id):
-                        await self.create_audio_context(self._context_id)
-
-                msg = self._build_msg(text=text, force=True, context_id=self._context_id)
+                msg = self._build_msg(text=text, force=True, context_id=context_id)
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
 
