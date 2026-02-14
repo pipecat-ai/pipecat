@@ -48,7 +48,11 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService, WordTTSService
+from pipecat.services.tts_service import (
+    AudioContextWordTTSService,
+    TextAggregationMode,
+    WordTTSService,
+)
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -454,7 +458,8 @@ class InworldTTSService(AudioContextWordTTSService):
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
         params: InputParams = None,
-        aggregate_sentences: bool = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         append_trailing_space: bool = True,
         **kwargs: Any,
     ):
@@ -468,7 +473,12 @@ class InworldTTSService(AudioContextWordTTSService):
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
             params: Input parameters for Inworld WebSocket TTS configuration.
-            aggregate_sentences: Whether to aggregate sentences before synthesis.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.102
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
@@ -478,6 +488,7 @@ class InworldTTSService(AudioContextWordTTSService):
             pause_frame_processing=True,
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             append_trailing_space=append_trailing_space,
             **kwargs,
         )
@@ -508,7 +519,7 @@ class InworldTTSService(AudioContextWordTTSService):
         if params.auto_mode is not None:
             self._settings["autoMode"] = params.auto_mode
         else:
-            self._settings["autoMode"] = aggregate_sentences
+            self._settings["autoMode"] = not self._is_streaming_tokens
 
         self._buffer_settings = {
             "maxBufferDelayMs": params.max_buffer_delay_ms,

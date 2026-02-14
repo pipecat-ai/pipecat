@@ -87,6 +87,19 @@ class TTSUsageMetricsData(MetricsData):
     value: int
 
 
+class TextAggregationMetricsData(MetricsData):
+    """Text aggregation time metrics data.
+
+    Measures the time from the first LLM token to the first complete sentence,
+    representing the latency cost of sentence aggregation in the TTS pipeline.
+
+    Parameters:
+        value: Aggregation time in seconds.
+    """
+
+    value: float
+
+
 class SmartTurnMetricsData(MetricsData):
     """Metrics data for smart turn predictions.
 
