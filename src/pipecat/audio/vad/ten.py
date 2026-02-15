@@ -18,7 +18,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error("TEN VAD not installed.")
     raise Exception(
-        "TEN VAD dependency missing. Install required package to use TenVadAnalyzer."
+        "TEN VAD dependency missing. Install required package to use TenVadAnalyzer. Use pip install -U --force-reinstall -v git+https://github.com/TEN-framework/ten-vad.git"
     ) from e
 
 
