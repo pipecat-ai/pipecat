@@ -38,7 +38,8 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 try:
-    import tkinter as tk
+    # tkinter is already imported at the top
+    pass
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("tkinter missing. Try `apt install python3-tk` or `brew install python-tk@3.10`.")
