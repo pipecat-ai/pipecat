@@ -845,6 +845,15 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         """
         return bool(self._function_calls_in_progress)
 
+    async def reset(self):
+        """Reset the aggregation state."""
+        await super().reset()
+        # Cancel any pending context updated tasks
+        for task in list(self._context_updated_tasks):
+            if not task.done():
+                task.cancel()
+        self._context_updated_tasks.clear()
+
     async def handle_aggregation(self, aggregation: str):
         """Add the aggregated assistant text to the context.
 

@@ -541,12 +541,16 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         return result
 
                     finally:
-                        # Always restore the original methods
-                        self.push_frame = original_push_frame
+                        # Always restore the original methods, but only if they haven't been
+                        # changed by another task in the meantime.
+                        if getattr(self, "push_frame", None) == traced_push_frame:
+                            self.push_frame = original_push_frame
 
                         if (
                             "original_start_llm_usage_metrics" in locals()
                             and original_start_llm_usage_metrics
+                            and getattr(self, "start_llm_usage_metrics", None)
+                            == wrapped_start_llm_usage_metrics
                         ):
                             self.start_llm_usage_metrics = original_start_llm_usage_metrics
 
