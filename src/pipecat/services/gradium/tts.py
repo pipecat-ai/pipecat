@@ -16,13 +16,14 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import InterruptibleWordTTSService
+from pipecat.services.tts_service import AudioContextWordTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -37,7 +38,7 @@ except ModuleNotFoundError as e:
 SAMPLE_RATE = 48000
 
 
-class GradiumTTSService(InterruptibleWordTTSService):
+class GradiumTTSService(AudioContextWordTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
 
     class InputParams(BaseModel):
@@ -71,7 +72,6 @@ class GradiumTTSService(InterruptibleWordTTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent class.
         """
-        # Initialize with parent class settings for proper frame handling
         super().__init__(
             push_stop_frames=True,
             pause_frame_processing=True,
@@ -95,7 +95,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
 
         # State tracking
         self._receive_task = None
-        self._current_context_id: Optional[str] = None
+        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -126,7 +126,10 @@ class GradiumTTSService(InterruptibleWordTTSService):
 
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Gradium API."""
-        return {"text": text, "type": "text"}
+        msg = {"text": text, "type": "text"}
+        if self._context_id:
+            msg["client_req_id"] = self._context_id
+        return msg
 
     async def start(self, frame: StartFrame):
         """Start the service and establish websocket connection.
@@ -197,6 +200,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
                 "type": "setup",
                 "output_format": "pcm",
                 "voice_id": self._voice_id,
+                "close_ws_on_eos": False,
             }
             if self._json_config is not None:
                 setup_msg["json_config"] = self._json_config
@@ -234,18 +238,35 @@ class GradiumTTSService(InterruptibleWordTTSService):
 
     async def flush_audio(self):
         """Flush any pending audio synthesis."""
-        if not self._websocket:
+        if not self._context_id or not self._websocket:
             return
         try:
-            msg = {"type": "end_of_stream"}
+            msg = {"type": "end_of_stream", "client_req_id": self._context_id}
             await self._websocket.send(json.dumps(msg))
+            self._context_id = None
         except ConnectionClosedOK:
             logger.debug(f"{self}: connection closed normally during flush")
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        """Handle interruption by resetting context state.
+
+        The parent AudioContextTTSService._handle_interruption() cancels the audio context
+        task and creates a new one. We reset _context_id so the next run_tts() creates a
+        fresh context. No websocket reconnection needed — audio from the old client_req_id
+        will be silently dropped since the audio context no longer exists.
+
+        Args:
+            frame: The interruption frame.
+            direction: The direction of the frame.
+        """
+        await super()._handle_interruption(frame, direction)
+        await self.stop_all_metrics()
+        self._context_id = None
+
     async def _receive_messages(self):
-        """Process incoming websocket messages."""
+        """Process incoming websocket messages, demultiplexing by client_req_id."""
         # TODO(laurent): This should not be necessary as it should happen when
         # receiving the messages but this does not seem to always be the case
         # and that may lead to a busy polling loop.
@@ -253,41 +274,35 @@ class GradiumTTSService(InterruptibleWordTTSService):
             raise ConnectionClosedOK(None, None)
         async for message in self._get_websocket():
             msg = json.loads(message)
+            ctx_id = msg.get("client_req_id")
 
             if msg["type"] == "audio":
-                # Process audio chunk
+                if not ctx_id or not self.audio_context_available(ctx_id):
+                    continue
                 await self.stop_ttfb_metrics()
                 await self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["audio"]),
                     sample_rate=self.sample_rate,
                     num_channels=1,
-                    context_id=self._current_context_id,
+                    context_id=ctx_id,
                 )
-                await self.push_frame(frame)
+                await self.append_to_audio_context(ctx_id, frame)
 
             elif msg["type"] == "text":
-                if self._current_context_id:
-                    await self.add_word_timestamps(
-                        [(msg["text"], msg["start_s"])], self._current_context_id
-                    )
+                if ctx_id and self.audio_context_available(ctx_id):
+                    await self.add_word_timestamps([(msg["text"], msg["start_s"])], ctx_id)
+
             elif msg["type"] == "end_of_stream":
-                await self.push_frame(TTSStoppedFrame())
+                if ctx_id and self.audio_context_available(ctx_id):
+                    await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
+                    await self.remove_audio_context(ctx_id)
                 await self.stop_all_metrics()
 
             elif msg["type"] == "error":
-                await self.push_frame(TTSStoppedFrame())
+                await self.push_frame(TTSStoppedFrame(context_id=ctx_id))
                 await self.stop_all_metrics()
-                await self.push_error(error_msg=f"Error: {msg['message']}")
-
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push frame and handle end-of-turn conditions.
-
-        Args:
-            frame: The frame to push.
-            direction: The direction to push the frame.
-        """
-        await super().push_frame(frame, direction)
+                await self.push_error(error_msg=f"Error: {msg.get('message', msg)}")
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -300,16 +315,18 @@ class GradiumTTSService(InterruptibleWordTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        _state = self._websocket.state if self._websocket is not None else None
-        logger.debug(f"{self}: Generating TTS [{text}] {_state}")
+        logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 self._websocket = None
                 await self._connect()
 
             try:
-                self._current_context_id = context_id
-                yield TTSStartedFrame(context_id=context_id)
+                if not self._context_id:
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
+                    self._context_id = context_id
+                    await self.create_audio_context(self._context_id)
 
                 msg = self._build_msg(text=text)
                 await self._get_websocket().send(json.dumps(msg))
