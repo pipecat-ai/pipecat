@@ -92,7 +92,7 @@ class VideoFrame:
     volume: int
 
     def is_silence(self) -> bool:
-        return self.volume == 0 and self.frame_idx == 0
+        return self.frame_idx == 0
 
 
 @dataclass
