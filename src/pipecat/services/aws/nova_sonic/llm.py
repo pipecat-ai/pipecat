@@ -60,6 +60,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.services.settings import LLMSettings
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -301,6 +302,29 @@ class AWSNovaSonicLLMService(LLMService):
         file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
             self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
+
+    #
+    # settings
+    #
+
+    async def _update_settings(self, update: LLMSettings) -> set[str]:
+        """Apply a settings update.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(update)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     #
     # standard AIService frame handling

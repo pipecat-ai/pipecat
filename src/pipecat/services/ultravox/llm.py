@@ -329,6 +329,7 @@ class UltravoxRealtimeLLMService(LLMService):
         changed = await super()._update_settings(update)
         if "output_medium" in changed:
             await self._update_output_medium(self._settings.output_medium)
+        self._warn_unhandled_updated_settings(changed - {"output_medium"})
         return changed
 
     #

@@ -124,25 +124,28 @@ class AzureSTTService(STTService):
         return True
 
     async def _update_settings(self, update: STTSettings) -> set[str]:
-        """Apply a settings update, reconfiguring the recognizer if needed.
+        """Apply a settings update.
 
-        When ``language`` changes the ``SpeechConfig`` is updated and the
-        speech recognizer is restarted so that the new language takes effect.
+        Settings are stored but not applied to the active recognizer.
         """
         changed = await super()._update_settings(update)
 
         if "language" in changed:
-            # Convert Language enum to Azure language code if needed.
+            # Convert Language enum to Azure language code for consistency.
             lang = self._settings.language
             if isinstance(lang, Language):
                 lang = language_to_azure_language(lang)
                 self._settings.language = lang
-            self._speech_config.speech_recognition_language = lang
 
-            # Restart the recognizer with the new config.
-            if self._speech_recognizer:
-                self._speech_recognizer.stop_continuous_recognition_async()
-                self._speech_recognizer.start_continuous_recognition_async()
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # if "language" in changed:
+        #     self._speech_config.speech_recognition_language = self._settings.language
+        #     if self._speech_recognizer:
+        #         self._speech_recognizer.stop_continuous_recognition_async()
+        #         self._speech_recognizer.start_continuous_recognition_async()
+
+        self._warn_unhandled_updated_settings(changed)
 
         return changed
 

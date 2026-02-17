@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -328,6 +329,25 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             True, as Deepgram service supports metrics generation.
         """
         return True
+
+    async def _update_settings(self, update: STTSettings) -> set[str]:
+        """Apply a settings update.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(update)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the Deepgram Flux STT service.

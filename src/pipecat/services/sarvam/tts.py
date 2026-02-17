@@ -958,6 +958,7 @@ class SarvamTTSService(InterruptibleTTSService):
         changed = await super()._update_settings(update)
         if "voice" in changed:
             await self._send_config()
+        self._warn_unhandled_updated_settings(changed - {"voice"})
         return changed
 
     async def _connect(self):

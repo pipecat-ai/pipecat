@@ -185,10 +185,9 @@ class AssemblyAISTTService(WebsocketSTTService):
         return True
 
     async def _update_settings(self, update: STTSettings) -> set[str]:
-        """Apply a settings update and reconnect if anything changed.
+        """Apply a settings update.
 
-        Any change triggers a WebSocket reconnect since all connection
-        parameters are encoded in the WebSocket URL.
+        Settings are stored but not applied to the active connection.
 
         Args:
             update: A :class:`STTSettings` (or ``AssemblyAISTTSettings``) delta.
@@ -201,15 +200,18 @@ class AssemblyAISTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        # Re-apply manual turn mode config if vad_force_turn_endpoint is active
-        # and connection_params were updated.
-        if self._vad_force_turn_endpoint and "connection_params" in changed:
-            self._settings.connection_params = self._configure_manual_turn_mode(
-                self._settings.connection_params
-            )
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # # Re-apply manual turn mode config if vad_force_turn_endpoint is active
+        # # and connection_params were updated.
+        # if self._vad_force_turn_endpoint and "connection_params" in changed:
+        #     self._settings.connection_params = self._configure_manual_turn_mode(
+        #         self._settings.connection_params
+        #     )
+        # await self._disconnect()
+        # await self._connect()
 
-        await self._disconnect()
-        await self._connect()
+        self._warn_unhandled_updated_settings(changed)
 
         return changed
 

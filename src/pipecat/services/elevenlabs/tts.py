@@ -516,6 +516,12 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self._context_id = None
 
+        if not url_changed:
+            # Reconnect applies all settings; only warn about fields not handled
+            # by voice settings or URL changes.
+            handled = ElevenLabsTTSSettings.URL_FIELDS | ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS
+            self._warn_unhandled_updated_settings(changed - handled)
+
         return changed
 
     async def start(self, frame: StartFrame):

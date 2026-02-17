@@ -279,6 +279,8 @@ class RimeTTSService(AudioContextWordTTSService):
             self._settings.speaker = self._voice_id
             await self._disconnect()
             await self._connect()
+        else:
+            self._warn_unhandled_updated_settings(changed)
         return changed
 
     def _build_msg(self, text: str = "") -> dict:

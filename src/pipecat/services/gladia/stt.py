@@ -382,8 +382,7 @@ class GladiaSTTService(WebsocketSTTService):
     async def _update_settings(self, update: GladiaSTTSettings) -> set[str]:
         """Apply settings update.
 
-        Gladia sessions are fixed at creation time, so any change requires
-        a full session teardown and reconnect.
+        Settings are stored but not applied to the active session.
 
         Args:
             update: A settings delta.
@@ -396,11 +395,14 @@ class GladiaSTTService(WebsocketSTTService):
         if not changed:
             return changed
 
-        # Gladia sessions are fixed — need to tear down and recreate
-        self._session_url = None
-        self._session_id = None
-        await self._disconnect()
-        await self._connect()
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # self._session_url = None
+        # self._session_id = None
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
 
         return changed
 

@@ -123,6 +123,20 @@ class AIService(FrameProcessor):
 
         return changed
 
+    def _warn_unhandled_updated_settings(self, unhandled: Set[str]):
+        """Log a warning for settings changes that won't take effect at runtime.
+
+        Convenience helper for ``_update_settings`` overrides.  Call with the
+        set of field names that changed but that the service does not (yet)
+        apply at runtime.
+
+        Args:
+            unhandled: Field names that changed but are not applied.
+        """
+        if unhandled:
+            fields = ", ".join(sorted(unhandled))
+            logger.warning(f"{self.name}: runtime update of [{fields}] is not currently supported")
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle service lifecycle.
 

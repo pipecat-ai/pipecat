@@ -141,16 +141,22 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         return encoding_map.get(encoding, encoding)
 
     async def _update_settings(self, update: STTSettings) -> set[str]:
-        """Apply a settings update, reconnecting if needed.
+        """Apply a settings update.
 
-        Any change to connection-relevant settings (model, language, etc.)
-        triggers a WebSocket reconnect so the new configuration takes effect.
+        Settings are stored but not applied to the active connection.
         """
         changed = await super()._update_settings(update)
 
-        if changed and self._websocket:
-            await self._disconnect()
-            await self._connect()
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # if changed and self._websocket:
+        #     await self._disconnect()
+        #     await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
 
         return changed
 

@@ -295,7 +295,7 @@ class CartesiaSTTService(WebsocketSTTService):
         await self._disconnect_websocket()
 
     async def _update_settings(self, update: STTSettings) -> set[str]:
-        """Apply a settings update and reconnect if anything changed.
+        """Apply a settings update.
 
         Args:
             update: A :class:`STTSettings` (or ``CartesiaSTTSettings``) delta.
@@ -304,9 +304,15 @@ class CartesiaSTTService(WebsocketSTTService):
             Set of field names whose values actually changed.
         """
         changed = await super()._update_settings(update)
-        if changed:
-            await self._disconnect()
-            await self._connect()
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # if changed:
+        #     await self._disconnect()
+        #     await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
         return changed
 
     async def _connect_websocket(self):

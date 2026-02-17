@@ -165,6 +165,25 @@ class InworldHttpTTSService(WordTTSService):
         """
         return True
 
+    async def _update_settings(self, update: TTSSettings) -> set[str]:
+        """Apply a settings update.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(update)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
+
     async def start(self, frame: StartFrame):
         """Start the Inworld TTS service.
 

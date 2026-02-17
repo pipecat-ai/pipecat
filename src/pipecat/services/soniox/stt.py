@@ -225,7 +225,7 @@ class SonioxSTTService(WebsocketSTTService):
         ``input_params`` is given, its ``model`` is propagated *up* to the
         top-level field.
 
-        Any change triggers a WebSocket reconnect.
+        Settings are stored but not applied to the active connection.
 
         Args:
             update: A settings delta.
@@ -249,8 +249,12 @@ class SonioxSTTService(WebsocketSTTService):
             self._settings.model = self._settings.input_params.model
             self.set_model_name(self._settings.model)
 
-        await self._disconnect()
-        await self._connect()
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
 
         return changed
 

@@ -338,11 +338,16 @@ class SarvamSTTService(STTService):
 
         changed = await super()._update_settings(update)
 
-        if not changed:
-            return changed
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # if not changed:
+        #     return changed
 
-        await self._disconnect()
-        await self._connect()
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
         return changed
 
     async def set_prompt(self, prompt: Optional[str]):
