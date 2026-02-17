@@ -888,11 +888,15 @@ class FunctionCallResultProperties:
 
 
 @dataclass
-class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
+class FunctionCallResultFrame(SystemFrame):
     """Frame containing the result of an LLM function call.
 
-    This is an uninterruptible frame because once a result is generated we
-    always want to update the context.
+    This is a system frame because it represents a completed state change:
+    the function has finished executing. This fact should be reflected
+    immediately regardless of what other frames are queued. Using SystemFrame
+    also ensures FIFO ordering with FunctionCallCancelFrame (also a
+    SystemFrame), preventing a cancel from jumping ahead of a completed
+    result.
 
     Parameters:
         function_name: Name of the function that was executed.
@@ -1349,8 +1353,14 @@ class FunctionCallsStartedFrame(SystemFrame):
 
 
 @dataclass
-class FunctionCallCancelFrame(SystemFrame):
+class FunctionCallCancelFrame(ControlFrame, UninterruptibleFrame):
     """Frame signaling that a function call has been cancelled.
+
+    This is an uninterruptible control frame (not a system frame) so it
+    maintains FIFO ordering with FunctionCallInProgressFrame and
+    FunctionCallResultFrame in the process queue. This prevents a race
+    condition where the cancel could jump ahead of a completed result
+    due to SystemFrame priority, causing the result to be dropped.
 
     Parameters:
         function_name: Name of the function that was cancelled.
@@ -1872,11 +1882,13 @@ class LLMFullResponseEndFrame(ControlFrame):
 
 
 @dataclass
-class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
+class FunctionCallInProgressFrame(SystemFrame):
     """Frame signaling that a function call is currently executing.
 
-    This is an uninterruptible frame because we always want to update the
-    context.
+    This is a system frame so all function call lifecycle frames
+    (FunctionCallsStartedFrame, FunctionCallInProgressFrame,
+    FunctionCallResultFrame, FunctionCallCancelFrame) share the same
+    priority and maintain FIFO ordering in the processor queue.
 
     Parameters:
         function_name: Name of the function being executed.

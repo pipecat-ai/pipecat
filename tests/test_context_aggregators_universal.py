@@ -333,6 +333,9 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             VADUserStartedSpeakingFrame(),
             VADUserStoppedSpeakingFrame(),
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
+            # SleepFrame ensures speech frames (non-system) are processed before
+            # FunctionCallResultFrame (system frame) arrives.
+            SleepFrame(),
             FunctionCallResultFrame(
                 function_name="fn_1", tool_call_id="1", arguments={}, result={}
             ),

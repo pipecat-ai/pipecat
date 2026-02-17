@@ -977,8 +977,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         )
 
         # If the function call was already cancelled (entry removed), don't re-add it.
-        # This can happen if FunctionCallCancelFrame arrived before this frame due to
-        # frame priority differences (SystemFrame vs UninterruptibleFrame).
+        # This can happen if the function was cancelled before _run_function_call had
+        # a chance to broadcast this frame.
         if frame.tool_call_id not in self._function_calls_in_progress:
             logger.debug(
                 f"{self} FunctionCallInProgressFrame ignored - function call was already cancelled"
