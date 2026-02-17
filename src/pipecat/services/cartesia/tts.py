@@ -11,7 +11,7 @@ import json
 import warnings
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncGenerator, List, Literal, Optional
+from typing import Any, AsyncGenerator, ClassVar, Dict, List, Literal, Mapping, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -216,6 +216,17 @@ class CartesiaTTSSettings(TTSSettings):
     emotion: List[str] = field(default_factory=lambda: NOT_GIVEN)
     generation_config: GenerationConfig = field(default_factory=lambda: NOT_GIVEN)
     pronunciation_dict_id: str = field(default_factory=lambda: NOT_GIVEN)
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "CartesiaTTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested ``output_format``."""
+        flat = dict(settings)
+        nested = flat.pop("output_format", None)
+        if isinstance(nested, dict):
+            flat.setdefault("output_container", nested.get("container"))
+            flat.setdefault("output_encoding", nested.get("encoding"))
+            flat.setdefault("output_sample_rate", nested.get("sample_rate"))
+        return super().from_mapping(flat)
 
 
 class CartesiaTTSService(AudioContextWordTTSService):

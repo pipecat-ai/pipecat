@@ -10,7 +10,7 @@ import asyncio
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, ClassVar, Dict, Mapping, Optional
 
 import aiohttp
 from loguru import logger
@@ -88,6 +88,17 @@ class AsyncAITTSSettings(TTSSettings):
     output_encoding: str = field(default_factory=lambda: NOT_GIVEN)
     output_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
 
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "AsyncAITTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested ``output_format``."""
+        flat = dict(settings)
+        nested = flat.pop("output_format", None)
+        if isinstance(nested, dict):
+            flat.setdefault("output_container", nested.get("container"))
+            flat.setdefault("output_encoding", nested.get("encoding"))
+            flat.setdefault("output_sample_rate", nested.get("sample_rate"))
+        return super().from_mapping(flat)
+
 
 class AsyncAITTSService(AudioContextTTSService):
     """Async TTS service with WebSocket streaming.
@@ -153,11 +164,9 @@ class AsyncAITTSService(AudioContextTTSService):
         self._settings = AsyncAITTSSettings(
             model=model,
             voice=voice_id,
-            output_format={
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
+            output_container=container,
+            output_encoding=encoding,
+            output_sample_rate=0,
             language=self.language_to_service_language(params.language)
             if params.language
             else None,

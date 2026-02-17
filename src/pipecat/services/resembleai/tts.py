@@ -9,7 +9,7 @@
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, ClassVar, Dict, Optional
 
 from loguru import logger
 
@@ -53,6 +53,11 @@ class ResembleAITTSSettings(TTSSettings):
     precision: str = field(default_factory=lambda: NOT_GIVEN)
     output_format: str = field(default_factory=lambda: NOT_GIVEN)
     resemble_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {
+        "voice_id": "voice",
+        "sample_rate": "resemble_sample_rate",
+    }
 
 
 class ResembleAITTSService(AudioContextWordTTSService):

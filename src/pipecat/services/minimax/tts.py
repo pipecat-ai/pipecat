@@ -12,7 +12,7 @@ for streaming text-to-speech synthesis.
 
 import json
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, ClassVar, Dict, Mapping, Optional
 
 import aiohttp
 from loguru import logger
@@ -119,6 +119,35 @@ class MiniMaxTTSSettings(TTSSettings):
     audio_channel: int = field(default_factory=lambda: NOT_GIVEN)
     audio_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
     language_boost: str = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "MiniMaxTTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested dicts.
+
+        Handles ``voice_setting`` (with ``vol`` → ``volume`` rename) and
+        ``audio_setting`` (with prefixed field mapping).
+        """
+        flat = dict(settings)
+
+        voice = flat.pop("voice_setting", None)
+        if isinstance(voice, dict):
+            flat.setdefault("speed", voice.get("speed"))
+            flat.setdefault("volume", voice.get("vol"))
+            flat.setdefault("pitch", voice.get("pitch"))
+            flat.setdefault("emotion", voice.get("emotion"))
+            flat.setdefault("text_normalization", voice.get("text_normalization"))
+            flat.setdefault("latex_read", voice.get("latex_read"))
+
+        audio = flat.pop("audio_setting", None)
+        if isinstance(audio, dict):
+            flat.setdefault("audio_bitrate", audio.get("bitrate"))
+            flat.setdefault("audio_format", audio.get("format"))
+            flat.setdefault("audio_channel", audio.get("channel"))
+            flat.setdefault("audio_sample_rate", audio.get("sample_rate"))
+
+        return super().from_mapping(flat)
 
 
 class MiniMaxHttpTTSService(TTSService):

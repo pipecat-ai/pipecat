@@ -9,7 +9,7 @@
 import io
 import wave
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, ClassVar, Dict, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -47,6 +47,8 @@ class GroqTTSSettings(TTSSettings):
     output_format: str = field(default_factory=lambda: NOT_GIVEN)
     speed: float = field(default_factory=lambda: NOT_GIVEN)
     groq_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "groq_sample_rate"}
 
 
 class GroqTTSService(TTSService):

@@ -17,7 +17,7 @@ import asyncio
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, ClassVar, Dict, List, Mapping, Optional, Tuple
 
 import aiohttp
 import websockets
@@ -73,6 +73,25 @@ class InworldTTSSettings(TTSSettings):
     temperature: float = field(default_factory=lambda: NOT_GIVEN)
     auto_mode: bool = field(default_factory=lambda: NOT_GIVEN)
     apply_text_normalization: str = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {
+        "voice_id": "voice",
+        "voiceId": "voice",
+        "modelId": "model",
+        "applyTextNormalization": "apply_text_normalization",
+        "autoMode": "auto_mode",
+    }
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "InworldTTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested ``audioConfig``."""
+        flat = dict(settings)
+        nested = flat.pop("audioConfig", None)
+        if isinstance(nested, dict):
+            flat.setdefault("audio_encoding", nested.get("audioEncoding"))
+            flat.setdefault("audio_sample_rate", nested.get("sampleRateHertz"))
+            flat.setdefault("speaking_rate", nested.get("speakingRate"))
+        return super().from_mapping(flat)
 
 
 class InworldHttpTTSService(WordTTSService):

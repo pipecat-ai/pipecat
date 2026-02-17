@@ -12,7 +12,7 @@ for streaming text-to-speech synthesis with customizable voice parameters.
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Literal, Optional
+from typing import Any, AsyncGenerator, ClassVar, Dict, Literal, Mapping, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -68,6 +68,18 @@ class FishAudioTTSSettings(TTSSettings):
     prosody_speed: float = field(default_factory=lambda: NOT_GIVEN)
     prosody_volume: int = field(default_factory=lambda: NOT_GIVEN)
     reference_id: str = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "fish_sample_rate"}
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "FishAudioTTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested ``prosody``."""
+        flat = dict(settings)
+        nested = flat.pop("prosody", None)
+        if isinstance(nested, dict):
+            flat.setdefault("prosody_speed", nested.get("speed"))
+            flat.setdefault("prosody_volume", nested.get("volume"))
+        return super().from_mapping(flat)
 
 
 class FishAudioTTSService(InterruptibleTTSService):
