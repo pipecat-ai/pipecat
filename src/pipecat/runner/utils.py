@@ -478,10 +478,20 @@ async def _create_telephony_transport(
             stream_sid=call_data["stream_id"],
             call_sid=call_data["call_id"],
         )
+    elif transport_type == "infobip":
+        from pipecat.serializers.infobip import InfobipFrameSerializer
+
+        params.serializer = InfobipFrameSerializer(
+            params=InfobipFrameSerializer.InputParams(
+                call_id=call_data.get("call_id"),
+                api_key=os.getenv("INFOBIP_API_KEY"),
+                base_url=os.getenv("INFOBIP_BASE_URL", "api.infobip.com"),
+            )
+        )
     else:
         raise ValueError(
             f"Unsupported telephony provider: {transport_type}. "
-            f"Supported providers: twilio, telnyx, plivo, exotel"
+            f"Supported providers: twilio, telnyx, plivo, exotel, infobip"
         )
 
     return FastAPIWebsocketTransport(websocket=websocket, params=params)
