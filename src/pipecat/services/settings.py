@@ -34,6 +34,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Type, 
 
 from loguru import logger
 
+from pipecat.transcriptions.language import Language
+
 if TYPE_CHECKING:
     from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionConfig
 
@@ -294,11 +296,13 @@ class TTSSettings(ServiceSettings):
     Parameters:
         model: TTS model identifier.
         voice: Voice identifier or name.
-        language: Language for speech synthesis.
+        language: Language for speech synthesis. Accepts a ``Language`` enum
+            (converted to a service-specific string) or a raw string (stored
+            as-is).
     """
 
     voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    language: Any = field(default_factory=lambda: NOT_GIVEN)
+    language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
 
@@ -309,7 +313,9 @@ class STTSettings(ServiceSettings):
 
     Parameters:
         model: STT model identifier.
-        language: Language for speech recognition.
+        language: Language for speech recognition. Accepts a ``Language`` enum
+            (converted to a service-specific string) or a raw string (stored
+            as-is).
     """
 
-    language: Any = field(default_factory=lambda: NOT_GIVEN)
+    language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)

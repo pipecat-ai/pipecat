@@ -448,7 +448,7 @@ class TTSService(AIService):
             Dict mapping changed field names to their previous values.
         """
         # Translate language *before* applying so the stored value is canonical
-        if is_given(update.language) and update.language is not None:
+        if is_given(update.language) and isinstance(update.language, Language):
             converted = self.language_to_service_language(update.language)
             if converted is not None:
                 update.language = converted

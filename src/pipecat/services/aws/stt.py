@@ -102,7 +102,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         super().__init__(ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         self._settings = AWSTranscribeSTTSettings(
-            language=language,
+            language=self.language_to_service_language(language) or "en-US",
             sample_rate=sample_rate,
             media_encoding="linear16",
             number_of_channels=1,
@@ -251,9 +251,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
             logger.debug("Connecting to AWS Transcribe WebSocket")
 
-            language_code = self.language_to_service_language(Language(self._settings.language))
+            language_code = self._settings.language
             if not language_code:
-                raise ValueError(f"Unsupported language: {self._settings.language}")
+                raise ValueError(f"Unsupported language: {language_code}")
 
             # Generate random websocket key
             websocket_key = "".join(

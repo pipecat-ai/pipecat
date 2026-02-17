@@ -183,7 +183,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         changed = await super()._update_settings(update)
 
         if "language" in changed:
-            self._language = self.language_to_service_language(Language(self._settings.language))
+            self._language = self._settings.language
         if "prompt" in changed:
             self._prompt = self._settings.prompt
         if "temperature" in changed:

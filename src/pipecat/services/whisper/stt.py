@@ -319,9 +319,8 @@ class WhisperSTTService(SegmentedSTTService):
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-        whisper_lang = self.language_to_service_language(self._settings.language)
         segments, _ = await asyncio.to_thread(
-            self._model.transcribe, audio_float, language=whisper_lang
+            self._model.transcribe, audio_float, language=self._settings.language
         )
         text: str = ""
         for segment in segments:
@@ -419,13 +418,12 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             # Divide by 32768 because we have signed 16-bit data.
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
-            whisper_lang = self.language_to_service_language(self._settings.language)
             chunk = await asyncio.to_thread(
                 mlx_whisper.transcribe,
                 audio_float,
                 path_or_hf_repo=self.model_name,
                 temperature=self._temperature,
-                language=whisper_lang,
+                language=self._settings.language,
             )
             text: str = ""
             for segment in chunk.get("segments", []):

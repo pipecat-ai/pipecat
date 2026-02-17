@@ -252,15 +252,8 @@ class FalSTTService(SegmentedSTTService):
         return language_to_fal_language(language)
 
     async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
-        """Apply a settings update, converting language if changed."""
+        """Apply a settings update."""
         changed = await super()._update_settings(update)
-
-        if "language" in changed:
-            # Convert the Language enum to a Fal language code.
-            lang = self._settings.language
-            if isinstance(lang, Language):
-                self._settings.language = self.language_to_service_language(lang)
-
         return changed
 
     @traced_stt

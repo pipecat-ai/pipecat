@@ -488,7 +488,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         self._config = None
         self._asr_service = None
         self._settings = NvidiaSegmentedSTTSettings(
-            language=params.language or Language.EN_US,
+            language=self.language_to_service_language(params.language or Language.EN_US)
+            or "en-US",
             profanity_filter=params.profanity_filter,
             automatic_punctuation=params.automatic_punctuation,
             verbatim_transcripts=params.verbatim_transcripts,
@@ -523,8 +524,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         self._asr_service = riva.client.ASRService(auth)
 
     def _get_language_code(self) -> str:
-        """Resolve the current language enum to an NVIDIA Riva language code string."""
-        return self.language_to_service_language(self._settings.language) or "en-US"
+        """Get the current NVIDIA Riva language code string."""
+        return self._settings.language or "en-US"
 
     def _create_recognition_config(self):
         """Create the NVIDIA Riva ASR recognition configuration."""

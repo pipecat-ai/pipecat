@@ -123,19 +123,23 @@ class AzureSTTService(STTService):
         """
         return True
 
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Azure service-specific language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Azure-specific language identifier, or None if not supported.
+        """
+        return language_to_azure_language(language)
+
     async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update.
 
         Settings are stored but not applied to the active recognizer.
         """
         changed = await super()._update_settings(update)
-
-        if "language" in changed:
-            # Convert Language enum to Azure language code for consistency.
-            lang = self._settings.language
-            if isinstance(lang, Language):
-                lang = language_to_azure_language(lang)
-                self._settings.language = lang
 
         # TODO: someday we could reconnect here to apply updated settings.
         # Code might look something like the below:

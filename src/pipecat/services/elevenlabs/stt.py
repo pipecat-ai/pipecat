@@ -34,7 +34,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -306,12 +306,6 @@ class ElevenLabsSTTService(SegmentedSTTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        # Convert language to ElevenLabs format before applying
-        if is_given(update.language) and isinstance(update.language, Language):
-            converted = self.language_to_service_language(update.language)
-            if converted is not None:
-                update.language = converted
-
         changed = await super()._update_settings(update)
 
         if "model" in changed:
@@ -555,12 +549,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        # Convert language to ElevenLabs format before applying
-        if is_given(update.language) and isinstance(update.language, Language):
-            converted = language_to_elevenlabs_language(update.language)
-            if converted is not None:
-                update.language = converted
-
         changed = await super()._update_settings(update)
 
         if not changed:
