@@ -415,7 +415,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     )
                 elif c["type"] == "image_url":
                     url = c["image_url"]["url"]
-                    logger.warning(f"Unsupported 'image_url': {url}")
+                    parts.append(Part.from_uri(file_uri=url))
                 elif c["type"] == "input_audio":
                     input_audio = c["input_audio"]
                     audio_bytes = base64.b64decode(input_audio["data"])
