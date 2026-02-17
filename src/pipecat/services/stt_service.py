@@ -338,6 +338,7 @@ class STTService(AIService):
             # If this is a finalized transcription, report TTFB immediately
             if frame.finalized and self._speech_end_time is not None:
                 ttfb = self._last_transcription_time - self._speech_end_time
+                self._metrics._last_ttfb_time = ttfb
                 await self._emit_stt_ttfb_metric(ttfb)
                 # Cancel the timeout since we've already reported
                 await self._cancel_ttfb_timeout()
