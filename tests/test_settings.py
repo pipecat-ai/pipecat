@@ -75,10 +75,6 @@ class TestServiceSettings:
         result = s.given_fields()
         assert result == {"model": "gpt-4o", "custom_key": 42}
 
-    def test_to_dict(self):
-        s = ServiceSettings(model="gpt-4o")
-        assert s.to_dict() == {"model": "gpt-4o"}
-
     def test_copy_is_deep(self):
         s = ServiceSettings(model="gpt-4o")
         s.extra = {"nested": {"a": 1}}

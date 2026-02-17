@@ -228,18 +228,6 @@ class ServiceSettings:
         instance.extra = extra
         return instance
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize to a flat dictionary, including extra.
-
-        Only given (non-``NOT_GIVEN``) values are included.  This is the
-        inverse of ``from_mapping`` and useful for passing settings to APIs
-        that expect plain dicts.
-
-        Returns:
-            A flat dictionary of all given settings.
-        """
-        return self.given_fields()
-
     def copy(self: _S) -> _S:
         """Return a deep copy of this settings instance.
 
