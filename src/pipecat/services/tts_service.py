@@ -352,15 +352,6 @@ class TTSService(AIService):
             return text + " "
         return text
 
-    async def update_setting(self, key: str, value: Any):
-        """Update a service-specific setting.
-
-        Args:
-            key: The setting key to update.
-            value: The new value for the setting.
-        """
-        pass
-
     async def flush_audio(self):
         """Flush any buffered audio data."""
         pass
