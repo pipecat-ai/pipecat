@@ -22,8 +22,8 @@ from pydantic import BaseModel
 
 from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 
-VAD_CONFIDENCE = 0.7
-VAD_START_SECS = 0.2
+VAD_CONFIDENCE = 0.5
+VAD_START_SECS = 0.1
 VAD_STOP_SECS = 0.2
 VAD_MIN_VOLUME = 0.6
 
