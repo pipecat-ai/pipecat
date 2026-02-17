@@ -296,9 +296,14 @@ class TTSSettings(ServiceSettings):
     Parameters:
         model: TTS model identifier.
         voice: Voice identifier or name.
-        language: Language for speech synthesis. Accepts a ``Language`` enum
-            (converted to a service-specific string) or a raw string (stored
-            as-is).
+        language: Language for speech synthesis. The union type reflects the
+            *input* side: callers may pass a ``Language`` enum or a raw string.
+            However, the **stored** value is always a service-specific string
+            — ``TTSService._update_settings`` converts ``Language`` enums via
+            ``language_to_service_language()`` before writing, and ``__init__``
+            methods do the same at construction time. Code that reads
+            ``self._settings.language`` after initialisation can treat it as
+            ``str``.
     """
 
     voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -313,9 +318,14 @@ class STTSettings(ServiceSettings):
 
     Parameters:
         model: STT model identifier.
-        language: Language for speech recognition. Accepts a ``Language`` enum
-            (converted to a service-specific string) or a raw string (stored
-            as-is).
+        language: Language for speech recognition. The union type reflects the
+            *input* side: callers may pass a ``Language`` enum or a raw string.
+            However, the **stored** value is always a service-specific string
+            — ``STTService._update_settings`` converts ``Language`` enums via
+            ``language_to_service_language()`` before writing, and ``__init__``
+            methods do the same at construction time. Code that reads
+            ``self._settings.language`` after initialisation can treat it as
+            ``str``.
     """
 
     language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
