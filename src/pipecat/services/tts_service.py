@@ -546,6 +546,14 @@ class TTSService(AIService):
                 await self._update_settings(frame.update)
             elif frame.settings:
                 # Backward-compatible path: convert legacy dict to settings object.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "Passing a dict via TTSUpdateSettingsFrame(settings={...}) is deprecated "
+                        "since 0.0.103, use TTSUpdateSettingsFrame(update=TTSSettings(...)) instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 update = type(self._settings).from_mapping(frame.settings)
                 await self._update_settings(update)
         elif isinstance(frame, BotStoppedSpeakingFrame):

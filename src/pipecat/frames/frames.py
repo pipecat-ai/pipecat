@@ -2117,7 +2117,11 @@ class ServiceUpdateSettingsFrame(ControlFrame):
     ``update`` object.  When both are provided, ``update`` takes precedence.
 
     Parameters:
-        settings: Dictionary of setting name to value mappings (legacy).
+        settings: Dictionary of setting name to value mappings.
+
+            .. deprecated:: 0.0.103
+                Use ``update`` with a typed settings object instead.
+
         update: :class:`~pipecat.services.settings.ServiceSettings` object
             describing the delta to apply.
     """
