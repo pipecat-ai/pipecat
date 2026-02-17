@@ -432,20 +432,20 @@ class TTSService(AIService):
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a TTS settings update.
 
         Handles ``model`` (via parent) and syncs ``_voice_id`` when voice
         changes.  Translates language values before applying.  Does **not**
         call ``set_voice`` or ``set_model`` directly — concrete services
         should override this method and handle reconnect logic based on the
-        returned changed-field set.
+        returned changed-field dict.
 
         Args:
             update: A TTS settings delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         # Translate language *before* applying so the stored value is canonical
         if is_given(update.language) and update.language is not None:

@@ -804,7 +804,7 @@ class GeminiLiveLLMService(LLMService):
         """
         return True
 
-    async def _update_settings(self, update: LLMSettings) -> set[str]:
+    async def _update_settings(self, update: LLMSettings) -> dict[str, Any]:
         """Apply a settings update.
 
         Settings are stored but not applied to the active connection.

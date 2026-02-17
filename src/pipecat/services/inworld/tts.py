@@ -165,7 +165,7 @@ class InworldHttpTTSService(WordTTSService):
         """
         return True
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update.
 
         Settings are stored but not applied to the active connection.

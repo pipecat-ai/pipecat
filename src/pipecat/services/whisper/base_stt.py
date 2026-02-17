@@ -11,7 +11,7 @@ interface, including language mapping, metrics generation, and error handling.
 """
 
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -174,7 +174,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update, syncing instance variables.
 
         Keeps ``_language``, ``_prompt``, and ``_temperature`` in sync with

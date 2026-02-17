@@ -24,7 +24,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, List, Literal, Optional
+from typing import Any, AsyncGenerator, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -680,7 +680,7 @@ class GoogleHttpTTSService(TTSService):
         """
         return language_to_google_tts_language(language)
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Override to handle speaking_rate validation.
 
         Args:
@@ -1024,7 +1024,7 @@ class GoogleTTSService(GoogleBaseTTSService):
             credentials, credentials_path
         )
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Override to handle speaking_rate validation.
 
         Args:
@@ -1259,14 +1259,14 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update with voice validation.
 
         Args:
             update: Settings delta. Can include 'voice', 'prompt', etc.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         if is_given(update.voice) and update.voice not in self.AVAILABLE_VOICES:
             logger.warning(f"Voice '{update.voice}' not in known voices list. Using anyway.")

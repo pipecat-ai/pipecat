@@ -13,7 +13,7 @@ using Rime's API for streaming and batch audio synthesis.
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -271,7 +271,7 @@ class RimeTTSService(AudioContextWordTTSService):
         self._extra_msg_fields["inlineSpeedAlpha"] = ",".join(speed_vals + [str(speed)])
         return f"[{text}]"
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update and reconnect if voice changed."""
         prev_voice = self._voice_id
         changed = await super()._update_settings(update)
@@ -977,7 +977,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update and reconnect if necessary.
 
         Since all settings are WebSocket URL query parameters,

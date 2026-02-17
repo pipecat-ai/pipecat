@@ -313,14 +313,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             await self._cancel_sequential_runner_task()
         await self._cancel_summary_task()
 
-    async def _update_settings(self, update: LLMSettings) -> set[str]:
+    async def _update_settings(self, update: LLMSettings) -> dict[str, Any]:
         """Apply a settings update, handling turn-completion fields.
 
         Args:
             update: An LLM settings delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
 

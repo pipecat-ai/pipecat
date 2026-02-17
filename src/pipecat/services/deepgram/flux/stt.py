@@ -330,7 +330,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update.
 
         Settings are stored but not applied to the active connection.

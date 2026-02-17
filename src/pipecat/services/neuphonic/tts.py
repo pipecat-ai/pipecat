@@ -14,7 +14,7 @@ import asyncio
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -181,7 +181,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         """
         return language_to_neuphonic_lang_code(language)
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update and reconnect with new configuration."""
         changed = await super()._update_settings(update)
         if changed:

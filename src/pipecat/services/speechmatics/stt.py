@@ -480,7 +480,7 @@ class SpeechmaticsSTTService(STTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, update: SpeechmaticsSTTSettings) -> set[str]:
+    async def _update_settings(self, update: SpeechmaticsSTTSettings) -> dict[str, Any]:
         """Apply settings update, reconnecting only when necessary.
 
         Fields are classified into three categories (see
@@ -497,7 +497,7 @@ class SpeechmaticsSTTService(STTService):
             update: A settings delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
 
@@ -505,7 +505,7 @@ class SpeechmaticsSTTService(STTService):
             return changed
 
         no_reconnect = SpeechmaticsSTTSettings.HOT_FIELDS | SpeechmaticsSTTSettings.LOCAL_FIELDS
-        needs_reconnect = bool(changed - no_reconnect)
+        needs_reconnect = bool(changed.keys() - no_reconnect)
 
         if needs_reconnect:
             # Connection-level fields changed — rebuild the SDK config

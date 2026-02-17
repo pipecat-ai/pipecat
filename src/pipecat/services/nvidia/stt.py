@@ -9,7 +9,7 @@
 import asyncio
 from concurrent.futures import CancelledError as FuturesCancelledError
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, List, Mapping, Optional
+from typing import Any, AsyncGenerator, List, Mapping, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -579,14 +579,14 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         self._config = self._create_recognition_config()
         logger.debug(f"Initialized NvidiaSegmentedSTTService with model: {self.model_name}")
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update and sync internal state.
 
         Args:
             update: A :class:`STTSettings` (or ``NvidiaSegmentedSTTSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
 

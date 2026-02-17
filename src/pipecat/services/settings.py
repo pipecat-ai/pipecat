@@ -19,7 +19,7 @@ Key concepts:
   service's current settings *and* for update objects.  Fields set to
   ``NOT_GIVEN`` are simply skipped when applying an update.
 - **apply_update**: Applies a delta onto a target settings object and returns
-  the set of field names that actually changed.
+  a dict mapping each changed field name to its previous value.
 - **from_mapping**: Constructs a settings object from a plain dict,
   supporting field aliases (e.g. ``"voice_id"`` → ``"voice"``).
 - **Extras**: Unknown keys land in the ``extra`` dict so services that have
@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Set, Type, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Type, TypeVar
 
 from loguru import logger
 
@@ -140,8 +140,8 @@ class ServiceSettings:
         result.update(self.extra)
         return result
 
-    def apply_update(self: _S, update: _S) -> Set[str]:
-        """Apply *update* onto this settings object, returning changed field names.
+    def apply_update(self: _S, update: _S) -> Dict[str, Any]:
+        """Apply *update* onto this settings object, returning changed fields.
 
         Only fields in *update* that are **given** (i.e. not ``NOT_GIVEN``)
         are considered.  A field is "changed" if its new value differs from
@@ -154,17 +154,19 @@ class ServiceSettings:
             update: A settings object of the same type containing the delta.
 
         Returns:
-            The set of field names whose values actually changed.
+            A dict mapping each changed field name to its **pre-update** value.
+            Use ``changed.keys()`` for the set of names, or index with
+            ``changed["field"]`` to inspect the old value.
 
         Examples::
 
             current = TTSSettings(voice="alice", language="en")
             delta = TTSSettings(voice="bob")
             changed = current.apply_update(delta)
-            # changed == {"voice"}
+            # changed == {"voice": "alice"}
             # current.voice == "bob", current.language == "en"
         """
-        changed: Set[str] = set()
+        changed: Dict[str, Any] = {}
         for f in fields(self):
             if f.name == "extra":
                 continue
@@ -174,14 +176,14 @@ class ServiceSettings:
             old_val = getattr(self, f.name)
             if old_val != new_val:
                 setattr(self, f.name, new_val)
-                changed.add(f.name)
+                changed[f.name] = old_val
 
         # Merge extra
         for key, new_val in update.extra.items():
             old_val = self.extra.get(key, NOT_GIVEN)
             if old_val != new_val:
                 self.extra[key] = new_val
-                changed.add(key)
+                changed[key] = old_val
 
         return changed
 

@@ -10,7 +10,7 @@ Provides the foundation for all AI services in the Pipecat framework, including
 model management, settings handling, and frame processing lifecycle methods.
 """
 
-from typing import Any, AsyncGenerator, Dict, Set
+from typing import Any, AsyncGenerator, Dict
 
 from loguru import logger
 
@@ -97,12 +97,13 @@ class AIService(FrameProcessor):
         """
         pass
 
-    async def _update_settings(self, update: ServiceSettings) -> Set[str]:
-        """Apply a settings update and return the set of changed field names.
+    async def _update_settings(self, update: ServiceSettings) -> Dict[str, Any]:
+        """Apply a settings update and return the changed fields.
 
-        The update is applied to ``_settings`` and the changed-field set is
-        returned.  The ``model`` field is handled specially: when it changes,
-        ``set_model_name`` is called.
+        The update is applied to ``_settings`` and a dict mapping each changed
+        field name to its **pre-update** value is returned.  The ``model``
+        field is handled specially: when it changes, ``set_model_name`` is
+        called.
 
         Concrete services should override this method (calling ``super()``)
         to react to specific changed fields (e.g. reconnect on voice change).
@@ -111,7 +112,7 @@ class AIService(FrameProcessor):
             update: A settings delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = self._settings.apply_update(update)
 
@@ -119,16 +120,15 @@ class AIService(FrameProcessor):
             self.set_model_name(self._settings.model)
 
         if changed:
-            logger.info(f"{self.name}: updated settings fields: {changed}")
+            logger.info(f"{self.name}: updated settings fields: {set(changed)}")
 
         return changed
 
-    def _warn_unhandled_updated_settings(self, unhandled: Set[str]):
+    def _warn_unhandled_updated_settings(self, unhandled):
         """Log a warning for settings changes that won't take effect at runtime.
 
-        Convenience helper for ``_update_settings`` overrides.  Call with the
-        set of field names that changed but that the service does not (yet)
-        apply at runtime.
+        Convenience helper for ``_update_settings`` overrides.  Accepts any
+        iterable of field names (a ``dict``, ``set``, ``dict_keys``, etc.).
 
         Args:
             unhandled: Field names that changed but are not applied.

@@ -12,7 +12,7 @@ transcription using segmented audio processing.
 
 import os
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -251,7 +251,7 @@ class FalSTTService(SegmentedSTTService):
         """
         return language_to_fal_language(language)
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update, converting language if changed."""
         changed = await super()._update_settings(update)
 

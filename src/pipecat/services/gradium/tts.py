@@ -7,7 +7,7 @@
 import base64
 import json
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -119,14 +119,14 @@ class GradiumTTSService(InterruptibleWordTTSService):
         """
         return True
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update and reconnect if voice changed.
 
         Args:
             update: A :class:`TTSSettings` (or ``GradiumTTSSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         prev_voice = self._voice_id
         changed = await super()._update_settings(update)

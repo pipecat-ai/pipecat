@@ -16,7 +16,7 @@ import io
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -294,7 +294,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
         """
         return language_to_elevenlabs_language(language)
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update.
 
         Converts language to ElevenLabs format before applying and keeps
@@ -304,7 +304,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             update: A :class:`STTSettings` (or ``ElevenLabsSTTSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         # Convert language to ElevenLabs format before applying
         if is_given(update.language) and isinstance(update.language, Language):
@@ -543,7 +543,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         return True
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update and reconnect if anything changed.
 
         Converts language to ElevenLabs format before applying and keeps
@@ -553,7 +553,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             update: A :class:`STTSettings` (or ``ElevenLabsRealtimeSTTSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         # Convert language to ElevenLabs format before applying
         if is_given(update.language) and isinstance(update.language, Language):

@@ -217,7 +217,7 @@ class SonioxSTTService(WebsocketSTTService):
         await super().start(frame)
         await self._connect()
 
-    async def _update_settings(self, update: SonioxSTTSettings) -> set[str]:
+    async def _update_settings(self, update: SonioxSTTSettings) -> dict[str, Any]:
         """Apply a settings update, keeping ``input_params`` in sync.
 
         Top-level ``model`` is the source of truth.  When it is given in
@@ -231,7 +231,7 @@ class SonioxSTTService(WebsocketSTTService):
             update: A settings delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         model_given = is_given(getattr(update, "model", NOT_GIVEN))
 

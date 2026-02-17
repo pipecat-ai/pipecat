@@ -12,7 +12,7 @@ for streaming text-to-speech synthesis with customizable voice parameters.
 
 import uuid
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Literal, Optional
+from typing import Any, AsyncGenerator, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -184,7 +184,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         """
         return True
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update and reconnect if needed.
 
         Any change to voice or model triggers a WebSocket reconnect.
@@ -193,7 +193,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             update: A :class:`TTSSettings` (or ``FishAudioTTSSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
         if changed:

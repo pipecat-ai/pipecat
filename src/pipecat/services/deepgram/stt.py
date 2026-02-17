@@ -7,7 +7,7 @@
 """Deepgram speech-to-text service implementation."""
 
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from loguru import logger
 
@@ -195,7 +195,7 @@ class DeepgramSTTService(STTService):
         """
         return True
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update, keeping ``live_options`` in sync.
 
         Top-level ``model`` and ``language`` are the source of truth.  When

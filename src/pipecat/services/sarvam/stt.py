@@ -13,7 +13,7 @@ can handle multiple audio formats for Indian language speech recognition.
 
 import base64
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Dict, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -306,14 +306,14 @@ class SarvamSTTService(STTService):
                 if self._socket_client:
                     await self._socket_client.flush()
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update, validate, sync state, and reconnect.
 
         Args:
             update: A :class:`STTSettings` (or ``SarvamSTTSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
 
         Raises:
             ValueError: If a setting is not supported by the current model.

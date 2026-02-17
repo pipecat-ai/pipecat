@@ -13,7 +13,7 @@ the Cartesia Live transcription API for real-time speech recognition.
 import json
 import urllib.parse
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -294,14 +294,14 @@ class CartesiaSTTService(WebsocketSTTService):
 
         await self._disconnect_websocket()
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update.
 
         Args:
             update: A :class:`STTSettings` (or ``CartesiaSTTSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
 

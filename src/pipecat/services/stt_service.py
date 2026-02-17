@@ -236,19 +236,19 @@ class STTService(AIService):
         await super().cleanup()
         await self._cancel_ttfb_timeout()
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply an STT settings update.
 
         Handles ``model`` (via parent). Does **not** call ``set_language``
         — concrete services should override this method and handle language
         changes (including any reconnect logic) based on the returned
-        changed-field set.
+        changed-field dict.
 
         Args:
             update: An STT settings delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
         return changed

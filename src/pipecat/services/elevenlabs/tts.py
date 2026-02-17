@@ -471,7 +471,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 voice_settings[key] = val
         return voice_settings or None
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update, reconnecting as needed.
 
         Uses the declarative ``URL_FIELDS`` and ``VOICE_SETTINGS_FIELDS``
@@ -482,7 +482,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             update: A :class:`TTSSettings` (or ``ElevenLabsTTSSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
 
@@ -520,7 +520,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             # Reconnect applies all settings; only warn about fields not handled
             # by voice settings or URL changes.
             handled = ElevenLabsTTSSettings.URL_FIELDS | ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS
-            self._warn_unhandled_updated_settings(changed - handled)
+            self._warn_unhandled_updated_settings(changed.keys() - handled)
 
         return changed
 
@@ -964,14 +964,14 @@ class ElevenLabsHttpTTSService(WordTTSService):
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
-    async def _update_settings(self, update: TTSSettings) -> set[str]:
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update and rebuild voice settings.
 
         Args:
             update: A :class:`TTSSettings` (or ``ElevenLabsHttpTTSSettings``) delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
         if changed:

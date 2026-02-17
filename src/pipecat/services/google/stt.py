@@ -630,7 +630,7 @@ class GoogleSTTService(STTService):
         logger.debug(f"Switching STT languages to: {languages}")
         await self._update_settings(GoogleSTTSettings(languages=list(languages)))
 
-    async def _update_settings(self, update: GoogleSTTSettings) -> set[str]:
+    async def _update_settings(self, update: GoogleSTTSettings) -> dict[str, Any]:
         """Apply settings update and reconnect if anything changed.
 
         Handles ``language`` from base ``set_language`` by converting it to
@@ -642,7 +642,7 @@ class GoogleSTTService(STTService):
             update: A settings delta.
 
         Returns:
-            Set of field names whose values actually changed.
+            Dict mapping changed field names to their previous values.
         """
         from pipecat.services.settings import is_given
 

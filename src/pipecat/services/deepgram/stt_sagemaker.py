@@ -15,7 +15,7 @@ languages, and various Deepgram features.
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -163,7 +163,7 @@ class DeepgramSageMakerSTTService(STTService):
         """
         return True
 
-    async def _update_settings(self, update: STTSettings) -> set[str]:
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update, keeping ``live_options`` in sync.
 
         Top-level ``model`` and ``language`` are the source of truth.  When

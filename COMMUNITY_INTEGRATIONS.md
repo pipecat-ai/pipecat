@@ -267,10 +267,10 @@ class MySTTService(STTService):
         self._settings = MySTTSettings(model=model, region=region)
 ```
 
-To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns the set of field names that changed. Your override should call `super()` first, then act on the changed fields:
+To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a `dict` mapping each changed field name to its **pre-update** value. Your override should call `super()` first, then act on the changed fields:
 
 ```python
-async def _update_settings(self, update: STTSettings) -> set[str]:
+async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
     """Apply a settings update, reconfiguring the recognizer if needed."""
     changed = await super()._update_settings(update)
 
@@ -282,12 +282,14 @@ async def _update_settings(self, update: STTSettings) -> set[str]:
     return changed
 ```
 
+The dict keys work like a set for membership tests (`"language" in changed`) and truthiness (`if changed`). Use `changed.keys() - {"language"}` for set difference, or `changed["language"]` to inspect the previous value of a field.
+
 Note that, in this example, the service requires a reconnect to apply the new language. Consider, for each setting, whether your service requires reconnection or can apply changes in-place.
 
-If your service can't yet apply certain settings at runtime, call `self._warn_unhandled_updated_settings(changed)` with the set of unhandled field names so users get a clear log message:
+If your service can't yet apply certain settings at runtime, call `self._warn_unhandled_updated_settings(changed)` with the unhandled field names so users get a clear log message:
 
 ```python
-async def _update_settings(self, update: STTSettings) -> set[str]:
+async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
     changed = await super()._update_settings(update)
 
     if not changed:
