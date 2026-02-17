@@ -282,7 +282,22 @@ async def _update_settings(self, update: STTSettings) -> set[str]:
     return changed
 ```
 
-Note that, in this example, the service requires a reconnect to apply the new language. Consider whether your service requires reconnection or can apply changes in-place.
+Note that, in this example, the service requires a reconnect to apply the new language. Consider, for each setting, whether your service requires reconnection or can apply changes in-place.
+
+If your service can't yet apply certain settings at runtime, call `self._warn_unhandled_updated_settings(changed)` with the set of unhandled field names so users get a clear log message:
+
+```python
+async def _update_settings(self, update: STTSettings) -> set[str]:
+    changed = await super()._update_settings(update)
+
+    if not changed:
+        return changed
+
+    # TODO: someday we could reconnect here to apply updated settings.
+    self._warn_unhandled_updated_settings(changed)
+
+    return changed
+```
 
 ### Sample Rate Handling
 
