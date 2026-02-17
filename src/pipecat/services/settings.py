@@ -104,7 +104,7 @@ class ServiceSettings:
 
     # -- common fields -------------------------------------------------------
 
-    model: Any = field(default_factory=lambda: NOT_GIVEN)
+    model: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     """AI model identifier (e.g. ``"gpt-4o"``, ``"eleven_turbo_v2_5"``)."""
 
     extra: Dict[str, Any] = field(default_factory=dict)
@@ -274,13 +274,13 @@ class LLMSettings(ServiceSettings):
             and prompts for incomplete turns.
     """
 
-    temperature: Any = field(default_factory=lambda: NOT_GIVEN)
-    max_tokens: Any = field(default_factory=lambda: NOT_GIVEN)
-    top_p: Any = field(default_factory=lambda: NOT_GIVEN)
-    top_k: Any = field(default_factory=lambda: NOT_GIVEN)
-    frequency_penalty: Any = field(default_factory=lambda: NOT_GIVEN)
-    presence_penalty: Any = field(default_factory=lambda: NOT_GIVEN)
-    seed: Any = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_tokens: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_k: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    frequency_penalty: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    presence_penalty: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    seed: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     filter_incomplete_user_turns: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     user_turn_completion_config: UserTurnCompletionConfig | _NotGiven = field(
         default_factory=lambda: NOT_GIVEN
@@ -297,7 +297,7 @@ class TTSSettings(ServiceSettings):
         language: Language for speech synthesis.
     """
 
-    voice: Any = field(default_factory=lambda: NOT_GIVEN)
+    voice: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     language: Any = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
