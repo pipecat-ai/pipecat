@@ -233,11 +233,15 @@ class GradiumTTSService(InterruptibleWordTTSService):
         raise Exception("Websocket not connected")
 
     async def flush_audio(self):
-        """Flush any pending audio synthesis."""
+        """Flush any pending audio synthesis.
+
+        Sends a <flush> tag to force the model to output audio for all text
+        that has been input so far, without closing the connection.
+        """
         if not self._websocket:
             return
         try:
-            msg = {"type": "end_of_stream"}
+            msg = {"type": "text", "text": "<flush>"}
             await self._websocket.send(json.dumps(msg))
         except ConnectionClosedOK:
             logger.debug(f"{self}: connection closed normally during flush")
