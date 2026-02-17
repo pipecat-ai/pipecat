@@ -12,7 +12,7 @@ WebSocket API for streaming audio transcription.
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Optional
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -67,6 +68,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         api_endpoint_base_url: str = "wss://streaming.assemblyai.com/v3/ws",
         connection_params: AssemblyAIConnectionParams = AssemblyAIConnectionParams(),
         vad_force_turn_endpoint: bool = True,
+        ttfs_p99_latency: Optional[float] = ASSEMBLYAI_TTFS_P99,
         **kwargs,
     ):
         """Initialize the AssemblyAI STT service.
@@ -76,10 +78,22 @@ class AssemblyAISTTService(WebsocketSTTService):
             language: Language code for transcription. Defaults to English (Language.EN).
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
             connection_params: Connection configuration parameters. Defaults to AssemblyAIConnectionParams().
-            vad_force_turn_endpoint: Whether to force turn endpoint on VAD stop. Defaults to True.
+            vad_force_turn_endpoint: Whether to force turn endpoint on VAD stop. When True,
+                disables AssemblyAI's model-based turn detection and relies on external VAD
+                to trigger turn endpoints. Automatically sets end_of_turn_confidence_threshold=1.0
+                and max_turn_silence=2000 unless explicitly overridden. Defaults to True.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(sample_rate=connection_params.sample_rate, **kwargs)
+        # When vad_force_turn_endpoint is enabled, configure connection params for manual
+        # turn detection mode (disable model-based turn detection)
+        if vad_force_turn_endpoint:
+            connection_params = self._configure_manual_turn_mode(connection_params)
+
+        super().__init__(
+            sample_rate=connection_params.sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs
+        )
 
         self._api_key = api_key
         self._language = language
@@ -96,6 +110,52 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._audio_buffer = bytearray()
         self._chunk_size_ms = 50
         self._chunk_size_bytes = 0
+
+    def _configure_manual_turn_mode(
+        self, connection_params: AssemblyAIConnectionParams
+    ) -> AssemblyAIConnectionParams:
+        """Configure connection params for manual turn detection mode.
+
+        When vad_force_turn_endpoint is enabled, we want to disable AssemblyAI's
+        model-based turn detection and rely on external VAD. This requires:
+        - end_of_turn_confidence_threshold=1.0 (disable semantic turn detection)
+        - max_turn_silence=2000 (high value since VAD handles turn endings)
+
+        Args:
+            connection_params: The user-provided connection parameters.
+
+        Returns:
+            Updated connection parameters configured for manual turn mode.
+        """
+        updates = {}
+
+        # Check end_of_turn_confidence_threshold
+        if connection_params.end_of_turn_confidence_threshold is None:
+            updates["end_of_turn_confidence_threshold"] = 1.0
+        elif connection_params.end_of_turn_confidence_threshold != 1.0:
+            logger.warning(
+                f"vad_force_turn_endpoint is enabled but end_of_turn_confidence_threshold "
+                f"is set to {connection_params.end_of_turn_confidence_threshold}. "
+                f"For manual turn detection mode, this should be 1.0 to disable "
+                f"model-based turn detection. The current value will be used."
+            )
+
+        # Check max_turn_silence
+        if connection_params.max_turn_silence is None:
+            updates["max_turn_silence"] = 2000
+        elif connection_params.max_turn_silence < 1000:
+            logger.warning(
+                f"vad_force_turn_endpoint is enabled but max_turn_silence is set to "
+                f"{connection_params.max_turn_silence}ms. With manual turn detection, "
+                f"a higher value (e.g., 2000ms) is recommended to avoid premature "
+                f"turn endings. The current value will be used."
+            )
+
+        # Apply updates if any
+        if updates:
+            connection_params = connection_params.model_copy(update=updates)
+
+        return connection_params
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.

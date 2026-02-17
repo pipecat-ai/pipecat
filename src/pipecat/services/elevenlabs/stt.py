@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -191,9 +192,10 @@ class ElevenLabsSTTService(SegmentedSTTService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         base_url: str = "https://api.elevenlabs.io",
-        model: str = "scribe_v1",
+        model: str = "scribe_v2",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = ELEVENLABS_TTFS_P99,
         **kwargs,
     ):
         """Initialize the ElevenLabs STT service.
@@ -202,13 +204,16 @@ class ElevenLabsSTTService(SegmentedSTTService):
             api_key: ElevenLabs API key for authentication.
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             base_url: Base URL for ElevenLabs API.
-            model: Model ID for transcription. Defaults to "scribe_v1".
+            model: Model ID for transcription. Defaults to "scribe_v2".
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         super().__init__(
             sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
 
@@ -436,6 +441,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         model: str = "scribe_v2_realtime",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = ELEVENLABS_REALTIME_TTFS_P99,
         **kwargs,
     ):
         """Initialize the ElevenLabs Realtime STT service.
@@ -446,10 +452,15 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             model: Model ID for transcription. Defaults to "scribe_v2_realtime".
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
         super().__init__(
             sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=10,
+            keepalive_interval=5,
             **kwargs,
         )
 
@@ -602,9 +613,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     async def _connect(self):
         """Establish WebSocket connection to ElevenLabs Realtime STT."""
-        await super()._connect()
-
         await self._connect_websocket()
+
+        await super()._connect()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
@@ -618,6 +629,21 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             self._receive_task = None
 
         await self._disconnect_websocket()
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio wrapped in ElevenLabs' JSON protocol.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        audio_base64 = base64.b64encode(silence).decode("utf-8")
+        message = {
+            "message_type": "input_audio_chunk",
+            "audio_base_64": audio_base64,
+            "commit": False,
+            "sample_rate": self.sample_rate,
+        }
+        await self._websocket.send(json.dumps(message))
 
     async def _connect_websocket(self):
         """Connect to ElevenLabs Realtime STT WebSocket endpoint."""

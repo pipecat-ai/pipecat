@@ -313,7 +313,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 if isinstance(frame, InputAudioRawFrame):
                     await self.push_audio_frame(frame)
                 elif isinstance(frame, InputTransportMessageFrame):
-                    await self.broadcast_frame(frame)
+                    await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
                 else:
                     await self.push_frame(frame)
         except Exception as e:
@@ -534,6 +534,18 @@ class FastAPIWebsocketTransport(BaseTransport):
 
     Provides bidirectional WebSocket communication with frame serialization,
     session management, and event handling for client connections and timeouts.
+
+    Event handlers available:
+
+    - on_client_connected(transport, websocket): Client WebSocket connected
+    - on_client_disconnected(transport, websocket): Client WebSocket disconnected
+    - on_session_timeout(transport, websocket): Session timed out
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, websocket):
+            ...
     """
 
     def __init__(

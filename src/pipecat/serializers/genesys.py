@@ -131,7 +131,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
     PROTOCOL_VERSION = "2"
 
-    class InputParams(BaseModel):
+    class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for GenesysAudioHookSerializer.
 
         Attributes:
@@ -144,6 +144,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             supported_languages: List of language codes the bot supports (e.g., ["en-US", "es-ES"]).
             selected_language: Default language code to use.
             start_paused: Whether to start the session in paused state.
+            ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
         genesys_sample_rate: int = 8000
@@ -167,8 +168,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             params: Configuration parameters.
             **kwargs: Additional arguments passed to BaseObject (e.g., name).
         """
-        super().__init__(**kwargs)
-        self._params = params or GenesysAudioHookSerializer.InputParams()
+        super().__init__(params or GenesysAudioHookSerializer.InputParams(), **kwargs)
 
         self._genesys_sample_rate = self._params.genesys_sample_rate
         self._sample_rate = 0  # Pipeline input rate, set in setup()
@@ -604,6 +604,9 @@ class GenesysAudioHookSerializer(FrameSerializer):
             return json.dumps(self.create_barge_in_event())
 
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            # Filter out RTVI messages using base class method
+            if self.should_ignore_frame(frame):
+                return None
             # Only pass through AudioHook protocol messages (those with "version" field)
             # Filter out RTVI and other non-AudioHook messages
             if isinstance(frame.message, dict) and "version" in frame.message:

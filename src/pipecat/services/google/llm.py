@@ -799,11 +799,15 @@ class GoogleLLMService(LLMService):
         """Create the Gemini client instance. Subclasses can override this."""
         self._client = genai.Client(api_key=self._api_key, http_options=self._http_options)
 
-    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, max_tokens: Optional[int] = None
+    ) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
+            max_tokens: Optional maximum number of tokens to generate. If provided,
+                overrides the service's default max_tokens setting.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -827,6 +831,10 @@ class GoogleLLMService(LLMService):
         generation_params = self._build_generation_params(
             system_instruction=system, tools=tools if tools else None
         )
+
+        # Override max_output_tokens if provided
+        if max_tokens is not None:
+            generation_params["max_output_tokens"] = max_tokens
 
         generation_config = GenerateContentConfig(**generation_params)
 

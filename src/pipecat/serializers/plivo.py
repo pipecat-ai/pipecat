@@ -42,13 +42,14 @@ class PlivoFrameSerializer(FrameSerializer):
     credentials to be provided.
     """
 
-    class InputParams(BaseModel):
+    class InputParams(FrameSerializer.InputParams):
         """Configuration parameters for PlivoFrameSerializer.
 
         Parameters:
             plivo_sample_rate: Sample rate used by Plivo, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.
+            ignore_rtvi_messages: Inherited from base FrameSerializer, defaults to True.
         """
 
         plivo_sample_rate: int = 8000
@@ -72,11 +73,12 @@ class PlivoFrameSerializer(FrameSerializer):
             auth_token: Plivo auth token (required for auto hang-up).
             params: Configuration parameters.
         """
+        super().__init__(params or PlivoFrameSerializer.InputParams())
+
         self._stream_id = stream_id
         self._call_id = call_id
         self._auth_id = auth_id
         self._auth_token = auth_token
-        self._params = params or PlivoFrameSerializer.InputParams()
 
         self._plivo_sample_rate = self._params.plivo_sample_rate
         self._sample_rate = 0  # Pipeline input rate
@@ -140,6 +142,8 @@ class PlivoFrameSerializer(FrameSerializer):
 
             return json.dumps(answer)
         elif isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+            if self.should_ignore_frame(frame):
+                return None
             return json.dumps(frame.message)
 
         # Return None for unhandled frames

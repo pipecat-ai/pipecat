@@ -26,7 +26,9 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    StartFrame,
     TranscriptionFrame,
+    UserMuteStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -42,8 +44,12 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.user_mute import FirstSpeechUserMuteStrategy, FunctionCallUserMuteStrategy
-from pipecat.turns.user_stop import TranscriptionUserTurnStopStrategy
+from pipecat.turns.user_mute import (
+    FirstSpeechUserMuteStrategy,
+    FunctionCallUserMuteStrategy,
+    MuteUntilFirstBotCompleteUserMuteStrategy,
+)
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 USER_TURN_STOP_TIMEOUT = 0.2
@@ -151,7 +157,16 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_user_turn_strategies(self):
         context = LLMContext()
-        user_aggregator = LLMUserAggregator(context)
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_turn_strategies=UserTurnStrategies(
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
+                ),
+            ),
+        )
 
         should_start = None
         should_stop = None
@@ -175,6 +190,8 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
             SleepFrame(),
             VADUserStoppedSpeakingFrame(),
+            # Wait for user_speech_timeout to elapse
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.1),
         ]
         expected_down_frames = [
             VADUserStartedSpeakingFrame,
@@ -243,7 +260,9 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             context,
             params=LLMUserAggregatorParams(
                 user_turn_strategies=UserTurnStrategies(
-                    stop=[TranscriptionUserTurnStopStrategy(timeout=TRANSCRIPTION_TIMEOUT)],
+                    stop=[
+                        SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=TRANSCRIPTION_TIMEOUT)
+                    ],
                 ),
                 user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT,
             ),
@@ -272,13 +291,13 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
 
         pipeline = Pipeline([user_aggregator])
 
+        # Transcript arrives before VAD stop, then we wait for user_speech_timeout
         frames_to_send = [
             VADUserStartedSpeakingFrame(),
-            VADUserStoppedSpeakingFrame(),
-            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT - 0.1),
             TranscriptionFrame(text="Hello!", user_id="", timestamp="now"),
-            SleepFrame(sleep=USER_TURN_STOP_TIMEOUT - 0.1),
-            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT),
+            VADUserStoppedSpeakingFrame(),
+            # Wait for user_speech_timeout (TRANSCRIPTION_TIMEOUT=0.1s) to elapse
+            SleepFrame(sleep=TRANSCRIPTION_TIMEOUT + 0.05),
         ]
         await run_test(
             pipeline,
@@ -377,6 +396,42 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         strategy, message = stop_messages[0]
         self.assertIsNone(strategy)  # strategy is None for end/cancel
         self.assertEqual(message.content, "Hello!")
+
+    async def test_start_frame_before_mute_event(self):
+        """StartFrame must reach downstream before mute events are broadcast.
+
+        With MuteUntilFirstBotCompleteUserMuteStrategy, the mute logic should
+        not run on control frames (StartFrame, EndFrame, CancelFrame). This
+        ensures StartFrame reaches downstream processors before
+        UserMuteStartedFrame is broadcast.
+
+        The default TurnAnalyzerUserTurnStopStrategy broadcasts a
+        SpeechControlParamsFrame when it processes StartFrame, which gets
+        re-queued to the aggregator. That non-control frame legitimately
+        triggers the mute state change, so UserMuteStartedFrame follows
+        StartFrame — but crucially, after it.
+        """
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_mute_strategies=[MuteUntilFirstBotCompleteUserMuteStrategy()],
+            ),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        # run_test internally sends StartFrame via PipelineRunner. With
+        # ignore_start=False we can verify ordering: StartFrame must arrive
+        # before UserMuteStartedFrame. Before the fix, UserMuteStartedFrame
+        # was broadcast before StartFrame reached downstream processors.
+        (down_frames, _) = await run_test(
+            pipeline,
+            frames_to_send=[],
+            expected_down_frames=[StartFrame, UserMuteStartedFrame],
+            ignore_start=False,
+        )
 
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):

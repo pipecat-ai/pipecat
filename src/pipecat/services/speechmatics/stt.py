@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -85,6 +86,16 @@ class SpeechmaticsSTTService(STTService):
     This service provides real-time speech-to-text transcription using the Speechmatics API.
     It supports partial and final transcriptions, multiple languages, various audio formats,
     and speaker diarization.
+
+    Event handlers available (in addition to STTService events):
+
+    - on_speakers_result(service, speakers): Speaker diarization results received
+
+    Example::
+
+        @stt.event_handler("on_speakers_result")
+        async def on_speakers_result(service, speakers):
+            ...
     """
 
     # Export related classes as class attributes
@@ -288,6 +299,7 @@ class SpeechmaticsSTTService(STTService):
         sample_rate: int | None = None,
         params: InputParams | None = None,
         should_interrupt: bool = True,
+        ttfs_p99_latency: float | None = SPEECHMATICS_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Speechmatics STT service.
@@ -300,9 +312,11 @@ class SpeechmaticsSTTService(STTService):
             sample_rate: Optional audio sample rate in Hz.
             params: Optional[InputParams]: Input parameters for the service.
             should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         # Service parameters
         self._api_key: str = api_key or os.getenv("SPEECHMATICS_API_KEY")

@@ -12,9 +12,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -37,8 +35,6 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -103,7 +99,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that.", append_to_context=False))
 
     fetch_image_function = FunctionSchema(
         name="fetch_user_image",
@@ -132,12 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages, tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            user_turn_strategies=UserTurnStrategies(
-                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-            ),
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        ),
+        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
     )
 
     pipeline = Pipeline(
@@ -182,6 +173,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @tts.event_handler("on_tts_request")
+    async def on_tts_request(tts, context_id: str, text: str):
+        logger.debug(f"On TTS request: {context_id}: {text}")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 

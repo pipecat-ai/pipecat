@@ -12,9 +12,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -28,8 +26,6 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.tavus.transport import TavusParams, TavusTransport
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -48,7 +44,6 @@ async def main():
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 microphone_out_enabled=False,
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             ),
         )
 
@@ -71,13 +66,7 @@ async def main():
         context = LLMContext(messages)
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
-            user_params=LLMUserAggregatorParams(
-                user_turn_strategies=UserTurnStrategies(
-                    stop=[
-                        TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
-                    ]
-                ),
-            ),
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
         )
 
         pipeline = Pipeline(

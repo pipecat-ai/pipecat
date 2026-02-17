@@ -11,9 +11,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -31,8 +29,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 load_dotenv(override=True)
 
@@ -83,14 +79,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         context = LLMContext(messages)
         user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
             context,
-            user_params=LLMUserAggregatorParams(
-                user_turn_strategies=UserTurnStrategies(
-                    stop=[
-                        TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
-                    ]
-                ),
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-            ),
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
         )
 
         pipeline = Pipeline(

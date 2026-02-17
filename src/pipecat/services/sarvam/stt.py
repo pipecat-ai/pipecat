@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024–2026, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 """Sarvam AI Speech-to-Text service implementation.
 
 This module provides a streaming Speech-to-Text service using Sarvam AI's WebSocket-based
@@ -6,7 +12,8 @@ can handle multiple audio formats for Indian language speech recognition.
 """
 
 import base64
-from typing import Optional
+from dataclasses import dataclass
+from typing import AsyncGenerator, Dict, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -25,6 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
+from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -68,27 +76,99 @@ def language_to_sarvam_language(language: Language) -> str:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass(frozen=True)
+class ModelConfig:
+    """Immutable configuration for a Sarvam STT model.
+
+    Attributes:
+        supports_prompt: Whether the model accepts prompt parameter.
+        supports_mode: Whether the model accepts mode parameter.
+        supports_language: Whether the model accepts language parameter.
+        default_language: Default language code (None = auto-detect).
+        default_mode: Default mode (None = not applicable).
+        use_translate_endpoint: Whether to use speech_to_text_translate_streaming endpoint.
+        use_translate_method: Whether to use translate() method instead of transcribe().
+    """
+
+    supports_prompt: bool
+    supports_mode: bool
+    supports_language: bool
+    default_language: Optional[str]
+    default_mode: Optional[str]
+    use_translate_endpoint: bool
+    use_translate_method: bool
+
+
+MODEL_CONFIGS: Dict[str, ModelConfig] = {
+    "saarika:v2.5": ModelConfig(
+        supports_prompt=False,
+        supports_mode=False,
+        supports_language=True,
+        default_language="unknown",
+        default_mode=None,
+        use_translate_endpoint=False,
+        use_translate_method=False,
+    ),
+    "saaras:v2.5": ModelConfig(
+        supports_prompt=True,
+        supports_mode=False,
+        supports_language=False,
+        default_language=None,  # Auto-detects language
+        default_mode=None,
+        use_translate_endpoint=True,
+        use_translate_method=True,
+    ),
+    "saaras:v3": ModelConfig(
+        supports_prompt=True,
+        supports_mode=True,
+        supports_language=True,
+        default_language="en-IN",
+        default_mode="transcribe",
+        use_translate_endpoint=False,
+        use_translate_method=False,
+    ),
+}
+
+
 class SarvamSTTService(STTService):
     """Sarvam speech-to-text service.
 
     Provides real-time speech recognition using Sarvam's WebSocket API.
+
+    Event handlers available (in addition to STTService events):
+
+    - on_connected(service): Connected to Sarvam WebSocket
+    - on_disconnected(service): Disconnected from Sarvam WebSocket
+    - on_connection_error(service, error): Connection error occurred
+
+    Example::
+
+        @stt.event_handler("on_connected")
+        async def on_connected(service):
+            ...
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam STT service.
 
         Parameters:
-            language: Target language for transcription. Defaults to None (required for saarika models).
-            prompt: Optional prompt to guide translation style/context for STT-Translate models.
-                   Only applicable to saaras (STT-Translate) models. Defaults to None.
+            language: Target language for transcription.
+                - saarika:v2.5: Defaults to "unknown" (auto-detect supported)
+                - saaras:v2.5: Not used (auto-detects language)
+                - saaras:v3: Defaults to "en-IN"
+            prompt: Optional prompt to guide transcription/translation style/context.
+                Only applicable to saaras models (v2.5 and v3). Defaults to None.
+            mode: Mode of operation for saaras:v3 models only. Options: transcribe, translate,
+                verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3.
             vad_signals: Enable VAD signals in response. Defaults to None.
             high_vad_sensitivity: Enable high VAD (Voice Activity Detection) sensitivity. Defaults to None.
         """
 
         language: Optional[Language] = None
         prompt: Optional[str] = None
-        vad_signals: bool = None
-        high_vad_sensitivity: bool = None
+        mode: Optional[Literal["transcribe", "translate", "verbatim", "translit", "codemix"]] = None
+        vad_signals: Optional[bool] = None
+        high_vad_sensitivity: Optional[bool] = None
 
     def __init__(
         self,
@@ -98,49 +178,70 @@ class SarvamSTTService(STTService):
         sample_rate: Optional[int] = None,
         input_audio_codec: str = "wav",
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
+        keepalive_timeout: Optional[float] = None,
+        keepalive_interval: float = 5.0,
         **kwargs,
     ):
         """Initialize the Sarvam STT service.
 
         Args:
             api_key: Sarvam API key for authentication.
-            model: Sarvam model to use for transcription.
+            model: Sarvam model to use for transcription. Allowed values:
+                - "saarika:v2.5": Standard STT model
+                - "saaras:v2.5": STT-Translate model (auto-detects language, supports prompts)
+                - "saaras:v3": Advanced STT model (supports mode and prompts)
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            keepalive_timeout: Seconds of no audio before sending silence to keep the
+                connection alive. None disables keepalive.
+            keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to the parent STTService.
         """
         params = params or SarvamSTTService.InputParams()
 
-        # Validate that saaras models don't accept language parameter
-        if "saaras" in model.lower():
-            if params.language is not None:
-                raise ValueError(
-                    f"Model '{model}' does not accept language parameter. "
-                    "STT-Translate models auto-detect language."
-                )
+        # Get model configuration (validates model exists)
+        if model not in MODEL_CONFIGS:
+            allowed = ", ".join(sorted(MODEL_CONFIGS.keys()))
+            raise ValueError(f"Unsupported model '{model}'. Allowed values: {allowed}.")
 
-        # Validate that saarika models don't accept prompt parameter
-        if "saarika" in model.lower():
-            if params.prompt is not None:
-                raise ValueError(
-                    f"Model '{model}' does not accept prompt parameter. "
-                    "Prompts are only supported for STT-Translate models"
-                )
+        self._config = MODEL_CONFIGS[model]
 
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        # Validate parameters against model capabilities
+        if params.prompt is not None and not self._config.supports_prompt:
+            raise ValueError(f"Model '{model}' does not support prompt parameter.")
+        if params.mode is not None and not self._config.supports_mode:
+            raise ValueError(f"Model '{model}' does not support mode parameter.")
+        if params.language is not None and not self._config.supports_language:
+            raise ValueError(
+                f"Model '{model}' does not support language parameter (auto-detects language)."
+            )
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=keepalive_timeout,
+            keepalive_interval=keepalive_interval,
+            **kwargs,
+        )
 
         self.set_model_name(model)
         self._api_key = api_key
         self._language_code: Optional[Language] = params.language
-        # For saarika models, default to "unknown" if language is not provided
+
+        # Set language string: use provided language or model's default
         if params.language:
             self._language_string = language_to_sarvam_language(params.language)
-        elif "saarika" in model.lower():
-            self._language_string = "unknown"
         else:
-            self._language_string = None
+            self._language_string = self._config.default_language
+
         self._prompt = params.prompt
+
+        # Set mode: use provided mode or model's default
+        self._mode = params.mode if params.mode is not None else self._config.default_mode
 
         # Store connection parameters
         self._vad_signals = params.vad_signals
@@ -161,6 +262,12 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+
+        if self._vad_signals:
+            self._register_event_handler("on_speech_started")
+            self._register_event_handler("on_speech_stopped")
+            self._register_event_handler("on_utterance_end")
+
         logger.info(f"Sarvam STT initialized with SDK headers: {self._sdk_headers}")
 
     def language_to_service_language(self, language: Language) -> str:
@@ -203,12 +310,14 @@ class SarvamSTTService(STTService):
 
         Args:
             language: The language to use for speech recognition.
+
+        Raises:
+            ValueError: If called on a model that auto-detects language.
         """
-        # saaras models do not accept a language parameter
-        if "saaras" in self.model_name.lower():
+        if not self._config.supports_language:
             raise ValueError(
-                f"Model '{self.model_name}' (saaras) does not accept language parameter. "
-                "saaras models auto-detect language."
+                f"Model '{self.model_name}' does not support language parameter "
+                "(auto-detects language)."
             )
 
         logger.info(f"Switching STT language to: [{language}]")
@@ -218,24 +327,20 @@ class SarvamSTTService(STTService):
         await self._connect()
 
     async def set_prompt(self, prompt: Optional[str]):
-        """Set the translation prompt and reconnect.
+        """Set the transcription/translation prompt and reconnect.
 
         Args:
-            prompt: Prompt text to guide translation style/context.
+            prompt: Prompt text to guide transcription/translation style/context.
                    Pass None to clear/disable prompt.
-                   Only applicable to STT-Translate models, not STT models.
+                   Only applicable to models that support prompts.
         """
-        # saarika models do not accept prompt parameter
-        if "saarika" in self.model_name.lower():
+        if not self._config.supports_prompt:
             if prompt is not None:
-                raise ValueError(
-                    f"Model '{self.model_name}' does not accept prompt parameter. "
-                    "Prompts are only supported for STT-Translate models."
-                )
-            # If prompt is None and it's saarika, just silently return (no-op)
+                raise ValueError(f"Model '{self.model_name}' does not support prompt parameter.")
+            # If prompt is None and model doesn't support prompts, silently return (no-op)
             return
 
-        logger.info("Updating STT-Translate prompt.")
+        logger.info(f"Updating {self.model_name} prompt.")
         self._prompt = prompt
         await self._disconnect()
         await self._connect()
@@ -267,7 +372,7 @@ class SarvamSTTService(STTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def run_stt(self, audio: bytes):
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Send audio data to Sarvam for transcription.
 
         Args:
@@ -299,13 +404,11 @@ class SarvamSTTService(STTService):
                 "sample_rate": self.sample_rate,
             }
 
-            # Use appropriate method based on service type
-            if "saarika" in self.model_name.lower():
-                # STT service
-                await self._socket_client.transcribe(**method_kwargs)
-            else:
-                # STT-Translate service - auto-detects input language and returns translated text
+            # Use appropriate method based on model configuration
+            if self._config.use_translate_method:
                 await self._socket_client.translate(**method_kwargs)
+            else:
+                await self._socket_client.transcribe(**method_kwargs)
 
         except Exception as e:
             yield ErrorFrame(error=f"Error sending audio to Sarvam: {e}", exception=e)
@@ -317,18 +420,32 @@ class SarvamSTTService(STTService):
         logger.debug("Connecting to Sarvam")
 
         try:
-            # Convert boolean parameters to string for SDK
-            vad_signals_str = "true" if self._vad_signals else "false"
-            high_vad_sensitivity_str = "true" if self._high_vad_sensitivity else "false"
-
             # Build common connection parameters
             connect_kwargs = {
                 "model": self.model_name,
-                "vad_signals": vad_signals_str,
-                "high_vad_sensitivity": high_vad_sensitivity_str,
-                "input_audio_codec": self._input_audio_codec,
                 "sample_rate": str(self.sample_rate),
             }
+
+            # Enable flush signal when using Pipecat's VAD (not Sarvam's) so that
+            # the flush() call on user-stopped-speaking is honored by the server.
+            if not self._vad_signals:
+                connect_kwargs["flush_signal"] = "true"
+
+            # Only send vad parameters when explicitly set (avoid overriding server defaults)
+            if self._vad_signals is not None:
+                connect_kwargs["vad_signals"] = "true" if self._vad_signals else "false"
+            if self._high_vad_sensitivity is not None:
+                connect_kwargs["high_vad_sensitivity"] = (
+                    "true" if self._high_vad_sensitivity else "false"
+                )
+
+            # Add language_code for models that support it
+            if self._language_string is not None:
+                connect_kwargs["language_code"] = self._language_string
+
+            # Add mode for models that support it
+            if self._config.supports_mode and self._mode is not None:
+                connect_kwargs["mode"] = self._mode
 
             def _connect_with_sdk_headers(connect_fn, **kwargs):
                 # Different SDK versions may use different kwarg names.
@@ -339,26 +456,23 @@ class SarvamSTTService(STTService):
                         pass
                 return connect_fn(**kwargs)
 
-            # Choose the appropriate service based on model
-            if "saarika" in self.model_name.lower():
-                # STT service - requires language_code
-                connect_kwargs["language_code"] = self._language_string
+            # Choose the appropriate endpoint based on model configuration
+            if self._config.use_translate_endpoint:
                 self._websocket_context = _connect_with_sdk_headers(
-                    self._sarvam_client.speech_to_text_streaming.connect,
+                    self._sarvam_client.speech_to_text_translate_streaming.connect,
                     **connect_kwargs,
                 )
             else:
-                # STT-Translate service - auto-detects input language and returns translated text
                 self._websocket_context = _connect_with_sdk_headers(
-                    self._sarvam_client.speech_to_text_translate_streaming.connect,
+                    self._sarvam_client.speech_to_text_streaming.connect,
                     **connect_kwargs,
                 )
 
             # Enter the async context manager
             self._socket_client = await self._websocket_context.__aenter__()
 
-            # Set prompt if provided (only for STT-Translate models, after connection)
-            if self._prompt is not None and "saaras" in self.model_name.lower():
+            # Set prompt if provided (only for models that support prompts)
+            if self._prompt is not None and self._config.supports_prompt:
                 await self._socket_client.set_prompt(self._prompt)
 
             # Register event handler for incoming messages
@@ -372,9 +486,13 @@ class SarvamSTTService(STTService):
             # Start receive task using Pipecat's task management
             self._receive_task = self.create_task(self._receive_task_handler())
 
+            self._create_keepalive_task()
+
             logger.info("Connected to Sarvam successfully")
 
         except ApiError as e:
+            self._socket_client = None
+            self._websocket_context = None
             await self.push_error(error_msg=f"Sarvam API error: {e}", exception=e)
         except Exception as e:
             self._socket_client = None
@@ -383,6 +501,8 @@ class SarvamSTTService(STTService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
+        await self._cancel_keepalive_task()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -506,6 +626,32 @@ class SarvamSTTService(STTService):
             "as-IN": Language.AS_IN,
         }
         return mapping.get(language_code, Language.HI_IN)
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the Sarvam SDK websocket client is connected."""
+        return self._socket_client is not None
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio via the Sarvam SDK to keep the connection alive.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        audio_base64 = base64.b64encode(silence).decode("utf-8")
+        encoding = (
+            self._input_audio_codec
+            if self._input_audio_codec.startswith("audio/")
+            else f"audio/{self._input_audio_codec}"
+        )
+        method_kwargs = {
+            "audio": audio_base64,
+            "encoding": encoding,
+            "sample_rate": self.sample_rate,
+        }
+        if self._config.use_translate_method:
+            await self._socket_client.translate(**method_kwargs)
+        else:
+            await self._socket_client.transcribe(**method_kwargs)
 
     async def _start_metrics(self):
         """Start processing metrics collection."""

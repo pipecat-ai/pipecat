@@ -289,6 +289,17 @@ class HeyGenTransport(BaseTransport):
     When used, the Pipecat bot joins the same virtual room as the HeyGen Avatar and the user.
     This is achieved by using `HeyGenTransport`, which initiates the conversation via
     `HeyGenApi` and obtains a room URL that all participants connect to.
+
+    Event handlers available:
+
+    - on_client_connected(transport, participant): Participant connected to the session
+    - on_client_disconnected(transport, participant): Participant disconnected from the session
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, participant):
+            ...
     """
 
     def __init__(

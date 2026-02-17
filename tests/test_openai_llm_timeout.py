@@ -128,6 +128,68 @@ async def test_openai_llm_timeout_still_pushes_end_frame():
 
 
 @pytest.mark.asyncio
+async def test_openai_llm_stream_closed_on_cancellation():
+    """Test that the stream is closed when CancelledError occurs during iteration.
+
+    This prevents socket leaks when the pipeline is interrupted (e.g., user interruption).
+    See issue #3589.
+    """
+    import asyncio
+
+    with patch.object(OpenAILLMService, "create_client"):
+        service = OpenAILLMService(model="gpt-4")
+        service._client = AsyncMock()
+
+        # Track if close was called
+        stream_closed = False
+
+        class MockAsyncStream:
+            """Mock AsyncStream that tracks close() calls and raises CancelledError."""
+
+            def __init__(self):
+                self.iteration_count = 0
+
+            async def close(self):
+                nonlocal stream_closed
+                stream_closed = True
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                self.iteration_count += 1
+                if self.iteration_count > 1:
+                    # Simulate cancellation during iteration
+                    raise asyncio.CancelledError()
+                # Return a minimal chunk for first iteration
+                mock_chunk = AsyncMock()
+                mock_chunk.usage = None
+                mock_chunk.model = None
+                mock_chunk.choices = []
+                return mock_chunk
+
+        mock_stream = MockAsyncStream()
+
+        # Mock the stream creation methods
+        service._stream_chat_completions_specific_context = AsyncMock(return_value=mock_stream)
+        service._stream_chat_completions_universal_context = AsyncMock(return_value=mock_stream)
+        service.start_ttfb_metrics = AsyncMock()
+        service.stop_ttfb_metrics = AsyncMock()
+        service.start_llm_usage_metrics = AsyncMock()
+
+        context = LLMContext(
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        # Process context should raise CancelledError but stream should still be closed
+        with pytest.raises(asyncio.CancelledError):
+            await service._process_context(context)
+
+        # Verify stream was closed despite the cancellation
+        assert stream_closed, "Stream should be closed even when CancelledError occurs"
+
+
+@pytest.mark.asyncio
 async def test_openai_llm_emits_error_frame_on_exception():
     """Test that OpenAI LLM service emits ErrorFrame when a general exception occurs.
 

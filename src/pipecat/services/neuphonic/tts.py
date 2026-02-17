@@ -135,13 +135,11 @@ class NeuphonicTTSService(InterruptibleTTSService):
         }
         self.set_voice(voice_id)
 
-        # Indicates if we have sent TTSStartedFrame. It will reset to False when
-        # there's an interruption or TTSStoppedFrame.
-        self._started = False
         self._cumulative_time = 0
 
         self._receive_task = None
         self._keepalive_task = None
+        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -213,8 +211,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            self._started = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with special handling for speech control.
@@ -230,7 +226,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         # processing more frames until we receive a BotStoppedSpeakingFrame.
         if isinstance(frame, TTSSpeakFrame):
             await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._started:
+        elif isinstance(frame, LLMFullResponseEndFrame):
             await self.pause_processing_frames()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.resume_processing_frames()
@@ -304,7 +300,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._started = False
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -317,7 +313,9 @@ class NeuphonicTTSService(InterruptibleTTSService):
                     await self.stop_ttfb_metrics()
 
                     audio = base64.b64decode(msg["data"]["audio"])
-                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                    frame = TTSAudioRawFrame(
+                        audio, self.sample_rate, 1, context_id=self._context_id
+                    )
                     await self.push_frame(frame)
 
     async def _keepalive_task_handler(self):
@@ -342,11 +340,12 @@ class NeuphonicTTSService(InterruptibleTTSService):
             await self._websocket.send(json.dumps(msg))
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -358,17 +357,17 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 await self._connect()
 
             try:
-                if not self._started:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._started = True
-                    self._cumulative_time = 0
+                await self.start_ttfb_metrics()
+                # Store context_id for use in _receive_messages
+                self._context_id = context_id
+                yield TTSStartedFrame(context_id=context_id)
+                self._cumulative_time = 0
 
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
@@ -502,11 +501,12 @@ class NeuphonicHttpTTSService(TTSService):
             return None
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic streaming API.
 
         Args:
             text: The text to convert to speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech and status information.
@@ -542,7 +542,7 @@ class NeuphonicHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 # Process SSE stream line by line
                 async for line in response.content:
@@ -564,7 +564,9 @@ class NeuphonicHttpTTSService(TTSService):
                             audio_bytes = base64.b64decode(audio_b64)
 
                             await self.stop_ttfb_metrics()
-                            yield TTSAudioRawFrame(audio_bytes, self.sample_rate, 1)
+                            yield TTSAudioRawFrame(
+                                audio_bytes, self.sample_rate, 1, context_id=context_id
+                            )
 
                     except Exception as e:
                         yield ErrorFrame(error=f"Unknown error occurred: {e}")
@@ -578,4 +580,4 @@ class NeuphonicHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)

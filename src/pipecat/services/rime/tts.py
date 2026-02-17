@@ -82,25 +82,39 @@ class RimeTTSService(AudioContextWordTTSService):
 
         Parameters:
             language: Language for synthesis. Defaults to English.
-            speed_alpha: Speech speed multiplier. Defaults to 1.0.
-            reduce_latency: Whether to reduce latency at potential quality cost.
-            pause_between_brackets: Whether to add pauses between bracketed content.
-            phonemize_between_brackets: Whether to phonemize bracketed content.
+            segment: Text segmentation mode ("immediate", "bySentence", "never").
+            repetition_penalty: Token repetition penalty (arcana only).
+            temperature: Sampling temperature (arcana only).
+            top_p: Cumulative probability threshold (arcana only).
+            speed_alpha: Speech speed multiplier (mistv2 only).
+            reduce_latency: Whether to reduce latency at potential quality cost (mistv2 only).
+            pause_between_brackets: Whether to add pauses between bracketed content (mistv2 only).
+            phonemize_between_brackets: Whether to phonemize bracketed content (mistv2 only).
+            no_text_normalization: Whether to disable text normalization (mistv2 only).
+            save_oovs: Whether to save out-of-vocabulary words (mistv2 only).
         """
 
         language: Optional[Language] = Language.EN
-        speed_alpha: Optional[float] = 1.0
-        reduce_latency: Optional[bool] = False
-        pause_between_brackets: Optional[bool] = False
-        phonemize_between_brackets: Optional[bool] = False
+        segment: Optional[str] = None
+        # Arcana params
+        repetition_penalty: Optional[float] = None
+        temperature: Optional[float] = None
+        top_p: Optional[float] = None
+        # Mistv2 params
+        speed_alpha: Optional[float] = None
+        reduce_latency: Optional[bool] = None
+        pause_between_brackets: Optional[bool] = None
+        phonemize_between_brackets: Optional[bool] = None
+        no_text_normalization: Optional[bool] = None
+        save_oovs: Optional[bool] = None
 
     def __init__(
         self,
         *,
         api_key: str,
         voice_id: str,
-        url: str = "wss://users.rime.ai/ws2",
-        model: str = "mistv2",
+        url: str = "wss://users-ws.rime.ai/ws3",
+        model: str = "arcana",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
@@ -143,26 +157,14 @@ class RimeTTSService(AudioContextWordTTSService):
             #    and insert these tags for the purpose of the TTS service alone.
             self._text_aggregator = SkipTagsAggregator([("spell(", ")")])
 
-        params = params or RimeTTSService.InputParams()
+        self._params = params or RimeTTSService.InputParams()
 
         # Store service configuration
         self._api_key = api_key
         self._url = url
         self._voice_id = voice_id
         self._model = model
-        self._settings = {
-            "speaker": voice_id,
-            "modelId": model,
-            "audioFormat": "pcm",
-            "samplingRate": 0,
-            "lang": self.language_to_service_language(params.language)
-            if params.language
-            else "eng",
-            "speedAlpha": params.speed_alpha,
-            "reduceLatency": params.reduce_latency,
-            "pauseBetweenBrackets": json.dumps(params.pause_between_brackets),
-            "phonemizeBetweenBrackets": json.dumps(params.phonemize_between_brackets),
-        }
+        self._settings = self._build_settings()
 
         # State tracking
         self._context_id = None  # Tracks current turn
@@ -189,14 +191,60 @@ class RimeTTSService(AudioContextWordTTSService):
         """
         return language_to_rime_language(language)
 
+    def _build_settings(self) -> dict:
+        """Build query params for the WebSocket URL based on the current model and params.
+
+        Returns:
+            Dictionary of query parameters. Only explicitly-set values are included.
+        """
+        settings = {
+            "speaker": self._voice_id,
+            "modelId": self._model,
+            "audioFormat": "pcm",
+            "samplingRate": self.sample_rate or 0,
+        }
+        if self._params.language:
+            settings["lang"] = self.language_to_service_language(self._params.language) or "eng"
+        if self._params.segment is not None:
+            settings["segment"] = self._params.segment
+
+        if self._model == "arcana":
+            if self._params.repetition_penalty is not None:
+                settings["repetition_penalty"] = self._params.repetition_penalty
+            if self._params.temperature is not None:
+                settings["temperature"] = self._params.temperature
+            if self._params.top_p is not None:
+                settings["top_p"] = self._params.top_p
+        else:  # mistv2/mist
+            if self._params.speed_alpha is not None:
+                settings["speedAlpha"] = self._params.speed_alpha
+            if self._params.reduce_latency is not None:
+                settings["reduceLatency"] = self._params.reduce_latency
+            if self._params.pause_between_brackets is not None:
+                settings["pauseBetweenBrackets"] = json.dumps(self._params.pause_between_brackets)
+            if self._params.phonemize_between_brackets is not None:
+                settings["phonemizeBetweenBrackets"] = json.dumps(
+                    self._params.phonemize_between_brackets
+                )
+            if self._params.no_text_normalization is not None:
+                settings["noTextNormalization"] = json.dumps(self._params.no_text_normalization)
+            if self._params.save_oovs is not None:
+                settings["saveOovs"] = json.dumps(self._params.save_oovs)
+
+        return settings
+
     async def set_model(self, model: str):
-        """Update the TTS model.
+        """Update the TTS model and reconnect.
 
         Args:
             model: The model name to use for synthesis.
         """
         self._model = model
+        self._settings = self._build_settings()
         await super().set_model(model)
+        if self._websocket:
+            await self._disconnect()
+            await self._connect()
 
     # A set of Rime-specific helpers for text transformations
     def SPELL(text: str) -> str:
@@ -224,12 +272,68 @@ class RimeTTSService(AudioContextWordTTSService):
         return f"[{text}]"
 
     async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if voice changed."""
-        prev_voice = self._voice_id
+        """Update service settings and reconnect if necessary.
+
+        Since all settings are WebSocket URL query parameters,
+        any setting change requires reconnecting to apply the new values.
+        """
+        prev_settings = self._settings.copy()
         await super()._update_settings(settings)
-        if not prev_voice == self._voice_id:
+
+        needs_reconnect = False
+
+        if "voice" in settings or "voice_id" in settings:
             self._settings["speaker"] = self._voice_id
-            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+            if prev_settings.get("speaker") != self._voice_id:
+                logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+                needs_reconnect = True
+
+        if "model" in settings:
+            self._settings = self._build_settings()
+            needs_reconnect = True
+
+        if "language" in settings:
+            new_lang = self.language_to_service_language(settings["language"])
+            if new_lang and new_lang != prev_settings.get("lang"):
+                logger.info(f"Updating language to: [{new_lang}]")
+                self._settings["lang"] = new_lang
+                needs_reconnect = True
+
+        # Arcana params
+        for key, settings_key in [
+            ("repetition_penalty", "repetition_penalty"),
+            ("temperature", "temperature"),
+            ("top_p", "top_p"),
+        ]:
+            if key in settings and settings[key] != prev_settings.get(settings_key):
+                self._settings[settings_key] = settings[key]
+                needs_reconnect = True
+
+        # Mistv2 params
+        for key, settings_key in [
+            ("speed_alpha", "speedAlpha"),
+            ("reduce_latency", "reduceLatency"),
+        ]:
+            if key in settings and settings[key] != prev_settings.get(settings_key):
+                self._settings[settings_key] = settings[key]
+                needs_reconnect = True
+
+        # Mistv2 boolean params (need json.dumps)
+        for key, settings_key in [
+            ("pause_between_brackets", "pauseBetweenBrackets"),
+            ("phonemize_between_brackets", "phonemizeBetweenBrackets"),
+            ("no_text_normalization", "noTextNormalization"),
+            ("save_oovs", "saveOovs"),
+        ]:
+            if key in settings and json.dumps(settings[key]) != prev_settings.get(settings_key):
+                self._settings[settings_key] = json.dumps(settings[key])
+                needs_reconnect = True
+
+        if "segment" in settings and settings["segment"] != prev_settings.get("segment"):
+            self._settings["segment"] = settings["segment"]
+            needs_reconnect = True
+
+        if needs_reconnect and self._websocket:
             await self._disconnect()
             await self._connect()
 
@@ -256,7 +360,7 @@ class RimeTTSService(AudioContextWordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["samplingRate"] = self.sample_rate
+        self._settings = self._build_settings()
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -302,7 +406,7 @@ class RimeTTSService(AudioContextWordTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            params = "&".join(f"{k}={v}" for k, v in self._settings.items())
+            params = "&".join(f"{k}={v}" for k, v in self._settings.items() if v is not None)
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await websocket_connect(url, additional_headers=headers)
@@ -370,6 +474,20 @@ class RimeTTSService(AudioContextWordTTSService):
 
         return word_pairs
 
+    def create_context_id(self) -> str:
+        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
+
+        Returns:
+            A unique string identifier for the TTS context.
+        """
+        # If a context ID does not exist, create a new one.
+        # If an ID exists, continue using the current ID.
+        # When interruptions happen, user speech results in
+        # an interruption, which resets the context ID.
+        if not self._context_id:
+            return str(uuid.uuid4())
+        return self._context_id
+
     async def flush_audio(self):
         """Flush any pending audio synthesis."""
         if not self._context_id or not self._websocket:
@@ -384,9 +502,10 @@ class RimeTTSService(AudioContextWordTTSService):
         async for message in self._get_websocket():
             msg = json.loads(message)
 
-            if not msg or not self.audio_context_available(msg["contextId"]):
+            if not msg or not self.audio_context_available(msg.get("contextId")):
                 continue
 
+            context_id = msg["contextId"]
             if msg["type"] == "chunk":
                 # Process audio chunk
                 await self.stop_ttfb_metrics()
@@ -395,8 +514,9 @@ class RimeTTSService(AudioContextWordTTSService):
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,
                     num_channels=1,
+                    context_id=context_id,
                 )
-                await self.append_to_audio_context(msg["contextId"], frame)
+                await self.append_to_audio_context(context_id, frame)
 
             elif msg["type"] == "timestamps":
                 # Process word timing information
@@ -409,7 +529,7 @@ class RimeTTSService(AudioContextWordTTSService):
                     # Calculate word timing pairs
                     word_pairs = self._calculate_word_times(words, starts, ends)
                     if word_pairs:
-                        await self.add_word_timestamps(word_pairs)
+                        await self.add_word_timestamps(word_pairs, context_id=context_id)
                         self._cumulative_time = ends[-1] + self._cumulative_time
                         logger.debug(f"Updated cumulative time to: {self._cumulative_time}")
 
@@ -432,11 +552,12 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self.add_word_timestamps([("Reset", 0)])
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Rime's streaming API.
 
         Args:
             text: The text to convert to speech.
+            context_id: Unique identifier for this TTS context.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -449,9 +570,9 @@ class RimeTTSService(AudioContextWordTTSService):
             try:
                 if not self._context_id:
                     await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
+                    yield TTSStartedFrame(context_id=context_id)
                     self._cumulative_time = 0
-                    self._context_id = str(uuid.uuid4())
+                    self._context_id = context_id
                     await self.create_audio_context(self._context_id)
 
                 msg = self._build_msg(text=text)
@@ -459,7 +580,7 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return
@@ -558,11 +679,12 @@ class RimeHttpTTSService(TTSService):
         return language_to_rime_language(language)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Rime's HTTP API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -601,13 +723,14 @@ class RimeHttpTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
                 async for frame in self._stream_audio_frames_from_iterator(
                     response.content.iter_chunked(CHUNK_SIZE),
                     strip_wav_header=need_to_strip_wav_header,
+                    context_id=context_id,
                 ):
                     await self.stop_ttfb_metrics()
                     yield frame
@@ -616,26 +739,24 @@ class RimeHttpTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
 
 class RimeNonJsonTTSService(InterruptibleTTSService):
     """Pipecat TTS service for Rime's non-JSON WebSocket API.
 
+    .. deprecated:: 0.0.102
+        Arcana now supports JSON WebSocket with word-level timestamps via the
+        ``wss://users-ws.rime.ai/ws3`` endpoint. Use :class:`RimeTTSService`
+        with ``model="arcana"`` instead.
+
     This service enables Text-to-Speech synthesis over WebSocket endpoints
     that require plain text (not JSON) messages and return raw audio bytes.
-    It is designed for use with TTS models like Arcana, which currently do
-    not support JSON-based WebSocket protocols (though this may change in
-    the future).
 
     Limitations:
         - Does not support word-level timestamps or context IDs.
         - Intended specifically for integrations where the TTS provider only
           accepts and returns non-JSON messages.
-
-    Note:
-        - Arcana and similar models may add JSON WebSocket support in the
-          future. This service focuses on the current plain text protocol.
     """
 
     class InputParams(BaseModel):
@@ -716,8 +837,8 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         if params.extra:
             self._settings.update(params.extra)
 
-        self._started = False
         self._receive_task = None
+        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -767,8 +888,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-            self._started = False
 
     async def _connect(self):
         """Establish WebSocket connection and start receive task."""
@@ -817,7 +936,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._started = False
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -847,17 +966,19 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
                         audio=message,
                         sample_rate=self.sample_rate,
                         num_channels=1,
+                        context_id=self._context_id,
                     )
                     await self.push_frame(frame)
             except Exception as e:
                 await self.push_error(error_msg=f"Error: {e}", exception=e)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Rime's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -867,17 +988,17 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
             try:
-                if not self._started:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._started = True
+                await self.start_ttfb_metrics()
+                # Store context_id for use in _receive_messages
+                self._context_id = context_id
+                yield TTSStartedFrame(context_id=context_id)
                 # Send bare text (not JSON)
                 await self._get_websocket().send(text)
                 await self.start_tts_usage_metrics(text)
 
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
                 return

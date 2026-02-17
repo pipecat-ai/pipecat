@@ -950,6 +950,41 @@ class LiveKitTransport(BaseTransport):
     Provides comprehensive LiveKit integration including audio streaming, data
     messaging, participant management, and room event handling for conversational
     AI applications.
+
+    Event handlers available:
+
+    - on_connected: Called when the bot connects to the room.
+    - on_disconnected: Called when the bot disconnects from the room.
+    - on_before_disconnect: [sync] Called just before the bot disconnects.
+    - on_call_state_updated: Called when the call state changes. Args: (state: str)
+    - on_first_participant_joined: Called when the first participant joins.
+      Args: (participant_id: str)
+    - on_participant_connected: Called when a participant connects.
+      Args: (participant_id: str)
+    - on_participant_disconnected: Called when a participant disconnects.
+      Args: (participant_id: str)
+    - on_participant_left: Called when a participant leaves.
+      Args: (participant_id: str, reason: str)
+    - on_audio_track_subscribed: Called when an audio track is subscribed.
+      Args: (participant_id: str)
+    - on_audio_track_unsubscribed: Called when an audio track is unsubscribed.
+      Args: (participant_id: str)
+    - on_video_track_subscribed: Called when a video track is subscribed.
+      Args: (participant_id: str)
+    - on_video_track_unsubscribed: Called when a video track is unsubscribed.
+      Args: (participant_id: str)
+    - on_data_received: Called when data is received from a participant.
+      Args: (data: bytes, participant_id: str)
+
+    Example::
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant_id):
+            await task.queue_frame(TTSSpeakFrame("Hello!"))
+
+        @transport.event_handler("on_participant_disconnected")
+        async def on_participant_disconnected(transport, participant_id):
+            await task.queue_frame(EndFrame())
     """
 
     def __init__(

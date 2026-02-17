@@ -216,7 +216,7 @@ class SessionProperties(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     instructions: Optional[str] = None
-    voice: Optional[GrokVoice] = "Ara"
+    voice: Optional[GrokVoice | str] = "Ara"
     turn_detection: Optional[TurnDetection] = Field(
         default_factory=lambda: TurnDetection(type="server_vad")
     )
