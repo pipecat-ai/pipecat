@@ -167,10 +167,13 @@ class DeepgramSageMakerSTTService(STTService):
         """Apply a settings update, keeping ``live_options`` in sync.
 
         Top-level ``model`` and ``language`` are the source of truth.  When
-        they change their values are propagated into ``live_options``.
+        they are given in *update* their values are propagated into
+        ``live_options``.  When only ``live_options`` is given, its ``model``
+        and ``language`` are propagated *up* to the top-level fields.
 
         Any change triggers a reconnect.
         """
+        # Determine which top-level fields are explicitly provided.
         model_given = isinstance(update, DeepgramSageMakerSTTSettings) and is_given(
             getattr(update, "model", NOT_GIVEN)
         )
@@ -183,16 +186,23 @@ class DeepgramSageMakerSTTService(STTService):
         if not changed:
             return changed
 
-        # Sync model into live_options
-        if model_given and "model" in changed:
+        # --- Sync model --------------------------------------------------
+        if model_given:
+            # Top-level model wins → push into live_options.
             self._settings.live_options.model = self._settings.model
+        elif "live_options" in changed and self._settings.live_options.model is not None:
+            # Only live_options was given → pull model up.
+            self._settings.model = self._settings.live_options.model
+            self.set_model_name(self._settings.model)
 
-        # Sync language into live_options
-        if language_given and "language" in changed:
+        # --- Sync language -----------------------------------------------
+        if language_given:
             lang = self._settings.language
             if isinstance(lang, Language):
                 lang = lang.value
             self._settings.live_options.language = lang
+        elif "live_options" in changed and self._settings.live_options.language is not None:
+            self._settings.language = self._settings.live_options.language
 
         await self._disconnect()
         await self._connect()
