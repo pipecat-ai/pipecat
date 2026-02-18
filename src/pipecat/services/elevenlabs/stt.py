@@ -11,6 +11,7 @@ using segmented audio processing. The service uploads audio files and receives
 transcription results directly.
 """
 
+import asyncio
 import base64
 import io
 import json
@@ -167,6 +168,13 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
     }
 
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
+
+
+class CommitStrategy(str, Enum):
+    """Commit strategies for transcript segmentation."""
+
+    MANUAL = "manual"
+    VAD = "vad"
 
 
 @dataclass
@@ -426,13 +434,6 @@ def audio_format_from_sample_rate(sample_rate: int) -> str:
     return "pcm_16000"
 
 
-class CommitStrategy(str, Enum):
-    """Commit strategies for transcript segmentation."""
-
-    MANUAL = "manual"
-    VAD = "vad"
-
-
 class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     """Speech-to-text service using ElevenLabs' Realtime WebSocket API.
 
@@ -514,6 +515,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         self._model_id = model
         self._audio_format = ""  # initialized in start()
         self._receive_task = None
+
+        self._connected_event = asyncio.Event()
+        self._connected_event.set()
 
         self._settings = ElevenLabsRealtimeSTTSettings(
             model=model,
@@ -630,6 +634,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Yields:
             None - transcription results are handled via WebSocket responses.
         """
+        # Wait for any in-flight _connect() to finish before checking state
+        await self._connected_event.wait()
+
         # Reconnect if connection is closed
         if not self._websocket or self._websocket.state is State.CLOSED:
             await self._connect()
@@ -654,12 +661,18 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
     async def _connect(self):
         """Establish WebSocket connection to ElevenLabs Realtime STT."""
-        await self._connect_websocket()
+        self._connected_event.clear()
+        try:
+            await self._connect_websocket()
 
-        await super()._connect()
+            await super()._connect()
 
-        if self._websocket and not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+            if self._websocket and not self._receive_task:
+                self._receive_task = self.create_task(
+                    self._receive_task_handler(self._report_error)
+                )
+        finally:
+            self._connected_event.set()
 
     async def _disconnect(self):
         """Close WebSocket connection and cleanup tasks."""
