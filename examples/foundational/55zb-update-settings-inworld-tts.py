@@ -97,9 +97,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Inworld TTS settings: speaking_rate=1.3, temperature=0.8")
+        logger.info("Updating Inworld TTS settings: speaking_rate=1.5, temperature=0.8")
         await task.queue_frame(
-            TTSUpdateSettingsFrame(update=InworldTTSSettings(speaking_rate=1.3, temperature=0.8))
+            TTSUpdateSettingsFrame(update=InworldTTSSettings(speaking_rate=1.5, temperature=0.8))
         )
 
     @transport.event_handler("on_client_disconnected")
