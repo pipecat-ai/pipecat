@@ -24,7 +24,8 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.whisper.base_stt import BaseWhisperSTTService, BaseWhisperSTTSettings
+from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.whisper.base_stt import BaseWhisperSTTSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -50,8 +51,11 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = BaseWhisperSTTService(
-        model="whisper-1",
+    # This file is meant to exercise Whisper API-based STT services, so we use
+    # OpenAI's Whisper STT as an example here. Here we could've also used:
+    # - SambaNova
+    # - Groq
+    stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
     )
 
@@ -103,14 +107,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info(
-            'Updating Whisper API STT settings: prompt="Transcribe in English", temperature=0.5'
-        )
-        await task.queue_frame(
-            STTUpdateSettingsFrame(
-                update=BaseWhisperSTTSettings(prompt="Transcribe in English", temperature=0.5)
-            )
-        )
+        logger.info('Updating OpenAI STT settings: language="es"')
+        await task.queue_frame(STTUpdateSettingsFrame(update=BaseWhisperSTTSettings(language="es")))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
