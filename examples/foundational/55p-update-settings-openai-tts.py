@@ -98,8 +98,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating OpenAI TTS settings: speed=1.5")
-        await task.queue_frame(TTSUpdateSettingsFrame(update=OpenAITTSSettings(speed=1.5)))
+        logger.info("Updating OpenAI TTS settings: speed=2.0")
+        await task.queue_frame(TTSUpdateSettingsFrame(update=OpenAITTSSettings(speed=2.0)))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
