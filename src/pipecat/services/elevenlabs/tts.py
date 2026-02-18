@@ -492,19 +492,19 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         # Rebuild voice settings for next context
         self._voice_settings = self._set_voice_settings()
 
-        url_changed = bool(changed & ElevenLabsTTSSettings.URL_FIELDS)
-        voice_settings_changed = bool(changed & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS)
+        url_changed = bool(changed.keys() & ElevenLabsTTSSettings.URL_FIELDS)
+        voice_settings_changed = bool(changed.keys() & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS)
 
         if url_changed:
             logger.debug(
-                f"URL-level setting changed ({changed & ElevenLabsTTSSettings.URL_FIELDS}), "
+                f"URL-level setting changed ({changed.keys() & ElevenLabsTTSSettings.URL_FIELDS}), "
                 f"reconnecting WebSocket"
             )
             await self._disconnect()
             await self._connect()
         elif voice_settings_changed and self._context_id:
             logger.debug(
-                f"Voice settings changed ({changed & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS}), "
+                f"Voice settings changed ({changed.keys() & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS}), "
                 f"closing current context to apply changes"
             )
             try:

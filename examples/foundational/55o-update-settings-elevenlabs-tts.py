@@ -25,6 +25,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService, ElevenLabsTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -100,10 +101,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating ElevenLabs TTS settings: speed=1.2, stability=0.3")
-        await task.queue_frame(
-            TTSUpdateSettingsFrame(update=ElevenLabsTTSSettings(speed=1.2, stability=0.3))
-        )
+        logger.info("Updating ElevenLabs TTS settings: speed=1.2")
+        await task.queue_frame(TTSUpdateSettingsFrame(update=ElevenLabsTTSSettings(speed=0.7)))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
