@@ -59,7 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -99,7 +99,9 @@ class OpenAIRealtimeLLMSettings(LLMSettings):
         session_properties: OpenAI Realtime session configuration.
     """
 
-    session_properties: Any = field(default_factory=lambda: NOT_GIVEN)
+    session_properties: events.SessionProperties | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class OpenAIRealtimeLLMService(LLMService):
@@ -539,6 +541,7 @@ class OpenAIRealtimeLLMService(LLMService):
         changed = await super()._update_settings(update)
         if "session_properties" in changed:
             await self._send_session_update()
+        self._warn_unhandled_updated_settings(changed.keys() - {"session_properties"})
         return changed
 
     async def _send_session_update(self):

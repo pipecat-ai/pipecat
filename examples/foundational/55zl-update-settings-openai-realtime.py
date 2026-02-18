@@ -16,13 +16,17 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
+    LLMContextAggregatorPair,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.openai.realtime.llm import (
     OpenAIRealtimeLLMService,
     OpenAIRealtimeLLMSettings,
 )
+from pipecat.services.openai_realtime import events
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -82,15 +86,35 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating OpenAI Realtime LLM settings: temperature=0.1")
+        logger.info("Updating OpenAI Realtime LLM settings: output_modalities=['text']")
         await task.queue_frame(
-            LLMUpdateSettingsFrame(update=OpenAIRealtimeLLMSettings(temperature=0.1))
+            LLMUpdateSettingsFrame(
+                update=OpenAIRealtimeLLMSettings(
+                    session_properties=events.SessionProperties(output_modalities=["text"])
+                )
+            )
+        )
+
+        await asyncio.sleep(10)
+        logger.info("Updating OpenAI Realtime LLM settings: output_modalities=['audio']")
+        await task.queue_frame(
+            LLMUpdateSettingsFrame(
+                update=OpenAIRealtimeLLMSettings(
+                    session_properties=events.SessionProperties(output_modalities=["audio"])
+                )
+            )
         )
 
     @transport.event_handler("on_client_disconnected")
