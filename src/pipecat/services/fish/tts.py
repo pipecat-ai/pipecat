@@ -208,9 +208,11 @@ class FishAudioTTSService(InterruptibleTTSService):
             Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
+
         if changed:
             await self._disconnect()
             await self._connect()
+
         return changed
 
     async def start(self, frame: StartFrame):

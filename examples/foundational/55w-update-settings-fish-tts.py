@@ -52,7 +52,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = FishAudioTTSService(api_key=os.getenv("FISH_API_KEY"))
+    tts = FishAudioTTSService(
+        api_key=os.getenv("FISH_API_KEY"),
+        model="4ce7e917cedd4bc2bb2e6ff3a46acaa1",  # Barack Obama
+    )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
