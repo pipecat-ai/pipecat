@@ -7,11 +7,9 @@ based on the orchestrator.py approach but following pipecat service patterns.
 import asyncio
 import base64
 import io
-import json
 import wave
 from dataclasses import dataclass
 
-import websockets
 from loguru import logger
 
 from pipecat.audio.utils import create_stream_resampler
@@ -43,6 +41,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.hume.hume_client import SimpleHumeClient
 from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.services.openai_realtime_beta.context import (
@@ -51,8 +50,6 @@ from pipecat.services.openai_realtime_beta.context import (
     OpenAIRealtimeUserContextAggregator,
 )
 from pipecat.utils.time import time_now_iso8601
-
-HUME_WS_URL = "wss://api.hume.ai/v0/evi/chat"
 
 
 @dataclass
@@ -88,9 +85,7 @@ class HumeSTSService(LLMService):
         self.config_id = config_id
         self.model = model
         self.system_prompt = system_prompt
-        self._ws: websockets.WebSocketClientProtocol | None = None
-        self._receive_task: asyncio.Task | None = None
-        self._chat_id: str | None = None
+        self._client: SimpleHumeClient | None = None
         self.active_conversation: bool = False
         self.active_conversation_id: str | None = None
         self.track_cancelled_conversations = track_cancelled_conversations
@@ -98,8 +93,6 @@ class HumeSTSService(LLMService):
         self._context: OpenAIRealtimeLLMContext | None = None
         self._resampler = create_stream_resampler()
         self._start_frame_cls = start_frame_cls or HumeStartFrame
-        self._connected = False
-        self._audio_buffer = bytearray()
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -132,9 +125,9 @@ class HumeSTSService(LLMService):
             await self.push_frame(frame)
 
         elif isinstance(frame, InputAudioRawFrame):
-            if self._ws and self._connected:
+            if self._client and self._client.is_connected:
                 audio = await self._resampler.resample(frame.audio, frame.sample_rate, 16000)
-                await self._send_audio(audio)
+                await self._client.send_audio(audio)
             if self._audio_passthrough:
                 await self.push_frame(frame, direction)
 
@@ -154,90 +147,24 @@ class HumeSTSService(LLMService):
     async def _connect(self):
         """Connect to Hume EVI WebSocket API."""
         try:
-            params = f"api_key={self.api_key}"
-            if self.config_id:
-                params += f"&config_id={self.config_id}"
-            url = f"{HUME_WS_URL}?{params}"
-
-            logger.info("Connecting to Hume EVI (raw WebSocket)...")
-            self._ws = await websockets.connect(url, max_size=20 * 1024 * 1024)
-
-            raw = await self._ws.recv()
-            meta = json.loads(raw)
-            self._chat_id = meta.get("chat_id", "")
-            logger.info(f"Hume session connected: chat_id={self._chat_id}")
-
-            await self._send_session_settings()
-
-            self._connected = True
-            self._receive_task = asyncio.create_task(self._receive_messages())
-
+            logger.info("Connecting to Hume EVI (SimpleHumeClient)...")
+            self._client = SimpleHumeClient(
+                on_message=lambda data: asyncio.create_task(self._handle_message(data)),
+                api_key=self.api_key,
+                config_id=self.config_id,
+                system_prompt=self.system_prompt,
+            )
+            await self._client.connect()
         except Exception as e:
             logger.error(f"Failed to connect to Hume EVI: {e}")
             await self.push_frame(ErrorFrame(error=str(e), fatal=True))
 
     async def _disconnect(self):
         """Disconnect from Hume EVI."""
-        self._connected = False
-
-        if self._receive_task:
-            self._receive_task.cancel()
-            try:
-                await self._receive_task
-            except asyncio.CancelledError:
-                pass
-            self._receive_task = None
-
-        if self._ws:
-            try:
-                await self._ws.close()
-            except Exception:
-                pass
-            self._ws = None
+        if self._client:
+            await self._client.disconnect()
+            self._client = None
             logger.info("Disconnected from Hume EVI")
-
-    async def _send_session_settings(self):
-        """Send session settings including system prompt."""
-        if not self._ws:
-            return
-
-        settings = {
-            "type": "session_settings",
-            "system_prompt": self.system_prompt,
-            "audio": {
-                "encoding": "linear16",
-                "sample_rate": 16000,
-                "channels": 1,
-            },
-        }
-        await self._ws.send(json.dumps(settings))
-        logger.debug("Sent session settings to Hume")
-
-    async def _send_audio(self, audio: bytes):
-        """Send audio data to Hume EVI."""
-        if not self._ws:
-            return
-
-        encoded_audio = base64.b64encode(audio).decode("utf-8")
-        msg = {"type": "audio_input", "data": encoded_audio}
-        await self._ws.send(json.dumps(msg))
-
-    async def _receive_messages(self):
-        """Background task to receive messages from Hume EVI."""
-        while self._connected and self._ws:
-            try:
-                raw_msg = await self._ws.recv()
-                data = json.loads(raw_msg)
-                await self._handle_message(data)
-            except websockets.exceptions.ConnectionClosed:
-                logger.info("Hume WebSocket closed")
-                self._connected = False
-                break
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error receiving Hume message: {e}")
-                break
 
     async def _handle_message(self, data: dict):
         """Handle incoming message from Hume EVI."""
