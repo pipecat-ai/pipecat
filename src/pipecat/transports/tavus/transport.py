@@ -519,7 +519,7 @@ class TavusInputTransport(BaseInputTransport):
         """Handle received participant audio data."""
         frame = InputAudioRawFrame(
             audio=audio.audio_frames,
-            sample_rate=audio.audio_frames,
+            sample_rate=audio.sample_rate,
             num_channels=audio.num_channels,
         )
         frame.transport_source = audio_source
