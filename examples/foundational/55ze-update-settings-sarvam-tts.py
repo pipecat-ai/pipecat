@@ -24,7 +24,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.sarvam.tts import SarvamTTSService, SarvamWSTTSSettings
+from pipecat.services.sarvam.tts import SarvamTTSService, SarvamTTSSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -97,8 +97,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Sarvam TTS settings: pace=1.3")
-        await task.queue_frame(TTSUpdateSettingsFrame(update=SarvamWSTTSSettings(pace=1.3)))
+        logger.info("Updating Sarvam TTS settings: pace=1.5")
+        await task.queue_frame(TTSUpdateSettingsFrame(update=SarvamTTSSettings(pace=1.5)))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

@@ -276,7 +276,7 @@ class SarvamHttpTTSSettings(TTSSettings):
 
 
 @dataclass
-class SarvamWSTTSSettings(TTSSettings):
+class SarvamTTSSettings(TTSSettings):
     """Settings for Sarvam WebSocket TTS service.
 
     Parameters:
@@ -686,7 +686,7 @@ class SarvamTTSService(InterruptibleTTSService):
     See https://docs.sarvam.ai/api-reference-docs/text-to-speech/stream for API details.
     """
 
-    _settings: SarvamWSTTSSettings
+    _settings: SarvamTTSSettings
 
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam TTS WebSocket service.
@@ -841,7 +841,7 @@ class SarvamTTSService(InterruptibleTTSService):
             pace = max(pace_min, min(pace_max, pace))
 
         # Build base settings
-        self._settings = SarvamWSTTSSettings(
+        self._settings = SarvamTTSSettings(
             target_language_code=(
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
@@ -956,9 +956,10 @@ class SarvamTTSService(InterruptibleTTSService):
     async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a settings update and resend config if voice changed."""
         changed = await super()._update_settings(update)
-        if "voice" in changed:
+
+        if changed:
             await self._send_config()
-        self._warn_unhandled_updated_settings(changed.keys() - {"voice"})
+
         return changed
 
     async def _connect(self):
