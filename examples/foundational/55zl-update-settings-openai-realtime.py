@@ -22,11 +22,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.openai.realtime import events
 from pipecat.services.openai.realtime.llm import (
     OpenAIRealtimeLLMService,
     OpenAIRealtimeLLMSettings,
 )
-from pipecat.services.openai_realtime import events
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams

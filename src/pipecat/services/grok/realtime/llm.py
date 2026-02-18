@@ -56,7 +56,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
@@ -94,7 +94,9 @@ class GrokRealtimeLLMSettings(LLMSettings):
         session_properties: Grok Realtime session configuration.
     """
 
-    session_properties: Any = field(default_factory=lambda: NOT_GIVEN)
+    session_properties: events.SessionProperties | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class GrokRealtimeLLMService(LLMService):
@@ -294,6 +296,27 @@ class GrokRealtimeLLMService(LLMService):
     # Standard AIService frame handling
     #
 
+    def _ensure_audio_config(self, input_sample_rate: int, output_sample_rate: int):
+        """Ensure session_properties.audio has input and output configs.
+
+        Fills in any missing audio configuration using the given sample rates.
+
+        Args:
+            input_sample_rate: Sample rate for audio input (Hz).
+            output_sample_rate: Sample rate for audio output (Hz).
+        """
+        props = self._settings.session_properties
+        if not props.audio:
+            props.audio = events.AudioConfiguration()
+        if not props.audio.input:
+            props.audio.input = events.AudioInput(
+                format=events.PCMAudioFormat(rate=input_sample_rate)
+            )
+        if not props.audio.output:
+            props.audio.output = events.AudioOutput(
+                format=events.PCMAudioFormat(rate=output_sample_rate)
+            )
+
     async def start(self, frame: StartFrame):
         """Start the service and establish WebSocket connection.
 
@@ -301,23 +324,7 @@ class GrokRealtimeLLMService(LLMService):
             frame: The start frame triggering service initialization.
         """
         await super().start(frame)
-
-        # Ensure audio configuration exists with both input and output
-        if not self._settings.session_properties.audio:
-            self._settings.session_properties.audio = events.AudioConfiguration()
-
-        # Fill in missing input configuration
-        if not self._settings.session_properties.audio.input:
-            self._settings.session_properties.audio.input = events.AudioInput(
-                format=events.PCMAudioFormat(rate=frame.audio_in_sample_rate)
-            )
-
-        # Fill in missing output configuration
-        if not self._settings.session_properties.audio.output:
-            self._settings.session_properties.audio.output = events.AudioOutput(
-                format=events.PCMAudioFormat(rate=frame.audio_out_sample_rate)
-            )
-
+        self._ensure_audio_config(frame.audio_in_sample_rate, frame.audio_out_sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -458,9 +465,23 @@ class GrokRealtimeLLMService(LLMService):
 
     async def _update_settings(self, update):
         """Apply a settings update, sending a session update if needed."""
+        # Capture current sample rates before the update replaces them.
+        input_rate = self._get_configured_sample_rate("input")
+        output_rate = self._get_configured_sample_rate("output")
+
         changed = await super()._update_settings(update)
+
         if "session_properties" in changed:
+            if input_rate and output_rate:
+                self._ensure_audio_config(input_rate, output_rate)
+            else:
+                logger.warning(
+                    "Attempting to apply session properties update without configured sample rates. "
+                    "Audio configuration may be incomplete."
+                )
             await self._send_session_update()
+
+        self._warn_unhandled_updated_settings(changed.keys() - {"session_properties"})
         return changed
 
     async def _send_session_update(self):
