@@ -100,8 +100,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info('Updating LMNT TTS settings: voice="lily"')
-        await task.queue_frame(TTSUpdateSettingsFrame(update=LmntTTSSettings(voice="lily")))
+        logger.info('Updating LMNT TTS settings: voice="tyler"')
+        await task.queue_frame(TTSUpdateSettingsFrame(update=LmntTTSSettings(voice="tyler")))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
