@@ -101,9 +101,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Sarvam STT settings: language=hi")
+        logger.info("Updating Sarvam STT settings: language=en-IN")
         await task.queue_frame(
-            STTUpdateSettingsFrame(update=SarvamSTTSettings(language=Language.HI))
+            STTUpdateSettingsFrame(update=SarvamSTTSettings(language=Language.EN_IN))
         )
 
     @transport.event_handler("on_client_disconnected")
