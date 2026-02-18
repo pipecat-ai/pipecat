@@ -54,7 +54,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     tts = HumeTTSService(
         api_key=os.getenv("HUME_API_KEY"),
-        voice_id="ee7ea9f8-c99a-4516-a65d-80235fa3acdc",
+        voice_id="f898a92e-685f-43fa-985b-a46920f0650b",
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -100,10 +100,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info('Updating Hume TTS settings: speed=1.5, description="Speak with excitement"')
+        logger.info('Updating Hume TTS settings: speed=2.0, description="Speak with excitement"')
         await task.queue_frame(
             TTSUpdateSettingsFrame(
-                update=HumeTTSSettings(speed=1.5, description="Speak with excitement")
+                update=HumeTTSSettings(speed=2.0, description="Speak with excitement")
             )
         )
 
