@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings
+from pipecat.services.cartesia.tts import CartesiaTTSService, CartesiaTTSSettings, GenerationConfig
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -103,8 +103,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Cartesia TTS settings: speed=fast")
-        await task.queue_frame(TTSUpdateSettingsFrame(update=CartesiaTTSSettings(speed="fast")))
+        logger.info("Updating Cartesia TTS settings: speed increased to 1.5")
+        await task.queue_frame(
+            TTSUpdateSettingsFrame(
+                update=CartesiaTTSSettings(generation_config=GenerationConfig(speed=1.5))
+            )
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
