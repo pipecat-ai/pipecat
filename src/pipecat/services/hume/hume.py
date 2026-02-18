@@ -126,6 +126,7 @@ class HumeSTSService(LLMService):
         if isinstance(frame, self._start_frame_cls):
             logger.info("Starting Hume service")
             await self._connect()
+            await self.push_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame):
             if self.active_conversation_id is not None and self.track_cancelled_conversations:
                 self.cancelled_conversation_ids.append(self.active_conversation_id)
