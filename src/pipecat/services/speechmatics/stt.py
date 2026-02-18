@@ -508,12 +508,14 @@ class SpeechmaticsSTTService(STTService):
         needs_reconnect = bool(changed.keys() - no_reconnect)
 
         if needs_reconnect:
+            logger.debug(f"{self} settings update requires reconnect: {changed.keys()}")
             # Connection-level fields changed — rebuild the SDK config
             # from the now-updated self._settings, then reconnect.
             self._config = self._build_config()
             await self._disconnect()
             await self._connect()
-        elif changed & SpeechmaticsSTTSettings.HOT_FIELDS:
+        elif changed.keys() & SpeechmaticsSTTSettings.HOT_FIELDS:
+            logger.debug(f"{self} applying hot settings update: {changed.keys()}")
             if self._config.enable_diarization:
                 # Only hot-updatable fields changed — push to the live session.
                 self._config.speaker_config.focus_speakers = self._settings.focus_speakers
@@ -522,11 +524,17 @@ class SpeechmaticsSTTService(STTService):
                 if self._client:
                     self._client.update_diarization_config(self._config.speaker_config)
             else:
-                # Diarization not enabled — need a full reconnect to apply.
-                self._config = self._build_config()
-                await self._disconnect()
-                await self._connect()
-        # LOCAL_FIELDS: already applied by super(); nothing else to do.
+                logger.debug(
+                    f"{self} hot settings updated but diarization not enabled: {changed.keys()}. ignoring."
+                )
+                # Diarization not enabled — the new settings will take effect
+                # if/when diarization is enabled, which does require a reconnect.
+        elif changed.keys() & SpeechmaticsSTTSettings.LOCAL_FIELDS:
+            logger.debug(
+                f"{self} local settings update, no special action required: {changed.keys()}"
+            )
+            # Only local fields changed — no need to push to the STT engine,
+            # the new settings will take effect immediately.
 
         return changed
 

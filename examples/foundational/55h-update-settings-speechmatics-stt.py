@@ -51,7 +51,14 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))
+    stt = SpeechmaticsSTTService(
+        api_key=os.getenv("SPEECHMATICS_API_KEY"),
+        params=SpeechmaticsSTTService.InputParams(
+            enable_diarization=True,
+            speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+            speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
+        ),
+    )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -104,6 +111,24 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating Speechmatics STT settings: language=es")
         await task.queue_frame(
             STTUpdateSettingsFrame(update=SpeechmaticsSTTSettings(language=Language.ES))
+        )
+
+        await asyncio.sleep(10)
+        logger.info("Updating Speechmatics STT settings: focus_speakers=['S1']")
+        await task.queue_frame(
+            STTUpdateSettingsFrame(update=SpeechmaticsSTTSettings(focus_speakers=["S1"]))
+        )
+
+        await asyncio.sleep(10)
+        logger.info(
+            "Updating Speechmatics STT settings: speaker_active_format=<SPEAKER_{speaker_id}>{text}</SPEAKER_{speaker_id}>"
+        )
+        await task.queue_frame(
+            STTUpdateSettingsFrame(
+                update=SpeechmaticsSTTSettings(
+                    speaker_active_format="<SPEAKER_{speaker_id}>{text}</SPEAKER_{speaker_id}>"
+                )
+            )
         )
 
     @transport.event_handler("on_client_disconnected")
