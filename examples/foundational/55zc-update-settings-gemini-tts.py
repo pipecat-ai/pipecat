@@ -25,6 +25,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.tts import GeminiTTSService, GeminiTTSSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -52,7 +53,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = GeminiTTSService(api_key=os.getenv("GOOGLE_API_KEY"))
+    tts = GeminiTTSService(
+        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        model="gemini-2.5-flash-tts",
+        voice_id="Charon",
+        params=GeminiTTSService.InputParams(
+            language=Language.EN_US,
+            prompt="You are a helpful AI assistant. Speak in a natural, conversational tone.",
+        ),
+    )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
