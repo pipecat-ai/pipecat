@@ -12,7 +12,7 @@ for generating speech from text using various voice models.
 
 import json
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -182,6 +182,23 @@ class DeepgramTTSService(WebsocketTTSService):
             self._receive_task = None
 
         await self._disconnect_websocket()
+
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+        """Apply a settings update.
+
+        Args:
+            update: A :class:`TTSSettings` (or ``DeepgramTTSSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(update)
+
+        if changed:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
 
     async def _connect_websocket(self):
         """Connect to Deepgram WebSocket API with configured settings."""
