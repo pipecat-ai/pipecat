@@ -146,8 +146,10 @@ class AzureSTTService(STTService):
         # if "language" in changed:
         #     self._speech_config.speech_recognition_language = self._settings.language
         #     if self._speech_recognizer:
-        #         self._speech_recognizer.stop_continuous_recognition_async()
-        #         self._speech_recognizer.start_continuous_recognition_async()
+        #         # Requires refactoring to set up and tear down recognizer, as
+        #         # language is applied at recognizer initialization
+        #         await self._disconnect()
+        #         await self._connect()
 
         self._warn_unhandled_updated_settings(changed)
 
