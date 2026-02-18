@@ -5,18 +5,23 @@
 #
 
 import asyncio
+import datetime
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
+    LLMContextAggregatorPair,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.ultravox.llm import (
@@ -52,17 +57,22 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
+    system_prompt = "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way."
+
     llm = UltravoxRealtimeLLMService(
         params=OneShotInputParams(
             api_key=os.getenv("ULTRAVOX_API_KEY"),
-            system_prompt="You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            system_prompt=system_prompt,
+            temperature=0.3,
+            max_duration=datetime.timedelta(minutes=3),
         ),
+        one_shot_selected_tools=ToolsSchema(standard_tools=[]),
     )
 
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
+            "content": system_prompt,
         },
     ]
 
@@ -88,15 +98,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info("Updating Ultravox Realtime LLM settings: temperature=0.1")
+        logger.info("Updating Ultravox Realtime LLM settings: output_medium=text")
         await task.queue_frame(
-            LLMUpdateSettingsFrame(update=UltravoxRealtimeLLMSettings(temperature=0.1))
+            LLMUpdateSettingsFrame(update=UltravoxRealtimeLLMSettings(output_medium="text"))
+        )
+
+        await asyncio.sleep(10)
+        logger.info("Updating Ultravox Realtime LLM settings: output_medium=voice")
+        await task.queue_frame(
+            LLMUpdateSettingsFrame(update=UltravoxRealtimeLLMSettings(output_medium="voice"))
         )
 
     @transport.event_handler("on_client_disconnected")
