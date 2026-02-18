@@ -17,7 +17,7 @@ Features:
 """
 
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from camb import StreamTtsOutputConfiguration
 from camb.client import AsyncCambAI

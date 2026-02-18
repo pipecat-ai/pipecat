@@ -25,6 +25,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.camb.tts import CambTTSService, CambTTSSettings
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -97,12 +98,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info('Updating Camb TTS settings: user_instructions="Speak enthusiastically"')
-        await task.queue_frame(
-            TTSUpdateSettingsFrame(
-                update=CambTTSSettings(user_instructions="Speak enthusiastically")
-            )
-        )
+        logger.info("Updating Camb TTS settings: language -> Spanish")
+        await task.queue_frame(TTSUpdateSettingsFrame(update=CambTTSSettings(language=Language.ES)))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
