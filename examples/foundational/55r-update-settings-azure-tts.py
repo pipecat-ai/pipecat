@@ -99,14 +99,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
-        async def update_settings():
-            await asyncio.sleep(10)
-            logger.info('Updating Azure TTS settings: rate="1.3", style="cheerful"')
-            await task.queue_frame(
-                TTSUpdateSettingsFrame(update=AzureTTSSettings(rate="1.3", style="cheerful"))
-            )
-
-        asyncio.create_task(update_settings())
+        await asyncio.sleep(10)
+        logger.info('Updating Azure TTS settings: rate="1.3", style="cheerful"')
+        await task.queue_frame(
+            TTSUpdateSettingsFrame(update=AzureTTSSettings(rate="1.3", style="cheerful"))
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

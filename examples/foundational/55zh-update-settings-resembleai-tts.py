@@ -99,16 +99,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
-        async def update_settings():
-            await asyncio.sleep(10)
-            logger.info("Updating ResembleAI TTS settings: voice (changed)")
-            await task.queue_frame(
-                TTSUpdateSettingsFrame(
-                    update=ResembleAITTSSettings(voice=os.getenv("RESEMBLEAI_VOICE_ID_ALT", ""))
-                )
+        await asyncio.sleep(10)
+        logger.info("Updating ResembleAI TTS settings: voice (changed)")
+        await task.queue_frame(
+            TTSUpdateSettingsFrame(
+                update=ResembleAITTSSettings(voice=os.getenv("RESEMBLEAI_VOICE_ID_ALT", ""))
             )
-
-        asyncio.create_task(update_settings())
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

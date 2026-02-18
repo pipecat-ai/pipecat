@@ -96,16 +96,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
-        async def update_settings():
-            await asyncio.sleep(10)
-            logger.info('Updating Camb TTS settings: user_instructions="Speak enthusiastically"')
-            await task.queue_frame(
-                TTSUpdateSettingsFrame(
-                    update=CambTTSSettings(user_instructions="Speak enthusiastically")
-                )
+        await asyncio.sleep(10)
+        logger.info('Updating Camb TTS settings: user_instructions="Speak enthusiastically"')
+        await task.queue_frame(
+            TTSUpdateSettingsFrame(
+                update=CambTTSSettings(user_instructions="Speak enthusiastically")
             )
-
-        asyncio.create_task(update_settings())
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
