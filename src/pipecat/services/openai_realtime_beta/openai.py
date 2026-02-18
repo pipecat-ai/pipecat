@@ -115,6 +115,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
+        push_silence_after_stop: bool = False,
+        silence_time_s: float = 2.0,
         **kwargs,
     ):
         """Initialize the OpenAI Realtime Beta LLM service.
@@ -151,6 +153,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         )
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
+        self._push_silence_after_stop = push_silence_after_stop
+        self._silence_time_s = silence_time_s
         self._websocket = None
         self._receive_task = None
         self._context = None
@@ -554,6 +558,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             await self.push_frame(TTSStoppedFrame())
             # Don't clear the self._current_audio_response here. We need to wait until we
             # receive a BotStoppedSpeakingFrame from the output transport.
+            if self._push_silence_after_stop:
+                silence_num_bytes = int(self._silence_time_s * 24000 * 2)  # 16-bit
+                await self.push_frame(
+                    TTSAudioRawFrame(
+                        audio=b"\x00" * silence_num_bytes,
+                        sample_rate=24000,
+                        num_channels=1,
+                    )
+                )
 
     async def _handle_evt_conversation_item_created(self, evt):
         await self._call_event_handler("on_conversation_item_created", evt.item.id, evt.item)
