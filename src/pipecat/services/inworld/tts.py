@@ -70,7 +70,7 @@ class InworldHttpTTSService(WordTTSService):
 
         temperature: Optional[float] = None
         speaking_rate: Optional[float] = None
-        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = None
+        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC"
 
     def __init__(
         self,
@@ -442,7 +442,7 @@ class InworldTTSService(AudioContextWordTTSService):
         max_buffer_delay_ms: Optional[int] = None
         buffer_char_threshold: Optional[int] = None
         auto_mode: Optional[bool] = True
-        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = None
+        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC"
 
     def __init__(
         self,
