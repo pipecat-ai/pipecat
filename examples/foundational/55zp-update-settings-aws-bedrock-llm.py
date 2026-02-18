@@ -57,7 +57,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = AWSBedrockLLMService(model="anthropic.claude-sonnet-4-20250514-v1:0")
+    llm = AWSBedrockLLMService(
+        aws_region="us-west-2",
+        model="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        params=AWSBedrockLLMService.InputParams(temperature=0.8),
+    )
 
     messages = [
         {
