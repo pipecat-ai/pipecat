@@ -53,8 +53,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = ResembleAITTSService(
-        api_key=os.getenv("RESEMBLEAI_API_KEY"),
-        voice_id=os.getenv("RESEMBLEAI_VOICE_ID", ""),
+        api_key=os.getenv("RESEMBLE_API_KEY"),
+        voice_id=os.getenv("RESEMBLE_VOICE_UUID"),
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -103,7 +103,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info("Updating ResembleAI TTS settings: voice (changed)")
         await task.queue_frame(
             TTSUpdateSettingsFrame(
-                update=ResembleAITTSSettings(voice=os.getenv("RESEMBLEAI_VOICE_ID_ALT", ""))
+                update=ResembleAITTSSettings(voice=os.getenv("RESEMBLE_VOICE_UUID_ALT"))
             )
         )
 
