@@ -97,10 +97,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
         await asyncio.sleep(10)
-        logger.info('Updating AWS Polly TTS settings: rate="fast", pitch="+10%"')
-        await task.queue_frame(
-            TTSUpdateSettingsFrame(update=AWSPollyTTSSettings(rate="fast", pitch="+10%"))
-        )
+        logger.info('Updating AWS Polly TTS settings: rate="fast"')
+        await task.queue_frame(TTSUpdateSettingsFrame(update=AWSPollyTTSSettings(rate="fast")))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
