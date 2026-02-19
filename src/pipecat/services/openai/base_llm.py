@@ -375,20 +375,29 @@ class BaseOpenAILLMService(LLMService):
             else self._stream_chat_completions_universal_context(context)
         )
 
-        # Ensure stream is closed on cancellation/exception to prevent socket
-        # leaks. OpenAI's AsyncStream uses close(), async generators use aclose().
+        # Ensure stream and its async iterator are closed on cancellation/exception
+        # to prevent socket leaks and uvloop crashes. Closing the iterator first
+        # cascades cleanup through nested async generators (httpx/httpcore internals),
+        # preventing uvloop's broken asyncgen finalizer from firing on Python 3.12+
+        # (MagicStack/uvloop#699).
         @asynccontextmanager
         async def _closing(stream):
+            chunk_iter = stream.__aiter__()
             try:
-                yield stream
+                yield chunk_iter
             finally:
-                if hasattr(stream, "aclose"):
-                    await stream.aclose()
-                elif hasattr(stream, "close"):
+                # Close the iterator first to cascade cleanup through
+                # nested async generators (httpx/httpcore internals).
+                if hasattr(chunk_iter, "aclose"):
+                    await chunk_iter.aclose()
+                # Then close the stream to release HTTP resources.
+                if hasattr(stream, "close"):
                     await stream.close()
+                elif hasattr(stream, "aclose"):
+                    await stream.aclose()
 
-        async with _closing(chunk_stream):
-            async for chunk in chunk_stream:
+        async with _closing(chunk_stream) as chunk_iter:
+            async for chunk in chunk_iter:
                 if chunk.usage:
                     cached_tokens = (
                         chunk.usage.prompt_tokens_details.cached_tokens
