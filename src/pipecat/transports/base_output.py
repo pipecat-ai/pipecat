@@ -613,6 +613,11 @@ class BaseOutputTransport(FrameProcessor):
             downstream_frame.transport_destination = self._destination
             upstream_frame = BotStartedSpeakingFrame()
             upstream_frame.transport_destination = self._destination
+
+            # Setting the siblings id
+            upstream_frame.broadcasted_sibling_id = downstream_frame.id
+            downstream_frame.broadcasted_sibling_id = upstream_frame.id
+
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
@@ -635,6 +640,11 @@ class BaseOutputTransport(FrameProcessor):
             downstream_frame.transport_destination = self._destination
             upstream_frame = BotStoppedSpeakingFrame()
             upstream_frame.transport_destination = self._destination
+
+            # Setting the siblings id
+            upstream_frame.broadcasted_sibling_id = downstream_frame.id
+            downstream_frame.broadcasted_sibling_id = upstream_frame.id
+
             await self._transport.push_frame(downstream_frame)
             await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
