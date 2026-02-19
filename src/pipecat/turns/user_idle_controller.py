@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    UserIdleTimeoutUpdateFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -51,12 +52,13 @@ class UserIdleController(BaseObject):
     def __init__(
         self,
         *,
-        user_idle_timeout: float,
+        user_idle_timeout: float = 0,
     ):
         """Initialize the user idle controller.
 
         Args:
             user_idle_timeout: Timeout in seconds before considering the user idle.
+                0 disables idle detection.
         """
         super().__init__()
 
@@ -96,6 +98,12 @@ class UserIdleController(BaseObject):
         Args:
             frame: The frame to be processed.
         """
+        if isinstance(frame, UserIdleTimeoutUpdateFrame):
+            self._user_idle_timeout = frame.timeout
+            if self._user_idle_timeout <= 0:
+                await self._cancel_idle_timer()
+            return
+
         if isinstance(frame, BotStoppedSpeakingFrame):
             # Only start the timer if the user isn't mid-turn and no function
             # calls are pending.
@@ -128,6 +136,8 @@ class UserIdleController(BaseObject):
 
     async def _start_idle_timer(self):
         """Start (or restart) the idle timer."""
+        if self._user_idle_timeout <= 0:
+            return
         await self._cancel_idle_timer()
         self._idle_timer_task = self.task_manager.create_task(
             self._idle_timer_expired(),

@@ -2146,6 +2146,20 @@ class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame):
 
 
 @dataclass
+class UserIdleTimeoutUpdateFrame(SystemFrame):
+    """Frame for updating the user idle timeout at runtime.
+
+    Setting timeout to 0 disables idle detection. Setting a positive value
+    enables it.
+
+    Parameters:
+        timeout: The new idle timeout in seconds. 0 disables idle detection.
+    """
+
+    timeout: float
+
+
+@dataclass
 class VADParamsUpdateFrame(ControlFrame):
     """Frame for updating VAD parameters.
 
