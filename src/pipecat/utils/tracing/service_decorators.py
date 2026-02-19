@@ -400,9 +400,10 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         # Store original method and output aggregator
                         original_push_frame = self.push_frame
                         output_text = ""  # Simple string accumulation
+                        function_calls_info = []
 
                         async def traced_push_frame(frame, direction=None):
-                            nonlocal output_text
+                            nonlocal output_text, function_calls_info
                             # Capture text from LLMTextFrame during streaming
                             if (
                                 hasattr(frame, "__class__")
@@ -410,6 +411,27 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                                 and hasattr(frame, "text")
                             ):
                                 output_text += frame.text
+                            # Capture function calls from FunctionCallsStartedFrame during downstream push
+                            elif (
+                                direction is None
+                                and hasattr(frame, "__class__")
+                                and frame.__class__.__name__ == "FunctionCallsStartedFrame"
+                                and hasattr(frame, "function_calls")
+                            ):
+                                for fc in frame.function_calls:
+                                    call_info = {
+                                        "name": fc.function_name,
+                                        "call_id": fc.tool_call_id,
+                                    }
+                                    if fc.arguments:
+                                        try:
+                                            args_str = json.dumps(fc.arguments)
+                                            if len(args_str) > 500:
+                                                args_str = args_str[:500] + "..."
+                                            call_info["arguments"] = args_str
+                                        except Exception:
+                                            call_info["arguments"] = str(fc.arguments)[:500]
+                                    function_calls_info.append(call_info)
 
                             # Call original
                             if direction is not None:
@@ -537,6 +559,18 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         # Add aggregated output after function completes, if available
                         if output_text:
                             current_span.set_attribute("output", output_text)
+
+                        if function_calls_info:
+                            current_span.set_attribute(
+                                "function_calls", json.dumps(function_calls_info)
+                            )
+                            current_span.set_attribute(
+                                "function_calls.count", len(function_calls_info)
+                            )
+                            current_span.set_attribute(
+                                "function_calls.all_names",
+                                ",".join(c["name"] for c in function_calls_info),
+                            )
 
                         return result
 
