@@ -131,6 +131,7 @@ class Frame:
     id: int = field(init=False)
     name: str = field(init=False)
     pts: Optional[int] = field(init=False)
+    broadcasted: bool = field(init=False)
     metadata: Dict[str, Any] = field(init=False)
     transport_source: Optional[str] = field(init=False)
     transport_destination: Optional[str] = field(init=False)
@@ -139,6 +140,7 @@ class Frame:
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
         self.pts: Optional[int] = None
+        self.broadcasted: bool = False
         self.metadata: Dict[str, Any] = {}
         self.transport_source: Optional[str] = None
         self.transport_destination: Optional[str] = None

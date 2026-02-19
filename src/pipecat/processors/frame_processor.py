@@ -787,8 +787,12 @@ class FrameProcessor(BaseObject):
             frame_cls: The class of the frame to be broadcasted.
             **kwargs: Keyword arguments to be passed to the frame's constructor.
         """
-        await self.push_frame(frame_cls(**kwargs))
-        await self.push_frame(frame_cls(**kwargs), FrameDirection.UPSTREAM)
+        downstream_frame = frame_cls(**kwargs)
+        downstream_frame.broadcasted = True
+        await self.push_frame(downstream_frame)
+        upstream_frame = frame_cls(**kwargs)
+        upstream_frame.broadcasted = True
+        await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
     async def broadcast_frame_instance(self, frame: Frame):
         """Broadcasts a frame instance upstream and downstream.
@@ -815,11 +819,13 @@ class FrameProcessor(BaseObject):
         new_frame = frame_cls(**init_fields)
         for k, v in extra_fields.items():
             setattr(new_frame, k, v)
+        new_frame.broadcasted = True
         await self.push_frame(new_frame)
 
         new_frame = frame_cls(**init_fields)
         for k, v in extra_fields.items():
             setattr(new_frame, k, v)
+        new_frame.broadcasted = True
         await self.push_frame(new_frame, FrameDirection.UPSTREAM)
 
     async def __start(self, frame: StartFrame):

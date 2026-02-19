@@ -1220,10 +1220,9 @@ class RTVIObserver(BaseObserver):
         frame = data.frame
         direction = data.direction
 
-        # Only process downstream frames. Some frames are broadcast in both
-        # directions (e.g. UserStartedSpeakingFrame, FunctionCallResultFrame),
-        # and we only want to send one RTVI message per event.
-        if direction != FrameDirection.DOWNSTREAM:
+        # For broadcasted frames (pushed in both directions), only process
+        # the downstream copy to avoid sending duplicate RTVI messages.
+        if frame.broadcasted and direction != FrameDirection.DOWNSTREAM:
             return
 
         # If we have already seen this frame, let's skip it.
