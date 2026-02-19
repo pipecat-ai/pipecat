@@ -566,9 +566,24 @@ class CartesiaTTSService(AudioContextWordTTSService):
     async def _process_messages(self):
         async for message in self._get_websocket():
             msg = json.loads(message)
-            if not msg or not self.audio_context_available(msg["context_id"]):
+            if not msg:
                 continue
-            ctx_id = msg["context_id"]
+
+            ctx_id = msg.get("context_id")
+            if not ctx_id:
+                if self._context_id:
+                    logger.warning(
+                        f"{self}: received message without context_id, "
+                        f"using current context {self._context_id}"
+                    )
+                    ctx_id = self._context_id
+                else:
+                    logger.warning(f"{self}: received message without context_id, skipping")
+                    continue
+
+            if not self.audio_context_available(ctx_id):
+                logger.debug(f"{self}: skipping message for unavailable context {ctx_id}")
+                continue
             if msg["type"] == "done":
                 await self.stop_ttfb_metrics()
                 await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
