@@ -788,10 +788,10 @@ class FrameProcessor(BaseObject):
             **kwargs: Keyword arguments to be passed to the frame's constructor.
         """
         downstream_frame = frame_cls(**kwargs)
-        downstream_frame.broadcasted = True
-        await self.push_frame(downstream_frame)
         upstream_frame = frame_cls(**kwargs)
-        upstream_frame.broadcasted = True
+        downstream_frame.broadcasted_sibling_id = upstream_frame.id
+        upstream_frame.broadcasted_sibling_id = downstream_frame.id
+        await self.push_frame(downstream_frame)
         await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
     async def broadcast_frame_instance(self, frame: Frame):
@@ -816,17 +816,18 @@ class FrameProcessor(BaseObject):
             if not f.init and f.name not in ("id", "name")
         }
 
-        new_frame = frame_cls(**init_fields)
+        downstream_frame = frame_cls(**init_fields)
         for k, v in extra_fields.items():
-            setattr(new_frame, k, v)
-        new_frame.broadcasted = True
-        await self.push_frame(new_frame)
+            setattr(downstream_frame, k, v)
 
-        new_frame = frame_cls(**init_fields)
+        upstream_frame = frame_cls(**init_fields)
         for k, v in extra_fields.items():
-            setattr(new_frame, k, v)
-        new_frame.broadcasted = True
-        await self.push_frame(new_frame, FrameDirection.UPSTREAM)
+            setattr(upstream_frame, k, v)
+
+        downstream_frame.broadcasted_sibling_id = upstream_frame.id
+        upstream_frame.broadcasted_sibling_id = downstream_frame.id
+        await self.push_frame(downstream_frame)
+        await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
     async def __start(self, frame: StartFrame):
         """Handle the start frame to initialize processor state.
