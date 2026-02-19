@@ -4,53 +4,48 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This example demonstrates using the Perplexity API as a drop-in replacement for OpenAI.
-
-Note that while this file is in the function-calling examples, Perplexity's API does not
-currently support function calling. The example shows basic chat completion functionality
-using Perplexity's API while maintaining compatibility with the OpenAI interface.
-"""
-
+import asyncio
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    AssistantTurnStoppedMessage,
     LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.perplexity.llm import PerplexityLLMService
+from pipecat.services.azure.realtime.llm import AzureRealtimeLLMService
+from pipecat.services.openai.realtime import events
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -58,35 +53,26 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    llm = AzureRealtimeLLMService(
+        api_key=os.getenv("AZURE_REALTIME_API_KEY"),
+        base_url=os.getenv("AZURE_REALTIME_BASE_URL"),
     )
-
-    llm = PerplexityLLMService(api_key=os.getenv("PERPLEXITY_API_KEY"))
 
     messages = [
         {
-            "role": "user",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way, but try to be brief.",
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
     context = LLMContext(messages)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            stt,
             user_aggregator,
             llm,
-            tts,
             transport.output(),
             assistant_aggregator,
         ]
@@ -101,11 +87,36 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
+    @assistant_aggregator.event_handler("on_assistant_turn_stopped")
+    async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}assistant: {message.content}"
+        logger.info(f"Transcript: {line}")
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
+
+        await asyncio.sleep(10)
+        logger.info("Updating Azure Realtime LLM settings: output_modalities=['text']")
+        await task.queue_frame(
+            LLMUpdateSettingsFrame(
+                update=OpenAIRealtimeLLMSettings(
+                    session_properties=events.SessionProperties(output_modalities=["text"])
+                )
+            )
+        )
+
+        await asyncio.sleep(10)
+        logger.info("Updating Azure Realtime LLM settings: output_modalities=['audio']")
+        await task.queue_frame(
+            LLMUpdateSettingsFrame(
+                update=OpenAIRealtimeLLMSettings(
+                    session_properties=events.SessionProperties(output_modalities=["audio"])
+                )
+            )
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

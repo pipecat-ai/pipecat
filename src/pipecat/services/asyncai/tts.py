@@ -179,6 +179,20 @@ class AsyncAITTSService(AudioContextTTSService):
         self._keepalive_task = None
         self._context_id = None
 
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+        """Apply a settings update.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(update)
+
+        if not changed:
+            return changed
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
+
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 

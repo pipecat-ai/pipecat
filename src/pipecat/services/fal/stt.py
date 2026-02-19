@@ -251,11 +251,6 @@ class FalSTTService(SegmentedSTTService):
         """
         return language_to_fal_language(language)
 
-    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
-        """Apply a settings update."""
-        changed = await super()._update_settings(update)
-        return changed
-
     @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[str] = None

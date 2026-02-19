@@ -4,53 +4,44 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This example demonstrates using the Perplexity API as a drop-in replacement for OpenAI.
-
-Note that while this file is in the function-calling examples, Perplexity's API does not
-currently support function calling. The example shows basic chat completion functionality
-using Perplexity's API while maintaining compatibility with the OpenAI interface.
-"""
-
+import asyncio
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-    LLMUserAggregatorParams,
-)
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.perplexity.llm import PerplexityLLMService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMSettings
+from pipecat.services.google.gemini_live.llm_vertex import GeminiLiveVertexLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -58,35 +49,27 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    llm = GeminiLiveVertexLLMService(
+        credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
+        project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
+        location=os.getenv("GOOGLE_CLOUD_LOCATION"),
     )
-
-    llm = PerplexityLLMService(api_key=os.getenv("PERPLEXITY_API_KEY"))
 
     messages = [
         {
-            "role": "user",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way, but try to be brief.",
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be spoken aloud, so avoid special characters that can't easily be spoken, such as emojis or bullet points. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
     context = LLMContext(messages)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            stt,
             user_aggregator,
             llm,
-            tts,
             transport.output(),
             assistant_aggregator,
         ]
@@ -104,8 +87,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
+
+        await asyncio.sleep(10)
+        logger.info("Updating Gemini Live Vertex LLM settings: temperature=0.1")
+        await task.queue_frame(
+            LLMUpdateSettingsFrame(update=GeminiLiveLLMSettings(temperature=0.1))
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

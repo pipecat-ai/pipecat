@@ -128,9 +128,8 @@ class GradiumTTSService(InterruptibleWordTTSService):
         Returns:
             Dict mapping changed field names to their previous values.
         """
-        prev_voice = self._voice_id
         changed = await super()._update_settings(update)
-        if self._voice_id != prev_voice:
+        if "voice" in changed:
             await self._disconnect()
             await self._connect()
         else:
