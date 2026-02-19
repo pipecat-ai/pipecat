@@ -12,7 +12,8 @@ gRPC API for high-quality speech synthesis.
 
 import asyncio
 import os
-from typing import AsyncGenerator, AsyncIterator, Generator, Mapping, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, AsyncIterator, Generator, Mapping, Optional
 
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
@@ -42,6 +44,17 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class NvidiaTTSSettings(TTSSettings):
+    """Settings for NVIDIA Riva TTS service.
+
+    Parameters:
+        quality: Audio quality setting (0-100).
+    """
+
+    quality: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class NvidiaTTSService(TTSService):
     """NVIDIA Riva text-to-speech service.
 
@@ -49,6 +62,8 @@ class NvidiaTTSService(TTSService):
     cloud-based TTS models. Supports multiple voices, languages, and
     configurable quality settings.
     """
+
+    _settings: NvidiaTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Riva TTS configuration.
@@ -94,13 +109,14 @@ class NvidiaTTSService(TTSService):
 
         self._server = server
         self._api_key = api_key
-        self._voice_id = voice_id
-        self._language_code = params.language
-        self._quality = params.quality
         self._function_id = model_function_map.get("function_id")
         self._use_ssl = use_ssl
+        self._settings = NvidiaTTSSettings(
+            voice=voice_id,
+            language=params.language,
+            quality=params.quality,
+        )
         self.set_model_name(model_function_map.get("model_name"))
-        self._voice_id = voice_id
 
         self._service = None
         self._config = None
@@ -132,6 +148,18 @@ class NvidiaTTSService(TTSService):
                 DeprecationWarning,
                 stacklevel=2,
             )
+
+    async def _update_settings(self, update: NvidiaTTSSettings) -> dict[str, Any]:
+        """Apply a settings update.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(update)
+        if not changed:
+            return changed
+        # TODO: reconnect gRPC client to apply changed settings.
+        self._warn_unhandled_updated_settings(changed)
+        return changed
 
     def _initialize_client(self):
         if self._service is not None:
@@ -181,11 +209,11 @@ class NvidiaTTSService(TTSService):
         def read_audio_responses() -> Generator[rtts.SynthesizeSpeechResponse, None, None]:
             responses = self._service.synthesize_online(
                 text,
-                self._voice_id,
-                self._language_code,
+                self._settings.voice,
+                self._settings.language,
                 sample_rate_hz=self.sample_rate,
                 zero_shot_audio_prompt_file=None,
-                zero_shot_quality=self._quality,
+                zero_shot_quality=self._settings.quality,
                 custom_dictionary={},
             )
             return responses
