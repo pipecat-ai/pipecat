@@ -6,8 +6,6 @@
 
 """Simli video service for real-time avatar generation."""
 
-from cgitb import enable
-
 import asyncio
 import warnings
 from typing import Optional
