@@ -25,6 +25,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Set,
     Tuple,
     Union,
 )
@@ -1026,6 +1027,11 @@ class RTVIObserverParams:
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
         errors_enabled: [Deprecated] Indicates if errors messages should be sent.
+        ignored_sources: List of frame processors whose frames should be silently ignored
+            by this observer. Useful for suppressing RTVI messages from secondary pipeline
+            branches (e.g. a silent evaluation LLM) that should not be visible to clients.
+            Sources can also be added and removed dynamically via ``add_ignored_source()``
+            and ``remove_ignored_source()``.
         skip_aggregator_types: List of aggregation types to skip sending as tts/output messages.
             Note: if using this to avoid sending secure information, be sure to also disable
             bot_llm_enabled to avoid leaking through LLM messages.
@@ -1065,6 +1071,7 @@ class RTVIObserverParams:
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
     errors_enabled: Optional[bool] = None
+    ignored_sources: List[FrameProcessor] = field(default_factory=list)
     skip_aggregator_types: Optional[List[AggregationType | str]] = None
     bot_output_transforms: Optional[
         List[
@@ -1110,6 +1117,7 @@ class RTVIObserver(BaseObserver):
         self._rtvi = rtvi
         self._params = params or RTVIObserverParams()
 
+        self._ignored_sources: Set[FrameProcessor] = set(self._params.ignored_sources)
         self._frames_seen = set()
 
         self._bot_transcription = ""
@@ -1170,6 +1178,31 @@ class RTVIObserver(BaseObserver):
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
+    def add_ignored_source(self, source: FrameProcessor):
+        """Ignore all frames pushed by the given processor.
+
+        Any frame whose source matches ``source`` will be silently skipped,
+        preventing RTVI messages from being emitted for activity in that
+        processor. Useful for suppressing events from secondary pipeline
+        branches (e.g. a silent evaluation LLM) that should not be visible
+        to clients.
+
+        Args:
+            source: The frame processor to ignore.
+        """
+        self._ignored_sources.add(source)
+
+    def remove_ignored_source(self, source: FrameProcessor):
+        """Stop ignoring frames pushed by the given processor.
+
+        Reverses a previous call to ``add_ignored_source()``. If ``source``
+        was not previously ignored this is a no-op.
+
+        Args:
+            source: The frame processor to stop ignoring.
+        """
+        self._ignored_sources.discard(source)
+
     def _get_function_call_report_level(self, function_name: str) -> RTVIFunctionCallReportLevel:
         """Get the report level for a specific function call.
 
@@ -1219,6 +1252,10 @@ class RTVIObserver(BaseObserver):
         src = data.source
         frame = data.frame
         direction = data.direction
+
+        # Frames from explicitly ignored sources are always skipped.
+        if self._ignored_sources and src in self._ignored_sources:
+            return
 
         # For broadcast frames (pushed in both directions), only process
         # the downstream copy to avoid sending duplicate RTVI messages.
