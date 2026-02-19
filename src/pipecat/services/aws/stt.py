@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -57,11 +57,11 @@ class AWSTranscribeSTTSettings(STTSettings):
         enable_channel_identification: Whether to enable channel identification.
     """
 
-    sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
-    media_encoding: str = field(default_factory=lambda: NOT_GIVEN)
-    number_of_channels: int = field(default_factory=lambda: NOT_GIVEN)
-    show_speaker_label: bool = field(default_factory=lambda: NOT_GIVEN)
-    enable_channel_identification: bool = field(default_factory=lambda: NOT_GIVEN)
+    sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    media_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    number_of_channels: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    show_speaker_label: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_channel_identification: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AWSTranscribeSTTService(WebsocketSTTService):

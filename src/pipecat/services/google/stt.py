@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -383,17 +383,19 @@ class GoogleSTTSettings(STTSettings):
         enable_voice_activity_events: Detect voice activity in audio.
     """
 
-    languages: Any = field(default_factory=lambda: NOT_GIVEN)
-    language_codes: Any = field(default_factory=lambda: NOT_GIVEN)
-    use_separate_recognition_per_channel: Any = field(default_factory=lambda: NOT_GIVEN)
-    enable_automatic_punctuation: Any = field(default_factory=lambda: NOT_GIVEN)
-    enable_spoken_punctuation: Any = field(default_factory=lambda: NOT_GIVEN)
-    enable_spoken_emojis: Any = field(default_factory=lambda: NOT_GIVEN)
-    profanity_filter: Any = field(default_factory=lambda: NOT_GIVEN)
-    enable_word_time_offsets: Any = field(default_factory=lambda: NOT_GIVEN)
-    enable_word_confidence: Any = field(default_factory=lambda: NOT_GIVEN)
-    enable_interim_results: Any = field(default_factory=lambda: NOT_GIVEN)
-    enable_voice_activity_events: Any = field(default_factory=lambda: NOT_GIVEN)
+    languages: List[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_codes: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    use_separate_recognition_per_channel: bool | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    enable_automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_spoken_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_spoken_emojis: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_word_time_offsets: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_word_confidence: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_voice_activity_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GoogleSTTService(STTService):

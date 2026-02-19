@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -64,7 +64,9 @@ class AssemblyAISTTSettings(STTSettings):
         connection_params: Connection configuration parameters.
     """
 
-    connection_params: AssemblyAIConnectionParams = field(default_factory=lambda: NOT_GIVEN)
+    connection_params: AssemblyAIConnectionParams | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class AssemblyAISTTService(WebsocketSTTService):

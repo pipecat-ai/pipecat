@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -115,28 +115,30 @@ class SpeechmaticsSTTSettings(STTSettings):
         extra_params: Extra parameters for the STT engine.
     """
 
-    domain: str = field(default_factory=lambda: NOT_GIVEN)
-    turn_detection_mode: TurnDetectionMode = field(default_factory=lambda: NOT_GIVEN)
-    speaker_active_format: str = field(default_factory=lambda: NOT_GIVEN)
-    speaker_passive_format: str = field(default_factory=lambda: NOT_GIVEN)
-    focus_speakers: list = field(default_factory=lambda: NOT_GIVEN)
-    ignore_speakers: list = field(default_factory=lambda: NOT_GIVEN)
-    focus_mode: Any = field(default_factory=lambda: NOT_GIVEN)
-    known_speakers: list = field(default_factory=lambda: NOT_GIVEN)
-    additional_vocab: list = field(default_factory=lambda: NOT_GIVEN)
-    audio_encoding: Any = field(default_factory=lambda: NOT_GIVEN)
-    operating_point: Any = field(default_factory=lambda: NOT_GIVEN)
-    max_delay: float = field(default_factory=lambda: NOT_GIVEN)
-    end_of_utterance_silence_trigger: float = field(default_factory=lambda: NOT_GIVEN)
-    end_of_utterance_max_delay: float = field(default_factory=lambda: NOT_GIVEN)
-    punctuation_overrides: dict = field(default_factory=lambda: NOT_GIVEN)
-    include_partials: bool = field(default_factory=lambda: NOT_GIVEN)
-    split_sentences: bool = field(default_factory=lambda: NOT_GIVEN)
-    enable_diarization: bool = field(default_factory=lambda: NOT_GIVEN)
-    speaker_sensitivity: float = field(default_factory=lambda: NOT_GIVEN)
-    max_speakers: int = field(default_factory=lambda: NOT_GIVEN)
-    prefer_current_speaker: bool = field(default_factory=lambda: NOT_GIVEN)
-    extra_params: dict = field(default_factory=lambda: NOT_GIVEN)
+    domain: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    turn_detection_mode: TurnDetectionMode | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_active_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_passive_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    focus_speakers: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    ignore_speakers: list[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    focus_mode: SpeakerFocusMode | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    known_speakers: list[SpeakerIdentifier] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    additional_vocab: list[AdditionalVocabEntry] | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    audio_encoding: AudioEncoding | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    operating_point: OperatingPoint | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_delay: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    end_of_utterance_silence_trigger: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    end_of_utterance_max_delay: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    punctuation_overrides: dict[str, Any] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    include_partials: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    split_sentences: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_diarization: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_sensitivity: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_speakers: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prefer_current_speaker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    extra_params: dict[str, Any] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     #: Fields that can be updated on a live connection via the Speechmatics
     #: diarization-config API — no reconnect needed.

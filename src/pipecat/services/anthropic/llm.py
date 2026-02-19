@@ -59,7 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, is_given
+from pipecat.services.settings import LLMSettings, _NotGiven, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -79,8 +79,10 @@ class AnthropicLLMSettings(LLMSettings):
         thinking: Extended thinking configuration.
     """
 
-    enable_prompt_caching: Any = field(default_factory=lambda: _NOT_GIVEN)
-    thinking: Any = field(default_factory=lambda: _NOT_GIVEN)
+    enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    thinking: "AnthropicLLMService.ThinkingConfig" | _NotGiven = field(
+        default_factory=lambda: _NOT_GIVEN
+    )
 
     @classmethod
     def from_mapping(cls, settings):

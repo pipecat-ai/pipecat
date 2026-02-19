@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -44,9 +44,9 @@ class GroqTTSSettings(TTSSettings):
         groq_sample_rate: Audio sample rate.
     """
 
-    output_format: str = field(default_factory=lambda: NOT_GIVEN)
-    speed: float = field(default_factory=lambda: NOT_GIVEN)
-    groq_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    groq_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "groq_sample_rate"}
 

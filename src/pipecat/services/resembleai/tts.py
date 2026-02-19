@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import AudioContextWordTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -50,9 +50,9 @@ class ResembleAITTSSettings(TTSSettings):
         resemble_sample_rate: Audio sample rate sent to the API.
     """
 
-    precision: str = field(default_factory=lambda: NOT_GIVEN)
-    output_format: str = field(default_factory=lambda: NOT_GIVEN)
-    resemble_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+    precision: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    resemble_sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {
         "voice_id": "voice",

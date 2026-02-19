@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -61,13 +61,13 @@ class FishAudioTTSSettings(TTSSettings):
         reference_id: Reference ID of the voice model.
     """
 
-    fish_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
-    latency: str = field(default_factory=lambda: NOT_GIVEN)
-    format: str = field(default_factory=lambda: NOT_GIVEN)
-    normalize: bool = field(default_factory=lambda: NOT_GIVEN)
-    prosody_speed: float = field(default_factory=lambda: NOT_GIVEN)
-    prosody_volume: int = field(default_factory=lambda: NOT_GIVEN)
-    reference_id: str = field(default_factory=lambda: NOT_GIVEN)
+    fish_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latency: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    normalize: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prosody_volume: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reference_id: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice", "sample_rate": "fish_sample_rate"}
 

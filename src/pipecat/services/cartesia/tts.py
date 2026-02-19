@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -209,13 +209,13 @@ class CartesiaTTSSettings(TTSSettings):
             custom pronunciations.
     """
 
-    output_container: str = field(default_factory=lambda: NOT_GIVEN)
-    output_encoding: str = field(default_factory=lambda: NOT_GIVEN)
-    output_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
-    speed: str = field(default_factory=lambda: NOT_GIVEN)
-    emotion: List[str] = field(default_factory=lambda: NOT_GIVEN)
-    generation_config: GenerationConfig = field(default_factory=lambda: NOT_GIVEN)
-    pronunciation_dict_id: str = field(default_factory=lambda: NOT_GIVEN)
+    output_container: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: Literal["slow", "normal", "fast"] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emotion: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    generation_config: GenerationConfig | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pronunciation_dict_id: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> "CartesiaTTSSettings":

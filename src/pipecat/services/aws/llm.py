@@ -56,7 +56,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -80,8 +80,10 @@ class AWSBedrockLLMSettings(LLMSettings):
         additional_model_request_fields: Additional model-specific parameters.
     """
 
-    latency: Any = field(default_factory=lambda: NOT_GIVEN)
-    additional_model_request_fields: Any = field(default_factory=lambda: NOT_GIVEN)
+    latency: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    additional_model_request_fields: Dict[str, Any] | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 @dataclass

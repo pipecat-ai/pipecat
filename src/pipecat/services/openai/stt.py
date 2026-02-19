@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
@@ -133,7 +133,7 @@ class OpenAIRealtimeSTTSettings(STTSettings):
         prompt: Optional prompt text to guide transcription style.
     """
 
-    prompt: Optional[str] = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAIRealtimeSTTService(WebsocketSTTService):

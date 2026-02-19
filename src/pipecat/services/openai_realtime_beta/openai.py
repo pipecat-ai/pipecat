@@ -11,7 +11,7 @@ import json
 import time
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 from loguru import logger
 
@@ -54,7 +54,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
-from pipecat.services.settings import NOT_GIVEN, LLMSettings
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -100,7 +100,9 @@ class OpenAIRealtimeBetaLLMSettings(LLMSettings):
         session_properties: OpenAI Realtime session configuration.
     """
 
-    session_properties: Any = field(default_factory=lambda: NOT_GIVEN)
+    session_properties: events.SessionProperties | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class OpenAIRealtimeBetaLLMService(LLMService):

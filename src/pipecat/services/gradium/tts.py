@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleWordTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -47,7 +47,7 @@ class GradiumTTSSettings(TTSSettings):
         output_format: Audio output format.
     """
 
-    output_format: str = field(default_factory=lambda: NOT_GIVEN)
+    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GradiumTTSService(InterruptibleWordTTSService):

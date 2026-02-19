@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import (
     AudioContextWordTTSService,
     InterruptibleTTSService,
@@ -86,15 +86,15 @@ class RimeTTSSettings(TTSSettings):
         inlineSpeedAlpha: Inline speed control markup.
     """
 
-    modelId: str = field(default_factory=lambda: NOT_GIVEN)
-    audioFormat: str = field(default_factory=lambda: NOT_GIVEN)
-    samplingRate: int = field(default_factory=lambda: NOT_GIVEN)
-    lang: str = field(default_factory=lambda: NOT_GIVEN)
-    speedAlpha: float = field(default_factory=lambda: NOT_GIVEN)
-    reduceLatency: bool = field(default_factory=lambda: NOT_GIVEN)
-    pauseBetweenBrackets: bool = field(default_factory=lambda: NOT_GIVEN)
-    phonemizeBetweenBrackets: bool = field(default_factory=lambda: NOT_GIVEN)
-    inlineSpeedAlpha: str = field(default_factory=lambda: NOT_GIVEN)
+    modelId: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audioFormat: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    samplingRate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lang: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speedAlpha: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    reduceLatency: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pauseBetweenBrackets: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    phonemizeBetweenBrackets: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    inlineSpeedAlpha: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {"speaker": "voice"}
 
@@ -114,14 +114,14 @@ class RimeNonJsonTTSSettings(TTSSettings):
         top_p: Cumulative probability threshold (0.0-1.0).
     """
 
-    modelId: str = field(default_factory=lambda: NOT_GIVEN)
-    audioFormat: str = field(default_factory=lambda: NOT_GIVEN)
-    samplingRate: int = field(default_factory=lambda: NOT_GIVEN)
-    lang: str = field(default_factory=lambda: NOT_GIVEN)
-    segment: str = field(default_factory=lambda: NOT_GIVEN)
-    repetition_penalty: float = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float = field(default_factory=lambda: NOT_GIVEN)
-    top_p: float = field(default_factory=lambda: NOT_GIVEN)
+    modelId: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audioFormat: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    samplingRate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lang: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    segment: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    repetition_penalty: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    top_p: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {"speaker": "voice"}
 

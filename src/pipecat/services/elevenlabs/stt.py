@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -185,7 +185,7 @@ class ElevenLabsSTTSettings(STTSettings):
         tag_audio_events: Whether to include audio event tags in transcription.
     """
 
-    tag_audio_events: bool = field(default_factory=lambda: NOT_GIVEN)
+    tag_audio_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -205,14 +205,14 @@ class ElevenLabsRealtimeSTTSettings(STTSettings):
         include_language_detection: Whether to include language detection in transcripts.
     """
 
-    commit_strategy: CommitStrategy = field(default_factory=lambda: NOT_GIVEN)
-    vad_silence_threshold_secs: float = field(default_factory=lambda: NOT_GIVEN)
-    vad_threshold: float = field(default_factory=lambda: NOT_GIVEN)
-    min_speech_duration_ms: int = field(default_factory=lambda: NOT_GIVEN)
-    min_silence_duration_ms: int = field(default_factory=lambda: NOT_GIVEN)
-    include_timestamps: bool = field(default_factory=lambda: NOT_GIVEN)
-    enable_logging: bool = field(default_factory=lambda: NOT_GIVEN)
-    include_language_detection: bool = field(default_factory=lambda: NOT_GIVEN)
+    commit_strategy: CommitStrategy | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_silence_threshold_secs: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_threshold: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_speech_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_silence_duration_ms: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    include_timestamps: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_logging: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    include_language_detection: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class ElevenLabsSTTService(SegmentedSTTService):

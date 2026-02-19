@@ -44,7 +44,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import (
     AudioContextWordTTSService,
     WordTTSService,
@@ -206,15 +206,17 @@ class ElevenLabsTTSSettings(TTSSettings):
         apply_text_normalization: Text normalization mode ("auto", "on", "off").
     """
 
-    stability: float = field(default_factory=lambda: NOT_GIVEN)
-    similarity_boost: float = field(default_factory=lambda: NOT_GIVEN)
-    style: float = field(default_factory=lambda: NOT_GIVEN)
-    use_speaker_boost: bool = field(default_factory=lambda: NOT_GIVEN)
-    speed: float = field(default_factory=lambda: NOT_GIVEN)
-    auto_mode: str = field(default_factory=lambda: NOT_GIVEN)
-    enable_ssml_parsing: bool = field(default_factory=lambda: NOT_GIVEN)
-    enable_logging: bool = field(default_factory=lambda: NOT_GIVEN)
-    apply_text_normalization: str = field(default_factory=lambda: NOT_GIVEN)
+    stability: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    similarity_boost: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    use_speaker_boost: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    auto_mode: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_ssml_parsing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_logging: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: Literal["auto", "on", "off"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
     #: Fields in the WS URL — changing any of these requires a reconnect.
     URL_FIELDS: ClassVar[frozenset[str]] = frozenset({"voice", "model", "language"})
@@ -242,13 +244,15 @@ class ElevenLabsHttpTTSSettings(TTSSettings):
         apply_text_normalization: Text normalization mode ("auto", "on", "off").
     """
 
-    optimize_streaming_latency: int = field(default_factory=lambda: NOT_GIVEN)
-    stability: float = field(default_factory=lambda: NOT_GIVEN)
-    similarity_boost: float = field(default_factory=lambda: NOT_GIVEN)
-    style: float = field(default_factory=lambda: NOT_GIVEN)
-    use_speaker_boost: bool = field(default_factory=lambda: NOT_GIVEN)
-    speed: float = field(default_factory=lambda: NOT_GIVEN)
-    apply_text_normalization: str = field(default_factory=lambda: NOT_GIVEN)
+    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stability: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    similarity_boost: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    use_speaker_boost: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: Literal["auto", "on", "off"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
     _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
 

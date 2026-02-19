@@ -56,7 +56,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -75,7 +75,7 @@ class UltravoxRealtimeLLMSettings(LLMSettings):
         output_medium: The output medium for the model ("voice" or "text").
     """
 
-    output_medium: str = field(default=NOT_GIVEN)
+    output_medium: str | _NotGiven = field(default=NOT_GIVEN)
 
 
 class AgentInputParams(BaseModel):

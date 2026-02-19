@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -97,7 +97,7 @@ class KokoroTTSSettings(TTSSettings):
         lang_code: Kokoro language code for synthesis.
     """
 
-    lang_code: str = field(default_factory=lambda: NOT_GIVEN)
+    lang_code: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class KokoroTTSService(TTSService):

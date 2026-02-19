@@ -24,7 +24,7 @@ import websockets
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -67,12 +67,12 @@ class InworldTTSSettings(TTSSettings):
         apply_text_normalization: Whether to apply text normalization.
     """
 
-    audio_encoding: str = field(default_factory=lambda: NOT_GIVEN)
-    audio_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
-    speaking_rate: float = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float = field(default_factory=lambda: NOT_GIVEN)
-    auto_mode: bool = field(default_factory=lambda: NOT_GIVEN)
-    apply_text_normalization: str = field(default_factory=lambda: NOT_GIVEN)
+    audio_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    auto_mode: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {
         "voice_id": "voice",

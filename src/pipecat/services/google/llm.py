@@ -58,7 +58,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -681,7 +681,9 @@ class GoogleLLMSettings(LLMSettings):
         thinking: Thinking configuration.
     """
 
-    thinking: Any = field(default_factory=lambda: NOT_GIVEN)
+    thinking: "GoogleLLMService.ThinkingConfig" | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
     @classmethod
     def from_mapping(cls, settings):

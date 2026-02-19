@@ -18,7 +18,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import FAL_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -159,9 +159,9 @@ class FalSTTSettings(STTSettings):
         version: Version of Wizper model to use. Defaults to '3'.
     """
 
-    task: str = field(default_factory=lambda: NOT_GIVEN)
-    chunk_level: str = field(default_factory=lambda: NOT_GIVEN)
-    version: str = field(default_factory=lambda: NOT_GIVEN)
+    task: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    chunk_level: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    version: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class FalSTTService(SegmentedSTTService):

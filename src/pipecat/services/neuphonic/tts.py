@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -85,10 +85,10 @@ class NeuphonicTTSSettings(TTSSettings):
         sampling_rate: Audio sample rate.
     """
 
-    lang_code: str = field(default_factory=lambda: NOT_GIVEN)
-    speed: float = field(default_factory=lambda: NOT_GIVEN)
-    encoding: str = field(default_factory=lambda: NOT_GIVEN)
-    sampling_rate: int = field(default_factory=lambda: NOT_GIVEN)
+    lang_code: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sampling_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NeuphonicTTSService(InterruptibleTTSService):

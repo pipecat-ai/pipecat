@@ -43,7 +43,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings
+from pipecat.services.settings import LLMSettings, _NotGiven
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -56,8 +56,8 @@ class OpenAILLMSettings(LLMSettings):
         service_tier: Service tier to use (e.g., "auto", "flex", "priority").
     """
 
-    max_completion_tokens: Any = field(default_factory=lambda: _NOT_GIVEN)
-    service_tier: Any = field(default_factory=lambda: _NOT_GIVEN)
+    max_completion_tokens: int | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
+    service_tier: str | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
 
 
 class BaseOpenAILLMService(LLMService):

@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService, WordTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -82,14 +82,14 @@ class AzureTTSSettings(TTSSettings):
         volume: Volume level (e.g., "+20%", "loud", "x-soft").
     """
 
-    emphasis: str = field(default_factory=lambda: NOT_GIVEN)
-    language: str = field(default_factory=lambda: NOT_GIVEN)
-    pitch: str = field(default_factory=lambda: NOT_GIVEN)
-    rate: str = field(default_factory=lambda: NOT_GIVEN)
-    role: str = field(default_factory=lambda: NOT_GIVEN)
-    style: str = field(default_factory=lambda: NOT_GIVEN)
-    style_degree: str = field(default_factory=lambda: NOT_GIVEN)
-    volume: str = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    role: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style_degree: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureBaseTTSService:

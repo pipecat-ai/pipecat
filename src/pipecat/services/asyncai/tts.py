@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import AudioContextTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -84,9 +84,9 @@ class AsyncAITTSSettings(TTSSettings):
         output_sample_rate: Audio sample rate in Hz.
     """
 
-    output_container: str = field(default_factory=lambda: NOT_GIVEN)
-    output_encoding: str = field(default_factory=lambda: NOT_GIVEN)
-    output_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+    output_container: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings: Mapping[str, Any]) -> "AsyncAITTSSettings":

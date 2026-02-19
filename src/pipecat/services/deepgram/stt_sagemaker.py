@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -57,7 +57,7 @@ class DeepgramSageMakerSTTSettings(STTSettings):
         live_options: Deepgram ``LiveOptions`` for detailed configuration.
     """
 
-    live_options: LiveOptions = field(default_factory=lambda: NOT_GIVEN)
+    live_options: LiveOptions | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramSageMakerSTTService(STTService):

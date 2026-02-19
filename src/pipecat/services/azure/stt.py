@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -59,8 +59,8 @@ class AzureSTTSettings(STTSettings):
         sample_rate: Audio sample rate in Hz.
     """
 
-    region: str = field(default_factory=lambda: NOT_GIVEN)
-    sample_rate: Optional[int] = field(default_factory=lambda: NOT_GIVEN)
+    region: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AzureSTTService(STTService):

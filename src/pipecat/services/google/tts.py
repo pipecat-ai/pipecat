@@ -24,7 +24,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -37,7 +37,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 
@@ -493,14 +493,20 @@ class GoogleHttpTTSSettings(TTSSettings):
         google_style: Google-specific voice style.
     """
 
-    pitch: str = field(default_factory=lambda: NOT_GIVEN)
-    rate: str = field(default_factory=lambda: NOT_GIVEN)
-    speaking_rate: float = field(default_factory=lambda: NOT_GIVEN)
-    volume: str = field(default_factory=lambda: NOT_GIVEN)
-    emphasis: str = field(default_factory=lambda: NOT_GIVEN)
-    language: str = field(default_factory=lambda: NOT_GIVEN)
-    gender: str = field(default_factory=lambda: NOT_GIVEN)
-    google_style: str = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emphasis: Literal["strong", "moderate", "reduced", "none"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    gender: Literal["male", "female", "neutral"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    google_style: (
+        Literal["apologetic", "calm", "empathetic", "firm", "lively"] | None | _NotGiven
+    ) = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -512,8 +518,8 @@ class GoogleStreamTTSSettings(TTSSettings):
         speaking_rate: The speaking rate, in the range [0.25, 2.0].
     """
 
-    language: str = field(default_factory=lambda: NOT_GIVEN)
-    speaking_rate: float = field(default_factory=lambda: NOT_GIVEN)
+    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -527,10 +533,12 @@ class GeminiTTSSettings(TTSSettings):
         speaker_configs: List of speaker configurations for multi-speaker mode.
     """
 
-    language: str = field(default_factory=lambda: NOT_GIVEN)
-    prompt: str = field(default_factory=lambda: NOT_GIVEN)
-    multi_speaker: bool = field(default_factory=lambda: NOT_GIVEN)
-    speaker_configs: List[dict] = field(default_factory=lambda: NOT_GIVEN)
+    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    multi_speaker: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker_configs: list[dict[str, Any]] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
 
 
 class GoogleHttpTTSService(TTSService):

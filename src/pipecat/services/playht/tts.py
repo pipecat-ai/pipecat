@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -111,11 +111,11 @@ class PlayHTTTSSettings(TTSSettings):
         playht_sample_rate: Audio sample rate sent to the API.
     """
 
-    output_format: str = field(default_factory=lambda: NOT_GIVEN)
-    voice_engine: str = field(default_factory=lambda: NOT_GIVEN)
-    speed: float = field(default_factory=lambda: NOT_GIVEN)
-    seed: int = field(default_factory=lambda: NOT_GIVEN)
-    playht_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+    output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    voice_engine: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    seed: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    playht_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class PlayHTTTSService(InterruptibleTTSService):

@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -144,7 +144,7 @@ class SonioxSTTSettings(STTSettings):
         input_params: Soniox ``SonioxInputParams`` for detailed configuration.
     """
 
-    input_params: SonioxInputParams = field(default_factory=lambda: NOT_GIVEN)
+    input_params: SonioxInputParams | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SonioxSTTService(WebsocketSTTService):

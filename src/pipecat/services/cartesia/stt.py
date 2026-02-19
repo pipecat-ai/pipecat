@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import CARTESIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -52,7 +52,7 @@ class CartesiaSTTSettings(STTSettings):
         encoding: Audio encoding format (e.g. ``"pcm_s16le"``).
     """
 
-    encoding: str = field(default_factory=lambda: NOT_GIVEN)
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class CartesiaLiveOptions:

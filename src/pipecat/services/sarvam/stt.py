@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -142,10 +142,10 @@ class SarvamSTTSettings(STTSettings):
         high_vad_sensitivity: Enable high VAD sensitivity.
     """
 
-    prompt: Optional[str] = field(default_factory=lambda: NOT_GIVEN)
-    mode: Optional[str] = field(default_factory=lambda: NOT_GIVEN)
-    vad_signals: Optional[bool] = field(default_factory=lambda: NOT_GIVEN)
-    high_vad_sensitivity: Optional[bool] = field(default_factory=lambda: NOT_GIVEN)
+    prompt: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mode: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_signals: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    high_vad_sensitivity: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamSTTService(STTService):

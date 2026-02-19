@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -55,7 +55,7 @@ class DeepgramSTTSettings(STTSettings):
         live_options: Deepgram ``LiveOptions`` for detailed configuration.
     """
 
-    live_options: LiveOptions = field(default_factory=lambda: NOT_GIVEN)
+    live_options: LiveOptions | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramSTTService(STTService):

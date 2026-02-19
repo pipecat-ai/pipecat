@@ -62,7 +62,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -266,13 +266,13 @@ class SarvamHttpTTSSettings(TTSSettings):
         sample_rate: Audio sample rate.
     """
 
-    language: str = field(default_factory=lambda: NOT_GIVEN)
-    enable_preprocessing: bool = field(default_factory=lambda: NOT_GIVEN)
-    pace: float = field(default_factory=lambda: NOT_GIVEN)
-    pitch: float = field(default_factory=lambda: NOT_GIVEN)
-    loudness: float = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float = field(default_factory=lambda: NOT_GIVEN)
-    sarvam_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
+    language: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sarvam_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -305,18 +305,18 @@ class SarvamTTSSettings(TTSSettings):
             **Note:** Only supported for bulbul:v3-beta. Ignored for v2.
     """
 
-    target_language_code: str = field(default_factory=lambda: NOT_GIVEN)
-    speaker: str = field(default_factory=lambda: NOT_GIVEN)
-    speech_sample_rate: str = field(default_factory=lambda: NOT_GIVEN)
-    enable_preprocessing: bool = field(default_factory=lambda: NOT_GIVEN)
-    min_buffer_size: int = field(default_factory=lambda: NOT_GIVEN)
-    max_chunk_length: int = field(default_factory=lambda: NOT_GIVEN)
-    output_audio_codec: str = field(default_factory=lambda: NOT_GIVEN)
-    output_audio_bitrate: str = field(default_factory=lambda: NOT_GIVEN)
-    pace: float = field(default_factory=lambda: NOT_GIVEN)
-    pitch: float = field(default_factory=lambda: NOT_GIVEN)
-    loudness: float = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float = field(default_factory=lambda: NOT_GIVEN)
+    target_language_code: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaker: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speech_sample_rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    min_buffer_size: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    max_chunk_length: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_audio_codec: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_audio_bitrate: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pace: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    loudness: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class SarvamHttpTTSService(TTSService):

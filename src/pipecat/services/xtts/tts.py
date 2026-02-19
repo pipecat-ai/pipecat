@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -78,7 +78,7 @@ class XTTSTTSSettings(TTSSettings):
         base_url: Base URL of the XTTS streaming server.
     """
 
-    base_url: str = field(default_factory=lambda: NOT_GIVEN)
+    base_url: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class XTTSService(TTSService):

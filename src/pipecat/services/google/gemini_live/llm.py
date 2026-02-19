@@ -76,7 +76,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import NOT_GIVEN, LLMSettings
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
@@ -617,14 +617,16 @@ class GeminiLiveLLMSettings(LLMSettings):
         proactivity: Proactivity configuration.
     """
 
-    modalities: Any = field(default_factory=lambda: NOT_GIVEN)
-    language: Any = field(default_factory=lambda: NOT_GIVEN)
-    media_resolution: Any = field(default_factory=lambda: NOT_GIVEN)
-    vad: Any = field(default_factory=lambda: NOT_GIVEN)
-    context_window_compression: Any = field(default_factory=lambda: NOT_GIVEN)
-    thinking: Any = field(default_factory=lambda: NOT_GIVEN)
-    enable_affective_dialog: Any = field(default_factory=lambda: NOT_GIVEN)
-    proactivity: Any = field(default_factory=lambda: NOT_GIVEN)
+    modalities: GeminiModalities | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    media_resolution: GeminiMediaResolution | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad: GeminiVADParams | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    context_window_compression: ContextWindowCompressionParams | dict | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    thinking: ThinkingConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_affective_dialog: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    proactivity: ProactivityConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GeminiLiveLLMService(LLMService):

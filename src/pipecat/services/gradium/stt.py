@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -75,7 +75,7 @@ class GradiumSTTSettings(STTSettings):
             generated. Higher delays allow more context but increase latency.
     """
 
-    delay_in_frames: int = field(default_factory=lambda: NOT_GIVEN)
+    delay_in_frames: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GradiumSTTService(WebsocketSTTService):

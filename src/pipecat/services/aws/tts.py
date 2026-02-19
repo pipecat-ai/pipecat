@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -135,11 +135,11 @@ class AWSPollyTTSSettings(TTSSettings):
         lexicon_names: List of pronunciation lexicons to apply.
     """
 
-    engine: str = field(default_factory=lambda: NOT_GIVEN)
-    pitch: str = field(default_factory=lambda: NOT_GIVEN)
-    rate: str = field(default_factory=lambda: NOT_GIVEN)
-    volume: str = field(default_factory=lambda: NOT_GIVEN)
-    lexicon_names: List[str] = field(default_factory=lambda: NOT_GIVEN)
+    engine: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lexicon_names: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class AWSPollyTTSService(TTSService):

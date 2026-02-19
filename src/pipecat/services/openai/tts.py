@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -71,8 +71,8 @@ class OpenAITTSSettings(TTSSettings):
         speed: Voice speed control (0.25 to 4.0, default 1.0).
     """
 
-    instructions: str = field(default_factory=lambda: NOT_GIVEN)
-    speed: float = field(default_factory=lambda: NOT_GIVEN)
+    instructions: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class OpenAITTSService(TTSService):

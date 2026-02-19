@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     Frame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import HATHORA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
@@ -39,7 +39,7 @@ class HathoraSTTSettings(STTSettings):
             what is supported.
     """
 
-    config: Optional[list] = field(default_factory=lambda: NOT_GIVEN)
+    config: list[ConfigOption] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class HathoraSTTService(SegmentedSTTService):

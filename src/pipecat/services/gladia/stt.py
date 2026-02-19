@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -188,7 +188,7 @@ class GladiaSTTSettings(STTSettings):
         input_params: Gladia ``GladiaInputParams`` for detailed configuration.
     """
 
-    input_params: GladiaInputParams = field(default_factory=lambda: NOT_GIVEN)
+    input_params: GladiaInputParams | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GladiaSTTService(WebsocketSTTService):

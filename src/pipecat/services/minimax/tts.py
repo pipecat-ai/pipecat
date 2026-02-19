@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, is_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -107,18 +107,18 @@ class MiniMaxTTSSettings(TTSSettings):
         language_boost: Language boost string for multilingual support.
     """
 
-    stream: bool = field(default_factory=lambda: NOT_GIVEN)
-    speed: float = field(default_factory=lambda: NOT_GIVEN)
-    volume: float = field(default_factory=lambda: NOT_GIVEN)
-    pitch: int = field(default_factory=lambda: NOT_GIVEN)
-    emotion: str = field(default_factory=lambda: NOT_GIVEN)
-    text_normalization: bool = field(default_factory=lambda: NOT_GIVEN)
-    latex_read: bool = field(default_factory=lambda: NOT_GIVEN)
-    audio_bitrate: int = field(default_factory=lambda: NOT_GIVEN)
-    audio_format: str = field(default_factory=lambda: NOT_GIVEN)
-    audio_channel: int = field(default_factory=lambda: NOT_GIVEN)
-    audio_sample_rate: int = field(default_factory=lambda: NOT_GIVEN)
-    language_boost: str = field(default_factory=lambda: NOT_GIVEN)
+    stream: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    emotion: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    text_normalization: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    latex_read: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_bitrate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_channel: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language_boost: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
 

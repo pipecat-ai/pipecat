@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import NVIDIA_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -110,11 +110,11 @@ class NvidiaSegmentedSTTSettings(STTSettings):
         boosted_lm_score: Score boost for specified words.
     """
 
-    profanity_filter: bool = field(default_factory=lambda: NOT_GIVEN)
-    automatic_punctuation: bool = field(default_factory=lambda: NOT_GIVEN)
-    verbatim_transcripts: bool = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_words: Optional[List[str]] = field(default_factory=lambda: NOT_GIVEN)
-    boosted_lm_score: float = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    automatic_punctuation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    verbatim_transcripts: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_words: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    boosted_lm_score: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class NvidiaSTTService(STTService):

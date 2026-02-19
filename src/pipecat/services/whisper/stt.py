@@ -20,7 +20,7 @@ from loguru import logger
 from typing_extensions import TYPE_CHECKING, override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -184,9 +184,9 @@ class WhisperSTTSettings(STTSettings):
         no_speech_prob: Probability threshold for filtering non-speech segments.
     """
 
-    device: str = field(default_factory=lambda: NOT_GIVEN)
-    compute_type: str = field(default_factory=lambda: NOT_GIVEN)
-    no_speech_prob: float = field(default_factory=lambda: NOT_GIVEN)
+    device: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    compute_type: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    no_speech_prob: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 @dataclass
@@ -199,9 +199,9 @@ class WhisperMLXSTTSettings(STTSettings):
         engine: Whisper engine identifier.
     """
 
-    no_speech_prob: float = field(default_factory=lambda: NOT_GIVEN)
-    temperature: float = field(default_factory=lambda: NOT_GIVEN)
-    engine: str = field(default_factory=lambda: NOT_GIVEN)
+    no_speech_prob: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    engine: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class WhisperSTTService(SegmentedSTTService):

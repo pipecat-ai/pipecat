@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -58,8 +58,8 @@ class HathoraTTSSettings(TTSSettings):
             what is supported.
     """
 
-    speed: float = field(default_factory=lambda: NOT_GIVEN)
-    config: list = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    config: list[ConfigOption] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class HathoraTTSService(TTSService):

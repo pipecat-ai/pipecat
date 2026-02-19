@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -53,7 +53,7 @@ class DeepgramTTSSettings(TTSSettings):
         encoding: Audio encoding format (linear16, mulaw, alaw).
     """
 
-    encoding: str = field(default_factory=lambda: NOT_GIVEN)
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramTTSService(WebsocketTTSService):
