@@ -972,6 +972,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
 
+        # If the function call was already cancelled (entry removed), don't re-add it.
+        # This can happen if the function was cancelled before _run_function_call had
+        # a chance to broadcast this frame.
+        if frame.tool_call_id not in self._function_calls_in_progress:
+            logger.debug(
+                f"{self} FunctionCallInProgressFrame ignored - function call was already cancelled"
+            )
+            return
+
         # Update context with the in-progress function call
         self._context.add_message(
             {
@@ -1058,11 +1067,24 @@ class LLMAssistantAggregator(LLMContextAggregator):
         logger.debug(
             f"{self} FunctionCallCancelFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
+        if frame.tool_call_id not in self._function_calls_in_progress:
+            return
+
         function_call = self._function_calls_in_progress.get(frame.tool_call_id)
-        if function_call and function_call.cancel_on_interruption:
-            # Update context with the function call cancellation
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
+
+        # Handle two cases:
+        # 1. function_call is None: Cancel arrived before FunctionCallInProgressFrame.
+        #    Discard the function call to prevent stuck state.
+        # 2. function_call is a frame with cancel_on_interruption=True: update context
+        #    with CANCELLED result and clean up tracking.
+        if function_call is None or function_call.cancel_on_interruption:
+            if function_call is not None:
+                # Only update context if we have the frame (function actually started)
+                self._update_function_call_result(
+                    frame.function_name, frame.tool_call_id, "CANCELLED"
+                )
             del self._function_calls_in_progress[frame.tool_call_id]
+        # else: cancel_on_interruption=False, ignore the cancel request
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
         image_appended = False
