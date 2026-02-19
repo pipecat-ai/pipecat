@@ -1220,7 +1220,7 @@ class RTVIObserver(BaseObserver):
         frame = data.frame
         direction = data.direction
 
-        # For broadcasted frames (pushed in both directions), only process
+        # For broadcast frames (pushed in both directions), only process
         # the downstream copy to avoid sending duplicate RTVI messages.
         if frame.broadcast_sibling_id is not None and direction != FrameDirection.DOWNSTREAM:
             return
