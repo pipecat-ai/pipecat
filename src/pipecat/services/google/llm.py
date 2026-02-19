@@ -673,6 +673,39 @@ class GoogleLLMContext(OpenAILLMContext):
         self._messages = [m for m in self._messages if m.parts]
 
 
+class GoogleThinkingConfig(BaseModel):
+    """Configuration for controlling the model's internal "thinking" process used before generating a response.
+
+    Gemini 2.5 and 3 series models have this thinking process.
+
+    Parameters:
+        thinking_level: Thinking level for Gemini 3 models.
+            For Gemini 3 Pro, this can be "low" or "high".
+            For Gemini 3 Flash, this can be "minimal", "low", "medium", or "high".
+            If not provided, Gemini 3 models default to "high".
+            Note: Gemini 2.5 series must use thinking_budget instead.
+        thinking_budget: Token budget for thinking, for Gemini 2.5 series.
+            -1 for dynamic thinking (model decides), 0 to disable thinking,
+            or a specific token count (e.g., 128-32768 for 2.5 Pro).
+            If not provided, most models today default to dynamic thinking.
+            See https://ai.google.dev/gemini-api/docs/thinking#set-budget
+            for default values and allowed ranges.
+            Note: Gemini 3 models must use thinking_level instead.
+        include_thoughts: Whether to include thought summaries in the response.
+            Today's models default to not including thoughts (False).
+    """
+
+    thinking_budget: Optional[int] = Field(default=None)
+
+    # Why `| str` here? To not break compatibility in case Google adds more
+    # levels in the future.
+    thinking_level: Optional[Literal["low", "high", "medium", "minimal"] | str] = Field(
+        default=None
+    )
+
+    include_thoughts: Optional[bool] = Field(default=None)
+
+
 @dataclass
 class GoogleLLMSettings(LLMSettings):
     """Settings for Google LLM services.
@@ -681,20 +714,18 @@ class GoogleLLMSettings(LLMSettings):
         thinking: Thinking configuration.
     """
 
-    thinking: "GoogleLLMService.ThinkingConfig" | _NotGiven = field(
-        default_factory=lambda: NOT_GIVEN
-    )
+    thinking: GoogleThinkingConfig | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings):
         """Convert a plain dict to settings, coercing thinking dicts.
 
         For backward compatibility, a ``thinking`` value that is a plain dict
-        is converted to a :class:`GoogleLLMService.ThinkingConfig`.
+        is converted to a :class:`GoogleThinkingConfig`.
         """
         instance = super().from_mapping(settings)
         if is_given(instance.thinking) and isinstance(instance.thinking, dict):
-            instance.thinking = GoogleLLMService.ThinkingConfig(**instance.thinking)
+            instance.thinking = GoogleThinkingConfig(**instance.thinking)
         return instance
 
 
@@ -711,37 +742,8 @@ class GoogleLLMService(LLMService):
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
-    class ThinkingConfig(BaseModel):
-        """Configuration for controlling the model's internal "thinking" process used before generating a response.
-
-        Gemini 2.5 and 3 series models have this thinking process.
-
-        Parameters:
-            thinking_level: Thinking level for Gemini 3 models.
-                For Gemini 3 Pro, this can be "low" or "high".
-                For Gemini 3 Flash, this can be "minimal", "low", "medium", or "high".
-                If not provided, Gemini 3 models default to "high".
-                Note: Gemini 2.5 series must use thinking_budget instead.
-            thinking_budget: Token budget for thinking, for Gemini 2.5 series.
-                -1 for dynamic thinking (model decides), 0 to disable thinking,
-                or a specific token count (e.g., 128-32768 for 2.5 Pro).
-                If not provided, most models today default to dynamic thinking.
-                See https://ai.google.dev/gemini-api/docs/thinking#set-budget
-                for default values and allowed ranges.
-                Note: Gemini 3 models must use thinking_level instead.
-            include_thoughts: Whether to include thought summaries in the response.
-                Today's models default to not including thoughts (False).
-        """
-
-        thinking_budget: Optional[int] = Field(default=None)
-
-        # Why `| str` here? To not break compatibility in case Google adds more
-        # levels in the future.
-        thinking_level: Optional[Literal["low", "high", "medium", "minimal"] | str] = Field(
-            default=None
-        )
-
-        include_thoughts: Optional[bool] = Field(default=None)
+    # Backward compatibility: ThinkingConfig used to be defined inline here.
+    ThinkingConfig = GoogleThinkingConfig
 
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
@@ -764,7 +766,7 @@ class GoogleLLMService(LLMService):
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
         top_k: Optional[int] = Field(default=None, ge=0)
         top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-        thinking: Optional["GoogleLLMService.ThinkingConfig"] = Field(default=None)
+        thinking: Optional[GoogleThinkingConfig] = Field(default=None)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(

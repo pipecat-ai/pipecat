@@ -70,6 +70,25 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+class AnthropicThinkingConfig(BaseModel):
+    """Configuration for extended thinking.
+
+    Parameters:
+        type: Type of thinking mode (currently only "enabled" or "disabled").
+        budget_tokens: Maximum number of tokens for thinking.
+            With today's models, the minimum is 1024.
+            Only allowed if type is "enabled".
+    """
+
+    # Why `| str` here? To not break compatibility in case Anthropic adds
+    # more types in the future.
+    type: Literal["enabled", "disabled"] | str
+
+    # Why not enforce minimnum of 1024 here? To not break compatibility in
+    # case Anthropic changes this requirement in the future.
+    budget_tokens: int
+
+
 @dataclass
 class AnthropicLLMSettings(LLMSettings):
     """Settings for Anthropic LLM services.
@@ -80,20 +99,18 @@ class AnthropicLLMSettings(LLMSettings):
     """
 
     enable_prompt_caching: bool | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
-    thinking: "AnthropicLLMService.ThinkingConfig" | _NotGiven = field(
-        default_factory=lambda: _NOT_GIVEN
-    )
+    thinking: AnthropicThinkingConfig | _NotGiven = field(default_factory=lambda: _NOT_GIVEN)
 
     @classmethod
     def from_mapping(cls, settings):
         """Convert a plain dict to settings, coercing thinking dicts.
 
         For backward compatibility, a ``thinking`` value that is a plain dict
-        is converted to a :class:`AnthropicLLMService.ThinkingConfig`.
+        is converted to a :class:`AnthropicThinkingConfig`.
         """
         instance = super().from_mapping(settings)
         if is_given(instance.thinking) and isinstance(instance.thinking, dict):
-            instance.thinking = AnthropicLLMService.ThinkingConfig(**instance.thinking)
+            instance.thinking = AnthropicThinkingConfig(**instance.thinking)
         return instance
 
 
@@ -148,23 +165,8 @@ class AnthropicLLMService(LLMService):
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AnthropicLLMAdapter
 
-    class ThinkingConfig(BaseModel):
-        """Configuration for extended thinking.
-
-        Parameters:
-            type: Type of thinking mode (currently only "enabled" or "disabled").
-            budget_tokens: Maximum number of tokens for thinking.
-                With today's models, the minimum is 1024.
-                Only allowed if type is "enabled".
-        """
-
-        # Why `| str` here? To not break compatibility in case Anthropic adds
-        # more types in the future.
-        type: Literal["enabled", "disabled"] | str
-
-        # Why not enforce minimnum of 1024 here? To not break compatibility in
-        # case Anthropic changes this requirement in the future.
-        budget_tokens: int
+    # Backward compatibility: ThinkingConfig used to be defined inline here.
+    ThinkingConfig = AnthropicThinkingConfig
 
     class InputParams(BaseModel):
         """Input parameters for Anthropic model inference.
@@ -193,9 +195,7 @@ class AnthropicLLMService(LLMService):
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
-        thinking: Optional["AnthropicLLMService.ThinkingConfig"] = Field(
-            default_factory=lambda: NOT_GIVEN
-        )
+        thinking: Optional[AnthropicThinkingConfig] = Field(default_factory=lambda: NOT_GIVEN)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
         def model_post_init(self, __context):
