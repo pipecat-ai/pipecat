@@ -789,8 +789,8 @@ class FrameProcessor(BaseObject):
         """
         downstream_frame = frame_cls(**kwargs)
         upstream_frame = frame_cls(**kwargs)
-        downstream_frame.broadcasted_sibling_id = upstream_frame.id
-        upstream_frame.broadcasted_sibling_id = downstream_frame.id
+        downstream_frame.broadcast_sibling_id = upstream_frame.id
+        upstream_frame.broadcast_sibling_id = downstream_frame.id
         await self.push_frame(downstream_frame)
         await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
@@ -824,8 +824,8 @@ class FrameProcessor(BaseObject):
         for k, v in extra_fields.items():
             setattr(upstream_frame, k, v)
 
-        downstream_frame.broadcasted_sibling_id = upstream_frame.id
-        upstream_frame.broadcasted_sibling_id = downstream_frame.id
+        downstream_frame.broadcast_sibling_id = upstream_frame.id
+        upstream_frame.broadcast_sibling_id = downstream_frame.id
         await self.push_frame(downstream_frame)
         await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 

@@ -123,7 +123,7 @@ class Frame:
         id: Unique identifier for the frame instance.
         name: Human-readable name combining class name and instance count.
         pts: Presentation timestamp in nanoseconds.
-        broadcasted_sibling_id: ID of the paired frame when this frame was
+        broadcast_sibling_id: ID of the paired frame when this frame was
             broadcast in both directions. Set automatically by
             ``broadcast_frame()`` and ``broadcast_frame_instance()``.
         metadata: Dictionary for arbitrary frame metadata.
@@ -134,7 +134,7 @@ class Frame:
     id: int = field(init=False)
     name: str = field(init=False)
     pts: Optional[int] = field(init=False)
-    broadcasted_sibling_id: Optional[int] = field(init=False)
+    broadcast_sibling_id: Optional[int] = field(init=False)
     metadata: Dict[str, Any] = field(init=False)
     transport_source: Optional[str] = field(init=False)
     transport_destination: Optional[str] = field(init=False)
@@ -143,7 +143,7 @@ class Frame:
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
         self.pts: Optional[int] = None
-        self.broadcasted_sibling_id: Optional[int] = None
+        self.broadcast_sibling_id: Optional[int] = None
         self.metadata: Dict[str, Any] = {}
         self.transport_source: Optional[str] = None
         self.transport_destination: Optional[str] = None
