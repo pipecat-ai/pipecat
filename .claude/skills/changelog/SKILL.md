@@ -26,7 +26,7 @@ Create changelog files for the important commits in this PR. The PR number is pr
    - `{PR_NUMBER}.performance.md` - for performance improvements
    - `{PR_NUMBER}.other.md` - for other changes
 
-4. Each changelog file should at least contain a main single line starting with `- ` followed by a clear description of the change.
+4. Each changelog file should at least contain a main single line starting with `- ` followed by a clear description of the change. No line wrapping.
 
 5. If the change is complicated, changelog files can have indented lines after the main line with additional details or code samples.
 
