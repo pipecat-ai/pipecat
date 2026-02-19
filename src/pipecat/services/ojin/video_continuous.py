@@ -79,7 +79,8 @@ OJIN_PERSONA_SAMPLE_RATE = 16000
 SPEECH_FILTER_AMOUNT = 5
 SPEECH_MOUTH_OPENING_SCALE = 1.0
 BYTES_PER_FRAME = int(OJIN_PERSONA_SAMPLE_RATE / 25 * 2)
-
+MAX_FRAMES_BUFFER = 3
+MIN_FRAMES_BUFFER = 1
 
 @dataclass
 class VideoFrame:
@@ -381,8 +382,7 @@ class OjinVideoService(FrameProcessor):
         audio_bytes: Optional[bytes] = None
         silence_bytes_per_frame = b"\x00" * BYTES_PER_FRAME
         skip_count = 0
-        MAX_FRAMES_BUFFER = 10
-        MIN_FRAMES_BUFFER = 7
+       
 
         while self._initialized:
             # Check speaking state notifications
