@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    MetricsFrame,
     ServiceSwitcherRequestMetadataFrame,
     StartFrame,
     STTMetadataFrame,
@@ -31,7 +30,6 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
@@ -121,9 +119,7 @@ class STTService(AIService):
         # STT TTFB tracking state
         self._stt_ttfb_timeout = stt_ttfb_timeout
         self._ttfb_timeout_task: Optional[asyncio.Task] = None
-        self._speech_end_time: Optional[float] = None
         self._user_speaking: bool = False
-        self._last_transcription_time: Optional[float] = None
         self._finalize_pending: bool = False
         self._finalize_requested: bool = False
 
@@ -327,23 +323,16 @@ class STTService(AIService):
             direction: The direction to push the frame.
         """
         if isinstance(frame, TranscriptionFrame):
-            # Store the transcription time for TTFB calculation
-            self._last_transcription_time = time.time()
-
             # Set finalized from pending state and auto-reset
             if self._finalize_pending:
                 frame.finalized = True
                 self._finalize_pending = False
 
             # If this is a finalized transcription, report TTFB immediately
-            if frame.finalized and self._speech_end_time is not None:
-                ttfb = self._last_transcription_time - self._speech_end_time
-                await self._emit_stt_ttfb_metric(ttfb)
+            if frame.finalized:
+                await self.stop_ttfb_metrics()
                 # Cancel the timeout since we've already reported
                 await self._cancel_ttfb_timeout()
-                # Clear state
-                self._speech_end_time = None
-                self._last_transcription_time = None
 
         await super().push_frame(frame, direction)
 
@@ -373,8 +362,6 @@ class STTService(AIService):
         while user is still speaking.
         """
         await self._cancel_ttfb_timeout()
-        self._speech_end_time = None
-        self._last_transcription_time = None
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle VAD user started speaking frame to start tracking transcriptions.
@@ -408,7 +395,8 @@ class STTService(AIService):
         # Calculate the actual speech end time (current time minus VAD stop delay).
         # This approximates when the last user audio was sent to the STT service,
         # which we use to measure against the eventual transcription response.
-        self._speech_end_time = frame.timestamp - frame.stop_secs
+        speech_end_time = frame.timestamp - frame.stop_secs
+        await self.start_ttfb_metrics(start_time=speech_end_time)
 
         # Start timeout task (any previous timeout was cancelled by VADUserStartedSpeakingFrame
         # or InterruptionFrame)
@@ -417,43 +405,19 @@ class STTService(AIService):
         )
 
     async def _ttfb_timeout_handler(self):
-        """Wait for timeout then report TTFB using the last transcription timestamp.
+        """Wait for timeout then report TTFB.
 
         This timeout allows the final transcription to arrive before we calculate
         and report TTFB. If no transcription arrived, no TTFB is reported.
         """
         try:
             await asyncio.sleep(self._stt_ttfb_timeout)
-
-            # Report TTFB if we have both speech end time and transcription time
-            if self._speech_end_time is not None and self._last_transcription_time is not None:
-                ttfb = self._last_transcription_time - self._speech_end_time
-                await self._emit_stt_ttfb_metric(ttfb)
-
-            # Clear state after reporting
-            self._speech_end_time = None
-            self._last_transcription_time = None
+            await self.stop_ttfb_metrics()
         except asyncio.CancelledError:
             # Task was cancelled (new utterance or interruption), which is expected behavior
             pass
         finally:
             self._ttfb_timeout_task = None
-
-    async def _emit_stt_ttfb_metric(self, ttfb: float):
-        """Emit STT TTFB metric if value is non-negative.
-
-        Args:
-            ttfb: The TTFB value in seconds.
-        """
-        if ttfb >= 0:
-            logger.debug(f"{self} TTFB: {ttfb:.3f}s")
-            if self.metrics_enabled:
-                ttfb_data = TTFBMetricsData(
-                    processor=self.name,
-                    model=self.model_name,
-                    value=ttfb,
-                )
-                await super().push_frame(MetricsFrame(data=[ttfb_data]))
 
     def _create_keepalive_task(self):
         """Start the keepalive task if keepalive is enabled."""
