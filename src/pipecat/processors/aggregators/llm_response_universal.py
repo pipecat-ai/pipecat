@@ -1257,8 +1257,8 @@ class LLMContextAggregatorPair:
         self,
         context: LLMContext,
         *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        user_params: Optional[LLMUserAggregatorParams] = None,
+        assistant_params: Optional[LLMAssistantAggregatorParams] = None,
     ):
         """Initialize the LLM context aggregator pair.
 
@@ -1267,6 +1267,8 @@ class LLMContextAggregatorPair:
             user_params: Parameters for the user context aggregator.
             assistant_params: Parameters for the assistant context aggregator.
         """
+        user_params = user_params or LLMUserAggregatorParams()
+        assistant_params = assistant_params or LLMAssistantAggregatorParams()
         self._user = LLMUserAggregator(context, params=user_params)
         self._assistant = LLMAssistantAggregator(context, params=assistant_params)
 
