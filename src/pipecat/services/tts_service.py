@@ -1042,6 +1042,8 @@ class AudioContextTTSService(WebsocketTTSService):
     audio from context ID "A" will be played first.
     """
 
+    _CONTEXT_KEEPALIVE = object()
+
     def __init__(
         self,
         *,
@@ -1152,8 +1154,14 @@ class AudioContextTTSService(WebsocketTTSService):
             A context ID string for the TTS request.
         """
         if self._reuse_context_id_within_turn and self._context_id:
+            self._refresh_active_audio_context()
             return self._context_id
         return super().create_context_id()
+
+    def _refresh_active_audio_context(self):
+        """Signal that the audio context is still in use, resetting the timeout."""
+        if self.has_active_audio_context():
+            self._contexts[self._context_id].put_nowait(AudioContextTTSService._CONTEXT_KEEPALIVE)
 
     async def start(self, frame: StartFrame):
         """Start the audio context TTS service.
@@ -1242,6 +1250,10 @@ class AudioContextTTSService(WebsocketTTSService):
         while running:
             try:
                 frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
+                if frame is AudioContextTTSService._CONTEXT_KEEPALIVE:
+                    # Context is still in use, reset the timeout.
+                    continue
+
                 if frame:
                     await self.push_frame(frame)
                 running = frame is not None
