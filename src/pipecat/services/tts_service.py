@@ -1042,14 +1042,23 @@ class AudioContextTTSService(WebsocketTTSService):
     audio from context ID "A" will be played first.
     """
 
-    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+    def __init__(
+        self,
+        *,
+        reuse_context_id_within_turn: bool = True,
+        reconnect_on_error: bool = True,
+        **kwargs,
+    ):
         """Initialize the Audio Context TTS service.
 
         Args:
+            reuse_context_id_within_turn: Whether the service should reuse context IDs within the same turn.
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
         super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)
+        self._reuse_context_id_within_turn = reuse_context_id_within_turn
+        self._context_id = None
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
 
@@ -1059,6 +1068,10 @@ class AudioContextTTSService(WebsocketTTSService):
         Args:
             context_id: Unique identifier for the audio context.
         """
+        # Set the context ID if not already set
+        if not self._context_id:
+            self._context_id = context_id
+
         await self._contexts_queue.put(context_id)
         self._contexts[context_id] = asyncio.Queue()
         logger.trace(f"{self} created audio context {context_id}")
@@ -1091,6 +1104,32 @@ class AudioContextTTSService(WebsocketTTSService):
         else:
             logger.warning(f"{self} unable to remove context {context_id}")
 
+    def has_active_audio_context(self) -> bool:
+        """Check if there is an active audio context.
+
+        Returns:
+            True if an active audio context exists, False otherwise.
+        """
+        return self._context_id is not None and self.audio_context_available(self._context_id)
+
+    def get_active_audio_context_id(self) -> Optional[str]:
+        """Get the active audio context ID.
+
+        Returns:
+            The active context ID, or None if no context is active.
+        """
+        return self._context_id
+
+    async def remove_active_audio_context(self):
+        """Remove the active audio context."""
+        if self._context_id:
+            await self.remove_audio_context(self._context_id)
+            self.reset_active_audio_context()
+
+    def reset_active_audio_context(self):
+        """Reset the active audio context."""
+        self._context_id = None
+
     def audio_context_available(self, context_id: str) -> bool:
         """Check whether the given audio context is registered.
 
@@ -1101,6 +1140,20 @@ class AudioContextTTSService(WebsocketTTSService):
             True if the context exists and is available.
         """
         return context_id in self._contexts
+
+    def create_context_id(self) -> str:
+        """Generate or reuse a context ID based on concurrent TTS support.
+
+        If _reuse_context_id_within_turn is False and a context already exists,
+        the existing context ID is returned. Otherwise, a new unique context
+        ID is generated.
+
+        Returns:
+            A context ID string for the TTS request.
+        """
+        if self._reuse_context_id_within_turn and self._context_id:
+            return self._context_id
+        return super().create_context_id()
 
     async def start(self, frame: StartFrame):
         """Start the audio context TTS service.
@@ -1137,6 +1190,7 @@ class AudioContextTTSService(WebsocketTTSService):
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self._stop_audio_context_task()
+        self.reset_active_audio_context()
         self._create_audio_context_task()
 
     def _create_audio_context_task(self):
@@ -1155,6 +1209,7 @@ class AudioContextTTSService(WebsocketTTSService):
         running = True
         while running:
             context_id = await self._contexts_queue.get()
+            self._context_id = context_id
 
             if context_id:
                 # Process the audio context until the context doesn't have more
@@ -1163,11 +1218,15 @@ class AudioContextTTSService(WebsocketTTSService):
 
                 # We just finished processing the context, so we can safely remove it.
                 del self._contexts[context_id]
+                self.reset_active_audio_context()
 
                 # Append some silence between sentences.
                 silence = b"\x00" * self.sample_rate
                 frame = TTSAudioRawFrame(
-                    audio=silence, sample_rate=self.sample_rate, num_channels=1
+                    audio=silence,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                    context_id=context_id,
                 )
                 await self.push_frame(frame)
             else:
