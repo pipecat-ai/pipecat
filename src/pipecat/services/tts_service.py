@@ -762,6 +762,22 @@ class TTSService(AIService):
                 frame.append_to_context = append_tts_text_to_context
             await self.push_frame(frame)
 
+    async def _stop_frame_handler(self):
+        has_started = False
+        while True:
+            try:
+                frame = await asyncio.wait_for(
+                    self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
+                )
+                if isinstance(frame, TTSStartedFrame):
+                    has_started = True
+                elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
+                    has_started = False
+            except asyncio.TimeoutError:
+                if has_started:
+                    await self.push_frame(TTSStoppedFrame())
+                    has_started = False
+
     #
     # Word timestamp methods (active when supports_word_timestamps=True)
     #
@@ -789,6 +805,7 @@ class TTSService(AIService):
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
             context_id: Unique identifier for the TTS context.
         """
+        # Transform to include context_id in each tuple
         word_times_with_context = [(word, timestamp, context_id) for word, timestamp in word_times]
 
         if self._initial_word_timestamp == -1:
@@ -840,22 +857,6 @@ class TTSService(AIService):
                 last_pts = frame.pts
                 await self.push_frame(frame)
             self._words_queue.task_done()
-
-    async def _stop_frame_handler(self):
-        has_started = False
-        while True:
-            try:
-                frame = await asyncio.wait_for(
-                    self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
-                )
-                if isinstance(frame, TTSStartedFrame):
-                    has_started = True
-                elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-                    has_started = False
-            except asyncio.TimeoutError:
-                if has_started:
-                    await self.push_frame(TTSStoppedFrame())
-                    has_started = False
 
 
 class WordTTSService(TTSService):
