@@ -400,6 +400,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -424,7 +425,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             apply_text_normalization=params.apply_text_normalization,
         )
         self.set_model_name(model)
-        self._voice_id = voice_id
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
@@ -607,7 +607,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             logger.debug("Connecting to ElevenLabs")
 
-            voice_id = self._voice_id
+            voice_id = self._settings.voice
             model = self.model_name
             output_format = self._output_format
             url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings.auto_mode}"
@@ -906,6 +906,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -931,7 +932,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
             apply_text_normalization=params.apply_text_normalization,
         )
         self.set_model_name(model)
-        self._voice_id = voice_id
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
@@ -1098,7 +1098,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         # Use the with-timestamps endpoint
-        url = f"{self._base_url}/v1/text-to-speech/{self._voice_id}/stream/with-timestamps"
+        url = f"{self._base_url}/v1/text-to-speech/{self._settings.voice}/stream/with-timestamps"
 
         payload: Dict[str, Union[str, Dict[str, Union[float, bool]]]] = {
             "text": text,

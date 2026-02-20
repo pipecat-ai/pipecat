@@ -173,6 +173,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         super().__init__(
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            voice=voice_url,
             **kwargs,
         )
 
@@ -205,7 +206,6 @@ class PlayHTTTSService(InterruptibleTTSService):
             seed=params.seed,
         )
         self.set_model_name(voice_engine)
-        self._voice_id = voice_url
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -425,7 +425,7 @@ class PlayHTTTSService(InterruptibleTTSService):
 
             tts_command = {
                 "text": text,
-                "voice": self._voice_id,
+                "voice": self._settings.voice,
                 "voice_engine": self._settings.voice_engine,
                 "output_format": self._settings.output_format,
                 "sample_rate": self.sample_rate,
@@ -511,7 +511,7 @@ class PlayHTHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_url, **kwargs)
 
         # Warn about deprecated protocol parameter if explicitly provided
         if protocol:
@@ -556,7 +556,6 @@ class PlayHTHttpTTSService(TTSService):
             seed=params.seed,
         )
         self.set_model_name(voice_engine)
-        self._voice_id = voice_url
 
     async def start(self, frame: StartFrame):
         """Start the PlayHT HTTP TTS service.
@@ -605,7 +604,7 @@ class PlayHTHttpTTSService(TTSService):
             # Prepare the request payload
             payload = {
                 "text": text,
-                "voice": self._voice_id,
+                "voice": self._settings.voice,
                 "voice_engine": self._settings.voice_engine,
                 "output_format": self._settings.output_format,
                 "sample_rate": self.sample_rate,

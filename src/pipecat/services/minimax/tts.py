@@ -227,7 +227,7 @@ class MiniMaxHttpTTSService(TTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or MiniMaxHttpTTSService.InputParams()
 
@@ -236,7 +236,6 @@ class MiniMaxHttpTTSService(TTSService):
         self._base_url = f"{base_url}?GroupId={group_id}"
         self._session = aiohttp_session
         self._model_name = model
-        self._voice_id = voice_id
 
         # Create voice settings
         self._settings = MiniMaxTTSSettings(
@@ -251,8 +250,7 @@ class MiniMaxHttpTTSService(TTSService):
             audio_channel=1,
         )
 
-        # Set voice and model
-        self._voice_id = voice_id
+        # Set model
         self.set_model_name(model)
 
         # Add language boost if provided
@@ -359,7 +357,7 @@ class MiniMaxHttpTTSService(TTSService):
 
         # Build voice_setting dict for API
         voice_setting = {
-            "voice_id": self._voice_id,
+            "voice_id": self._settings.voice,
             "speed": self._settings.speed,
             "vol": self._settings.volume,
             "pitch": self._settings.pitch,

@@ -94,11 +94,11 @@ class ResembleAITTSService(AudioContextWordTTSService):
         """
         super().__init__(
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
         self._api_key = api_key
-        self._voice_id = voice_id
         self._url = url
         self._settings = ResembleAITTSSettings(
             voice=voice_id,
@@ -126,8 +126,6 @@ class ResembleAITTSService(AudioContextWordTTSService):
         self._jitter_buffer_bytes = 44100  # ~1000ms at 22050Hz to handle 400ms+ network gaps
         self._playback_started: dict[str, bool] = {}  # Track if we've started playback per request
 
-        self._voice_id = voice_id
-
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -146,7 +144,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
             JSON string containing the request payload.
         """
         msg = {
-            "voice_uuid": self._voice_id,
+            "voice_uuid": self._settings.voice,
             "data": text,
             "binary_response": False,  # Use JSON frames to get timestamps
             "request_id": self._request_id_counter,  # ResembleAI only accepts number

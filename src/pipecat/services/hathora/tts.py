@@ -109,6 +109,7 @@ class HathoraTTSService(TTSService):
         """
         super().__init__(
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
         self._model = model
@@ -125,7 +126,6 @@ class HathoraTTSService(TTSService):
         )
 
         self.set_model_name(model)
-        self._voice_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -154,8 +154,8 @@ class HathoraTTSService(TTSService):
 
             payload = {"model": self._model, "text": text}
 
-            if self._voice_id is not None:
-                payload["voice"] = self._voice_id
+            if self._settings.voice is not None:
+                payload["voice"] = self._settings.voice
             if self._settings.speed is not None:
                 payload["speed"] = self._settings.speed
             if self._settings.config is not None:

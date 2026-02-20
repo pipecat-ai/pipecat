@@ -137,11 +137,10 @@ class KokoroTTSService(TTSService):
             **kwargs: Additional arguments passed to parent `TTSService`.
 
         """
-        super().__init__(**kwargs)
+        super().__init__(voice=voice_id, **kwargs)
 
         params = params or KokoroTTSService.InputParams()
 
-        self._voice_id = voice_id
         self._lang_code = language_to_kokoro_language(params.language)
 
         self._settings = KokoroTTSSettings(
@@ -182,7 +181,7 @@ class KokoroTTSService(TTSService):
             yield TTSStartedFrame(context_id=context_id)
 
             stream = self._kokoro.create_stream(
-                text, voice=self._voice_id, lang=self._lang_code, speed=1.0
+                text, voice=self._settings.voice, lang=self._lang_code, speed=1.0
             )
 
             async for samples, sample_rate in stream:

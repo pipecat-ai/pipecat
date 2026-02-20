@@ -213,7 +213,7 @@ class CambTTSService(TTSService):
             params: Additional voice parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         self._api_key = api_key
         self._timeout = timeout
@@ -238,7 +238,6 @@ class CambTTSService(TTSService):
         )
 
         self.set_model_name(model)
-        self._voice_id = voice_id
 
         self._client = None
 
@@ -299,7 +298,7 @@ class CambTTSService(TTSService):
             # Build SDK parameters
             tts_kwargs: Dict[str, Any] = {
                 "text": text,
-                "voice_id": self._voice_id,
+                "voice_id": self._settings.voice,
                 "language": self._settings.language,
                 "speech_model": self.model_name,
                 "output_configuration": StreamTtsOutputConfiguration(format="pcm_s16le"),

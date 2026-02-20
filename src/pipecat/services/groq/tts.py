@@ -102,6 +102,7 @@ class GroqTTSService(TTSService):
         super().__init__(
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -110,7 +111,6 @@ class GroqTTSService(TTSService):
         self._api_key = api_key
         self._model_name = model_name
         self._output_format = output_format
-        self._voice_id = voice_id
         self._params = params
 
         self._settings = GroqTTSSettings(
@@ -151,7 +151,7 @@ class GroqTTSService(TTSService):
         try:
             response = await self._client.audio.speech.create(
                 model=self._model_name,
-                voice=self._voice_id,
+                voice=self._settings.voice,
                 response_format=self._output_format,
                 input=text,
             )

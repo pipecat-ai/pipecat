@@ -139,6 +139,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -151,8 +152,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
             speed=params.speed,
             encoding=encoding,
             sampling_rate=sample_rate,
+            voice=voice_id,
         )
-        self._voice_id = voice_id
 
         self._cumulative_time = 0
 
@@ -288,7 +289,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 "speed": self._settings.speed,
                 "encoding": self._settings.encoding,
                 "sampling_rate": self._settings.sampling_rate,
-                "voice_id": self._voice_id,
+                "voice_id": self._settings.voice,
             }
 
             query_params = []
@@ -442,7 +443,7 @@ class NeuphonicHttpTTSService(TTSService):
             params: Additional input parameters for TTS configuration.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or NeuphonicHttpTTSService.InputParams()
 

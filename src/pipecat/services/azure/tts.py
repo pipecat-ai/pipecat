@@ -165,12 +165,12 @@ class AzureBaseTTSService:
             role=params.role,
             style=params.style,
             style_degree=params.style_degree,
+            voice=voice,
             volume=params.volume,
         )
 
         self._api_key = api_key
         self._region = region
-        self._voice_id = voice
         self._speech_synthesizer = None
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
@@ -194,7 +194,7 @@ class AzureBaseTTSService:
             f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
-            f"<voice name='{self._voice_id}'>"
+            f"<voice name='{self._settings.voice}'>"
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
         )
 
@@ -295,6 +295,7 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            voice=voice,
             **kwargs,
         )
 
@@ -733,7 +734,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             params: Voice and synthesis parameters configuration.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice, **kwargs)
 
         # Initialize Azure-specific functionality from mixin
         self._init_azure_base(api_key=api_key, region=region, voice=voice, params=params)

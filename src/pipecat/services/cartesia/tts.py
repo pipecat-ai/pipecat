@@ -313,6 +313,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             pause_frame_processing=True,
             sample_rate=sample_rate,
             text_aggregator=text_aggregator,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -340,9 +341,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
             emotion=params.emotion,
             generation_config=params.generation_config,
             pronunciation_dict_id=params.pronunciation_dict_id,
+            voice=voice_id,
         )
         self.set_model_name(model)
-        self._voice_id = voice_id
 
         self._context_id = None
         self._receive_task = None
@@ -440,7 +441,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
     ):
         voice_config = {}
         voice_config["mode"] = "id"
-        voice_config["id"] = self._voice_id
+        voice_config["id"] = self._settings.voice
 
         if is_given(self._settings.emotion) and self._settings.emotion:
             with warnings.catch_warnings():
@@ -720,7 +721,7 @@ class CartesiaHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or CartesiaHttpTTSService.InputParams()
 
@@ -741,7 +742,6 @@ class CartesiaHttpTTSService(TTSService):
             generation_config=params.generation_config,
             pronunciation_dict_id=params.pronunciation_dict_id,
         )
-        self._voice_id = voice_id
         self.set_model_name(model)
 
         self._client = AsyncCartesia(
@@ -809,7 +809,7 @@ class CartesiaHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            voice_config = {"mode": "id", "id": self._voice_id}
+            voice_config = {"mode": "id", "id": self._settings.voice}
 
             if is_given(self._settings.emotion) and self._settings.emotion:
                 with warnings.catch_warnings():

@@ -191,6 +191,7 @@ class RimeTTSService(AudioContextWordTTSService):
             pause_frame_processing=True,
             append_trailing_space=True,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -207,7 +208,6 @@ class RimeTTSService(AudioContextWordTTSService):
         # Store service configuration
         self._api_key = api_key
         self._url = url
-        self._voice_id = voice_id
         self._model = model
         self._settings = RimeTTSSettings(
             voice=voice_id,
@@ -582,7 +582,7 @@ class RimeHttpTTSService(TTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or RimeHttpTTSService.InputParams()
 
@@ -596,8 +596,8 @@ class RimeHttpTTSService(TTSService):
             pauseBetweenBrackets=params.pause_between_brackets,
             phonemizeBetweenBrackets=params.phonemize_between_brackets,
             inlineSpeedAlpha=params.inline_speed_alpha if params.inline_speed_alpha else NOT_GIVEN,
+            voice=voice_id,
         )
-        self._voice_id = voice_id
         self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
@@ -648,7 +648,7 @@ class RimeHttpTTSService(TTSService):
         if is_given(self._settings.inlineSpeedAlpha):
             payload["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
         payload["text"] = text
-        payload["speaker"] = self._voice_id
+        payload["speaker"] = self._settings.voice
         payload["modelId"] = self._model_name
         payload["samplingRate"] = self.sample_rate
 
@@ -762,12 +762,12 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             aggregate_sentences=aggregate_sentences,
             push_stop_frames=True,
             pause_frame_processing=True,
+            voice=voice_id,
             **kwargs,
         )
         params = params or RimeNonJsonTTSService.InputParams()
         self._api_key = api_key
         self._url = url
-        self._voice_id = voice_id
         self._model = model
         self._settings = RimeNonJsonTTSSettings(
             voice=voice_id,

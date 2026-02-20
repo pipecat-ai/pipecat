@@ -195,7 +195,7 @@ class AWSPollyTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or AWSPollyTTSService.InputParams()
 
@@ -221,8 +221,6 @@ class AWSPollyTTSService(TTSService):
         )
 
         self._resampler = create_stream_resampler()
-
-        self._voice_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -299,7 +297,7 @@ class AWSPollyTTSService(TTSService):
                 "Text": ssml,
                 "TextType": "ssml",
                 "OutputFormat": "pcm",
-                "VoiceId": self._voice_id,
+                "VoiceId": self._settings.voice,
                 "Engine": self._settings.engine,
                 # AWS only supports 8000 and 16000 for PCM. We select 16000.
                 "SampleRate": "16000",

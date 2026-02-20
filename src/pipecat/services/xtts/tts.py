@@ -111,14 +111,13 @@ class XTTSService(TTSService):
             sample_rate: Audio sample rate. If None, uses default.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         self._settings = XTTSTTSSettings(
             voice=voice_id,
             language=self.language_to_service_language(language),
             base_url=base_url,
         )
-        self._voice_id = voice_id
         self._studio_speakers: Optional[Dict[str, Any]] = None
         self._aiohttp_session = aiohttp_session
 
@@ -180,7 +179,7 @@ class XTTSService(TTSService):
             logger.error(f"{self} no studio speakers available")
             return
 
-        embeddings = self._studio_speakers[self._voice_id]
+        embeddings = self._studio_speakers[self._settings.voice]
 
         url = self._settings.base_url + "/tts_stream"
 

@@ -145,6 +145,11 @@ class TTSService(AIService):
         text_filter: Optional[BaseTextFilter] = None,
         # Audio transport destination of the generated frames.
         transport_destination: Optional[str] = None,
+        # Voice identifier or name to use for speech synthesis
+        voice: Optional[str] = None,
+        # Language to use for speech synthesis. This will be translated to a
+        # service-specific language identifier before being applied
+        language: Optional[Language] = None,
         **kwargs,
     ):
         """Initialize the TTS service.
@@ -178,6 +183,10 @@ class TTSService(AIService):
                     Use `text_filters` instead, which allows multiple filters.
 
             transport_destination: Destination for generated audio frames.
+            voice: Voice identifier or name to use for speech synthesis.
+            language: Language to use for speech synthesis. This will be
+                translated to a service-specific language identifier before
+                being applied.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -191,8 +200,9 @@ class TTSService(AIService):
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._voice_id: str = ""
-        self._settings = TTSSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
+        self._settings = TTSSettings(
+            voice=voice, language=language
+        )  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         if text_aggregator:
             import warnings
@@ -427,11 +437,7 @@ class TTSService(AIService):
     async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
         """Apply a TTS settings update.
 
-        Handles ``model`` (via parent) and syncs ``_voice_id`` when voice
-        changes.  Translates language values before applying.  Does **not**
-        call ``set_voice`` or ``set_model`` directly — concrete services
-        should override this method and handle reconnect logic based on the
-        returned changed-field dict.
+        Translates language to service-specific value before applying.
 
         Args:
             update: A TTS settings delta.
@@ -446,10 +452,6 @@ class TTSService(AIService):
                 update.language = converted
 
         changed = await super()._update_settings(update)
-
-        # Keep _voice_id in sync for code that reads it directly
-        if "voice" in changed:
-            self._voice_id = self._settings.voice
 
         return changed
 

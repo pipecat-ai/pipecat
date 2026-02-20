@@ -101,6 +101,7 @@ class DeepgramTTSService(WebsocketTTSService):
             pause_frame_processing=True,
             push_stop_frames=True,
             append_trailing_space=True,
+            voice=voice,
             **kwargs,
         )
 
@@ -111,7 +112,6 @@ class DeepgramTTSService(WebsocketTTSService):
             voice=voice,
             encoding=encoding,
         )
-        self._voice_id = voice
 
         self._receive_task = None
         self._context_id: Optional[str] = None
@@ -210,7 +210,7 @@ class DeepgramTTSService(WebsocketTTSService):
 
             # Build WebSocket URL with query parameters
             params = []
-            params.append(f"model={self._voice_id}")
+            params.append(f"model={self._settings.voice}")
             params.append(f"encoding={self._settings.encoding}")
             params.append(f"sample_rate={self.sample_rate}")
 
@@ -388,7 +388,7 @@ class DeepgramHttpTTSService(TTSService):
             encoding: Audio encoding format. Defaults to "linear16".
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice, **kwargs)
 
         self._api_key = api_key
         self._session = aiohttp_session
@@ -398,7 +398,6 @@ class DeepgramHttpTTSService(TTSService):
             voice=voice,
             encoding=encoding,
         )
-        self._voice_id = voice
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
@@ -427,7 +426,7 @@ class DeepgramHttpTTSService(TTSService):
         headers = {"Authorization": f"Token {self._api_key}", "Content-Type": "application/json"}
 
         params = {
-            "model": self._voice_id,
+            "model": self._settings.voice,
             "encoding": self._settings.encoding,
             "sample_rate": self.sample_rate,
             "container": "none",

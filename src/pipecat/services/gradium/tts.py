@@ -91,6 +91,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=SAMPLE_RATE,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -99,7 +100,6 @@ class GradiumTTSService(InterruptibleWordTTSService):
         # Store service configuration
         self._api_key = api_key
         self._url = url
-        self._voice_id = voice_id
         self._json_config = json_config
         self._settings = GradiumTTSSettings(
             model=model,
@@ -208,7 +208,7 @@ class GradiumTTSService(InterruptibleWordTTSService):
             setup_msg = {
                 "type": "setup",
                 "output_format": "pcm",
-                "voice_id": self._voice_id,
+                "voice_id": self._settings.voice,
             }
             if self._json_config is not None:
                 setup_msg["json_config"] = self._json_config

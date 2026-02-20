@@ -118,11 +118,11 @@ class LmntTTSService(InterruptibleTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
         self._api_key = api_key
-        self._voice_id = voice_id
         self.set_model_name(model)
         self._settings = LmntTTSSettings(
             model=model,
@@ -235,7 +235,7 @@ class LmntTTSService(InterruptibleTTSService):
             # Build initial connection message
             init_msg = {
                 "X-API-Key": self._api_key,
-                "voice": self._voice_id,
+                "voice": self._settings.voice,
                 "format": self._settings.format,
                 "sample_rate": self.sample_rate,
                 "language": self._settings.language,

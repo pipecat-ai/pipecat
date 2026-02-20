@@ -144,6 +144,7 @@ class InworldHttpTTSService(WordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -173,7 +174,6 @@ class InworldHttpTTSService(WordTTSService):
 
         self._cumulative_time = 0.0
 
-        self._voice_id = voice_id
         self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
@@ -519,6 +519,7 @@ class InworldTTSService(AudioContextWordTTSService):
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
             append_trailing_space=append_trailing_space,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -563,7 +564,6 @@ class InworldTTSService(AudioContextWordTTSService):
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
 
-        self._voice_id = voice_id
         self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:

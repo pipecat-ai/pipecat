@@ -126,6 +126,7 @@ class HumeTTSService(WordTTSService):
             sample_rate=sample_rate,
             push_text_frames=False,
             push_stop_frames=True,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -142,7 +143,6 @@ class HumeTTSService(WordTTSService):
             speed=params.speed,
             trailing_silence=params.trailing_silence,
         )
-        self._voice_id = voice_id
 
         self._audio_bytes = b""
 
@@ -263,7 +263,7 @@ class HumeTTSService(WordTTSService):
         # Build the request payload
         utterance_kwargs: dict[str, Any] = {
             "text": text,
-            "voice": PostedUtteranceVoiceWithId(id=self._voice_id),
+            "voice": PostedUtteranceVoiceWithId(id=self._settings.voice),
         }
         if self._settings.description is not None:
             utterance_kwargs["description"] = self._settings.description

@@ -153,6 +153,7 @@ class AsyncAITTSService(AudioContextTTSService):
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
 
@@ -173,7 +174,6 @@ class AsyncAITTSService(AudioContextTTSService):
         )
 
         self.set_model_name(model)
-        self._voice_id = voice_id
 
         self._receive_task = None
         self._keepalive_task = None
@@ -278,7 +278,7 @@ class AsyncAITTSService(AudioContextTTSService):
             )
             init_msg = {
                 "model_id": self._model_name,
-                "voice": {"mode": "id", "id": self._voice_id},
+                "voice": {"mode": "id", "id": self._settings.voice},
                 "output_format": {
                     "container": self._settings.output_container,
                     "encoding": self._settings.output_encoding,
@@ -497,7 +497,7 @@ class AsyncAIHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or AsyncAIHttpTTSService.InputParams()
 
@@ -514,7 +514,6 @@ class AsyncAIHttpTTSService(TTSService):
             if params.language
             else None,
         )
-        self._voice_id = voice_id
         self.set_model_name(model)
 
         self._session = aiohttp_session
@@ -561,7 +560,7 @@ class AsyncAIHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            voice_config = {"mode": "id", "id": self._voice_id}
+            voice_config = {"mode": "id", "id": self._settings.voice}
             await self.start_ttfb_metrics()
             payload = {
                 "model_id": self._model_name,

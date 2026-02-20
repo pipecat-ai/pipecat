@@ -281,7 +281,6 @@ class SarvamTTSSettings(TTSSettings):
 
     Parameters:
         target_language_code: Sarvam language code.
-        speaker: Voice speaker ID.
         speech_sample_rate: Audio sample rate as string.
         enable_preprocessing: Enable text preprocessing. Defaults to False.
             **Note:** Always enabled for bulbul:v3-beta.
@@ -306,7 +305,6 @@ class SarvamTTSSettings(TTSSettings):
     """
 
     target_language_code: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    speaker: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     speech_sample_rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_preprocessing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     min_buffer_size: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -460,13 +458,13 @@ class SarvamHttpTTSService(TTSService):
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
 
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or SarvamHttpTTSService.InputParams()
 
         # Set default voice based on model if not specified
         if voice_id is None:
             voice_id = self._config.default_speaker
+
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         self._api_key = api_key
         self._base_url = base_url
@@ -489,6 +487,7 @@ class SarvamHttpTTSService(TTSService):
             ),
             pace=pace,
             model=model,
+            voice=voice_id,
         )
 
         # Add parameters based on model support
@@ -508,7 +507,6 @@ class SarvamHttpTTSService(TTSService):
             logger.warning(f"temperature parameter is ignored for {model}")
 
         self.set_model_name(model)
-        self._voice_id = voice_id
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -558,7 +556,7 @@ class SarvamHttpTTSService(TTSService):
             payload = {
                 "text": text,
                 "target_language_code": self._settings.language,
-                "speaker": self._voice_id,
+                "speaker": self._settings.voice,
                 "sample_rate": self.sample_rate,
                 "enable_preprocessing": self._settings.enable_preprocessing,
                 "model": self._model_name,
@@ -812,6 +810,10 @@ class SarvamTTSService(InterruptibleTTSService):
         if sample_rate is None:
             sample_rate = self._config.default_sample_rate
 
+        # Set default voice based on model if not specified
+        if voice_id is None:
+            voice_id = self._config.default_speaker
+
         # Initialize parent class first
         super().__init__(
             aggregate_sentences=aggregate_sentences,
@@ -819,19 +821,15 @@ class SarvamTTSService(InterruptibleTTSService):
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,
+            voice=voice_id,
             **kwargs,
         )
         params = params or SarvamTTSService.InputParams()
-
-        # Set default voice based on model if not specified
-        if voice_id is None:
-            voice_id = self._config.default_speaker
 
         # WebSocket endpoint URL with model query parameter
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
         self.set_model_name(model)
-        self._voice_id = voice_id
 
         # Validate and clamp pace to model's valid range
         pace = params.pace
@@ -845,7 +843,6 @@ class SarvamTTSService(InterruptibleTTSService):
             target_language_code=(
                 self.language_to_service_language(params.language) if params.language else "en-IN"
             ),
-            speaker=voice_id,
             speech_sample_rate=str(sample_rate),
             enable_preprocessing=(
                 True if self._config.preprocessing_always_enabled else params.enable_preprocessing
@@ -856,6 +853,7 @@ class SarvamTTSService(InterruptibleTTSService):
             output_audio_bitrate=params.output_audio_bitrate,
             pace=pace,
             model=model,
+            voice=voice_id,
         )
 
         # Add parameters based on model support
@@ -1018,11 +1016,10 @@ class SarvamTTSService(InterruptibleTTSService):
         """Send initial configuration message."""
         if not self._websocket:
             raise Exception("WebSocket not connected")
-        self._settings.speaker = self._voice_id
         # Build config dict for the API
         config_data = {
             "target_language_code": self._settings.target_language_code,
-            "speaker": self._settings.speaker,
+            "speaker": self._settings.voice,
             "speech_sample_rate": self._settings.speech_sample_rate,
             "enable_preprocessing": self._settings.enable_preprocessing,
             "min_buffer_size": self._settings.min_buffer_size,

@@ -602,7 +602,7 @@ class GoogleHttpTTSService(TTSService):
             params: Voice customization parameters including pitch, rate, volume, etc.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or GoogleHttpTTSService.InputParams()
 
@@ -618,8 +618,8 @@ class GoogleHttpTTSService(TTSService):
             else "en-US",
             gender=params.gender,
             google_style=params.google_style,
+            voice=voice_id,
         )
-        self._voice_id = voice_id
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
         )
@@ -707,7 +707,7 @@ class GoogleHttpTTSService(TTSService):
         ssml = "<speak>"
 
         # Voice tag
-        voice_attrs = [f"name='{self._voice_id}'"]
+        voice_attrs = [f"name='{self._settings.voice}'"]
 
         language = self._settings.language
         voice_attrs.append(f"language='{language}'")
@@ -766,8 +766,8 @@ class GoogleHttpTTSService(TTSService):
             await self.start_ttfb_metrics()
 
             # Check if the voice is a Chirp voice (including Chirp 3) or Journey voice
-            is_chirp_voice = "chirp" in self._voice_id.lower()
-            is_journey_voice = "journey" in self._voice_id.lower()
+            is_chirp_voice = "chirp" in self._settings.voice.lower()
+            is_journey_voice = "journey" in self._settings.voice.lower()
 
             # Create synthesis input based on voice_id
             if is_chirp_voice or is_journey_voice:
@@ -778,7 +778,7 @@ class GoogleHttpTTSService(TTSService):
                 synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
 
             voice = texttospeech_v1.VoiceSelectionParams(
-                language_code=self._settings.language, name=self._voice_id
+                language_code=self._settings.language, name=self._settings.voice
             )
             # Build audio config with conditional speaking_rate
             audio_config_params = {
@@ -1015,7 +1015,7 @@ class GoogleTTSService(GoogleBaseTTSService):
             params: Language configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or GoogleTTSService.InputParams()
 
@@ -1025,8 +1025,8 @@ class GoogleTTSService(GoogleBaseTTSService):
             if params.language
             else "en-US",
             speaking_rate=params.speaking_rate,
+            voice=voice_id,
         )
-        self._voice_id = voice_id
         self._voice_cloning_key = voice_cloning_key
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
@@ -1073,7 +1073,7 @@ class GoogleTTSService(GoogleBaseTTSService):
                 )
             else:
                 voice = texttospeech_v1.VoiceSelectionParams(
-                    language_code=self._settings.language, name=self._voice_id
+                    language_code=self._settings.language, name=self._settings.voice
                 )
 
             # Create streaming config
@@ -1220,7 +1220,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
 
         params = params or GeminiTTSService.InputParams()
 
@@ -1229,7 +1229,6 @@ class GeminiTTSService(GoogleBaseTTSService):
 
         self._location = location
         self._model = model
-        self._voice_id = voice_id
         self._settings = GeminiTTSSettings(
             language=self.language_to_service_language(params.language)
             if params.language
@@ -1237,6 +1236,7 @@ class GeminiTTSService(GoogleBaseTTSService):
             prompt=params.prompt,
             multi_speaker=params.multi_speaker,
             speaker_configs=params.speaker_configs,
+            voice=voice_id,
         )
 
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
@@ -1306,7 +1306,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                     speaker_voice_configs.append(
                         texttospeech_v1.MultispeakerPrebuiltVoice(
                             speaker_alias=speaker_config["speaker_alias"],
-                            speaker_id=speaker_config.get("speaker_id", self._voice_id),
+                            speaker_id=speaker_config.get("speaker_id", self._settings.voice),
                         )
                     )
 
@@ -1323,7 +1323,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                 # Single speaker mode
                 voice = texttospeech_v1.VoiceSelectionParams(
                     language_code=self._settings.language,
-                    name=self._voice_id,
+                    name=self._settings.voice,
                     model_name=self._model,
                 )
 

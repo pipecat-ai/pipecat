@@ -190,13 +190,14 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(span_name, context=parent_context) as span:
                 try:
+                    settings = getattr(self, "_settings", {})
                     add_tts_span_attributes(
                         span=span,
                         service_name=service_class_name,
                         model=getattr(self, "model_name") or "unknown",
-                        voice_id=getattr(self, "_voice_id", "unknown"),
+                        voice_id=getattr(settings, "voice", "unknown"),
                         text=text,
-                        settings=getattr(self, "_settings", {}),
+                        settings=settings,
                         character_count=len(text),
                         operation_name="tts",
                         cartesia_version=getattr(self, "_cartesia_version", None),
