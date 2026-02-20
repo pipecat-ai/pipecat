@@ -372,7 +372,7 @@ class TTSService(AIService):
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
-        if self._supports_word_timestamps:
+        if self._words_task:
             await self._stop_words_task()
 
     async def cancel(self, frame: CancelFrame):
@@ -385,7 +385,7 @@ class TTSService(AIService):
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
-        if self._supports_word_timestamps:
+        if self._words_task:
             await self._stop_words_task()
 
     def add_text_transformer(
@@ -488,8 +488,7 @@ class TTSService(AIService):
             await self._handle_interruption(frame, direction)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
-            if self._supports_word_timestamps:
-                self._llm_response_started = True
+            self._llm_response_started = True
             await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             # We pause processing incoming frames if the LLM response included
@@ -636,8 +635,9 @@ class TTSService(AIService):
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
             await filter.handle_interruption()
+
+        self._llm_response_started = False
         if self._supports_word_timestamps:
-            self._llm_response_started = False
             await self.reset_word_timestamps()
 
     async def _maybe_pause_frame_processing(self):
