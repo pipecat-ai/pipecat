@@ -968,45 +968,21 @@ class WebsocketWordTTSService(WebsocketTTSService):
         )
 
 
-class InterruptibleWordTTSService(WebsocketWordTTSService):
-    """Websocket-based TTS service with word timestamps that handles interruptions.
+class InterruptibleWordTTSService(InterruptibleTTSService):
+    """Deprecated. Use InterruptibleTTSService with supports_word_timestamps=True instead.
 
-    For TTS services that support word timestamps but can't correlate generated
-    audio with requested text. Handles interruptions by reconnecting when needed.
+    .. deprecated::
+        Word timestamp functionality has been moved to TTSService. Pass
+        ``supports_word_timestamps=True`` to InterruptibleTTSService instead.
     """
 
     def __init__(self, **kwargs):
         """Initialize the Interruptible Word TTS service.
 
         Args:
-            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
+            **kwargs: Additional arguments passed to the parent InterruptibleTTSService.
         """
-        super().__init__(**kwargs)
-
-        # Indicates if the bot is speaking. If the bot is not speaking we don't
-        # need to reconnect when the user speaks. If the bot is speaking and the
-        # user interrupts we need to reconnect.
-        self._bot_speaking = False
-
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
-        if self._bot_speaking:
-            await self._disconnect()
-            await self._connect()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with bot speaking state tracking.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
+        super().__init__(supports_word_timestamps=True, **kwargs)
 
 
 class AudioContextTTSService(WebsocketTTSService):
