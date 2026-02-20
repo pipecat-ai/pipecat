@@ -26,7 +26,7 @@ from ojin.ojin_client_messages import (
 from ojin.profiling_utils import FPSTracker
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_default_resampler
+from pipecat.audio.utils import create_default_resampler, is_silence
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -79,8 +79,9 @@ OJIN_PERSONA_SAMPLE_RATE = 16000
 SPEECH_FILTER_AMOUNT = 5
 SPEECH_MOUTH_OPENING_SCALE = 1.0
 BYTES_PER_FRAME = int(OJIN_PERSONA_SAMPLE_RATE / 25 * 2)
-MAX_FRAMES_BUFFER = 3
+MAX_FRAMES_BUFFER = 2
 MIN_FRAMES_BUFFER = 1
+
 
 @dataclass
 class VideoFrame:
@@ -221,6 +222,7 @@ class OjinVideoService(FrameProcessor):
 
         elif isinstance(frame, TTSStartedFrame):
             logger.warning("TTSStartedFrame received")
+            self._interrupting = False
             if self._latency_start_ts is None:
                 self._latency_start_ts = time.perf_counter()
             await self.push_frame(frame, direction)
@@ -322,37 +324,11 @@ class OjinVideoService(FrameProcessor):
                 volume=volume,
             )
 
-            # If we receive the first silence after interruption we clear the buffer
-            if video_frame.is_silence() and self._interrupting:
-                self._interrupting = False
-                logger.warning(
-                    f"Interruption finished, speech frames discarded: {self._discarded_speech_frames}"
-                )
-                self._discarded_speech_frames = 0
-                self._video_frames.clear()
-            elif not video_frame.is_silence() and self._interrupting:
-                self._discarded_speech_frames += 1
-                logger.warning(
-                    f"Interrupting, speech frames discarded: {self._discarded_speech_frames}"
-                )
-                return
-
             self._video_frames.append(video_frame)
             if self._settings.frame_debugging_enabled:
                 logger.debug(
                     f"Received video frame {frame_idx}, is_final={message.is_final_response}"
                 )
-
-            if self._latency_start_ts is not None and video_frame.frame_idx == 1:
-                self._latency = time.perf_counter() - self._latency_start_ts
-                self._latency_start_ts = None
-                logger.info(
-                    f"First video frame received, ojin latency: {self._latency}, buffer: {len(self._video_frames)}"
-                )
-                await self.push_frame(
-                    OjinLatencyFrame(latency=self._latency), direction=FrameDirection.DOWNSTREAM
-                )
-                self._latency = None
 
         elif isinstance(message, ErrorResponseMessage):
             await self.push_error(
@@ -382,7 +358,6 @@ class OjinVideoService(FrameProcessor):
         audio_bytes: Optional[bytes] = None
         silence_bytes_per_frame = b"\x00" * BYTES_PER_FRAME
         skip_count = 0
-       
 
         while self._initialized:
             # Check speaking state notifications
@@ -401,27 +376,35 @@ class OjinVideoService(FrameProcessor):
 
             next_frame_time += self._frame_duration
 
-            if not initial_buffer_filled:
-                if len(self._video_frames) >= MAX_FRAMES_BUFFER:
-                    initial_buffer_filled = True
-                else:
-                    continue
+            # if not initial_buffer_filled:
+            #     if len(self._video_frames) >= MAX_FRAMES_BUFFER:
+            #         initial_buffer_filled = True
+            #     else:
+            #         continue
 
             # Check if we have a ready video frame
             if len(self._video_frames) > 0:
                 video_frame = self._video_frames.popleft()
                 frame_count += 1
                 image_bytes = video_frame.image_bytes
-
-                if self._interrupting and len(self._video_frames) < 4:
-                    next_frame_time += 3 * self._frame_duration
-                    audio_bytes = silence_bytes_per_frame
-                else:
-                    audio_bytes = video_frame.audio_bytes
+                audio_bytes = video_frame.audio_bytes
 
                 self._last_played_image_bytes = image_bytes
                 is_silence = video_frame.is_silence()
                 self._is_speaking = not is_silence
+
+                if not is_silence:
+                    if self._latency_start_ts is not None and video_frame.frame_idx == 1:
+                        self._latency = time.perf_counter() - self._latency_start_ts
+                        self._latency_start_ts = None
+                        logger.info(
+                            f"First video frame received, ojin latency: {self._latency}, buffer: {len(self._video_frames)}"
+                        )
+                        await self.push_frame(
+                            OjinLatencyFrame(latency=self._latency),
+                            direction=FrameDirection.DOWNSTREAM,
+                        )
+                        self._latency = None
 
                 if self._settings.frame_debugging_enabled:
                     if is_silence:
@@ -432,7 +415,9 @@ class OjinVideoService(FrameProcessor):
                         logger.debug(
                             f"[SPEECH] Playing frame {frame_count}, buffer left: {len(self._video_frames)} volume: {video_frame.volume}"
                         )
-                all_silence = all(f.is_silence() for f in self._video_frames)
+                all_silence = (
+                    all(f.is_silence() for f in self._video_frames) and len(self._video_frames) > 0
+                )
                 if all_silence and len(self._video_frames) > MAX_FRAMES_BUFFER:
                     skip_count += 1
                     if skip_count % 2 == 0:
