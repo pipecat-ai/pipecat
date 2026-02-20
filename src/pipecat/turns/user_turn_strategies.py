@@ -9,7 +9,6 @@
 from dataclasses import dataclass
 from typing import List, Optional
 
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -47,6 +46,10 @@ class UserTurnStrategies:
         if not self.start:
             self.start = [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
         if not self.stop:
+            from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import (
+                LocalSmartTurnAnalyzerV3,
+            )
+
             self.stop = [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
 
 
