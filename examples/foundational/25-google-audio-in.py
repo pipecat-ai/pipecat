@@ -98,7 +98,7 @@ class UserAudioCollector(FrameProcessor):
             self._user_speaking = True
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
-            self._context.add_audio_frames_message(audio_frames=self._audio_frames)
+            await self._context.add_audio_frames_message(audio_frames=self._audio_frames)
             await self._user_context_aggregator.push_frame(LLMContextFrame(context=self._context))
         elif isinstance(frame, InputAudioRawFrame):
             if self._user_speaking:

@@ -25,7 +25,6 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import (
-    INTERRUPTION_COMPLETION_TIMEOUT,
     FrameDirection,
     FrameProcessor,
 )
@@ -521,7 +520,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
                         # Complete after the timeout so the warning fires
                         # but the test doesn't hang.
                         async def delayed_complete():
-                            await asyncio.sleep(INTERRUPTION_COMPLETION_TIMEOUT + 1.0)
+                            await asyncio.sleep(1.0)
                             frame.complete()
 
                         asyncio.create_task(delayed_complete())
@@ -532,7 +531,7 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
                 async def process_frame(self, frame: Frame, direction: FrameDirection):
                     await super().process_frame(frame, direction)
                     if isinstance(frame, TextFrame):
-                        await self.push_interruption_task_frame_and_wait()
+                        await self.push_interruption_task_frame_and_wait(timeout=0.5)
                         await self.push_frame(OutputTransportMessageUrgentFrame(message="done"))
                     else:
                         await self.push_frame(frame, direction)
