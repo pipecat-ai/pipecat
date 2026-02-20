@@ -119,10 +119,10 @@ MODEL_CONFIGS: Dict[str, ModelConfig] = {
         use_translate_method=True,
     ),
     "saaras:v3": ModelConfig(
-        supports_prompt=True,
+        supports_prompt=False,
         supports_mode=True,
         supports_language=True,
-        default_language="en-IN",
+        default_language="unknown",
         default_mode="transcribe",
         use_translate_endpoint=False,
         use_translate_method=False,
@@ -155,9 +155,9 @@ class SarvamSTTService(STTService):
             language: Target language for transcription.
                 - saarika:v2.5: Defaults to "unknown" (auto-detect supported)
                 - saaras:v2.5: Not used (auto-detects language)
-                - saaras:v3: Defaults to "en-IN"
+                - saaras:v3: Defaults to "unknown" (auto-detect supported)
             prompt: Optional prompt to guide transcription/translation style/context.
-                Only applicable to saaras models (v2.5 and v3). Defaults to None.
+                Only applicable to saaras:v2.5. Defaults to None.
             mode: Mode of operation for saaras:v3 models only. Options: transcribe, translate,
                 verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3.
             vad_signals: Enable VAD signals in response. Defaults to None.
@@ -190,7 +190,7 @@ class SarvamSTTService(STTService):
             model: Sarvam model to use for transcription. Allowed values:
                 - "saarika:v2.5": Standard STT model
                 - "saaras:v2.5": STT-Translate model (auto-detects language, supports prompts)
-                - "saaras:v3": Advanced STT model (supports mode and prompts)
+                - "saaras:v3": Advanced STT model (supports mode)
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
@@ -447,13 +447,32 @@ class SarvamSTTService(STTService):
             if self._config.supports_mode and self._mode is not None:
                 connect_kwargs["mode"] = self._mode
 
+            # Prompt support differs across sarvamai versions. Prefer connect-time prompt
+            # when available and gracefully degrade if the SDK doesn't accept it.
+            if self._prompt is not None and self._config.supports_prompt:
+                connect_kwargs["prompt"] = self._prompt
+
             def _connect_with_sdk_headers(connect_fn, **kwargs):
                 # Different SDK versions may use different kwarg names.
-                for header_kw in ("headers", "additional_headers", "extra_headers"):
+                # If prompt is unsupported at connect-time, retry without it.
+                attempts = [kwargs]
+                if "prompt" in kwargs:
+                    attempts.append({k: v for k, v in kwargs.items() if k != "prompt"})
+
+                last_type_error = None
+                for attempt_kwargs in attempts:
+                    for header_kw in ("headers", "additional_headers", "extra_headers"):
+                        try:
+                            return connect_fn(**attempt_kwargs, **{header_kw: self._sdk_headers})
+                        except TypeError as e:
+                            last_type_error = e
                     try:
-                        return connect_fn(**kwargs, **{header_kw: self._sdk_headers})
-                    except TypeError:
-                        pass
+                        return connect_fn(**attempt_kwargs)
+                    except TypeError as e:
+                        last_type_error = e
+
+                if last_type_error is not None:
+                    raise last_type_error
                 return connect_fn(**kwargs)
 
             # Choose the appropriate endpoint based on model configuration
@@ -471,9 +490,11 @@ class SarvamSTTService(STTService):
             # Enter the async context manager
             self._socket_client = await self._websocket_context.__aenter__()
 
-            # Set prompt if provided (only for models that support prompts)
+            # Fallback for SDKs that support runtime prompt updates.
             if self._prompt is not None and self._config.supports_prompt:
-                await self._socket_client.set_prompt(self._prompt)
+                prompt_setter = getattr(self._socket_client, "set_prompt", None)
+                if callable(prompt_setter):
+                    await prompt_setter(self._prompt)
 
             # Register event handler for incoming messages
             def _message_handler(message):
