@@ -6,7 +6,6 @@
 
 import base64
 import json
-import uuid
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 from loguru import logger
@@ -97,7 +96,6 @@ class GradiumTTSService(AudioContextWordTTSService):
 
         # State tracking
         self._receive_task = None
-        self._context_id: Optional[str] = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -129,8 +127,9 @@ class GradiumTTSService(AudioContextWordTTSService):
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Gradium API."""
         msg = {"text": text, "type": "text"}
-        if self._context_id:
-            msg["client_req_id"] = self._context_id
+        context_id = self.get_active_audio_context_id()
+        if context_id:
+            msg["client_req_id"] = context_id
         return msg
 
     async def start(self, frame: StartFrame):
@@ -229,6 +228,7 @@ class GradiumTTSService(AudioContextWordTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
+            await self.remove_active_audio_context()
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -240,12 +240,13 @@ class GradiumTTSService(AudioContextWordTTSService):
 
     async def flush_audio(self):
         """Flush any pending audio synthesis."""
-        if not self._context_id or not self._websocket:
+        context_id = self.get_active_audio_context_id()
+        if not context_id or not self._websocket:
             return
         try:
-            msg = {"type": "end_of_stream", "client_req_id": self._context_id}
+            msg = {"type": "end_of_stream", "client_req_id": context_id}
             await self._websocket.send(json.dumps(msg))
-            self._context_id = None
+            self.reset_active_audio_context()
         except ConnectionClosedOK:
             logger.debug(f"{self}: connection closed normally during flush")
         except Exception as e:
@@ -265,7 +266,6 @@ class GradiumTTSService(AudioContextWordTTSService):
         """
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        self._context_id = None
 
     async def _receive_messages(self):
         """Process incoming websocket messages, demultiplexing by client_req_id."""
@@ -306,20 +306,6 @@ class GradiumTTSService(AudioContextWordTTSService):
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Error: {msg.get('message', msg)}")
 
-    def create_context_id(self) -> str:
-        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
-
-        Returns:
-            A unique string identifier for the TTS context.
-        """
-        # If a context ID does not exist, create a new one.
-        # If an ID exists, continue using the current ID.
-        # When interruptions happens, user speech results in
-        # an interruption, which resets the context ID.
-        if not self._context_id:
-            return str(uuid.uuid4())
-        return self._context_id
-
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Gradium's streaming API.
@@ -338,11 +324,10 @@ class GradiumTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                if not self._context_id:
+                if not self.has_active_audio_context():
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
-                    self._context_id = context_id
-                    await self.create_audio_context(self._context_id)
+                    await self.create_audio_context(context_id)
 
                 msg = self._build_msg(text=text)
                 await self._get_websocket().send(json.dumps(msg))

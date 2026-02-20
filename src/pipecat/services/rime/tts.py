@@ -12,7 +12,6 @@ using Rime's API for streaming and batch audio synthesis.
 
 import base64
 import json
-import uuid
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
@@ -167,7 +166,6 @@ class RimeTTSService(AudioContextWordTTSService):
         self._settings = self._build_settings()
 
         # State tracking
-        self._context_id = None  # Tracks current turn
         self._receive_task = None
         self._cumulative_time = 0  # Accumulates time across messages
         self._extra_msg_fields = {}  # Extra fields for next message
@@ -339,7 +337,7 @@ class RimeTTSService(AudioContextWordTTSService):
 
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Rime API."""
-        msg = {"text": text, "contextId": self._context_id}
+        msg = {"text": text, "contextId": self.get_active_audio_context_id()}
         if self._extra_msg_fields:
             msg |= self._extra_msg_fields
             self._extra_msg_fields = {}
@@ -427,7 +425,7 @@ class RimeTTSService(AudioContextWordTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Error disconnecting: {e}", exception=e)
         finally:
-            self._context_id = None
+            await self.remove_active_audio_context()
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -439,11 +437,11 @@ class RimeTTSService(AudioContextWordTTSService):
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle interruption by clearing current context."""
+        context_id = self.get_active_audio_context_id()
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        if self._context_id:
+        if context_id:
             await self._get_websocket().send(json.dumps(self._build_clear_msg()))
-            self._context_id = None
 
     def _calculate_word_times(self, words: list, starts: list, ends: list) -> list:
         """Calculate word timing pairs with proper spacing and punctuation.
@@ -474,28 +472,15 @@ class RimeTTSService(AudioContextWordTTSService):
 
         return word_pairs
 
-    def create_context_id(self) -> str:
-        """Generate a unique context ID for a TTS request in case we don't have one already in progress.
-
-        Returns:
-            A unique string identifier for the TTS context.
-        """
-        # If a context ID does not exist, create a new one.
-        # If an ID exists, continue using the current ID.
-        # When interruptions happen, user speech results in
-        # an interruption, which resets the context ID.
-        if not self._context_id:
-            return str(uuid.uuid4())
-        return self._context_id
-
     async def flush_audio(self):
         """Flush any pending audio synthesis."""
-        if not self._context_id or not self._websocket:
+        context_id = self.get_active_audio_context_id()
+        if not context_id or not self._websocket:
             return
 
         logger.trace(f"{self}: flushing audio")
         await self._get_websocket().send(json.dumps({"operation": "flush"}))
-        self._context_id = None
+        self.reset_active_audio_context()
 
     async def _receive_messages(self):
         """Process incoming websocket messages."""
@@ -537,7 +522,7 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
                 await self.push_error(error_msg=f"Error: {msg['message']}")
-                self._context_id = None
+                self.reset_active_audio_context()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push frame and handle end-of-turn conditions.
@@ -568,12 +553,11 @@ class RimeTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                if not self._context_id:
+                if not self.has_active_audio_context():
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
                     self._cumulative_time = 0
-                    self._context_id = context_id
-                    await self.create_audio_context(self._context_id)
+                    await self.create_audio_context(context_id)
 
                 msg = self._build_msg(text=text)
                 await self._get_websocket().send(json.dumps(msg))
