@@ -36,7 +36,7 @@ logger.add(sys.stderr, level="DEBUG")
 async def main():
     async with aiohttp.ClientSession() as session:
         transport = LemonSliceTransport(
-            bot_name="Pipecat bot",
+            bot_name="Pipecat",
             api_key=os.getenv("LEMONSLICE_API_KEY"),
             agent_id=os.getenv("LEMONSLICE_AGENT_ID"),
             session=session,
@@ -93,7 +93,7 @@ async def main():
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, participant):
-            logger.info(f"Client connected")
+            logger.info("Client connected")
             # Kick off the conversation.
             messages.append(
                 {
@@ -105,7 +105,7 @@ async def main():
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, participant):
-            logger.info(f"Client disconnected")
+            logger.info("Client disconnected")
             await task.cancel()
 
         runner = PipelineRunner()

@@ -199,11 +199,13 @@ class LemonSliceTransportClient:
                 await self._api.end_session(self._session_id, self._control_url)
             self._session_id = None
             self._control_url = None
+            raise
 
     async def cleanup(self):
         """Cleanup client resources."""
         try:
-            await self._daily_transport_client.cleanup()
+            if self._daily_transport_client:
+                await self._daily_transport_client.cleanup()
         except Exception as e:
             logger.error(f"Exception during cleanup: {e}")
 
@@ -316,7 +318,7 @@ class LemonSliceTransportClient:
 
     async def send_interrupt_message(self) -> None:
         """Send an interrupt message to the LemonSlice session."""
-        logger.info("Sending interrupt message")
+        logger.debug("Sending interrupt message")
         transport_frame = OutputTransportMessageUrgentFrame(
             message={
                 "event": "interrupt",
@@ -338,7 +340,7 @@ class LemonSliceTransportClient:
 
     async def send_response_finished_message(self) -> None:
         """Send a response_finished message to the LemonSlice session."""
-        logger.info("Sending response_finished message")
+        logger.debug("Sending response_finished message")
         transport_frame = OutputTransportMessageUrgentFrame(
             message={
                 "event": "response_finished",
@@ -682,7 +684,7 @@ class LemonSliceTransport(BaseTransport):
         output_name: Optional[str] = None,
         daily_room_url: Optional[str] = None,
         daily_token: Optional[str] = None,
-        lemonslice_properties: dict = {},
+        lemonslice_properties: Optional[dict] = None,
     ):
         """Initialize the LemonSlice transport.
 
@@ -709,7 +711,7 @@ class LemonSliceTransport(BaseTransport):
             on_participant_left=self._on_participant_left,
         )
         self._client = LemonSliceTransportClient(
-            bot_name="Pipecat",
+            bot_name=bot_name,
             callbacks=callbacks,
             api_key=api_key,
             agent_image_url=agent_image_url,
