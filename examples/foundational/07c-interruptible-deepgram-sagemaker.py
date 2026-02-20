@@ -23,8 +23,10 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.aws.llm import AWSBedrockLLMService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTService
 from pipecat.services.deepgram.tts import DeepgramTTSService
+from pipecat.services.deepgram.tts_sagemaker import DeepgramSageMakerTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -57,12 +59,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # This requires:
     # - AWS credentials configured (via environment variables or AWS CLI)
     # - A deployed SageMaker endpoint with Deepgram model
-    stt = DeepgramSageMakerSTTService(
-        endpoint_name=os.getenv("SAGEMAKER_ENDPOINT_NAME"),
-        region=os.getenv("AWS_REGION"),
-    )
+    # stt = DeepgramSageMakerSTTService(
+    #     endpoint_name=os.getenv("SAGEMAKER_STT_ENDPOINT_NAME"),
+    #     region=os.getenv("AWS_REGION"),
+    # )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-2-andromeda-en")
+    # Initialize Deepgram SageMaker TTS Service
+    # This requires:
+    # - AWS credentials configured (via environment variables or AWS CLI)
+    # - A deployed SageMaker endpoint with Deepgram TTS model
+    tts = DeepgramSageMakerTTSService(
+        endpoint_name=os.getenv("SAGEMAKER_TTS_ENDPOINT_NAME"),
+        region=os.getenv("AWS_REGION"),
+        voice="aura-2-andromeda-en",
+    )
 
     llm = AWSBedrockLLMService(
         aws_region=os.getenv("AWS_REGION"),
