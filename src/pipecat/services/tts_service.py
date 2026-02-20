@@ -1027,6 +1027,9 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             self._bot_speaking = False
 
 
+_CONTEXT_KEEPALIVE = object()
+
+
 class AudioContextTTSService(WebsocketTTSService):
     """Base class for websocket-based TTS services with audio context management.
 
@@ -1101,6 +1104,11 @@ class AudioContextTTSService(WebsocketTTSService):
             True if the context exists and is available.
         """
         return context_id in self._contexts
+
+    def refresh_audio_context(self, context_id: str):
+        """Signal that the audio context is still in use, resetting the timeout."""
+        if context_id in self._contexts:
+            self._contexts[context_id].put_nowait(_CONTEXT_KEEPALIVE)
 
     async def start(self, frame: StartFrame):
         """Start the audio context TTS service.
@@ -1183,6 +1191,9 @@ class AudioContextTTSService(WebsocketTTSService):
         while running:
             try:
                 frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
+                if frame is _CONTEXT_KEEPALIVE:
+                    # Context is still in use, reset the timeout.
+                    continue
                 if frame:
                     await self.push_frame(frame)
                 running = frame is not None

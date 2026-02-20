@@ -402,6 +402,8 @@ class AsyncAITTSService(AudioContextTTSService):
 
                     if not self.audio_context_available(self._context_id):
                         await self.create_audio_context(self._context_id)
+                else:
+                    self.refresh_audio_context(self._context_id)
 
                 msg = self._build_msg(text=text, force=True, context_id=self._context_id)
                 await self._get_websocket().send(msg)

@@ -735,6 +735,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                         ]
                     await self._websocket.send(json.dumps(msg))
                     logger.trace(f"Created new context {self._context_id}")
+                else:
+                    self.refresh_audio_context(self._context_id)
 
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)

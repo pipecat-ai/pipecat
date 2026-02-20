@@ -627,6 +627,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 yield TTSStartedFrame(context_id=context_id)
                 self._context_id = context_id
                 await self.create_audio_context(self._context_id)
+            else:
+                self.refresh_audio_context(self._context_id)
 
             msg = self._build_msg(text=text)
 

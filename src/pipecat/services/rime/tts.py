@@ -574,6 +574,8 @@ class RimeTTSService(AudioContextWordTTSService):
                     self._cumulative_time = 0
                     self._context_id = context_id
                     await self.create_audio_context(self._context_id)
+                else:
+                    self.refresh_audio_context(self._context_id)
 
                 msg = self._build_msg(text=text)
                 await self._get_websocket().send(json.dumps(msg))
