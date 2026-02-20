@@ -192,6 +192,7 @@ class TTSService(AIService):
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
         self._voice_id: str = ""
+        self._settings = TTSSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         if text_aggregator:
             import warnings

@@ -105,6 +105,7 @@ class STTService(AIService):
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
+        self._settings = STTSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
         self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""

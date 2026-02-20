@@ -205,6 +205,7 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._tracing_enabled: bool = False
         self._skip_tts: Optional[bool] = None
         self._summary_task: Optional[asyncio.Task] = None
+        self._settings = LLMSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
