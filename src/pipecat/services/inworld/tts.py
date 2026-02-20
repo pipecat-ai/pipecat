@@ -144,7 +144,6 @@ class InworldHttpTTSService(WordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
 
@@ -519,7 +518,6 @@ class InworldTTSService(AudioContextWordTTSService):
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
             append_trailing_space=append_trailing_space,
-            voice=voice_id,
             **kwargs,
         )
 

@@ -313,7 +313,6 @@ class CartesiaTTSService(AudioContextWordTTSService):
             pause_frame_processing=True,
             sample_rate=sample_rate,
             text_aggregator=text_aggregator,
-            voice=voice_id,
             **kwargs,
         )
 
@@ -721,7 +720,7 @@ class CartesiaHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or CartesiaHttpTTSService.InputParams()
 

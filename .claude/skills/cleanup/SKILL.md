@@ -291,7 +291,7 @@ class NewTTSService(TTSService):
             voice: Voice identifier to use.
             **kwargs: Additional arguments passed to the parent service.
         """
-        super().__init__(voice=voice, **kwargs)
+        super().__init__(**kwargs)
         self._api_key = api_key
 ```
 

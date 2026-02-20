@@ -94,7 +94,6 @@ class ResembleAITTSService(AudioContextWordTTSService):
         """
         super().__init__(
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
 

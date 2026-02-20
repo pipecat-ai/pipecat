@@ -464,7 +464,7 @@ class SarvamHttpTTSService(TTSService):
         if voice_id is None:
             voice_id = self._config.default_speaker
 
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._base_url = base_url
@@ -821,7 +821,6 @@ class SarvamTTSService(InterruptibleTTSService):
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
         params = params or SarvamTTSService.InputParams()

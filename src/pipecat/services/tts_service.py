@@ -145,11 +145,6 @@ class TTSService(AIService):
         text_filter: Optional[BaseTextFilter] = None,
         # Audio transport destination of the generated frames.
         transport_destination: Optional[str] = None,
-        # Voice identifier or name to use for speech synthesis
-        voice: Optional[str] = None,
-        # Language to use for speech synthesis. This will be translated to a
-        # service-specific language identifier before being applied
-        language: Optional[Language] = None,
         **kwargs,
     ):
         """Initialize the TTS service.
@@ -183,10 +178,6 @@ class TTSService(AIService):
                     Use `text_filters` instead, which allows multiple filters.
 
             transport_destination: Destination for generated audio frames.
-            voice: Voice identifier or name to use for speech synthesis.
-            language: Language to use for speech synthesis. This will be
-                translated to a service-specific language identifier before
-                being applied.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -201,7 +192,7 @@ class TTSService(AIService):
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
         self._settings = TTSSettings(
-            voice=voice, language=language
+            voice=""
         )  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         if text_aggregator:

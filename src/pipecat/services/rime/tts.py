@@ -191,7 +191,6 @@ class RimeTTSService(AudioContextWordTTSService):
             pause_frame_processing=True,
             append_trailing_space=True,
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
 
@@ -582,7 +581,7 @@ class RimeHttpTTSService(TTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or RimeHttpTTSService.InputParams()
 
@@ -762,7 +761,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             aggregate_sentences=aggregate_sentences,
             push_stop_frames=True,
             pause_frame_processing=True,
-            voice=voice_id,
             **kwargs,
         )
         params = params or RimeNonJsonTTSService.InputParams()

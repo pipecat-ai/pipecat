@@ -109,7 +109,6 @@ class HathoraTTSService(TTSService):
         """
         super().__init__(
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
         self._model = model

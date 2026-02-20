@@ -137,7 +137,7 @@ class KokoroTTSService(TTSService):
             **kwargs: Additional arguments passed to parent `TTSService`.
 
         """
-        super().__init__(voice=voice_id, **kwargs)
+        super().__init__(**kwargs)
 
         params = params or KokoroTTSService.InputParams()
 

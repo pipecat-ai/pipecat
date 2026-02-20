@@ -295,7 +295,6 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            voice=voice,
             **kwargs,
         )
 
@@ -734,7 +733,7 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             params: Voice and synthesis parameters configuration.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Initialize Azure-specific functionality from mixin
         self._init_azure_base(api_key=api_key, region=region, voice=voice, params=params)

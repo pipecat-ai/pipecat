@@ -126,7 +126,6 @@ class HumeTTSService(WordTTSService):
             sample_rate=sample_rate,
             push_text_frames=False,
             push_stop_frames=True,
-            voice=voice_id,
             **kwargs,
         )
 

@@ -227,7 +227,7 @@ class MiniMaxHttpTTSService(TTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or MiniMaxHttpTTSService.InputParams()
 

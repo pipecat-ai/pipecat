@@ -602,7 +602,7 @@ class GoogleHttpTTSService(TTSService):
             params: Voice customization parameters including pitch, rate, volume, etc.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or GoogleHttpTTSService.InputParams()
 
@@ -1015,7 +1015,7 @@ class GoogleTTSService(GoogleBaseTTSService):
             params: Language configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or GoogleTTSService.InputParams()
 
@@ -1220,7 +1220,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or GeminiTTSService.InputParams()
 

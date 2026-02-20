@@ -91,7 +91,6 @@ class GradiumTTSService(InterruptibleWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=SAMPLE_RATE,
-            voice=voice_id,
             **kwargs,
         )
 

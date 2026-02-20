@@ -102,7 +102,6 @@ class GroqTTSService(TTSService):
         super().__init__(
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
 

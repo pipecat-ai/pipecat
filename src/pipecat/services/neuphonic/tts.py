@@ -139,7 +139,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
 
@@ -443,7 +442,7 @@ class NeuphonicHttpTTSService(TTSService):
             params: Additional input parameters for TTS configuration.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or NeuphonicHttpTTSService.InputParams()
 

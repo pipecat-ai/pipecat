@@ -132,7 +132,7 @@ class OpenAITTSService(TTSService):
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, voice=voice, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self.set_model_name(model)
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)

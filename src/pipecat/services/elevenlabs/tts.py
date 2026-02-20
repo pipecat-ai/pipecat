@@ -400,7 +400,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
 
@@ -906,7 +905,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             sample_rate=sample_rate,
-            voice=voice_id,
             **kwargs,
         )
 

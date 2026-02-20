@@ -111,7 +111,7 @@ class XTTSService(TTSService):
             sample_rate: Audio sample rate. If None, uses default.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice_id, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = XTTSTTSSettings(
             voice=voice_id,

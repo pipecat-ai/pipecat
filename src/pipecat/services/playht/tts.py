@@ -173,7 +173,6 @@ class PlayHTTTSService(InterruptibleTTSService):
         super().__init__(
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            voice=voice_url,
             **kwargs,
         )
 
@@ -511,7 +510,7 @@ class PlayHTHttpTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice_url, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Warn about deprecated protocol parameter if explicitly provided
         if protocol:

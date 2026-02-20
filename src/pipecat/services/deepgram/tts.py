@@ -101,7 +101,6 @@ class DeepgramTTSService(WebsocketTTSService):
             pause_frame_processing=True,
             push_stop_frames=True,
             append_trailing_space=True,
-            voice=voice,
             **kwargs,
         )
 
@@ -388,7 +387,7 @@ class DeepgramHttpTTSService(TTSService):
             encoding: Audio encoding format. Defaults to "linear16".
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        super().__init__(sample_rate=sample_rate, voice=voice, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._session = aiohttp_session
