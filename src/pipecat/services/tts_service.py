@@ -125,6 +125,8 @@ class TTSService(AIService):
         append_trailing_space: bool = False,
         # TTS output sample rate
         sample_rate: Optional[int] = None,
+        # if True, enables word-level timestamp tracking and synchronization
+        supports_word_timestamps: bool = False,
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
         text_aggregator: Optional[BaseTextAggregator] = None,
         # Types of text aggregations that should not be spoken.
@@ -157,6 +159,9 @@ class TTSService(AIService):
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
             sample_rate: Output sample rate for generated audio.
+            supports_word_timestamps: Whether this service supports word-level timestamp tracking.
+                When True, enables synchronization of audio with spoken words so only spoken words
+                are added to the conversation context.
             text_aggregator: Custom text aggregator for processing incoming text.
 
                 .. deprecated:: 0.0.95
@@ -226,6 +231,13 @@ class TTSService(AIService):
 
         self._processing_text: bool = False
         self._tts_contexts: Dict[str, TTSContext] = {}
+
+        # Word timestamp state (active when supports_word_timestamps=True)
+        self._supports_word_timestamps: bool = supports_word_timestamps
+        self._initial_word_timestamp: int = -1
+        self._initial_word_times: List[Tuple[str, float, Optional[str]]] = []
+        self._words_task: Optional[asyncio.Task] = None
+        self._llm_response_started: bool = False
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -347,6 +359,8 @@ class TTSService(AIService):
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
         if self._push_stop_frames and not self._stop_frame_task:
             self._stop_frame_task = self.create_task(self._stop_frame_handler())
+        if self._supports_word_timestamps:
+            self._create_words_task()
 
     async def stop(self, frame: EndFrame):
         """Stop the TTS service.
@@ -358,6 +372,8 @@ class TTSService(AIService):
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
+        if self._supports_word_timestamps:
+            await self._stop_words_task()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the TTS service.
@@ -369,6 +385,8 @@ class TTSService(AIService):
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
+        if self._supports_word_timestamps:
+            await self._stop_words_task()
 
     def add_text_transformer(
         self,
@@ -469,6 +487,10 @@ class TTSService(AIService):
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption(frame, direction)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMFullResponseStartFrame):
+            if self._supports_word_timestamps:
+                self._llm_response_started = True
+            await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             # We pause processing incoming frames if the LLM response included
             # text (it might be that it's only a function calling response). We
@@ -487,6 +509,9 @@ class TTSService(AIService):
                     await self.push_frame(frame, direction)
             else:
                 await self.push_frame(frame, direction)
+            # Flush any pending audio so the TTS service closes the current context.
+            if self._supports_word_timestamps:
+                await self.flush_audio()
         elif isinstance(frame, TTSSpeakFrame):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
@@ -611,6 +636,9 @@ class TTSService(AIService):
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
             await filter.handle_interruption()
+        if self._supports_word_timestamps:
+            self._llm_response_started = False
+            await self.reset_word_timestamps()
 
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
@@ -734,41 +762,9 @@ class TTSService(AIService):
                 frame.append_to_context = append_tts_text_to_context
             await self.push_frame(frame)
 
-    async def _stop_frame_handler(self):
-        has_started = False
-        while True:
-            try:
-                frame = await asyncio.wait_for(
-                    self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
-                )
-                if isinstance(frame, TTSStartedFrame):
-                    has_started = True
-                elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
-                    has_started = False
-            except asyncio.TimeoutError:
-                if has_started:
-                    await self.push_frame(TTSStoppedFrame())
-                    has_started = False
-
-
-class WordTTSService(TTSService):
-    """Base class for TTS services that support word timestamps.
-
-    Word timestamps are useful to synchronize audio with text of the spoken
-    words. This way only the spoken words are added to the conversation context.
-    """
-
-    def __init__(self, **kwargs):
-        """Initialize the Word TTS service.
-
-        Args:
-            **kwargs: Additional arguments passed to the parent TTSService.
-        """
-        super().__init__(**kwargs)
-        self._initial_word_timestamp = -1
-        self._initial_word_times = []
-        self._words_task = None
-        self._llm_response_started: bool = False
+    #
+    # Word timestamp methods (active when supports_word_timestamps=True)
+    #
 
     async def start_word_timestamps(self):
         """Start tracking word timestamps from the current time."""
@@ -793,7 +789,6 @@ class WordTTSService(TTSService):
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
             context_id: Unique identifier for the TTS context.
         """
-        # Transform to include context_id in each tuple
         word_times_with_context = [(word, timestamp, context_id) for word, timestamp in word_times]
 
         if self._initial_word_timestamp == -1:
@@ -803,55 +798,9 @@ class WordTTSService(TTSService):
         else:
             await self._add_word_timestamps(word_times_with_context)
 
-    async def start(self, frame: StartFrame):
-        """Start the word TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        self._create_words_task()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the word TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        await self._stop_words_task()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the word TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._stop_words_task()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames with word timestamp awareness.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame processing.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, LLMFullResponseStartFrame):
-            self._llm_response_started = True
-        elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
-            await self.flush_audio()
-
-    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
-        self._llm_response_started = False
-        await self.reset_word_timestamps()
-
     def _create_words_task(self):
         if not self._words_task:
-            self._words_queue = asyncio.Queue()
+            self._words_queue: asyncio.Queue = asyncio.Queue()
             self._words_task = self.create_task(self._words_task_handler())
 
     async def _stop_words_task(self):
@@ -891,6 +840,39 @@ class WordTTSService(TTSService):
                 last_pts = frame.pts
                 await self.push_frame(frame)
             self._words_queue.task_done()
+
+    async def _stop_frame_handler(self):
+        has_started = False
+        while True:
+            try:
+                frame = await asyncio.wait_for(
+                    self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
+                )
+                if isinstance(frame, TTSStartedFrame):
+                    has_started = True
+                elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
+                    has_started = False
+            except asyncio.TimeoutError:
+                if has_started:
+                    await self.push_frame(TTSStoppedFrame())
+                    has_started = False
+
+
+class WordTTSService(TTSService):
+    """Deprecated. Use TTSService with supports_word_timestamps=True instead.
+
+    .. deprecated::
+        Word timestamp functionality has been moved to TTSService. Pass
+        ``supports_word_timestamps=True`` to TTSService (or any subclass) instead.
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize the Word TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent TTSService.
+        """
+        super().__init__(supports_word_timestamps=True, **kwargs)
 
 
 class WebsocketTTSService(TTSService, WebsocketService):
@@ -965,10 +947,12 @@ class InterruptibleTTSService(WebsocketTTSService):
             self._bot_speaking = False
 
 
-class WebsocketWordTTSService(WordTTSService, WebsocketService):
-    """Base class for websocket-based TTS services that support word timestamps.
+class WebsocketWordTTSService(WebsocketTTSService):
+    """Deprecated. Use WebsocketTTSService with supports_word_timestamps=True instead.
 
-    Combines word timestamp functionality with websocket connectivity.
+    .. deprecated::
+        Word timestamp functionality has been moved to TTSService. Pass
+        ``supports_word_timestamps=True`` to WebsocketTTSService instead.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -978,12 +962,9 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        WordTTSService.__init__(self, **kwargs)
-        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-
-    async def _report_error(self, error: ErrorFrame):
-        await self._call_event_handler("on_connection_error", error.error)
-        await self.push_error_frame(error)
+        super().__init__(
+            supports_word_timestamps=True, reconnect_on_error=reconnect_on_error, **kwargs
+        )
 
 
 class InterruptibleWordTTSService(WebsocketWordTTSService):
@@ -1263,15 +1244,12 @@ class AudioContextTTSService(WebsocketTTSService):
                 break
 
 
-class AudioContextWordTTSService(AudioContextTTSService, WebsocketWordTTSService):
-    """Websocket-based TTS service with word timestamps and audio context management.
+class AudioContextWordTTSService(AudioContextTTSService):
+    """Deprecated. Use AudioContextTTSService with supports_word_timestamps=True instead.
 
-    This is a base class for websocket-based TTS services that support word
-    timestamps and also allow correlating the generated audio with the requested
-    text through audio contexts.
-
-    Combines the audio context management capabilities of AudioContextTTSService
-    with the word timestamp functionality of WebsocketWordTTSService.
+    .. deprecated::
+        Word timestamp functionality has been moved to TTSService. Pass
+        ``supports_word_timestamps=True`` to AudioContextTTSService instead.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -1281,5 +1259,6 @@ class AudioContextWordTTSService(AudioContextTTSService, WebsocketWordTTSService
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        AudioContextTTSService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        WebsocketWordTTSService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        super().__init__(
+            supports_word_timestamps=True, reconnect_on_error=reconnect_on_error, **kwargs
+        )

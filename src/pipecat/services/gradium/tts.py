@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService
+from pipecat.services.tts_service import AudioContextTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -38,7 +38,7 @@ except ModuleNotFoundError as e:
 SAMPLE_RATE = 48000
 
 
-class GradiumTTSService(AudioContextWordTTSService):
+class GradiumTTSService(AudioContextTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
 
     class InputParams(BaseModel):
@@ -76,6 +76,7 @@ class GradiumTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             push_text_frames=False,
             pause_frame_processing=True,
+            supports_word_timestamps=True,
             sample_rate=SAMPLE_RATE,
             **kwargs,
         )

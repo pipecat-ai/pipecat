@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
+from pipecat.services.tts_service import AudioContextTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -191,7 +191,7 @@ class CartesiaEmotion(str, Enum):
     DETERMINED = "determined"
 
 
-class CartesiaTTSService(AudioContextWordTTSService):
+class CartesiaTTSService(AudioContextTTSService):
     """Cartesia TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using Cartesia's streaming WebSocket API.
@@ -270,7 +270,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
         super().__init__(
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=False,
+            supports_word_timestamps=True,
             sample_rate=sample_rate,
             text_aggregator=text_aggregator,
             **kwargs,

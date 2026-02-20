@@ -48,11 +48,11 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService, WordTTSService
+from pipecat.services.tts_service import AudioContextTTSService, TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-class InworldHttpTTSService(WordTTSService):
+class InworldHttpTTSService(TTSService):
     """Inworld AI HTTP-based TTS service.
 
     Supports both streaming and non-streaming modes via the `streaming` parameter.
@@ -101,6 +101,7 @@ class InworldHttpTTSService(WordTTSService):
         super().__init__(
             push_text_frames=False,
             push_stop_frames=True,
+            supports_word_timestamps=True,
             sample_rate=sample_rate,
             **kwargs,
         )
@@ -411,7 +412,7 @@ class InworldHttpTTSService(WordTTSService):
             )
 
 
-class InworldTTSService(AudioContextWordTTSService):
+class InworldTTSService(AudioContextTTSService):
     """Inworld AI WebSocket-based TTS service.
 
     Uses bidirectional WebSocket for lower latency streaming. Supports multiple
@@ -476,6 +477,7 @@ class InworldTTSService(AudioContextWordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
+            supports_word_timestamps=True,
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
             append_trailing_space=append_trailing_space,

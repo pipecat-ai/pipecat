@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService
+from pipecat.services.tts_service import AudioContextTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -36,7 +36,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class ResembleAITTSService(AudioContextWordTTSService):
+class ResembleAITTSService(AudioContextTTSService):
     """Resemble AI TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using Resemble AI's streaming WebSocket API.
@@ -69,6 +69,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
         super().__init__(
             sample_rate=sample_rate,
             reuse_context_id_within_turn=False,
+            supports_word_timestamps=True,
             **kwargs,
         )
 

@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.tts_service import TTSService, WordTTSService
+from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -229,7 +229,7 @@ class AzureBaseTTSService:
         return escaped_text
 
 
-class AzureTTSService(WordTTSService, AzureBaseTTSService):
+class AzureTTSService(TTSService, AzureBaseTTSService):
     """Azure Cognitive Services streaming TTS service with word timestamps.
 
     Provides real-time text-to-speech synthesis using Azure's WebSocket-based
@@ -257,14 +257,14 @@ class AzureTTSService(WordTTSService, AzureBaseTTSService):
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
             aggregate_sentences: Whether to aggregate sentences before synthesis.
-            **kwargs: Additional arguments passed to parent WordTTSService.
+            **kwargs: Additional arguments passed to the parent TTSService.
         """
-        # Initialize WordTTSService first to set up word timestamp tracking
         super().__init__(
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,  # We'll push text frames based on word timestamps
             push_stop_frames=True,
             pause_frame_processing=True,
+            supports_word_timestamps=True,
             sample_rate=sample_rate,
             **kwargs,
         )

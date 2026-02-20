@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import WordTTSService
+from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -46,7 +46,7 @@ DEFAULT_HEADERS = {
 }
 
 
-class HumeTTSService(WordTTSService):
+class HumeTTSService(TTSService):
     """Hume Octave Text-to-Speech service.
 
     Streams PCM audio via Hume's HTTP output streaming (JSON chunks) endpoint
@@ -101,11 +101,11 @@ class HumeTTSService(WordTTSService):
                 f"Hume TTS streams at {HUME_SAMPLE_RATE} Hz; configured sample_rate={sample_rate}"
             )
 
-        # WordTTSService sets push_text_frames=False by default, which we want
         super().__init__(
             sample_rate=sample_rate,
             push_text_frames=False,
             push_stop_frames=True,
+            supports_word_timestamps=True,
             **kwargs,
         )
 

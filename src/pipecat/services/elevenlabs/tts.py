@@ -33,8 +33,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import (
-    AudioContextWordTTSService,
-    WordTTSService,
+    AudioContextTTSService,
+    TTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -228,7 +228,7 @@ def calculate_word_times(
     return (word_times, new_partial_word, new_partial_word_start_time)
 
 
-class ElevenLabsTTSService(AudioContextWordTTSService):
+class ElevenLabsTTSService(AudioContextTTSService):
     """ElevenLabs WebSocket-based TTS service with word timestamps.
 
     Provides real-time text-to-speech using ElevenLabs' WebSocket streaming API.
@@ -308,6 +308,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
+            supports_word_timestamps=True,
             sample_rate=sample_rate,
             **kwargs,
         )
@@ -734,7 +735,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
 
 
-class ElevenLabsHttpTTSService(WordTTSService):
+class ElevenLabsHttpTTSService(TTSService):
     """ElevenLabs HTTP-based TTS service with word timestamps.
 
     Provides text-to-speech using ElevenLabs' HTTP streaming API for simpler,
@@ -797,6 +798,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
+            supports_word_timestamps=True,
             sample_rate=sample_rate,
             **kwargs,
         )
