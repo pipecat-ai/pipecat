@@ -175,12 +175,12 @@ class OpenAIRealtimeLLMService(LLMService):
 
         self.api_key = api_key
         self.base_url = full_url
-        self.set_model_name(model)
 
         self._settings = OpenAIRealtimeLLMSettings(
             model=model,
             session_properties=session_properties or events.SessionProperties(),
         )
+        self._sync_model_name_to_metrics()
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
         self._video_frame_detail = video_frame_detail

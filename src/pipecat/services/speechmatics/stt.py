@@ -459,7 +459,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Model + metrics (operating_point comes from the SDK config/preset)
         self._settings.model = self._config.operating_point.value
-        self.set_model_name(self._config.operating_point.value)
+        self._sync_model_name_to_metrics()
 
         # Message queue
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()

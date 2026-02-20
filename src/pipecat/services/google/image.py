@@ -79,7 +79,9 @@ class GoogleImageGenService(ImageGenService):
         http_options = update_google_client_http_options(http_options)
 
         self._client = genai.Client(api_key=api_key, http_options=http_options)
-        self.set_model_name(self._params.model)
+
+        self._settings.model = self._params.model
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

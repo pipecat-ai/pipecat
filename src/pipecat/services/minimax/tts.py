@@ -235,7 +235,6 @@ class MiniMaxHttpTTSService(TTSService):
         self._group_id = group_id
         self._base_url = f"{base_url}?GroupId={group_id}"
         self._session = aiohttp_session
-        self._model_name = model
 
         # Create voice settings
         self._settings = MiniMaxTTSSettings(
@@ -249,9 +248,7 @@ class MiniMaxHttpTTSService(TTSService):
             audio_format="pcm",
             audio_channel=1,
         )
-
-        # Set model
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
         # Add language boost if provided
         if params.language:
@@ -318,14 +315,6 @@ class MiniMaxHttpTTSService(TTSService):
         """
         return language_to_minimax_language(language)
 
-    def set_model_name(self, model: str):
-        """Set the TTS model to use.
-
-        Args:
-            model: The model name to use for synthesis.
-        """
-        self._model_name = model
-
     async def start(self, frame: StartFrame):
         """Start the MiniMax TTS service.
 
@@ -382,7 +371,7 @@ class MiniMaxHttpTTSService(TTSService):
             "stream": self._settings.stream,
             "voice_setting": voice_setting,
             "audio_setting": audio_setting,
-            "model": self._model_name,
+            "model": self._settings.model,
             "text": text,
         }
         if is_given(self._settings.language_boost):

@@ -212,7 +212,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             tag=params.tag or [],
             min_confidence=params.min_confidence,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
         self._api_key = api_key
         self._url = url
         self._should_interrupt = should_interrupt

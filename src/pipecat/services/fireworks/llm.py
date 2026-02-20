@@ -66,7 +66,7 @@ class FireworksLLMService(OpenAILLMService):
             Dictionary of parameters for the chat completion request.
         """
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
             "frequency_penalty": self._settings.frequency_penalty,
             "presence_penalty": self._settings.presence_penalty,

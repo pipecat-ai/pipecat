@@ -201,7 +201,7 @@ class CartesiaSTTService(WebsocketSTTService):
             language=merged_options.get("language"),
             encoding=merged_options.get("encoding", "pcm_s16le"),
         )
-        self.set_model_name(merged_options["model"])
+        self._sync_model_name_to_metrics()
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
         self._receive_task = None

@@ -66,7 +66,7 @@ class CerebrasLLMService(OpenAILLMService):
             Dictionary of parameters for the chat completion request.
         """
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
             "seed": self._settings.seed,
             "temperature": self._settings.temperature,

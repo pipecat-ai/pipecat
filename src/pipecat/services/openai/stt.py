@@ -100,24 +100,24 @@ class OpenAISTTService(BaseWhisperSTTService):
         # Build kwargs dict with only set parameters
         kwargs = {
             "file": ("audio.wav", audio, "audio/wav"),
-            "model": self.model_name,
-            "language": self._language,
+            "model": self._settings.model,
+            "language": self._settings.language,
         }
 
         if self._include_prob_metrics:
             # GPT-4o-transcribe models only support logprobs (not verbose_json)
-            if self.model_name in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
+            if self._settings.model in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
                 kwargs["response_format"] = "json"
                 kwargs["include"] = ["logprobs"]
             else:
                 # Whisper models support verbose_json
                 kwargs["response_format"] = "verbose_json"
 
-        if self._prompt is not None:
-            kwargs["prompt"] = self._prompt
+        if self._settings.prompt is not None:
+            kwargs["prompt"] = self._settings.prompt
 
-        if self._temperature is not None:
-            kwargs["temperature"] = self._temperature
+        if self._settings.temperature is not None:
+            kwargs["temperature"] = self._settings.temperature
 
         return await self._client.audio.transcriptions.create(**kwargs)
 
@@ -226,7 +226,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         self._api_key = api_key
         self._base_url = base_url
-        self.set_model_name(model)
 
         self._prompt = prompt
         self._turn_detection = turn_detection
@@ -238,6 +237,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             language=language,
             prompt=prompt,
         )
+        self._sync_model_name_to_metrics()
 
         self._receive_task = None
         self._session_ready = False
@@ -437,7 +437,7 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
     async def _send_session_update(self):
         """Send ``session.update`` to configure the transcription session."""
-        transcription: dict = {"model": self.model_name}
+        transcription: dict = {"model": self._settings.model}
 
         language_code = (
             self._language_to_code(self._settings.language) if self._settings.language else None

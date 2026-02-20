@@ -181,10 +181,10 @@ class NvidiaSTTService(STTService):
         self._function_id = model_function_map.get("function_id")
 
         self._settings = NvidiaSTTSettings(
+            model=model_function_map.get("model_name"),
             language=params.language,
         )
-
-        self.set_model_name(model_function_map.get("model_name"))
+        self._sync_model_name_to_metrics()
 
         self._asr_service = None
         self._queue = None
@@ -282,7 +282,7 @@ class NvidiaSTTService(STTService):
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
 
-        logger.debug(f"Initialized NvidiaSTTService with model: {self.model_name}")
+        logger.debug(f"Initialized NvidiaSTTService with model: {self._settings.model}")
 
     async def stop(self, frame: EndFrame):
         """Stop the NVIDIA Riva STT service and clean up resources.
@@ -467,9 +467,6 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
         params = params or NvidiaSegmentedSTTService.InputParams()
 
-        # Set model name
-        self.set_model_name(model_function_map.get("model_name"))
-
         # Initialize NVIDIA Riva settings
         self._api_key = api_key
         self._server = server
@@ -488,6 +485,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         self._config = None
         self._asr_service = None
         self._settings = NvidiaSegmentedSTTSettings(
+            model=model_function_map.get("model_name"),
             language=self.language_to_service_language(params.language or Language.EN_US)
             or "en-US",
             profanity_filter=params.profanity_filter,
@@ -496,6 +494,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             boosted_lm_words=params.boosted_lm_words,
             boosted_lm_score=params.boosted_lm_score,
         )
+        self._sync_model_name_to_metrics()
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language enum to NVIDIA Riva's language code.
@@ -578,7 +577,7 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
         await super().start(frame)
         self._initialize_client()
         self._config = self._create_recognition_config()
-        logger.debug(f"Initialized NvidiaSegmentedSTTService with model: {self.model_name}")
+        logger.debug(f"Initialized NvidiaSegmentedSTTService with model: {self._settings.model}")
 
     async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply a settings update and sync internal state.

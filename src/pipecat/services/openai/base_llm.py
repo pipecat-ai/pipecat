@@ -151,7 +151,7 @@ class BaseOpenAILLMService(LLMService):
         )
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
         self._full_model_name: str = ""
         self._client = self.create_client(
             api_key=api_key,
@@ -265,7 +265,7 @@ class BaseOpenAILLMService(LLMService):
             Dictionary of parameters for the chat completion request.
         """
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
             "stream_options": {"include_usage": True},
             "frequency_penalty": self._settings.frequency_penalty,

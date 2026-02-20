@@ -269,7 +269,7 @@ class AWSNovaSonicLLMService(LLMService):
             top_p=params.top_p,
             endpointing_sensitivity=params.endpointing_sensitivity,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
         # Audio I/O config (hardware settings, not runtime-tunable)
         self._input_sample_rate = params.input_sample_rate

@@ -236,8 +236,7 @@ class CambTTSService(TTSService):
             ),
             user_instructions=params.user_instructions,
         )
-
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
         self._client = None
 
@@ -272,7 +271,7 @@ class CambTTSService(TTSService):
 
         # Use model-specific sample rate if not explicitly specified
         if not self._init_sample_rate:
-            self._sample_rate = MODEL_SAMPLE_RATES.get(self.model_name, 22050)
+            self._sample_rate = MODEL_SAMPLE_RATES.get(self._settings.model, 22050)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -300,12 +299,12 @@ class CambTTSService(TTSService):
                 "text": text,
                 "voice_id": self._settings.voice,
                 "language": self._settings.language,
-                "speech_model": self.model_name,
+                "speech_model": self._settings.model,
                 "output_configuration": StreamTtsOutputConfiguration(format="pcm_s16le"),
             }
 
             # Add user instructions if using mars-instruct model
-            if self._model_name == "mars-instruct" and self._settings.user_instructions:
+            if self._settings.model == "mars-instruct" and self._settings.user_instructions:
                 tts_kwargs["user_instructions"] = self._settings.user_instructions
 
             await self.start_tts_usage_metrics(text)

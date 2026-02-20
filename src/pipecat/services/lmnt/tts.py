@@ -122,13 +122,13 @@ class LmntTTSService(InterruptibleTTSService):
         )
 
         self._api_key = api_key
-        self.set_model_name(model)
         self._settings = LmntTTSSettings(
             model=model,
             voice=voice_id,
             language=self.language_to_service_language(language),
             format="raw",
         )
+        self._sync_model_name_to_metrics()
         self._receive_task = None
         self._context_id: Optional[str] = None
 
@@ -238,7 +238,7 @@ class LmntTTSService(InterruptibleTTSService):
                 "format": self._settings.format,
                 "sample_rate": self.sample_rate,
                 "language": self._settings.language,
-                "model": self.model_name,
+                "model": self._settings.model,
             }
 
             # Connect to LMNT's websocket directly

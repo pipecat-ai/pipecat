@@ -279,9 +279,9 @@ class GladiaSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._region = region
         self._url = url
-        self.set_model_name(model)
         self._receive_task = None
         self._settings = GladiaSTTSettings(model=model, input_params=params)
+        self._sync_model_name_to_metrics()
 
         # Session management
         self._session_url = None
@@ -328,7 +328,7 @@ class GladiaSTTService(WebsocketSTTService):
             "bit_depth": params.bit_depth or 16,
             "sample_rate": self.sample_rate,
             "channels": params.channels or 1,
-            "model": self._model_name,
+            "model": self._settings.model,
         }
 
         # Add custom_metadata if provided

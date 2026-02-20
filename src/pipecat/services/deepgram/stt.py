@@ -143,13 +143,13 @@ class DeepgramSTTService(STTService):
         if "language" in merged_options and isinstance(merged_options["language"], Language):
             merged_options["language"] = merged_options["language"].value
 
-        self.set_model_name(merged_options["model"])
         merged_live_options = LiveOptions(**merged_options)
         self._settings = DeepgramSTTSettings(
             model=merged_options.get("model"),
             language=merged_options.get("language"),
             live_options=merged_live_options,
         )
+        self._sync_model_name_to_metrics()
 
         self._addons = addons
         self._should_interrupt = should_interrupt
@@ -225,7 +225,7 @@ class DeepgramSTTService(STTService):
         elif "live_options" in changed and self._settings.live_options.model is not None:
             # Only live_options was given → pull model up.
             self._settings.model = self._settings.live_options.model
-            self.set_model_name(self._settings.model)
+            self._sync_model_name_to_metrics()
 
         # --- Sync language -----------------------------------------------
         if language_given:

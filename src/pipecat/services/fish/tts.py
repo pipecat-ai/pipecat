@@ -176,6 +176,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         self._request_id = None
 
         self._settings = FishAudioTTSSettings(
+            model=model_id,
             voice=reference_id,
             fish_sample_rate=0,
             latency=params.latency,
@@ -185,8 +186,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             prosody_volume=params.prosody_volume,
             reference_id=reference_id,
         )
-
-        self.set_model_name(model_id)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -267,7 +267,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             logger.debug("Connecting to Fish Audio")
             headers = {"Authorization": f"Bearer {self._api_key}"}
-            headers["model"] = self.model_name
+            headers["model"] = self._settings.model
             self._websocket = await websocket_connect(self._base_url, additional_headers=headers)
 
             # Send initial start message with ormsgpack

@@ -236,7 +236,6 @@ class WhisperSTTService(SegmentedSTTService):
         super().__init__(**kwargs)
         self._device: str = device
         self._compute_type = compute_type
-        self.set_model_name(model if isinstance(model, str) else model.value)
         self._no_speech_prob = no_speech_prob
         self._model: Optional[WhisperModel] = None
 
@@ -247,6 +246,7 @@ class WhisperSTTService(SegmentedSTTService):
             compute_type=self._compute_type,
             no_speech_prob=self._no_speech_prob,
         )
+        self._sync_model_name_to_metrics()
 
         self._load()
 
@@ -281,7 +281,7 @@ class WhisperSTTService(SegmentedSTTService):
 
             logger.debug("Loading Whisper model...")
             self._model = WhisperModel(
-                self.model_name, device=self._device, compute_type=self._compute_type
+                self._settings.model, device=self._device, compute_type=self._compute_type
             )
             logger.debug("Loaded Whisper model")
         except ModuleNotFoundError as e:
@@ -370,7 +370,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         # Skip WhisperSTTService.__init__ and call its parent directly
         SegmentedSTTService.__init__(self, **kwargs)
 
-        self.set_model_name(model if isinstance(model, str) else model.value)
         self._no_speech_prob = no_speech_prob
         self._temperature = temperature
 
@@ -381,6 +380,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             temperature=self._temperature,
             engine="mlx",
         )
+        self._sync_model_name_to_metrics()
 
         # No need to call _load() as MLX Whisper loads models on demand
 
@@ -421,7 +421,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             chunk = await asyncio.to_thread(
                 mlx_whisper.transcribe,
                 audio_float,
-                path_or_hf_repo=self.model_name,
+                path_or_hf_repo=self._settings.model,
                 temperature=self._temperature,
                 language=self._settings.language,
             )

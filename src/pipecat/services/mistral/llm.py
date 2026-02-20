@@ -180,7 +180,7 @@ class MistralLLMService(OpenAILLMService):
         fixed_messages = self._apply_mistral_fixups(params_from_context["messages"])
 
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
             "messages": fixed_messages,
             "tools": params_from_context["tools"],

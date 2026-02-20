@@ -330,6 +330,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self._cartesia_version = cartesia_version
         self._url = url
         self._settings = CartesiaTTSSettings(
+            model=model,
             output_container=container,
             output_encoding=encoding,
             output_sample_rate=0,
@@ -342,7 +343,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             pronunciation_dict_id=params.pronunciation_dict_id,
             voice=voice_id,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
         self._context_id = None
         self._receive_task = None
@@ -457,7 +458,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "transcript": text,
             "continue": continue_transcript,
             "context_id": self._context_id,
-            "model_id": self.model_name,
+            "model_id": self._settings.model,
             "voice": voice_config,
             "output_format": {
                 "container": self._settings.output_container,
@@ -465,7 +466,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 "sample_rate": self._settings.output_sample_rate,
             },
             "add_timestamps": add_timestamps,
-            "use_original_timestamps": False if self.model_name == "sonic" else True,
+            "use_original_timestamps": False if self._settings.model == "sonic" else True,
         }
 
         if is_given(self._settings.language) and self._settings.language:
@@ -741,7 +742,7 @@ class CartesiaHttpTTSService(TTSService):
             generation_config=params.generation_config,
             pronunciation_dict_id=params.pronunciation_dict_id,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
         self._client = AsyncCartesia(
             api_key=api_key,
@@ -829,7 +830,7 @@ class CartesiaHttpTTSService(TTSService):
             }
 
             payload = {
-                "model_id": self._model_name,
+                "model_id": self._settings.model,
                 "transcript": text,
                 "voice": voice_config,
                 "output_format": output_format,

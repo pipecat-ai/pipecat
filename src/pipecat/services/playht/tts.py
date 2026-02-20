@@ -204,7 +204,7 @@ class PlayHTTTSService(InterruptibleTTSService):
             speed=params.speed,
             seed=params.seed,
         )
-        self.set_model_name(voice_engine)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -545,6 +545,7 @@ class PlayHTHttpTTSService(TTSService):
             voice_engine = voice_engine.replace("-ws", "")
 
         self._settings = PlayHTTTSSettings(
+            model=voice_engine,
             voice=voice_url,
             language=self.language_to_service_language(params.language)
             if params.language
@@ -554,7 +555,7 @@ class PlayHTHttpTTSService(TTSService):
             speed=params.speed,
             seed=params.seed,
         )
-        self.set_model_name(voice_engine)
+        self._sync_model_name_to_metrics()
 
     async def start(self, frame: StartFrame):
         """Start the PlayHT HTTP TTS service.

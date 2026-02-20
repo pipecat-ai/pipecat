@@ -423,7 +423,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             enable_logging=params.enable_logging,
             apply_text_normalization=params.apply_text_normalization,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
@@ -607,7 +607,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             logger.debug("Connecting to ElevenLabs")
 
             voice_id = self._settings.voice
-            model = self.model_name
+            model = self._settings.model
             output_format = self._output_format
             url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings.auto_mode}"
 
@@ -929,7 +929,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             speed=params.speed,
             apply_text_normalization=params.apply_text_normalization,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
@@ -1100,7 +1100,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
         payload: Dict[str, Union[str, Dict[str, Union[float, bool]]]] = {
             "text": text,
-            "model_id": self._model_name,
+            "model_id": self._settings.model,
         }
 
         # Include previous text as context if available
@@ -1122,7 +1122,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             payload["apply_text_normalization"] = self._settings.apply_text_normalization
 
         language = self._settings.language
-        if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
+        if self._settings.model in ELEVENLABS_MULTILINGUAL_MODELS and language:
             payload["language_code"] = language
             logger.debug(f"Using language code: {language}")
         elif language:

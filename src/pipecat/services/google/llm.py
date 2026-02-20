@@ -797,7 +797,6 @@ class GoogleLLMService(LLMService):
 
         params = params or GoogleLLMService.InputParams()
 
-        self.set_model_name(model)
         self._api_key = api_key
         self._system_instruction = system_instruction
         self._http_options = update_google_client_http_options(http_options)
@@ -811,6 +810,7 @@ class GoogleLLMService(LLMService):
             thinking=params.thinking,
             extra=params.extra if isinstance(params.extra, dict) else {},
         )
+        self._sync_model_name_to_metrics()
         self._tools = tools
         self._tool_config = tool_config
 
@@ -870,7 +870,7 @@ class GoogleLLMService(LLMService):
 
         # Use the new google-genai client's async method
         response = await self._client.aio.models.generate_content(
-            model=self._model_name,
+            model=self._settings.model,
             contents=messages,
             config=generation_config,
         )
@@ -930,10 +930,10 @@ class GoogleLLMService(LLMService):
             # There's no way to introspect on model capabilities, so
             # to check for models that we know default to thinkin on
             # and can be configured to turn it off.
-            if not self._model_name.startswith("gemini-2.5-flash"):
+            if not self._settings.model.startswith("gemini-2.5-flash"):
                 return
             # If we have an image model, we don't use a budget either.
-            if "image" in self._model_name:
+            if "image" in self._settings.model:
                 return
             # If thinking_config is already set, don't override it.
             if "thinking_config" in generation_params:
@@ -974,7 +974,7 @@ class GoogleLLMService(LLMService):
 
         await self.start_ttfb_metrics()
         return await self._client.aio.models.generate_content_stream(
-            model=self._model_name,
+            model=self._settings.model,
             contents=messages,
             config=generation_config,
         )

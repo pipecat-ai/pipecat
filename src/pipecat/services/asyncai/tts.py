@@ -171,8 +171,7 @@ class AsyncAITTSService(AudioContextTTSService):
             if params.language
             else None,
         )
-
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
         self._receive_task = None
         self._keepalive_task = None
@@ -513,7 +512,7 @@ class AsyncAIHttpTTSService(TTSService):
             if params.language
             else None,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
         self._session = aiohttp_session
 
@@ -562,7 +561,7 @@ class AsyncAIHttpTTSService(TTSService):
             voice_config = {"mode": "id", "id": self._settings.voice}
             await self.start_ttfb_metrics()
             payload = {
-                "model_id": self._model_name,
+                "model_id": self._settings.model,
                 "transcript": text,
                 "voice": voice_config,
                 "output_format": {

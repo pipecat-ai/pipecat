@@ -108,7 +108,6 @@ class GroqTTSService(TTSService):
         params = params or GroqTTSService.InputParams()
 
         self._api_key = api_key
-        self._model_name = model_name
         self._output_format = output_format
         self._params = params
 
@@ -120,6 +119,7 @@ class GroqTTSService(TTSService):
             speed=params.speed,
             groq_sample_rate=sample_rate,
         )
+        self._sync_model_name_to_metrics()
 
         self._client = AsyncGroq(api_key=self._api_key)
 
@@ -149,7 +149,7 @@ class GroqTTSService(TTSService):
 
         try:
             response = await self._client.audio.speech.create(
-                model=self._model_name,
+                model=self._settings.model,
                 voice=self._settings.voice,
                 response_format=self._output_format,
                 input=text,

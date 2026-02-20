@@ -489,6 +489,7 @@ class SarvamHttpTTSService(TTSService):
             model=model,
             voice=voice_id,
         )
+        self._sync_model_name_to_metrics()
 
         # Add parameters based on model support
         if self._config.supports_pitch:
@@ -505,8 +506,6 @@ class SarvamHttpTTSService(TTSService):
             self._settings.temperature = params.temperature
         elif params.temperature != 0.6:
             logger.warning(f"temperature parameter is ignored for {model}")
-
-        self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -559,7 +558,7 @@ class SarvamHttpTTSService(TTSService):
                 "speaker": self._settings.voice,
                 "sample_rate": self.sample_rate,
                 "enable_preprocessing": self._settings.enable_preprocessing,
-                "model": self._model_name,
+                "model": self._settings.model,
                 "pace": self._settings.pace if is_given(self._settings.pace) else 1.0,
             }
 
@@ -828,7 +827,6 @@ class SarvamTTSService(InterruptibleTTSService):
         # WebSocket endpoint URL with model query parameter
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
-        self.set_model_name(model)
 
         # Validate and clamp pace to model's valid range
         pace = params.pace
@@ -854,6 +852,7 @@ class SarvamTTSService(InterruptibleTTSService):
             model=model,
             voice=voice_id,
         )
+        self._sync_model_name_to_metrics()
 
         # Add parameters based on model support
         if self._config.supports_pitch:

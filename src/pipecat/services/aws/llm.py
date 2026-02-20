@@ -820,7 +820,6 @@ class AWSBedrockLLMService(LLMService):
             "config": client_config,
         }
 
-        self.set_model_name(model)
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         self._settings = AWSBedrockLLMSettings(
@@ -833,6 +832,7 @@ class AWSBedrockLLMService(LLMService):
             if isinstance(params.additional_model_request_fields, dict)
             else {},
         )
+        self._sync_model_name_to_metrics()
 
         logger.info(f"Using AWS Bedrock model: {model}")
 
@@ -895,7 +895,7 @@ class AWSBedrockLLMService(LLMService):
             inference_config["maxTokens"] = max_tokens
 
         request_params = {
-            "modelId": self.model_name,
+            "modelId": self._settings.model,
             "messages": messages,
             "additionalModelRequestFields": self._settings.additional_model_request_fields,
         }
@@ -1052,7 +1052,7 @@ class AWSBedrockLLMService(LLMService):
 
             # Prepare request parameters
             request_params = {
-                "modelId": self.model_name,
+                "modelId": self._settings.model,
                 "messages": messages,
                 "additionalModelRequestFields": self._settings.additional_model_request_fields,
             }

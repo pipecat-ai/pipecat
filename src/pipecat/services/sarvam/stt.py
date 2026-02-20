@@ -225,7 +225,6 @@ class SarvamSTTService(STTService):
 
         super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
-        self.set_model_name(model)
         self._api_key = api_key
 
         # Store connection parameters
@@ -257,6 +256,7 @@ class SarvamSTTService(STTService):
             vad_signals=params.vad_signals,
             high_vad_sensitivity=params.high_vad_sensitivity,
         )
+        self._sync_model_name_to_metrics()
 
         if params.vad_signals:
             self._register_event_handler("on_speech_started")
@@ -322,7 +322,7 @@ class SarvamSTTService(STTService):
         if is_given(update.language) and update.language is not None:
             if not self._config.supports_language:
                 raise ValueError(
-                    f"Model '{self.model_name}' does not support language parameter "
+                    f"Model '{self._settings.model}' does not support language parameter "
                     "(auto-detects language)."
                 )
 
@@ -330,11 +330,13 @@ class SarvamSTTService(STTService):
             if is_given(update.prompt) and update.prompt is not None:
                 if not self._config.supports_prompt:
                     raise ValueError(
-                        f"Model '{self.model_name}' does not support prompt parameter."
+                        f"Model '{self._settings.model}' does not support prompt parameter."
                     )
             if is_given(update.mode) and update.mode is not None:
                 if not self._config.supports_mode:
-                    raise ValueError(f"Model '{self.model_name}' does not support mode parameter.")
+                    raise ValueError(
+                        f"Model '{self._settings.model}' does not support mode parameter."
+                    )
 
         changed = await super()._update_settings(update)
 
@@ -374,11 +376,13 @@ class SarvamSTTService(STTService):
 
         if not self._config.supports_prompt:
             if prompt is not None:
-                raise ValueError(f"Model '{self.model_name}' does not support prompt parameter.")
+                raise ValueError(
+                    f"Model '{self._settings.model}' does not support prompt parameter."
+                )
             # If prompt is None and model doesn't support prompts, silently return (no-op)
             return
 
-        logger.info(f"Updating {self.model_name} prompt.")
+        logger.info(f"Updating {self._settings.model} prompt.")
         self._settings.prompt = prompt
         await self._disconnect()
         await self._connect()
@@ -460,7 +464,7 @@ class SarvamSTTService(STTService):
         try:
             # Build common connection parameters
             connect_kwargs = {
-                "model": self.model_name,
+                "model": self._settings.model,
                 "sample_rate": str(self.sample_rate),
             }
 

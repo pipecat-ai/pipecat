@@ -105,8 +105,7 @@ class HathoraSTTService(SegmentedSTTService):
             language=params.language,
             config=params.config,
         )
-
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

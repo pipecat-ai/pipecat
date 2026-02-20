@@ -134,7 +134,6 @@ class OpenAITTSService(TTSService):
             )
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self.set_model_name(model)
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
         if instructions or speed:
@@ -154,6 +153,7 @@ class OpenAITTSService(TTSService):
             instructions=params.instructions if params else instructions,
             speed=params.speed if params else speed,
         )
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -194,7 +194,7 @@ class OpenAITTSService(TTSService):
             # Setup API parameters
             create_params = {
                 "input": text,
-                "model": self.model_name,
+                "model": self._settings.model,
                 "voice": VALID_VOICES[self._settings.voice],
                 "response_format": "pcm",
             }

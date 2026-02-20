@@ -701,7 +701,6 @@ class GeminiLiveLLMService(LLMService):
 
         self._last_sent_time = 0
         self._base_url = base_url
-        self.set_model_name(model)
         self._voice_id = voice_id
         self._language_code = params.language
 
@@ -763,6 +762,7 @@ class GeminiLiveLLMService(LLMService):
             proactivity=params.proactivity or {},
             extra=params.extra if isinstance(params.extra, dict) else {},
         )
+        self._sync_model_name_to_metrics()
 
         self._file_api_base_url = file_api_base_url
         self._file_api: Optional[GeminiFileAPI] = None
@@ -1230,7 +1230,9 @@ class GeminiLiveLLMService(LLMService):
             await self.push_error(error_msg=f"Initialization error: {e}", exception=e)
 
     async def _connection_task_handler(self, config: LiveConnectConfig):
-        async with self._client.aio.live.connect(model=self._model_name, config=config) as session:
+        async with self._client.aio.live.connect(
+            model=self._settings.model, config=config
+        ) as session:
             logger.info("Connected to Gemini service")
 
             # Mark connection start time

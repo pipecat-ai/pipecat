@@ -195,13 +195,13 @@ class SonioxSTTService(WebsocketSTTService):
 
         self._api_key = api_key
         self._url = url
-        self.set_model_name(params.model)
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
 
         self._settings = SonioxSTTSettings(
             model=params.model,
             input_params=params,
         )
+        self._sync_model_name_to_metrics()
 
         self._final_transcription_buffer = []
         self._last_tokens_received: Optional[float] = None
@@ -247,7 +247,7 @@ class SonioxSTTService(WebsocketSTTService):
         elif "input_params" in changed and self._settings.input_params.model is not None:
             # Only input_params was given → pull model up.
             self._settings.model = self._settings.input_params.model
-            self.set_model_name(self._settings.model)
+            self._sync_model_name_to_metrics()
 
         # TODO: someday we could reconnect here to apply updated settings.
         # Code might look something like the below:
@@ -380,7 +380,7 @@ class SonioxSTTService(WebsocketSTTService):
             # Send the initial configuration message.
             config = {
                 "api_key": self._api_key,
-                "model": self._model_name,
+                "model": self._settings.model,
                 "audio_format": params.audio_format,
                 "num_channels": params.num_channels or 1,
                 "enable_endpoint_detection": enable_endpoint_detection,

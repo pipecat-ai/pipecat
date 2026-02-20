@@ -84,7 +84,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             Dictionary of parameters for the chat completion request.
         """
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
             "stream_options": {"include_usage": True},
             "temperature": self._settings.temperature,

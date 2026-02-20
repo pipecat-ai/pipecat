@@ -42,27 +42,25 @@ class AIService(FrameProcessor):
             **kwargs: Additional arguments passed to the parent FrameProcessor.
         """
         super().__init__(**kwargs)
-        self._model_name: str = ""
-        self._settings: ServiceSettings = ServiceSettings()
+        self._settings: ServiceSettings = ServiceSettings(model="")
         self._session_properties: Dict[str, Any] = {}
 
-    @property
-    def model_name(self) -> str:
-        """Get the current model name.
+    def _sync_model_name_to_metrics(self):
+        """Sync the current AI model name (in `self._settings.model`) for usage in metrics.
 
-        Returns:
-            The name of the AI model being used.
-        """
-        return self._model_name
+        We don't store model name here because there's already a single source
+        of truth for it in `self._settings.model`. This method is just for
+        syncing the model name to the metrics data.
 
-    def set_model_name(self, model: str):
-        """Set the AI model name and update metrics.
+        TODO: as a next step we should make it so that service classes pass
+        model into `super().__init__` and `AIService` can be responsible for
+        syncing its initial value to metrics, just as it's responsible for
+        syncing any updates to its value to metrics via `_update_settings`.
 
         Args:
             model: The name of the AI model to use.
         """
-        self._model_name = model
-        self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
+        self.set_core_metrics_data(MetricsData(processor=self.name, model=self._settings.model))
 
     async def start(self, frame: StartFrame):
         """Start the AI service.
@@ -117,7 +115,7 @@ class AIService(FrameProcessor):
         changed = self._settings.apply_update(update)
 
         if "model" in changed:
-            self.set_model_name(self._settings.model)
+            self._sync_model_name_to_metrics()
 
         if changed:
             logger.info(f"{self.name}: updated settings fields: {set(changed)}")

@@ -173,7 +173,7 @@ class InworldHttpTTSService(WordTTSService):
 
         self._cumulative_time = 0.0
 
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -562,7 +562,7 @@ class InworldTTSService(AudioContextWordTTSService):
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
 
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

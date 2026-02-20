@@ -492,7 +492,7 @@ class STTService(AIService):
             if self.metrics_enabled:
                 ttfb_data = TTFBMetricsData(
                     processor=self.name,
-                    model=self.model_name,
+                    model=self._settings.model,
                     value=ttfb,
                 )
                 await super().push_frame(MetricsFrame(data=[ttfb_data]))

@@ -156,7 +156,6 @@ class BaseWhisperSTTService(SegmentedSTTService):
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         super().__init__(ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-        self.set_model_name(model)
         self._client = self._create_client(api_key, base_url)
         self._language = self.language_to_service_language(language or Language.EN)
         self._prompt = prompt
@@ -170,6 +169,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             prompt=self._prompt,
             temperature=self._temperature,
         )
+        self._sync_model_name_to_metrics()
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)

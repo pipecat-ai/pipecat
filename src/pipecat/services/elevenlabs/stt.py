@@ -281,7 +281,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
             else "eng",
             tag_audio_events=params.tag_audio_events,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
@@ -531,7 +531,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             enable_logging=params.enable_logging,
             include_language_detection=params.include_language_detection,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.

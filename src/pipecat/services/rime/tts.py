@@ -75,7 +75,6 @@ class RimeTTSSettings(TTSSettings):
     """Settings for Rime WS JSON and HTTP TTS services.
 
     Parameters:
-        modelId: Rime model identifier.
         audioFormat: Audio output format.
         samplingRate: Audio sample rate.
         lang: Rime language code.
@@ -86,7 +85,6 @@ class RimeTTSSettings(TTSSettings):
         inlineSpeedAlpha: Inline speed control markup.
     """
 
-    modelId: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     audioFormat: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     samplingRate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     lang: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -104,7 +102,6 @@ class RimeNonJsonTTSSettings(TTSSettings):
     """Settings for Rime non-JSON WS TTS service.
 
     Parameters:
-        modelId: Rime model identifier.
         audioFormat: Audio output format.
         samplingRate: Audio sample rate.
         lang: Rime language code.
@@ -114,7 +111,6 @@ class RimeNonJsonTTSSettings(TTSSettings):
         top_p: Cumulative probability threshold (0.0-1.0).
     """
 
-    modelId: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     audioFormat: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     samplingRate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     lang: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -210,7 +206,7 @@ class RimeTTSService(AudioContextWordTTSService):
         self._model = model
         self._settings = RimeTTSSettings(
             voice=voice_id,
-            modelId=model,
+            model=model,
             audioFormat="pcm",
             samplingRate=0,
             lang=self.language_to_service_language(params.language) if params.language else "eng",
@@ -219,6 +215,7 @@ class RimeTTSService(AudioContextWordTTSService):
             pauseBetweenBrackets=json.dumps(params.pause_between_brackets),
             phonemizeBetweenBrackets=json.dumps(params.phonemize_between_brackets),
         )
+        self._sync_model_name_to_metrics()
 
         # State tracking
         self._context_id = None  # Tracks current turn
@@ -353,7 +350,7 @@ class RimeTTSService(AudioContextWordTTSService):
                 f"{k}={v}"
                 for k, v in {
                     "speaker": self._settings.voice,
-                    "modelId": self._settings.modelId,
+                    "modelId": self._settings.model,
                     "audioFormat": self._settings.audioFormat,
                     "samplingRate": self._settings.samplingRate,
                     "lang": self._settings.lang,
@@ -589,6 +586,7 @@ class RimeHttpTTSService(TTSService):
         self._session = aiohttp_session
         self._base_url = "https://users.rime.ai/v1/rime-tts"
         self._settings = RimeTTSSettings(
+            model=model,
             lang=self.language_to_service_language(params.language) if params.language else "eng",
             speedAlpha=params.speed_alpha,
             reduceLatency=params.reduce_latency,
@@ -597,7 +595,7 @@ class RimeHttpTTSService(TTSService):
             inlineSpeedAlpha=params.inline_speed_alpha if params.inline_speed_alpha else NOT_GIVEN,
             voice=voice_id,
         )
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -648,7 +646,7 @@ class RimeHttpTTSService(TTSService):
             payload["inlineSpeedAlpha"] = self._settings.inlineSpeedAlpha
         payload["text"] = text
         payload["speaker"] = self._settings.voice
-        payload["modelId"] = self._model_name
+        payload["modelId"] = self._settings.model
         payload["samplingRate"] = self.sample_rate
 
         # Arcana does not support PCM audio
@@ -769,7 +767,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         self._model = model
         self._settings = RimeNonJsonTTSSettings(
             voice=voice_id,
-            modelId=model,
+            model=model,
             audioFormat=audio_format,
             samplingRate=sample_rate,
             lang=self.language_to_service_language(params.language)
@@ -782,6 +780,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             temperature=params.temperature if params.temperature is not None else NOT_GIVEN,
             top_p=params.top_p if params.top_p is not None else NOT_GIVEN,
         )
+        self._sync_model_name_to_metrics()
         # Add any extra parameters for future compatibility
         if params.extra:
             self._settings.extra.update(params.extra)
@@ -863,7 +862,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             # Build URL with query parameters (only given, non-None values)
             settings_dict = {
                 "speaker": self._settings.voice,
-                "modelId": self._settings.modelId,
+                "modelId": self._settings.model,
                 "audioFormat": self._settings.audioFormat,
                 "samplingRate": self._settings.samplingRate,
             }
@@ -980,10 +979,6 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         any setting change requires reconnecting to apply the new values.
         """
         changed = await super()._update_settings(update)
-
-        # Sync model to settings dict field
-        if "model" in changed:
-            self._settings.modelId = self._model_name
 
         if changed:
             logger.debug("Settings changed, reconnecting WebSocket with new parameters")

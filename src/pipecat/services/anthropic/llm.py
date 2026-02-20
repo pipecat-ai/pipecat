@@ -237,7 +237,6 @@ class AnthropicLLMService(LLMService):
         self._client = client or AsyncAnthropic(
             api_key=api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one
-        self.set_model_name(model)
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         self._settings = AnthropicLLMSettings(
@@ -258,6 +257,7 @@ class AnthropicLLMService(LLMService):
             thinking=params.thinking,
             extra=params.extra if isinstance(params.extra, dict) else {},
         )
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate usage metrics.
@@ -324,7 +324,7 @@ class AnthropicLLMService(LLMService):
 
         # Build params using the same method as streaming completions
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "max_tokens": max_tokens if max_tokens is not None else self._settings.max_tokens,
             "stream": False,
             "temperature": self._settings.temperature,
@@ -438,7 +438,7 @@ class AnthropicLLMService(LLMService):
             await self.start_ttfb_metrics()
 
             params = {
-                "model": self.model_name,
+                "model": self._settings.model,
                 "max_tokens": self._settings.max_tokens,
                 "stream": True,
                 "temperature": self._settings.temperature,
