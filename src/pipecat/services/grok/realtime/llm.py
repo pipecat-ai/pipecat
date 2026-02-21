@@ -511,8 +511,11 @@ class GrokRealtimeLLMService(LLMService):
             elif evt.type == "response.function_call_arguments.done":
                 await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
-                await self._handle_evt_error(evt)
-                return
+                if evt.error.code == "response_cancel_not_active":
+                    logger.warning(f"Non-fatal API error: {evt.error.message}")
+                else:
+                    await self._handle_evt_error(evt)
+                    return
 
     async def _handle_evt_conversation_created(self, evt):
         """Handle conversation.created event - first event after connecting."""
