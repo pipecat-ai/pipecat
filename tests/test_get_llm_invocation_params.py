@@ -42,7 +42,14 @@ For AWS Bedrock adapter:
 
 import unittest
 
-from google.genai.types import Content, Part
+from google.genai.types import (
+    Content,
+    FunctionCallingConfig,
+    FunctionCallingConfigMode,
+    Part,
+    ToolConfig,
+)
+from openai import NOT_GIVEN
 
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
@@ -475,6 +482,52 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(user_messages), 4)
         # Should have 2 model messages (converted from assistant)
         self.assertEqual(len(model_messages), 2)
+
+    def test_gemini_tool_choice_mapping(self):
+        """Test that tool_choice is correctly mapped to Gemini tool_config."""
+        # Test 'none'
+        context = LLMContext(tool_choice="none")
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertIsInstance(params["tool_config"], ToolConfig)
+        self.assertEqual(
+            params["tool_config"].function_calling_config.mode, FunctionCallingConfigMode.NONE
+        )
+        self.assertIsNone(params["tool_config"].function_calling_config.allowed_function_names)
+
+        # Test 'auto'
+        context = LLMContext(tool_choice="auto")
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertIsInstance(params["tool_config"], ToolConfig)
+        self.assertEqual(
+            params["tool_config"].function_calling_config.mode, FunctionCallingConfigMode.AUTO
+        )
+        self.assertIsNone(params["tool_config"].function_calling_config.allowed_function_names)
+
+        # Test 'required'
+        context = LLMContext(tool_choice="required")
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertIsInstance(params["tool_config"], ToolConfig)
+        self.assertEqual(
+            params["tool_config"].function_calling_config.mode, FunctionCallingConfigMode.ANY
+        )
+        self.assertIsNone(params["tool_config"].function_calling_config.allowed_function_names)
+
+        # Test specific function
+        tool_choice = {"type": "function", "function": {"name": "test_tool"}}
+        context = LLMContext(tool_choice=tool_choice)
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertIsInstance(params["tool_config"], ToolConfig)
+        self.assertEqual(
+            params["tool_config"].function_calling_config.mode, FunctionCallingConfigMode.ANY
+        )
+        self.assertEqual(
+            params["tool_config"].function_calling_config.allowed_function_names, ["test_tool"]
+        )
+
+        # Test NOT_GIVEN
+        context = LLMContext(tool_choice=NOT_GIVEN)
+        params = self.adapter.get_llm_invocation_params(context)
+        self.assertEqual(params["tool_config"], NOT_GIVEN)
 
 
 class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
