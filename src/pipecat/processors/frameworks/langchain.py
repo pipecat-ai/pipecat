@@ -74,7 +74,11 @@ class LangchainProcessor(FrameProcessor):
                 if isinstance(frame, OpenAILLMContextFrame)
                 else frame.context.get_messages()
             )
-            text: str = messages[-1]["content"]
+            content = messages[-1]["content"]
+            if isinstance(content, list):
+                text = " ".join([c["text"] for c in content if isinstance(c, dict) and c.get("type") == "text"])
+            else:
+                text = content
 
             await self._ainvoke(text.strip())
         else:
