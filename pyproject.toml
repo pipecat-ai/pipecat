@@ -28,7 +28,7 @@ dependencies = [
     "Markdown>=3.7,<4",
     "nltk>=3.9.1,<4",
     "numpy>=1.26.4,<3",
-    "Pillow>=11.1.0,<12",
+    "Pillow>=11.1.0,<13",
     "protobuf~=5.29.6",
     "pydantic>=2.10.6,<3",
     "pyloudnorm~=0.1.1",
@@ -105,16 +105,16 @@ remote-smart-turn = []
 resembleai = [ "pipecat-ai[websockets-base]" ]
 rime = [ "pipecat-ai[websockets-base]" ]
 riva = [ "pipecat-ai[nvidia]" ]
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.1.0"]
+runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.2.0"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
-sarvam = [ "sarvamai==0.1.21", "pipecat-ai[websockets-base]" ]
+sarvam = [ "sarvamai==0.1.26a2", "pipecat-ai[websockets-base]" ]
 sentry = [ "sentry-sdk>=2.28.0,<3" ]
 silero = [ "onnxruntime~=1.23.2" ]
-simli = [ "simli-ai~=1.0.3"]
+simli = [ "simli-ai~=2.0.1"]
 soniox = [ "pipecat-ai[websockets-base]" ]
 soundfile = [ "soundfile~=0.13.1" ]
-speechmatics = [ "speechmatics-voice[smart]>=0.2.8" ]
+speechmatics = [ "speechmatics-voice[smart]~=0.2.8" ]
 strands = [ "strands-agents>=1.9.1,<2" ]
 tavus=[]
 together = []

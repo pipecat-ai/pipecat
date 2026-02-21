@@ -111,6 +111,7 @@ class DeepgramTTSService(WebsocketTTSService):
             voice=voice,
             encoding=encoding,
         )
+        self._sync_model_name_to_metrics()
 
         self._receive_task = None
         self._context_id: Optional[str] = None
@@ -192,6 +193,11 @@ class DeepgramTTSService(WebsocketTTSService):
             Dict mapping changed field names to their previous values.
         """
         changed = await super()._update_settings(update)
+
+        # Deepgram uses voice as the model, so keep them in sync for metrics
+        if "voice" in changed:
+            self._settings.model = self._settings.voice
+            self._sync_model_name_to_metrics()
 
         if changed:
             await self._disconnect()
@@ -397,6 +403,7 @@ class DeepgramHttpTTSService(TTSService):
             voice=voice,
             encoding=encoding,
         )
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.

@@ -44,6 +44,8 @@ class AIService(FrameProcessor):
         super().__init__(**kwargs)
         self._settings: ServiceSettings = ServiceSettings(model="")
         self._session_properties: Dict[str, Any] = {}
+        self._tracing_enabled: bool = False
+        self._tracing_context = None
 
     def _sync_model_name_to_metrics(self):
         """Sync the current AI model name (in `self._settings.model`) for usage in metrics.
@@ -71,7 +73,8 @@ class AIService(FrameProcessor):
         Args:
             frame: The start frame containing initialization parameters.
         """
-        pass
+        self._tracing_enabled = frame.enable_tracing
+        self._tracing_context = frame.tracing_context
 
     async def stop(self, frame: EndFrame):
         """Stop the AI service.

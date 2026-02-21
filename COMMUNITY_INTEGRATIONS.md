@@ -25,7 +25,6 @@ Your repository must contain these components:
 - **Source code** - Complete implementation following Pipecat patterns
 - **Foundational example** - Single file example showing basic usage (see [Pipecat examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational))
 - **README.md** - Must include:
-
   - Introduction and explanation of your integration
   - Installation instructions
   - Usage instructions with Pipecat Pipeline
@@ -110,7 +109,6 @@ Once your PR is submitted, post in the `#community-integrations` Discord channel
 #### Key requirements:
 
 - **Frame sequence:** Output must follow this frame sequence pattern:
-
   - `LLMFullResponseStartFrame` - Signals the start of an LLM response
   - `LLMTextFrame` - Contains LLM content, typically streamed as tokens
   - `LLMFullResponseEndFrame` - Signals the end of an LLM response
@@ -265,6 +263,7 @@ class MySTTService(STTService):
     def __init__(self, *, model: str, region: str, **kwargs):
         super().__init__(**kwargs)
         self._settings = MySTTSettings(model=model, region=region)
+        self._sync_model_name_to_metrics()
 ```
 
 To react to runtime setting changes, override `_update_settings`. The base implementation applies the delta to `self._settings` and returns a `dict` mapping each changed field name to its **pre-update** value. Your override should call `super()` first, then act on the changed fields:

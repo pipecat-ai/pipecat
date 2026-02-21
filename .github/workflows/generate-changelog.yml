@@ -86,7 +86,7 @@ jobs:
           fi
 
           # Validate fragment types
-          VALID_TYPES="added changed deprecated removed fixed security other"
+          VALID_TYPES="added changed deprecated removed fixed performance security other"
           INVALID_FRAGMENTS=""
 
           for file in changelog/*.md; do

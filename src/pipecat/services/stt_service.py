@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterruptionFrame,
-    MetricsFrame,
     ServiceSwitcherRequestMetadataFrame,
     StartFrame,
     STTMetadataFrame,
@@ -32,7 +31,6 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.settings import STTSettings, is_given
@@ -50,6 +48,12 @@ class STTService(AIService):
     Provides common functionality for STT services including audio passthrough,
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
+
+    Includes an optional keepalive mechanism that sends silent audio when no real
+    audio has been sent for a configurable timeout, preventing servers from closing
+    idle connections (e.g. when behind a ServiceSwitcher). Subclasses that enable
+    keepalive must override ``_send_keepalive()`` to deliver the silence in the
+    appropriate service-specific protocol.
 
     Event handlers:
         on_connected: Called when connected to the STT service.
@@ -80,6 +84,8 @@ class STTService(AIService):
         sample_rate: Optional[int] = None,
         stt_ttfb_timeout: float = 2.0,
         ttfs_p99_latency: Optional[float] = None,
+        keepalive_timeout: Optional[float] = None,
+        keepalive_interval: float = 5.0,
         **kwargs,
     ):
         """Initialize the STT service.
@@ -99,14 +105,18 @@ class STTService(AIService):
                 This is broadcast via STTMetadataFrame at pipeline start for downstream
                 processors (e.g., turn strategies) to optimize timing. Subclasses provide
                 measured defaults; pass a value here to override for your deployment.
+            keepalive_timeout: Seconds of no audio before sending silence to keep the
+                connection alive. None disables keepalive. Useful for services that
+                close idle connections (e.g. behind a ServiceSwitcher).
+            keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
+
         self._settings = STTSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
-        self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
         self._ttfs_p99_latency = ttfs_p99_latency
@@ -114,11 +124,15 @@ class STTService(AIService):
         # STT TTFB tracking state
         self._stt_ttfb_timeout = stt_ttfb_timeout
         self._ttfb_timeout_task: Optional[asyncio.Task] = None
-        self._speech_end_time: Optional[float] = None
         self._user_speaking: bool = False
-        self._last_transcription_time: Optional[float] = None
         self._finalize_pending: bool = False
         self._finalize_requested: bool = False
+
+        # Keepalive state
+        self._keepalive_timeout = keepalive_timeout
+        self._keepalive_interval = keepalive_interval
+        self._keepalive_task: Optional[asyncio.Task] = None
+        self._last_audio_time: float = 0
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -241,12 +255,12 @@ class STTService(AIService):
         """
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
-        self._tracing_enabled = frame.enable_tracing
 
     async def cleanup(self):
         """Clean up STT service resources."""
         await super().cleanup()
         await self._cancel_ttfb_timeout()
+        await self._cancel_keepalive_task()
 
     async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
         """Apply an STT settings update.
@@ -286,6 +300,8 @@ class STTService(AIService):
         """
         if self._muted:
             return
+
+        self._last_audio_time = time.monotonic()
 
         # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
         if hasattr(frame, "user_id"):
@@ -369,23 +385,16 @@ class STTService(AIService):
             direction: The direction to push the frame.
         """
         if isinstance(frame, TranscriptionFrame):
-            # Store the transcription time for TTFB calculation
-            self._last_transcription_time = time.time()
-
             # Set finalized from pending state and auto-reset
             if self._finalize_pending:
                 frame.finalized = True
                 self._finalize_pending = False
 
             # If this is a finalized transcription, report TTFB immediately
-            if frame.finalized and self._speech_end_time is not None:
-                ttfb = self._last_transcription_time - self._speech_end_time
-                await self._emit_stt_ttfb_metric(ttfb)
+            if frame.finalized:
+                await self.stop_ttfb_metrics()
                 # Cancel the timeout since we've already reported
                 await self._cancel_ttfb_timeout()
-                # Clear state
-                self._speech_end_time = None
-                self._last_transcription_time = None
 
         await super().push_frame(frame, direction)
 
@@ -415,8 +424,6 @@ class STTService(AIService):
         while user is still speaking.
         """
         await self._cancel_ttfb_timeout()
-        self._speech_end_time = None
-        self._last_transcription_time = None
 
     async def _handle_vad_user_started_speaking(self, frame: VADUserStartedSpeakingFrame):
         """Handle VAD user started speaking frame to start tracking transcriptions.
@@ -450,7 +457,8 @@ class STTService(AIService):
         # Calculate the actual speech end time (current time minus VAD stop delay).
         # This approximates when the last user audio was sent to the STT service,
         # which we use to measure against the eventual transcription response.
-        self._speech_end_time = frame.timestamp - frame.stop_secs
+        speech_end_time = frame.timestamp - frame.stop_secs
+        await self.start_ttfb_metrics(start_time=speech_end_time)
 
         # Start timeout task (any previous timeout was cancelled by VADUserStartedSpeakingFrame
         # or InterruptionFrame)
@@ -459,43 +467,79 @@ class STTService(AIService):
         )
 
     async def _ttfb_timeout_handler(self):
-        """Wait for timeout then report TTFB using the last transcription timestamp.
+        """Wait for timeout then report TTFB.
 
         This timeout allows the final transcription to arrive before we calculate
         and report TTFB. If no transcription arrived, no TTFB is reported.
         """
         try:
             await asyncio.sleep(self._stt_ttfb_timeout)
-
-            # Report TTFB if we have both speech end time and transcription time
-            if self._speech_end_time is not None and self._last_transcription_time is not None:
-                ttfb = self._last_transcription_time - self._speech_end_time
-                await self._emit_stt_ttfb_metric(ttfb)
-
-            # Clear state after reporting
-            self._speech_end_time = None
-            self._last_transcription_time = None
+            await self.stop_ttfb_metrics()
         except asyncio.CancelledError:
             # Task was cancelled (new utterance or interruption), which is expected behavior
             pass
         finally:
             self._ttfb_timeout_task = None
 
-    async def _emit_stt_ttfb_metric(self, ttfb: float):
-        """Emit STT TTFB metric if value is non-negative.
+    def _create_keepalive_task(self):
+        """Start the keepalive task if keepalive is enabled."""
+        if self._keepalive_timeout is not None:
+            self._last_audio_time = time.monotonic()
+            self._keepalive_task = self.create_task(
+                self._keepalive_task_handler(), name="keepalive"
+            )
+
+    async def _cancel_keepalive_task(self):
+        """Stop the keepalive task if running."""
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
+    async def _keepalive_task_handler(self):
+        """Send periodic silent audio to prevent the server from closing the connection.
+
+        When keepalive is enabled, this task checks periodically if the connection
+        has been idle (no audio sent) for longer than keepalive_timeout seconds.
+        If so, it generates silent 16-bit mono PCM audio and passes it to
+        _send_keepalive() for service-specific formatting and sending.
+        """
+        while True:
+            await asyncio.sleep(self._keepalive_interval)
+            try:
+                if not self._is_keepalive_ready():
+                    continue
+                elapsed = time.monotonic() - self._last_audio_time
+                if elapsed < self._keepalive_timeout:
+                    continue
+                num_samples = int(self.sample_rate * _KEEPALIVE_SILENCE_DURATION)
+                silence = b"\x00" * (num_samples * 2)
+                await self._send_keepalive(silence)
+                self._last_audio_time = time.monotonic()
+                logger.trace(f"{self} sent keepalive silence")
+            except Exception as e:
+                logger.warning(f"{self} keepalive error: {e}")
+                break
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the service is ready to send keepalive.
+
+        Subclasses should override this to check their connection state.
+
+        Returns:
+            True if keepalive can be sent.
+        """
+        return True
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio to keep the connection alive.
+
+        Subclasses that enable keepalive must override this to deliver silence
+        in their service-specific protocol.
 
         Args:
-            ttfb: The TTFB value in seconds.
+            silence: Silent 16-bit mono PCM audio bytes.
         """
-        if ttfb >= 0:
-            logger.debug(f"{self} TTFB: {ttfb:.3f}s")
-            if self.metrics_enabled:
-                ttfb_data = TTFBMetricsData(
-                    processor=self.name,
-                    model=self._settings.model,
-                    value=ttfb,
-                )
-                await super().push_frame(MetricsFrame(data=[ttfb_data]))
+        raise NotImplementedError("Subclasses must override _send_keepalive")
 
 
 class SegmentedSTTService(STTService):
@@ -610,46 +654,27 @@ class WebsocketSTTService(STTService, WebsocketService):
     Combines STT functionality with websocket connectivity, providing automatic
     error handling, reconnection capabilities, and optional silence-based keepalive.
 
-    The keepalive feature sends silent audio when no real audio has been sent for
-    a configurable timeout, preventing servers from closing idle connections (e.g.
-    when behind a ServiceSwitcher). Subclasses can override ``_send_keepalive()``
-    to wrap the silence in a service-specific protocol.
+    The keepalive feature (inherited from STTService) sends silent audio when no
+    real audio has been sent for a configurable timeout, preventing servers from
+    closing idle connections (e.g. when behind a ServiceSwitcher). Subclasses can
+    override ``_send_keepalive()`` to wrap the silence in a service-specific protocol.
     """
 
     def __init__(
         self,
         *,
         reconnect_on_error: bool = True,
-        keepalive_timeout: Optional[float] = None,
-        keepalive_interval: float = 5.0,
         **kwargs,
     ):
         """Initialize the Websocket STT service.
 
         Args:
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
-            keepalive_timeout: Seconds of no audio before sending silence to keep the
-                connection alive. None disables keepalive. Useful for services that
-                close idle connections (e.g. behind a ServiceSwitcher).
-            keepalive_interval: Seconds between idle checks when keepalive is enabled.
-            **kwargs: Additional arguments passed to parent classes.
+            **kwargs: Additional arguments passed to parent classes (including
+                keepalive_timeout and keepalive_interval for STTService).
         """
         STTService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
-        self._keepalive_timeout = keepalive_timeout
-        self._keepalive_interval = keepalive_interval
-        self._keepalive_task: Optional[asyncio.Task] = None
-        self._last_audio_time: float = 0
-
-    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
-        """Process an audio frame, tracking the last audio time for keepalive.
-
-        Args:
-            frame: The audio frame to process.
-            direction: The direction of frame processing.
-        """
-        self._last_audio_time = time.monotonic()
-        await super().process_audio_frame(frame, direction)
 
     async def _connect(self):
         """Connect and start keepalive task if enabled."""
@@ -673,44 +698,9 @@ class WebsocketSTTService(STTService, WebsocketService):
             self._create_keepalive_task()
         return result
 
-    def _create_keepalive_task(self):
-        """Start the keepalive task if keepalive is enabled."""
-        if self._keepalive_timeout is not None:
-            self._last_audio_time = time.monotonic()
-            self._keepalive_task = self.create_task(
-                self._keepalive_task_handler(), name="keepalive"
-            )
-
-    async def _cancel_keepalive_task(self):
-        """Stop the keepalive task if running."""
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
-
-    async def _keepalive_task_handler(self):
-        """Send periodic silent audio to prevent the server from closing the connection.
-
-        When keepalive is enabled, this task checks periodically if the connection
-        has been idle (no audio sent) for longer than keepalive_timeout seconds.
-        If so, it generates silent 16-bit mono PCM audio and passes it to
-        _send_keepalive() for service-specific formatting and sending.
-        """
-        while True:
-            await asyncio.sleep(self._keepalive_interval)
-            try:
-                if not self._websocket or self._websocket.state is not State.OPEN:
-                    continue
-                elapsed = time.monotonic() - self._last_audio_time
-                if elapsed < self._keepalive_timeout:
-                    continue
-                num_samples = int(self.sample_rate * _KEEPALIVE_SILENCE_DURATION)
-                silence = b"\x00" * (num_samples * 2)
-                await self._send_keepalive(silence)
-                self._last_audio_time = time.monotonic()
-                logger.trace(f"{self} sent keepalive silence")
-            except Exception as e:
-                logger.warning(f"{self} keepalive error: {e}")
-                break
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the websocket is open and ready for keepalive."""
+        return self._websocket is not None and self._websocket.state is State.OPEN
 
     async def _send_keepalive(self, silence: bytes):
         """Send silent audio over the websocket to keep the connection alive.

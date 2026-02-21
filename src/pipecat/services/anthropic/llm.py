@@ -214,7 +214,7 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-sonnet-4-6",
         params: Optional[InputParams] = None,
         client=None,
         retry_timeout_secs: Optional[float] = 5.0,
@@ -225,7 +225,7 @@ class AnthropicLLMService(LLMService):
 
         Args:
             api_key: Anthropic API key for authentication.
-            model: Model name to use. Defaults to "claude-sonnet-4-5-20250929".
+            model: Model name to use. Defaults to "claude-sonnet-4-6".
             params: Optional model parameters for inference.
             client: Optional custom Anthropic client instance.
             retry_timeout_secs: Request timeout in seconds for retry logic.

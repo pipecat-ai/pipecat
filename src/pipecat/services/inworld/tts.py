@@ -16,12 +16,17 @@ Inworld’s text-to-speech (TTS) models offer ultra-realistic, context-aware spe
 import asyncio
 import base64
 import json
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, ClassVar, Dict, List, Mapping, Optional, Tuple
+from typing import Any, AsyncGenerator, ClassVar, Dict, List, Literal, Mapping, Optional, Tuple
 
 import aiohttp
 import websockets
 from loguru import logger
+
+from pipecat import version as pipecat_version
+
+USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
 
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
@@ -65,6 +70,7 @@ class InworldTTSSettings(TTSSettings):
             maintaining high quality audio output. If None (default),
             automatically set based on aggregate_sentences.
         apply_text_normalization: Whether to apply text normalization.
+        timestamp_transport_strategy: Strategy for timestamp transport ("ASYNC" or "SYNC").
     """
 
     audio_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -73,6 +79,7 @@ class InworldTTSSettings(TTSSettings):
     temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     auto_mode: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     apply_text_normalization: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    timestamp_transport_strategy: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
     _aliases: ClassVar[Dict[str, str]] = {
         "voice_id": "voice",
@@ -80,6 +87,7 @@ class InworldTTSSettings(TTSSettings):
         "modelId": "model",
         "applyTextNormalization": "apply_text_normalization",
         "autoMode": "auto_mode",
+        "timestampTransportStrategy": "timestamp_transport_strategy",
     }
 
     @classmethod
@@ -109,10 +117,12 @@ class InworldHttpTTSService(WordTTSService):
         Parameters:
             temperature: Temperature for speech synthesis.
             speaking_rate: Speaking rate for speech synthesis.
+            timestamp_transport_strategy: The strategy to use for timestamp transport.
         """
 
         temperature: Optional[float] = None
         speaking_rate: Optional[float] = None
+        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC"
 
     def __init__(
         self,
@@ -170,6 +180,8 @@ class InworldHttpTTSService(WordTTSService):
             self._settings.temperature = params.temperature
         if params.speaking_rate is not None:
             self._settings.speaking_rate = params.speaking_rate
+        if params.timestamp_transport_strategy is not None:
+            self._settings.timestamp_transport_strategy = params.timestamp_transport_strategy
 
         self._cumulative_time = 0.0
 
@@ -288,10 +300,15 @@ class InworldHttpTTSService(WordTTSService):
 
         # Use WORD timestamps for simplicity and correct spacing/capitalization
         payload["timestampType"] = self._timestamp_type
+        if is_given(self._settings.timestamp_transport_strategy):
+            payload["timestampTransportStrategy"] = self._settings.timestamp_transport_strategy
 
+        request_id = str(uuid.uuid4())
         headers = {
             "Authorization": f"Basic {self._api_key}",
             "Content-Type": "application/json",
+            "X-User-Agent": USER_AGENT,
+            "X-Request-Id": request_id,
         }
 
         try:
@@ -305,7 +322,7 @@ class InworldHttpTTSService(WordTTSService):
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Inworld API error: {error_text}")
+                    logger.error(f"Inworld API error (request_id={request_id}): {error_text}")
                     yield ErrorFrame(error=f"Inworld API error: {error_text}")
                     return
 
@@ -474,6 +491,7 @@ class InworldTTSService(AudioContextWordTTSService):
                 flushing of buffered text to achieve minimal latency while
                 maintaining high quality audio output. If None (default),
                 automatically set based on aggregate_sentences.
+            timestamp_transport_strategy: The strategy to use for timestamp transport.
         """
 
         temperature: Optional[float] = None
@@ -481,7 +499,8 @@ class InworldTTSService(AudioContextWordTTSService):
         apply_text_normalization: Optional[str] = None
         max_buffer_delay_ms: Optional[int] = None
         buffer_char_threshold: Optional[int] = None
-        auto_mode: Optional[bool] = None
+        auto_mode: Optional[bool] = True
+        timestamp_transport_strategy: Optional[Literal["ASYNC", "SYNC"]] = "ASYNC"
 
     def __init__(
         self,
@@ -539,6 +558,8 @@ class InworldTTSService(AudioContextWordTTSService):
             self._settings.speaking_rate = params.speaking_rate
         if params.apply_text_normalization is not None:
             self._settings.apply_text_normalization = params.apply_text_normalization
+        if params.timestamp_transport_strategy is not None:
+            self._settings.timestamp_transport_strategy = params.timestamp_transport_strategy
 
         if params.auto_mode is not None:
             self._settings.auto_mode = params.auto_mode
@@ -552,7 +573,6 @@ class InworldTTSService(AudioContextWordTTSService):
 
         self._receive_task = None
         self._keepalive_task = None
-        self._context_id = None
 
         # Track cumulative time across generations for monotonic timestamps within a turn.
         # When auto_mode is enabled, the server controls generations and timestamps reset
@@ -607,9 +627,10 @@ class InworldTTSService(AudioContextWordTTSService):
         keeping the context open for subsequent text. The context is only
         closed on interruption, disconnect, or end of session.
         """
-        if self._context_id and self._websocket:
-            logger.trace(f"Flushing audio for context {self._context_id}")
-            await self._send_flush(self._context_id)
+        context_id = self.get_active_audio_context_id()
+        if context_id and self._websocket:
+            logger.trace(f"Flushing audio for context {context_id}")
+            await self._send_flush(context_id)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
@@ -674,7 +695,7 @@ class InworldTTSService(AudioContextWordTTSService):
             frame: The interruption frame.
             direction: The direction of the interruption.
         """
-        old_context_id = self._context_id
+        old_context_id = self.get_active_audio_context_id()
         logger.trace(f"{self}: Handling interruption, old context: {old_context_id}")
 
         await super()._handle_interruption(frame, direction)
@@ -686,7 +707,6 @@ class InworldTTSService(AudioContextWordTTSService):
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
-        self._context_id = None
         self._cumulative_time = 0.0
         self._generation_end_time = 0.0
         logger.trace(f"{self}: Interruption handled, context reset to None")
@@ -760,8 +780,13 @@ class InworldTTSService(AudioContextWordTTSService):
             if self._websocket and self._websocket.state is State.OPEN:
                 return
 
-            logger.debug("Connecting to Inworld WebSocket TTS")
-            headers = [("Authorization", f"Basic {self._api_key}")]
+            request_id = str(uuid.uuid4())
+            logger.debug(f"Connecting to Inworld WebSocket TTS (request_id={request_id})")
+            headers = [
+                ("Authorization", f"Basic {self._api_key}"),
+                ("X-User-Agent", USER_AGENT),
+                ("X-Request-Id", request_id),
+            ]
             self._websocket = await websocket_connect(self._url, additional_headers=headers)
             await self._call_event_handler("on_connected")
         except Exception as e:
@@ -780,9 +805,10 @@ class InworldTTSService(AudioContextWordTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Inworld WebSocket TTS")
-                if self._context_id:
+                context_id = self.get_active_audio_context_id()
+                if context_id:
                     try:
-                        await self._send_close_context(self._context_id)
+                        await self._send_close_context(context_id)
                     except Exception:
                         pass
                 await self._websocket.close()
@@ -790,7 +816,7 @@ class InworldTTSService(AudioContextWordTTSService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            self._context_id = None
+            await self.remove_active_audio_context()
             self._websocket = None
             self._cumulative_time = 0.0
             self._generation_end_time = 0.0
@@ -816,7 +842,7 @@ class InworldTTSService(AudioContextWordTTSService):
             ]
             logger.debug(
                 f"{self}: Received message types={msg_types}, ctx_id={ctx_id}, "
-                f"current_ctx={self._context_id}, available={self.audio_context_available(ctx_id) if ctx_id else 'N/A'}"
+                f"current_ctx={self.get_active_audio_context_id()}, available={self.audio_context_available(ctx_id) if ctx_id else 'N/A'}"
             )
 
             # Check for errors
@@ -828,7 +854,9 @@ class InworldTTSService(AudioContextWordTTSService):
                 # Handle "Context not found" error (code 5)
                 # This can happen when a keepalive message is sent but no context is available.
                 if error_code == 5 and "not found" in error_msg.lower():
-                    logger.debug(f"{self}: Context {ctx_id or self._context_id} not found.")
+                    logger.debug(
+                        f"{self}: Context {ctx_id or self.get_active_audio_context_id()} not found."
+                    )
                     continue
 
                 # For other errors, push error frame
@@ -843,11 +871,9 @@ class InworldTTSService(AudioContextWordTTSService):
             # If the context isn't available but matches our current context ID,
             # recreate it (handles race conditions during interruption recovery).
             if ctx_id and not self.audio_context_available(ctx_id):
-                if self._context_id == ctx_id:
-                    logger.trace(
-                        f"{self}: Recreating audio context for current context: {self._context_id}"
-                    )
-                    await self.create_audio_context(self._context_id)
+                if self.get_active_audio_context_id() == ctx_id:
+                    logger.trace(f"{self}: Recreating audio context for current context: {ctx_id}")
+                    await self.create_audio_context(ctx_id)
                 else:
                     # This is a message from an old/closed context - skip it
                     logger.trace(f"{self}: Skipping message from unavailable context: {ctx_id}")
@@ -869,12 +895,12 @@ class InworldTTSService(AudioContextWordTTSService):
                 if ctx_id:
                     await self.append_to_audio_context(ctx_id, frame)
 
-                # timestampInfo is inside audioChunk
-                timestamp_info = audio_chunk.get("timestampInfo")
-                if timestamp_info:
-                    word_times = self._calculate_word_times(timestamp_info)
-                    if word_times:
-                        await self.add_word_timestamps(word_times, ctx_id)
+            # timestampInfo is inside audioChunk
+            timestamp_info = audio_chunk.get("timestampInfo")
+            if timestamp_info:
+                word_times = self._calculate_word_times(timestamp_info)
+                if word_times:
+                    await self.add_word_timestamps(word_times, ctx_id)
 
             # Handle context created confirmation
             if "contextCreated" in result:
@@ -893,8 +919,8 @@ class InworldTTSService(AudioContextWordTTSService):
                 logger.trace(f"{self}: Context closed on server: {ctx_id}")
                 await self.stop_ttfb_metrics()
                 # Only reset if this is our current context
-                if ctx_id == self._context_id:
-                    self._context_id = None
+                if ctx_id == self.get_active_audio_context_id():
+                    self.reset_active_audio_context()
                 if ctx_id and self.audio_context_available(ctx_id):
                     await self.remove_audio_context(ctx_id)
                 await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
@@ -906,12 +932,13 @@ class InworldTTSService(AudioContextWordTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    if self._context_id:
+                    context_id = self.get_active_audio_context_id()
+                    if context_id:
                         keepalive_message = {
                             "send_text": {"text": ""},
-                            "contextId": self._context_id,
+                            "contextId": context_id,
                         }
-                        logger.trace(f"Sending keepalive for context {self._context_id}")
+                        logger.trace(f"Sending keepalive for context {context_id}")
                     else:
                         keepalive_message = {"send_text": {"text": ""}}
                         logger.trace("Sending keepalive without context")
@@ -945,6 +972,10 @@ class InworldTTSService(AudioContextWordTTSService):
             create_config["applyTextNormalization"] = self._settings.apply_text_normalization
         if is_given(self._settings.auto_mode):
             create_config["autoMode"] = self._settings.auto_mode
+        if is_given(self._settings.timestamp_transport_strategy):
+            create_config["timestampTransportStrategy"] = (
+                self._settings.timestamp_transport_strategy
+            )
 
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.
@@ -1003,20 +1034,13 @@ class InworldTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame(context_id=context_id)
+                if not self.has_active_audio_context():
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame(context_id=context_id)
+                    await self.create_audio_context(context_id)
+                    await self._send_context(context_id)
 
-                if not self._context_id:
-                    self._context_id = context_id
-                    logger.trace(f"{self}: Creating new context {self._context_id}")
-                    await self.create_audio_context(self._context_id)
-                    await self._send_context(self._context_id)
-                elif not self.audio_context_available(self._context_id):
-                    # Context exists on server but local tracking was removed
-                    logger.trace(f"{self}: Recreating local audio context {self._context_id}")
-                    await self.create_audio_context(self._context_id)
-
-                await self._send_text(self._context_id, text)
+                await self._send_text(context_id, text)
                 await self.start_tts_usage_metrics(text)
 
             except Exception as e:

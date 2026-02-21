@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.utils.tracing.conversation_context_provider import get_current_conversation_context
 from pipecat.utils.tracing.service_attributes import (
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
@@ -34,7 +33,6 @@ from pipecat.utils.tracing.service_attributes import (
     add_tts_span_attributes,
 )
 from pipecat.utils.tracing.setup import is_tracing_available
-from pipecat.utils.tracing.turn_context_provider import get_current_turn_context
 
 if is_tracing_available():
     from opentelemetry import context as context_api
@@ -73,6 +71,19 @@ def _noop_decorator(func):
     return func
 
 
+def _get_turn_context(self):
+    """Get the current turn's tracing context if available.
+
+    Args:
+        self: The service instance.
+
+    Returns:
+        The turn context, or None if unavailable.
+    """
+    tracing_ctx = getattr(self, "_tracing_context", None)
+    return tracing_ctx.get_turn_context() if tracing_ctx else None
+
+
 def _get_parent_service_context(self):
     """Get the parent service span context (internal use only).
 
@@ -88,12 +99,14 @@ def _get_parent_service_context(self):
     if not is_tracing_available():
         return None
 
-    # The parent span was created when Traceable was initialized and stored as self._span
+    # TODO: Remove this block and delete class_decorators.py once Traceable is removed.
+    # Legacy: support for classes inheriting from Traceable (currently unused, deprecated).
     if hasattr(self, "_span") and self._span:
         return trace.set_span_in_context(self._span)
 
-    # Fall back to conversation context if available
-    conversation_context = get_current_conversation_context()
+    # Use the conversation context set by TurnTraceObserver via TracingContext.
+    tracing_ctx = getattr(self, "_tracing_context", None)
+    conversation_context = tracing_ctx.get_conversation_context() if tracing_ctx else None
     if conversation_context:
         return conversation_context
 
@@ -200,8 +213,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             span_name = "tts"
 
             # Get parent context
-            turn_context = get_current_turn_context()
-            parent_context = turn_context or _get_parent_service_context(self)
+            parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
             # Create span
             tracer = trace.get_tracer("pipecat")
@@ -236,19 +248,21 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
             @functools.wraps(f)
             async def gen_wrapper(self, text, *args, **kwargs):
-                try:
-                    # Check if tracing is enabled for this service instance
-                    if not getattr(self, "_tracing_enabled", False):
-                        async for item in f(self, text, *args, **kwargs):
-                            yield item
-                        return
+                if not getattr(self, "_tracing_enabled", False):
+                    async for item in f(self, text, *args, **kwargs):
+                        yield item
+                    return
 
+                fn_called = False
+                try:
                     async with tracing_context(self, text):
+                        fn_called = True
                         async for item in f(self, text, *args, **kwargs):
                             yield item
                 except Exception as e:
+                    if fn_called:
+                        raise
                     logging.error(f"Error in TTS tracing (continuing without tracing): {e}")
-                    # If tracing fails, fall back to the original function
                     async for item in f(self, text, *args, **kwargs):
                         yield item
 
@@ -257,16 +271,18 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
             @functools.wraps(f)
             async def wrapper(self, text, *args, **kwargs):
-                try:
-                    # Check if tracing is enabled for this service instance
-                    if not getattr(self, "_tracing_enabled", False):
-                        return await f(self, text, *args, **kwargs)
+                if not getattr(self, "_tracing_enabled", False):
+                    return await f(self, text, *args, **kwargs)
 
+                fn_called = False
+                try:
                     async with tracing_context(self, text):
+                        fn_called = True
                         return await f(self, text, *args, **kwargs)
                 except Exception as e:
+                    if fn_called:
+                        raise
                     logging.error(f"Error in TTS tracing (continuing without tracing): {e}")
-                    # If tracing fails, fall back to the original function
                     return await f(self, text, *args, **kwargs)
 
             return wrapper
@@ -299,17 +315,16 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     def decorator(f):
         @functools.wraps(f)
         async def wrapper(self, transcript, is_final, language=None):
-            try:
-                # Check if tracing is enabled for this service instance
-                if not getattr(self, "_tracing_enabled", False):
-                    return await f(self, transcript, is_final, language)
+            if not getattr(self, "_tracing_enabled", False):
+                return await f(self, transcript, is_final, language)
 
+            fn_called = False
+            try:
                 service_class_name = self.__class__.__name__
                 span_name = "stt"
 
                 # Get the turn context first, then fall back to service context
-                turn_context = get_current_turn_context()
-                parent_context = turn_context or _get_parent_service_context(self)
+                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
@@ -339,14 +354,16 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         )
 
                         # Call the original function
+                        fn_called = True
                         return await f(self, transcript, is_final, language)
                     except Exception as e:
                         # Log any exception but don't disrupt the main flow
                         logging.warning(f"Error in STT transcription tracing: {e}")
                         raise
             except Exception as e:
+                if fn_called:
+                    raise
                 logging.error(f"Error in STT tracing (continuing without tracing): {e}")
-                # If tracing fails, fall back to the original function
                 return await f(self, transcript, is_final, language)
 
         return wrapper
@@ -381,17 +398,16 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     def decorator(f):
         @functools.wraps(f)
         async def wrapper(self, context, *args, **kwargs):
-            try:
-                # Check if tracing is enabled for this service instance
-                if not getattr(self, "_tracing_enabled", False):
-                    return await f(self, context, *args, **kwargs)
+            if not getattr(self, "_tracing_enabled", False):
+                return await f(self, context, *args, **kwargs)
 
+            fn_called = False
+            try:
                 service_class_name = self.__class__.__name__
                 span_name = "llm"
 
                 # Get the parent context - turn context if available, otherwise service context
-                turn_context = get_current_turn_context()
-                parent_context = turn_context or _get_parent_service_context(self)
+                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
@@ -530,6 +546,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Don't raise - let the function execute anyway
 
                         # Run function with modified push_frame to capture the output
+                        fn_called = True
                         result = await f(self, context, *args, **kwargs)
 
                         # Add aggregated output after function completes, if available
@@ -555,8 +572,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         if ttfb is not None:
                             current_span.set_attribute("metrics.ttfb", ttfb)
             except Exception as e:
+                if fn_called:
+                    raise
                 logging.error(f"Error in LLM tracing (continuing without tracing): {e}")
-                # If tracing fails, fall back to the original function
                 return await f(self, context, *args, **kwargs)
 
         return wrapper
@@ -588,17 +606,16 @@ def traced_gemini_live(operation: str) -> Callable:
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(self, *args, **kwargs):
-            try:
-                # Check if tracing is enabled for this service instance
-                if not getattr(self, "_tracing_enabled", False):
-                    return await func(self, *args, **kwargs)
+            if not getattr(self, "_tracing_enabled", False):
+                return await func(self, *args, **kwargs)
 
+            fn_called = False
+            try:
                 service_class_name = self.__class__.__name__
                 span_name = f"{operation}"
 
                 # Get the parent context - turn context if available, otherwise service context
-                turn_context = get_current_turn_context()
-                parent_context = turn_context or _get_parent_service_context(self)
+                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
@@ -851,6 +868,7 @@ def traced_gemini_live(operation: str) -> Callable:
                             current_span.set_attribute("metrics.ttfb", ttfb)
 
                         # Run the original function
+                        fn_called = True
                         result = await func(self, *args, **kwargs)
 
                         return result
@@ -861,8 +879,9 @@ def traced_gemini_live(operation: str) -> Callable:
                         raise
 
             except Exception as e:
+                if fn_called:
+                    raise
                 logging.error(f"Error in Gemini Live tracing (continuing without tracing): {e}")
-                # If tracing fails, fall back to the original function
                 return await func(self, *args, **kwargs)
 
         return wrapper
@@ -891,17 +910,16 @@ def traced_openai_realtime(operation: str) -> Callable:
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(self, *args, **kwargs):
-            try:
-                # Check if tracing is enabled for this service instance
-                if not getattr(self, "_tracing_enabled", False):
-                    return await func(self, *args, **kwargs)
+            if not getattr(self, "_tracing_enabled", False):
+                return await func(self, *args, **kwargs)
 
+            fn_called = False
+            try:
                 service_class_name = self.__class__.__name__
                 span_name = f"{operation}"
 
                 # Get the parent context - turn context if available, otherwise service context
-                turn_context = get_current_turn_context()
-                parent_context = turn_context or _get_parent_service_context(self)
+                parent_context = _get_turn_context(self) or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
@@ -1071,6 +1089,7 @@ def traced_openai_realtime(operation: str) -> Callable:
                                 current_span.set_attribute("metrics.ttfb", ttfb)
 
                         # Run the original function
+                        fn_called = True
                         result = await func(self, *args, **kwargs)
 
                         return result
@@ -1081,8 +1100,9 @@ def traced_openai_realtime(operation: str) -> Callable:
                         raise
 
             except Exception as e:
+                if fn_called:
+                    raise
                 logging.error(f"Error in OpenAI Realtime tracing (continuing without tracing): {e}")
-                # If tracing fails, fall back to the original function
                 return await func(self, *args, **kwargs)
 
         return wrapper

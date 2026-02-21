@@ -519,7 +519,7 @@ class TavusInputTransport(BaseInputTransport):
         """Handle received participant audio data."""
         frame = InputAudioRawFrame(
             audio=audio.audio_frames,
-            sample_rate=audio.audio_frames,
+            sample_rate=audio.sample_rate,
             num_channels=audio.num_channels,
         )
         frame.transport_source = audio_source
@@ -661,6 +661,17 @@ class TavusTransport(BaseTransport):
     When used, the Pipecat bot joins the same virtual room as the Tavus Avatar and the user.
     This is achieved by using `TavusTransportClient`, which initiates the conversation via
     `TavusApi` and obtains a room URL that all participants connect to.
+
+    Event handlers available:
+
+    - on_client_connected(transport, participant): Participant connected to the session
+    - on_client_disconnected(transport, participant): Participant disconnected from the session
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, participant):
+            ...
     """
 
     def __init__(

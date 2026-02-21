@@ -202,7 +202,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
         self._function_call_tasks: Dict[Optional[asyncio.Task], FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
-        self._tracing_enabled: bool = False
         self._skip_tts: Optional[bool] = None
         self._summary_task: Optional[asyncio.Task] = None
         self._settings = LLMSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
@@ -290,7 +289,6 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         await super().start(frame)
         if not self._run_in_parallel:
             await self._create_sequential_runner_task()
-        self._tracing_enabled = frame.enable_tracing
 
     async def stop(self, frame: EndFrame):
         """Stop the LLM service.

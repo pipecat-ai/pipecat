@@ -471,6 +471,17 @@ class WebsocketClientTransport(BaseTransport):
 
     Provides a complete WebSocket client transport implementation with
     input and output capabilities, connection management, and event handling.
+
+    Event handlers available:
+
+    - on_connected(transport): Connected to WebSocket server
+    - on_disconnected(transport): Disconnected from WebSocket server
+
+    Example::
+
+        @transport.event_handler("on_connected")
+        async def on_connected(transport):
+            ...
     """
 
     def __init__(

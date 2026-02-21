@@ -15,7 +15,7 @@ import asyncio
 import time
 from concurrent.futures import CancelledError as FuturesCancelledError
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Tuple
 
 import aiohttp
@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
-    ControlFrame,
+    DataFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -183,34 +183,44 @@ class DailyInputTransportMessageUrgentFrame(DailyInputTransportMessageFrame):
 
 
 @dataclass
-class DailyUpdateRemoteParticipantsFrame(ControlFrame):
-    """Frame to update remote participants in Daily calls.
+class DailySIPTransferFrame(DataFrame):
+    """SIP call transfer frame for transport queuing.
 
-    .. deprecated:: 0.0.87
-        `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a future version.
-        Create your own custom frame and use a custom processor to handle it or use, for example,
-        `on_after_push_frame` event instead in the output transport.
+    A SIP call transfer that will be queued. The transfer will happen after any
+    preceding audio finishes playing, allowing the bot to complete its current
+    utterance before the transfer occurs.
+
+    Parameters:
+        settings: SIP call transfer settings.
+    """
+
+    settings: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DailySIPReferFrame(DataFrame):
+    """SIP REFER frame for transport queuing.
+
+    A SIP REFER that will be queued. The REFER will happen after any preceding
+    audio finishes playing, allowing the bot to complete its current utterance
+    before the REFER occurs.
+
+    Parameters:
+        settings: SIP REFER settings.
+    """
+
+    settings: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DailyUpdateRemoteParticipantsFrame(DataFrame):
+    """Frame to update remote participants in Daily calls.
 
     Parameters:
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
-    remote_participants: Mapping[str, Any] = None
-
-    def __post_init__(self):
-        super().__post_init__()
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "DailyUpdateRemoteParticipantsFrame is deprecated and will be removed in a future version."
-                "Instead, create your own custom frame and handle it in the "
-                '`@transport.output().event_handler("on_after_push_frame")` event handler or a '
-                "custom processor.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+    remote_participants: Mapping[str, Any] = field(default_factory=dict)
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -501,6 +511,7 @@ class DailyTransportClient(EventHandler):
         self._event_task = None
         self._audio_task = None
         self._video_task = None
+        self._join_message_queue: list = []
 
         # Input and ouput sample rates. They will be initialize on setup().
         self._in_sample_rate = 0
@@ -567,7 +578,8 @@ class DailyTransportClient(EventHandler):
             error: An error description or None.
         """
         if not self._joined:
-            return "Unable to send messages before joining."
+            self._join_message_queue.append(frame)
+            return None
 
         participant_id = None
         if isinstance(
@@ -768,6 +780,8 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_joined(data)
 
             self._joined_event.set()
+
+            await self._flush_join_messages()
         else:
             error_msg = f"Error joining {self._room_url}: {error}"
             logger.error(error_msg)
@@ -1541,6 +1555,12 @@ class DailyTransportClient(EventHandler):
             await callback(*args)
             queue.task_done()
 
+    async def _flush_join_messages(self):
+        """Send any messages that were queued before join completed."""
+        for frame in self._join_message_queue:
+            await self.send_message(frame)
+        self._join_message_queue.clear()
+
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
         """Get the event loop from the task manager."""
         if not self._task_manager:
@@ -1946,18 +1966,6 @@ class DailyOutputTransport(BaseOutputTransport):
         # Leave the room.
         await self._client.leave()
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process outgoing frames, including transport messages.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame flow in the pipeline.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, DailyUpdateRemoteParticipantsFrame):
-            await self._client.update_remote_participants(frame.remote_participants)
-
     async def send_message(
         self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
     ):
@@ -1968,7 +1976,7 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         error = await self._client.send_message(frame)
         if error:
-            logger.error(f"Unable to send message: {error}")
+            await self.push_error(f"Unable to send message: {error}")
 
     async def register_video_destination(self, destination: str):
         """Register a video output destination.
@@ -2011,6 +2019,25 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         return await self._client.write_video_frame(frame)
 
+    async def write_transport_frame(self, frame: Frame):
+        """Handle queued SIP frames after preceding audio has been sent.
+
+        Args:
+            frame: The frame to handle.
+        """
+        if isinstance(frame, DailySIPTransferFrame):
+            error = await self._client.sip_call_transfer(frame.settings)
+            if error:
+                await self.push_error(f"Unable to transfer SIP call: {error}")
+        elif isinstance(frame, DailySIPReferFrame):
+            error = await self._client.sip_refer(frame.settings)
+            if error:
+                await self.push_error(f"Unable to perform SIP REFER: {error}")
+        elif isinstance(frame, DailyUpdateRemoteParticipantsFrame):
+            error = await self._client.update_remote_participants(frame.remote_participants)
+            if error:
+                await self.push_error(f"Unable to update remote participants: {error}")
+
     def _supports_native_dtmf(self) -> bool:
         """Daily supports native DTMF via telephone events.
 
@@ -2039,6 +2066,61 @@ class DailyTransport(BaseTransport):
     Provides comprehensive Daily integration including audio/video streaming,
     transcription, recording, dial-in/out functionality, and real-time communication
     features for conversational AI applications.
+
+    Event handlers available:
+
+    - on_joined: Called when the bot joins the room. Args: (data: dict)
+    - on_left: Called when the bot leaves the room.
+    - on_before_leave: [sync] Called just before the bot leaves the room.
+    - on_error: Called when a transport error occurs. Args: (error: str)
+    - on_call_state_updated: Called when the call state changes. Args: (state: str)
+    - on_first_participant_joined: Called when the first participant joins.
+      Args: (participant: dict)
+    - on_participant_joined: Called when any participant joins.
+      Args: (participant: dict)
+    - on_participant_left: Called when a participant leaves.
+      Args: (participant: dict, reason: str)
+    - on_participant_updated: Called when a participant's state changes.
+      Args: (participant: dict)
+    - on_client_connected: Called when a participant connects (alias for
+      on_participant_joined). Args: (participant: dict)
+    - on_client_disconnected: Called when a participant disconnects (alias for
+      on_participant_left). Args: (participant: dict)
+    - on_active_speaker_changed: Called when the active speaker changes.
+      Args: (participant: dict)
+    - on_app_message: Called when an app message is received.
+      Args: (message: Any, sender: str)
+    - on_transcription_message: Called when a transcription message is received.
+      Args: (message: dict)
+    - on_recording_started: Called when recording starts. Args: (status: str)
+    - on_recording_stopped: Called when recording stops. Args: (stream_id: str)
+    - on_recording_error: Called when a recording error occurs.
+      Args: (stream_id: str, message: str)
+    - on_dialin_connected: Called when a dial-in call connects. Args: (data: dict)
+    - on_dialin_ready: Called when the SIP endpoint is ready.
+      Args: (sip_endpoint: str)
+    - on_dialin_stopped: Called when a dial-in call stops. Args: (data: dict)
+    - on_dialin_error: Called when a dial-in error occurs. Args: (data: dict)
+    - on_dialin_warning: Called when a dial-in warning occurs. Args: (data: dict)
+    - on_dialout_answered: Called when a dial-out call is answered. Args: (data: dict)
+    - on_dialout_connected: Called when a dial-out call connects. Args: (data: dict)
+    - on_dialout_stopped: Called when a dial-out call stops. Args: (data: dict)
+    - on_dialout_error: Called when a dial-out error occurs. Args: (data: dict)
+    - on_dialout_warning: Called when a dial-out warning occurs. Args: (data: dict)
+
+    Example::
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            await task.queue_frame(TTSSpeakFrame("Hello!"))
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
+
+        @transport.event_handler("on_app_message")
+        async def on_app_message(transport, message, sender):
+            logger.info(f"Message from {sender}: {message}")
     """
 
     def __init__(

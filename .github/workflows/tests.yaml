@@ -33,6 +33,7 @@ jobs:
 
       - name: Install system packages
         run: |
+          sudo apt-get update
           sudo apt-get install -y portaudio19-dev
 
       - name: Install dependencies
@@ -45,6 +46,7 @@ jobs:
             --extra livekit \
             --extra local-smart-turn-v3 \
             --extra piper \
+            --extra tracing \
             --extra websocket
 
       - name: Test with pytest

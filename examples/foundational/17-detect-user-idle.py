@@ -5,17 +5,21 @@
 #
 
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     EndTaskFrame,
     LLMMessagesAppendFrame,
     LLMRunFrame,
     TTSSpeakFrame,
+    UserIdleTimeoutUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -30,6 +34,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -74,6 +79,17 @@ class IdleHandler:
             await aggregator.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
 
+async def fetch_weather_from_api(params: FunctionCallParams):
+    # Simulate a slow API call, waiting longer than the user idle timeout.
+    await asyncio.sleep(3)
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await asyncio.sleep(6)
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
@@ -104,6 +120,42 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
+    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+
+    weather_function = FunctionSchema(
+        name="get_current_weather",
+        description="Get the current weather",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "format": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location.",
+            },
+        },
+        required=["location", "format"],
+    )
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
+
     messages = [
         {
             "role": "system",
@@ -111,7 +163,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = LLMContext(messages)
+    context = LLMContext(messages, tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -146,6 +198,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @user_aggregator.event_handler("on_user_turn_idle")
     async def on_user_turn_idle(aggregator):
+        logger.info(f"User turn idle")
         await idle_handler.handle_idle(aggregator)
 
     @user_aggregator.event_handler("on_user_turn_started")
@@ -158,6 +211,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
+        await asyncio.sleep(30)
+        logger.info(f"Disabling idle detection")
+        await task.queue_frames([UserIdleTimeoutUpdateFrame(timeout=0)])
+        await asyncio.sleep(30)
+        logger.info(f"Enabling idle detection")
+        await task.queue_frames([UserIdleTimeoutUpdateFrame(timeout=5)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

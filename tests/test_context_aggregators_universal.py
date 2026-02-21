@@ -24,7 +24,9 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
+    StartFrame,
     TranscriptionFrame,
+    UserMuteStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -40,7 +42,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.tests.utils import SleepFrame, run_test
-from pipecat.turns.user_mute import FirstSpeechUserMuteStrategy, FunctionCallUserMuteStrategy
+from pipecat.turns.user_mute import (
+    FirstSpeechUserMuteStrategy,
+    FunctionCallUserMuteStrategy,
+    MuteUntilFirstBotCompleteUserMuteStrategy,
+)
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
@@ -385,6 +391,42 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
         strategy, message = stop_messages[0]
         self.assertIsNone(strategy)  # strategy is None for end/cancel
         self.assertEqual(message.content, "Hello!")
+
+    async def test_start_frame_before_mute_event(self):
+        """StartFrame must reach downstream before mute events are broadcast.
+
+        With MuteUntilFirstBotCompleteUserMuteStrategy, the mute logic should
+        not run on control frames (StartFrame, EndFrame, CancelFrame). This
+        ensures StartFrame reaches downstream processors before
+        UserMuteStartedFrame is broadcast.
+
+        The default TurnAnalyzerUserTurnStopStrategy broadcasts a
+        SpeechControlParamsFrame when it processes StartFrame, which gets
+        re-queued to the aggregator. That non-control frame legitimately
+        triggers the mute state change, so UserMuteStartedFrame follows
+        StartFrame — but crucially, after it.
+        """
+        context = LLMContext()
+
+        user_aggregator = LLMUserAggregator(
+            context,
+            params=LLMUserAggregatorParams(
+                user_mute_strategies=[MuteUntilFirstBotCompleteUserMuteStrategy()],
+            ),
+        )
+
+        pipeline = Pipeline([user_aggregator])
+
+        # run_test internally sends StartFrame via PipelineRunner. With
+        # ignore_start=False we can verify ordering: StartFrame must arrive
+        # before UserMuteStartedFrame. Before the fix, UserMuteStartedFrame
+        # was broadcast before StartFrame reached downstream processors.
+        (down_frames, _) = await run_test(
+            pipeline,
+            frames_to_send=[],
+            expected_down_frames=[StartFrame, UserMuteStartedFrame],
+            ignore_start=False,
+        )
 
 
 class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):

@@ -120,10 +120,10 @@ MODEL_CONFIGS: Dict[str, ModelConfig] = {
         use_translate_method=True,
     ),
     "saaras:v3": ModelConfig(
-        supports_prompt=True,
+        supports_prompt=False,
         supports_mode=True,
         supports_language=True,
-        default_language="en-IN",
+        default_language="unknown",
         default_mode="transcribe",
         use_translate_endpoint=False,
         use_translate_method=False,
@@ -152,6 +152,18 @@ class SarvamSTTService(STTService):
     """Sarvam speech-to-text service.
 
     Provides real-time speech recognition using Sarvam's WebSocket API.
+
+    Event handlers available (in addition to STTService events):
+
+    - on_connected(service): Connected to Sarvam WebSocket
+    - on_disconnected(service): Disconnected from Sarvam WebSocket
+    - on_connection_error(service, error): Connection error occurred
+
+    Example::
+
+        @stt.event_handler("on_connected")
+        async def on_connected(service):
+            ...
     """
 
     _settings: SarvamSTTSettings
@@ -163,9 +175,9 @@ class SarvamSTTService(STTService):
             language: Target language for transcription.
                 - saarika:v2.5: Defaults to "unknown" (auto-detect supported)
                 - saaras:v2.5: Not used (auto-detects language)
-                - saaras:v3: Defaults to "en-IN"
+                - saaras:v3: Defaults to "unknown" (auto-detect supported)
             prompt: Optional prompt to guide transcription/translation style/context.
-                Only applicable to saaras models (v2.5 and v3). Defaults to None.
+                Only applicable to saaras:v2.5. Defaults to None.
             mode: Mode of operation for saaras:v3 models only. Options: transcribe, translate,
                 verbatim, translit, codemix. Defaults to "transcribe" for saaras:v3.
             vad_signals: Enable VAD signals in response. Defaults to None.
@@ -187,6 +199,8 @@ class SarvamSTTService(STTService):
         input_audio_codec: str = "wav",
         params: Optional[InputParams] = None,
         ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
+        keepalive_timeout: Optional[float] = None,
+        keepalive_interval: float = 5.0,
         **kwargs,
     ):
         """Initialize the Sarvam STT service.
@@ -196,12 +210,15 @@ class SarvamSTTService(STTService):
             model: Sarvam model to use for transcription. Allowed values:
                 - "saarika:v2.5": Standard STT model
                 - "saaras:v2.5": STT-Translate model (auto-detects language, supports prompts)
-                - "saaras:v3": Advanced STT model (supports mode and prompts)
+                - "saaras:v3": Advanced STT model (supports mode)
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
+            keepalive_timeout: Seconds of no audio before sending silence to keep the
+                connection alive. None disables keepalive.
+            keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to the parent STTService.
         """
         params = params or SarvamSTTService.InputParams()
@@ -223,7 +240,13 @@ class SarvamSTTService(STTService):
                 f"Model '{model}' does not support language parameter (auto-detects language)."
             )
 
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=keepalive_timeout,
+            keepalive_interval=keepalive_interval,
+            **kwargs,
+        )
 
         self._api_key = api_key
 
@@ -490,13 +513,36 @@ class SarvamSTTService(STTService):
             if self._config.supports_mode and is_given(self._settings.mode):
                 connect_kwargs["mode"] = self._settings.mode
 
+            # Prompt support differs across sarvamai versions. Prefer connect-time prompt
+            # when available and gracefully degrade if the SDK doesn't accept it.
+            if (
+                is_given(self._settings.prompt)
+                and self._settings.prompt is not None
+                and self._config.supports_prompt
+            ):
+                connect_kwargs["prompt"] = self._settings.prompt
+
             def _connect_with_sdk_headers(connect_fn, **kwargs):
                 # Different SDK versions may use different kwarg names.
-                for header_kw in ("headers", "additional_headers", "extra_headers"):
+                # If prompt is unsupported at connect-time, retry without it.
+                attempts = [kwargs]
+                if "prompt" in kwargs:
+                    attempts.append({k: v for k, v in kwargs.items() if k != "prompt"})
+
+                last_type_error = None
+                for attempt_kwargs in attempts:
+                    for header_kw in ("headers", "additional_headers", "extra_headers"):
+                        try:
+                            return connect_fn(**attempt_kwargs, **{header_kw: self._sdk_headers})
+                        except TypeError as e:
+                            last_type_error = e
                     try:
-                        return connect_fn(**kwargs, **{header_kw: self._sdk_headers})
-                    except TypeError:
-                        pass
+                        return connect_fn(**attempt_kwargs)
+                    except TypeError as e:
+                        last_type_error = e
+
+                if last_type_error is not None:
+                    raise last_type_error
                 return connect_fn(**kwargs)
 
             # Choose the appropriate endpoint based on model configuration
@@ -514,9 +560,15 @@ class SarvamSTTService(STTService):
             # Enter the async context manager
             self._socket_client = await self._websocket_context.__aenter__()
 
-            # Set prompt if provided (only for models that support prompts)
-            if is_given(self._settings.prompt) and self._config.supports_prompt:
-                await self._socket_client.set_prompt(self._settings.prompt)
+            # Fallback for SDKs that support runtime prompt updates.
+            if (
+                is_given(self._settings.prompt)
+                and self._settings.prompt is not None
+                and self._config.supports_prompt
+            ):
+                prompt_setter = getattr(self._socket_client, "set_prompt", None)
+                if callable(prompt_setter):
+                    await prompt_setter(self._settings.prompt)
 
             # Register event handler for incoming messages
             def _message_handler(message):
@@ -528,6 +580,8 @@ class SarvamSTTService(STTService):
 
             # Start receive task using Pipecat's task management
             self._receive_task = self.create_task(self._receive_task_handler())
+
+            self._create_keepalive_task()
 
             logger.info("Connected to Sarvam successfully")
 
@@ -542,6 +596,8 @@ class SarvamSTTService(STTService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket API using SDK."""
+        await self._cancel_keepalive_task()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -667,6 +723,32 @@ class SarvamSTTService(STTService):
             "as-IN": Language.AS_IN,
         }
         return mapping.get(language_code, Language.HI_IN)
+
+    def _is_keepalive_ready(self) -> bool:
+        """Check if the Sarvam SDK websocket client is connected."""
+        return self._socket_client is not None
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio via the Sarvam SDK to keep the connection alive.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        audio_base64 = base64.b64encode(silence).decode("utf-8")
+        encoding = (
+            self._input_audio_codec
+            if self._input_audio_codec.startswith("audio/")
+            else f"audio/{self._input_audio_codec}"
+        )
+        method_kwargs = {
+            "audio": audio_base64,
+            "encoding": encoding,
+            "sample_rate": self.sample_rate,
+        }
+        if self._config.use_translate_method:
+            await self._socket_client.translate(**method_kwargs)
+        else:
+            await self._socket_client.transcribe(**method_kwargs)
 
     async def _start_metrics(self):
         """Start processing metrics collection."""

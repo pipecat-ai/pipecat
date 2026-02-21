@@ -131,7 +131,6 @@ class SimliVideoService(FrameProcessor):
             # Build SimliConfig from new parameters
             # Only pass optional parameters if explicitly provided to use SimliConfig defaults
             config_kwargs = {
-                "apiKey": api_key,
                 "faceId": face_id,
             }
             if params.max_session_length is not None:
@@ -153,10 +152,10 @@ class SimliVideoService(FrameProcessor):
         config.maxIdleTime += 5
         config.maxSessionLength += 5
         self._simli_client = SimliClient(
+            api_key=api_key,
             config=config,
-            latencyInterval=latency_interval,
             simliURL=simli_url,
-            enable_logging=params.enable_logging or False,
+            enableSFU=True,
         )
 
         self._pipecat_resampler: AudioResampler = None
@@ -173,7 +172,7 @@ class SimliVideoService(FrameProcessor):
         """Start the connection to Simli service and begin processing tasks."""
         try:
             if not self._initialized:
-                await self._simli_client.Initialize()
+                await self._simli_client.start()
                 self._initialized = True
 
             # Create task to consume and process audio and video
