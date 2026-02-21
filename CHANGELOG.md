@@ -942,6 +942,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for `VideoSDKTransport` in `src/pipecat/transports/videosdk`, enabling Pipecat bots to join VideoSDK.live meetings with bidirectional audio and handle participant chat messages via VideoSDK PubSub.
+- Added `videosdk>=0.2.7` dependency to `pyproject.toml`.
+- Added `VIDEOSDK_AUTH_TOKEN` and `VIDEOSDK_MEETING_ID` fields to `env.example`.
+- Added new example `examples/foundational/04c-transports-videosdk.py` demonstrating usage of `VideoSDKTransport`.
+
 - Introducing user turn strategies. User turn strategies indicate when the user
   turn starts or stops. In conversational agents, these are often referred to
   as start/stop speaking or turn-taking plans or policies.
