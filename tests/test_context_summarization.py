@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from pipecat.frames.frames import LLMContextSummaryRequestFrame
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationConfig,
@@ -600,6 +600,78 @@ class TestSummaryGenerationExceptions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary, "This is a summary of the conversation")
         self.assertGreater(last_index, -1)
         self.assertEqual(last_index, 1)  # Should be the index of the last summarized message
+
+
+class TestLLMSpecificMessageHandling(unittest.TestCase):
+    """Tests that LLMSpecificMessage objects are correctly skipped in summarization."""
+
+    def test_estimate_context_tokens_skips_specific_messages(self):
+        """Test that estimate_context_tokens skips LLMSpecificMessage objects."""
+        context = LLMContext()
+        context.add_message({"role": "user", "content": "Hello"})
+        context.add_message(LLMSpecificMessage(llm="google", message={}))
+        context.add_message({"role": "assistant", "content": "Hi there"})
+
+        tokens_with_specific = LLMContextSummarizationUtil.estimate_context_tokens(context)
+
+        context_without = LLMContext()
+        context_without.add_message({"role": "user", "content": "Hello"})
+        context_without.add_message({"role": "assistant", "content": "Hi there"})
+        tokens_without = LLMContextSummarizationUtil.estimate_context_tokens(context_without)
+
+        self.assertEqual(tokens_with_specific, tokens_without)
+
+    def test_get_messages_to_summarize_with_specific_messages(self):
+        """Test that get_messages_to_summarize handles LLMSpecificMessage objects."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message(LLMSpecificMessage(llm="google", message={}))
+        context.add_message({"role": "user", "content": "Message 1"})
+        context.add_message({"role": "assistant", "content": "Response 1"})
+        context.add_message(LLMSpecificMessage(llm="google", message={}))
+        context.add_message({"role": "user", "content": "Message 2"})
+        context.add_message({"role": "assistant", "content": "Response 2"})
+
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+
+        self.assertGreater(len(result.messages), 0)
+        self.assertGreater(result.last_summarized_index, 0)
+
+    def test_format_messages_skips_specific_messages(self):
+        """Test that format_messages_for_summary skips LLMSpecificMessage objects."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            LLMSpecificMessage(llm="google", message={}),
+            {"role": "assistant", "content": "Hi there"},
+        ]
+
+        transcript = LLMContextSummarizationUtil.format_messages_for_summary(messages)
+
+        self.assertIn("USER: Hello", transcript)
+        self.assertIn("ASSISTANT: Hi there", transcript)
+
+    def test_function_call_tracking_skips_specific_messages(self):
+        """Test that _get_function_calls_in_progress_index skips LLMSpecificMessage."""
+        messages = [
+            {"role": "user", "content": "What time is it?"},
+            LLMSpecificMessage(llm="google", message={}),
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    }
+                ],
+            },
+            LLMSpecificMessage(llm="google", message={}),
+            {"role": "tool", "tool_call_id": "call_123", "content": '{"time": "10:30 AM"}'},
+        ]
+
+        result = LLMContextSummarizationUtil._get_function_calls_in_progress_index(messages, 0)
+        self.assertEqual(result, -1)
 
 
 if __name__ == "__main__":
