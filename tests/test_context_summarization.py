@@ -634,8 +634,8 @@ class TestLLMSpecificMessageHandling(unittest.TestCase):
 
         result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
 
-        self.assertGreater(len(result.messages), 0)
-        self.assertGreater(result.last_summarized_index, 0)
+        self.assertEqual(len(result.messages), 4)
+        self.assertEqual(result.last_summarized_index, 4)
 
     def test_format_messages_skips_specific_messages(self):
         """Test that format_messages_for_summary skips LLMSpecificMessage objects."""
