@@ -1135,6 +1135,11 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
     if it was previously paused as fast as possible. After resuming frame
     processing all queued frames will be processed in the order received.
 
+    Note:
+        This frame is now equivalent to FrameProcessorResumeFrame, which was
+        changed to a SystemFrame to fix a bug where resume frames would get
+        stuck in the blocked processing queue.
+
     Parameters:
         processor: The frame processor to resume.
     """
@@ -1959,12 +1964,19 @@ class FrameProcessorPauseFrame(ControlFrame):
 
 
 @dataclass
-class FrameProcessorResumeFrame(ControlFrame):
+class FrameProcessorResumeFrame(SystemFrame):
     """Frame to resume frame processing for a specific processor.
 
     This frame is used to resume frame processing for the given processor if
     it was previously paused. After resuming frame processing all queued frames
     will be processed in the order received.
+
+    This is a SystemFrame to ensure it bypasses the blocked processing queue
+    when the processor is paused. Otherwise, the resume frame would get queued
+    and never processed.
+
+    Note:
+        This frame is now equivalent to FrameProcessorResumeUrgentFrame.
 
     Parameters:
         processor: The frame processor to resume.
