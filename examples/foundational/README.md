@@ -121,6 +121,7 @@ uv run 07-interruptible.py -t twilio -x NGROK_HOST_NAME
 - **[19-openai-realtime-beta.py](./19-openai-realtime-beta.py)**: OpenAI Speech-to-Speech (Direct S2S, Function calls)
 - **[21-tavus-layer-tavus-transport.py](./21-tavus-layer-tavus-transport.py)**: Tavus digital twin (Avatar integration)
 - **[27-simli-layer.py](./27-simli-layer.py)**: Simli avatar integration (Video synchronization)
+- **[55-lemonslice-transport.py](./55-lemonslice-transport.py)**: LemonSlice avatar integration (A/V Synced Avatar integration)
 
 ### Performance & Optimization
 
