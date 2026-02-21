@@ -42,6 +42,23 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
+def _get_model_name(service) -> str:
+    """Get the model name from a service instance.
+
+    This is a bit of a mess — there were multiple places a model name could live.
+    Soon, self._settings should be the only source of truth about model name.
+    In fact...it might already be the case, but juuuuust to be safe, we'll
+    check all the places we used to store it.
+    """
+    return (
+        getattr(getattr(service, "_settings", None), "model", None)
+        or getattr(service, "_full_model_name", None)
+        or getattr(service, "model_name", None)
+        or getattr(service, "_model_name", None)
+        or "unknown"
+    )
+
+
 def _noop_decorator(func):
     """No-op fallback decorator when tracing is unavailable.
 
@@ -202,13 +219,14 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(span_name, context=parent_context) as span:
                 try:
+                    settings = getattr(self, "_settings", {})
                     add_tts_span_attributes(
                         span=span,
                         service_name=service_class_name,
-                        model=getattr(self, "model_name") or "unknown",
-                        voice_id=getattr(self, "_voice_id", "unknown"),
+                        model=_get_model_name(self),
+                        voice_id=getattr(settings, "voice", "unknown"),
                         text=text,
-                        settings=getattr(self, "_settings", {}),
+                        settings=settings,
                         character_count=len(text),
                         operation_name="tts",
                         cartesia_version=getattr(self, "_cartesia_version", None),
@@ -325,7 +343,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         add_stt_span_attributes(
                             span=current_span,
                             service_name=service_class_name,
-                            model=getattr(self, "model_name") or settings.get("model", "unknown"),
+                            model=_get_model_name(self),
                             transcript=transcript,
                             is_final=is_final,
                             language=str(language) if language else None,
@@ -506,10 +524,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Add all available attributes to the span
                             attribute_kwargs = {
                                 "service_name": service_class_name,
-                                "model": getattr(self, "_full_model_name", None)
-                                or getattr(self, "model_name", None)
-                                or params.get("model")
-                                or "unknown",
+                                "model": _get_model_name(self),
                                 "stream": True,  # Most LLM services use streaming
                                 "parameters": params,
                             }
@@ -609,11 +624,7 @@ def traced_gemini_live(operation: str) -> Callable:
                 ) as current_span:
                     try:
                         # Base service attributes
-                        model_name = (
-                            getattr(self, "model_name", None)
-                            or getattr(self, "_model_name", None)
-                            or "unknown"
-                        )
+                        model_name = _get_model_name(self)
                         voice_id = getattr(self, "_voice_id", None)
                         language_code = getattr(self, "_language_code", None)
                         settings = getattr(self, "_settings", {})
@@ -917,11 +928,7 @@ def traced_openai_realtime(operation: str) -> Callable:
                 ) as current_span:
                     try:
                         # Base service attributes
-                        model_name = (
-                            getattr(self, "model_name", None)
-                            or getattr(self, "_model_name", None)
-                            or "unknown"
-                        )
+                        model_name = _get_model_name(self)
 
                         # Operation-specific attribute collection
                         operation_attrs = {}

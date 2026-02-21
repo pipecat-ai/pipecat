@@ -15,6 +15,7 @@ import asyncio
 import datetime
 import json
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import aiohttp
@@ -34,7 +35,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
-    LLMUpdateSettingsFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -56,6 +56,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -64,6 +65,17 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Ultravox, you need to `pip install pipecat-ai[ultravox]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class UltravoxRealtimeLLMSettings(LLMSettings):
+    """Settings for UltravoxRealtimeLLMService.
+
+    Parameters:
+        output_medium: The output medium for the model ("voice" or "text").
+    """
+
+    output_medium: str | _NotGiven = field(default=NOT_GIVEN)
 
 
 class AgentInputParams(BaseModel):
@@ -146,6 +158,8 @@ class UltravoxRealtimeLLMService(LLMService):
     by the model and may not always align with its understanding of user input.
     """
 
+    _settings: UltravoxRealtimeLLMSettings
+
     def __init__(
         self,
         *,
@@ -163,6 +177,7 @@ class UltravoxRealtimeLLMService(LLMService):
             **kwargs: Additional arguments passed to parent LLMService.
         """
         super().__init__(**kwargs)
+        self._settings = UltravoxRealtimeLLMSettings()
         self._params = params
         if one_shot_selected_tools:
             if not isinstance(self._params, OneShotInputParams):
@@ -310,6 +325,13 @@ class UltravoxRealtimeLLMService(LLMService):
             await self.cancel_task(self._receive_task, timeout=1.0)
             self._receive_task = None
 
+    async def _update_settings(self, update: UltravoxRealtimeLLMSettings):
+        changed = await super()._update_settings(update)
+        if "output_medium" in changed:
+            await self._update_output_medium(self._settings.output_medium)
+        self._warn_unhandled_updated_settings(changed.keys() - {"output_medium"})
+        return changed
+
     #
     # frame processing
     # StartFrame, StopFrame, CancelFrame implemented in base class
@@ -331,9 +353,6 @@ class UltravoxRealtimeLLMService(LLMService):
                 else LLMContext.from_openai_context(frame.context)
             )
             await self._handle_context(context)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            if "output_medium" in frame.settings:
-                await self._update_output_medium(frame.settings.get("output_medium"))
         elif isinstance(frame, InputTextRawFrame):
             await self._send_user_text(frame.text)
             await self.push_frame(frame, direction)

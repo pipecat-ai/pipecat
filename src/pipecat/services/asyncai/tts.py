@@ -9,7 +9,8 @@
 import asyncio
 import base64
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, ClassVar, Dict, Mapping, Optional
 
 import aiohttp
 from loguru import logger
@@ -27,6 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import AudioContextTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -72,11 +74,39 @@ def language_to_async_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class AsyncAITTSSettings(TTSSettings):
+    """Settings for Async AI TTS services.
+
+    Parameters:
+        output_container: Audio container format (e.g. "raw").
+        output_encoding: Audio encoding format (e.g. "pcm_s16le").
+        output_sample_rate: Audio sample rate in Hz.
+    """
+
+    output_container: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "AsyncAITTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested ``output_format``."""
+        flat = dict(settings)
+        nested = flat.pop("output_format", None)
+        if isinstance(nested, dict):
+            flat.setdefault("output_container", nested.get("container"))
+            flat.setdefault("output_encoding", nested.get("encoding"))
+            flat.setdefault("output_sample_rate", nested.get("sample_rate"))
+        return super().from_mapping(flat)
+
+
 class AsyncAITTSService(AudioContextTTSService):
     """Async TTS service with WebSocket streaming.
 
     Provides text-to-speech using Async's streaming WebSocket API.
     """
+
+    _settings: AsyncAITTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Async TTS configuration.
@@ -131,22 +161,34 @@ class AsyncAITTSService(AudioContextTTSService):
         self._api_key = api_key
         self._api_version = version
         self._url = url
-        self._settings = {
-            "output_format": {
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
-            "language": self.language_to_service_language(params.language)
+        self._settings = AsyncAITTSSettings(
+            model=model,
+            voice=voice_id,
+            output_container=container,
+            output_encoding=encoding,
+            output_sample_rate=0,
+            language=self.language_to_service_language(params.language)
             if params.language
             else None,
-        }
-
-        self.set_model_name(model)
-        self.set_voice(voice_id)
+        )
+        self._sync_model_name_to_metrics()
 
         self._receive_task = None
         self._keepalive_task = None
+
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+        """Apply a settings update.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(update)
+
+        if not changed:
+            return changed
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -178,7 +220,7 @@ class AsyncAITTSService(AudioContextTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["output_format"]["sample_rate"] = self.sample_rate
+        self._settings.output_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -232,10 +274,14 @@ class AsyncAITTSService(AudioContextTTSService):
                 f"{self._url}?api_key={self._api_key}&version={self._api_version}"
             )
             init_msg = {
-                "model_id": self._model_name,
-                "voice": {"mode": "id", "id": self._voice_id},
-                "output_format": self._settings["output_format"],
-                "language": self._settings["language"],
+                "model_id": self._settings.model,
+                "voice": {"mode": "id", "id": self._settings.voice},
+                "output_format": {
+                    "container": self._settings.output_container,
+                    "encoding": self._settings.output_encoding,
+                    "sample_rate": self._settings.output_sample_rate,
+                },
+                "language": self._settings.language,
             }
 
             await self._get_websocket().send(json.dumps(init_msg))
@@ -404,6 +450,8 @@ class AsyncAIHttpTTSService(TTSService):
     connection is not required or desired.
     """
 
+    _settings: AsyncAITTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Async API.
 
@@ -450,18 +498,17 @@ class AsyncAIHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = url
         self._api_version = version
-        self._settings = {
-            "output_format": {
-                "container": container,
-                "encoding": encoding,
-                "sample_rate": 0,
-            },
-            "language": self.language_to_service_language(params.language)
+        self._settings = AsyncAITTSSettings(
+            model=model,
+            voice=voice_id,
+            output_container=container,
+            output_encoding=encoding,
+            output_sample_rate=0,
+            language=self.language_to_service_language(params.language)
             if params.language
             else None,
-        }
-        self.set_voice(voice_id)
-        self.set_model_name(model)
+        )
+        self._sync_model_name_to_metrics()
 
         self._session = aiohttp_session
 
@@ -491,7 +538,7 @@ class AsyncAIHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["output_format"]["sample_rate"] = self.sample_rate
+        self._settings.output_sample_rate = self.sample_rate
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -507,14 +554,18 @@ class AsyncAIHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            voice_config = {"mode": "id", "id": self._voice_id}
+            voice_config = {"mode": "id", "id": self._settings.voice}
             await self.start_ttfb_metrics()
             payload = {
-                "model_id": self._model_name,
+                "model_id": self._settings.model,
                 "transcript": text,
                 "voice": voice_config,
-                "output_format": self._settings["output_format"],
-                "language": self._settings["language"],
+                "output_format": {
+                    "container": self._settings.output_container,
+                    "encoding": self._settings.output_encoding,
+                    "sample_rate": self._settings.output_sample_rate,
+                },
+                "language": self._settings.language,
             }
             yield TTSStartedFrame(context_id=context_id)
             headers = {

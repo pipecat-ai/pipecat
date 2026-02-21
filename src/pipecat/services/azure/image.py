@@ -54,7 +54,8 @@ class AzureImageGenServiceREST(ImageGenService):
         self._api_key = api_key
         self._azure_endpoint = endpoint
         self._api_version = api_version
-        self.set_model_name(model)
+        self._settings.model = model
+        self._sync_model_name_to_metrics()
         self._image_size = image_size
         self._aiohttp_session = aiohttp_session
 

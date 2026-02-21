@@ -17,7 +17,8 @@ import asyncio
 import base64
 import json
 import uuid
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, ClassVar, Dict, List, Literal, Mapping, Optional, Tuple
 
 import aiohttp
 import websockets
@@ -27,6 +28,8 @@ from pipecat import version as pipecat_version
 
 USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
+
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -52,12 +55,61 @@ from pipecat.services.tts_service import AudioContextWordTTSService, WordTTSServ
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
+@dataclass
+class InworldTTSSettings(TTSSettings):
+    """Settings for Inworld TTS services.
+
+    Parameters:
+        audio_encoding: Audio encoding format (e.g. LINEAR16).
+        audio_sample_rate: Audio sample rate in Hz.
+        speaking_rate: Speaking rate for speech synthesis.
+        temperature: Temperature for speech synthesis.
+        auto_mode: Whether to use auto mode. Recommended when texts are sent
+            in full sentences/phrases. When enabled, the server controls
+            flushing of buffered text to achieve minimal latency while
+            maintaining high quality audio output. If None (default),
+            automatically set based on aggregate_sentences.
+        apply_text_normalization: Whether to apply text normalization.
+        timestamp_transport_strategy: Strategy for timestamp transport ("ASYNC" or "SYNC").
+    """
+
+    audio_encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    audio_sample_rate: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speaking_rate: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    temperature: float | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    auto_mode: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    timestamp_transport_strategy: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {
+        "voice_id": "voice",
+        "voiceId": "voice",
+        "modelId": "model",
+        "applyTextNormalization": "apply_text_normalization",
+        "autoMode": "auto_mode",
+        "timestampTransportStrategy": "timestamp_transport_strategy",
+    }
+
+    @classmethod
+    def from_mapping(cls, settings: Mapping[str, Any]) -> "InworldTTSSettings":
+        """Construct settings from a plain dict, destructuring legacy nested ``audioConfig``."""
+        flat = dict(settings)
+        nested = flat.pop("audioConfig", None)
+        if isinstance(nested, dict):
+            flat.setdefault("audio_encoding", nested.get("audioEncoding"))
+            flat.setdefault("audio_sample_rate", nested.get("sampleRateHertz"))
+            flat.setdefault("speaking_rate", nested.get("speakingRate"))
+        return super().from_mapping(flat)
+
+
 class InworldHttpTTSService(WordTTSService):
     """Inworld AI HTTP-based TTS service.
 
     Supports both streaming and non-streaming modes via the `streaming` parameter.
     Outputs LINEAR16 audio at configurable sample rates with word-level timestamps.
     """
+
+    _settings: InworldTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Inworld TTS configuration.
@@ -117,26 +169,23 @@ class InworldHttpTTSService(WordTTSService):
         else:
             self._base_url = "https://api.inworld.ai/tts/v1/voice"
 
-        self._settings = {
-            "voiceId": voice_id,
-            "modelId": model,
-            "audioConfig": {
-                "audioEncoding": encoding,
-                "sampleRateHertz": 0,
-            },
-        }
+        self._settings = InworldTTSSettings(
+            model=model,
+            voice=voice_id,
+            audio_encoding=encoding,
+            audio_sample_rate=0,
+        )
 
         if params.temperature is not None:
-            self._settings["temperature"] = params.temperature
+            self._settings.temperature = params.temperature
         if params.speaking_rate is not None:
-            self._settings["audioConfig"]["speakingRate"] = params.speaking_rate
+            self._settings.speaking_rate = params.speaking_rate
         if params.timestamp_transport_strategy is not None:
-            self._settings["timestampTransportStrategy"] = params.timestamp_transport_strategy
+            self._settings.timestamp_transport_strategy = params.timestamp_transport_strategy
 
         self._cumulative_time = 0.0
 
-        self.set_voice(voice_id)
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -153,7 +202,7 @@ class InworldHttpTTSService(WordTTSService):
             frame: The start frame.
         """
         await super().start(frame)
-        self._settings["audioConfig"]["sampleRateHertz"] = self.sample_rate
+        self._settings.audio_sample_rate = self.sample_rate
 
     async def stop(self, frame: EndFrame):
         """Stop the Inworld TTS service.
@@ -232,20 +281,27 @@ class InworldHttpTTSService(WordTTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}] (streaming={self._streaming})")
 
+        audio_config = {
+            "audioEncoding": self._settings.audio_encoding,
+            "sampleRateHertz": self._settings.audio_sample_rate,
+        }
+        if is_given(self._settings.speaking_rate):
+            audio_config["speakingRate"] = self._settings.speaking_rate
+
         payload = {
             "text": text,
-            "voiceId": self._settings["voiceId"],
-            "modelId": self._settings["modelId"],
-            "audioConfig": self._settings["audioConfig"],
+            "voiceId": self._settings.voice,
+            "modelId": self._settings.model,
+            "audioConfig": audio_config,
         }
 
-        if "temperature" in self._settings:
-            payload["temperature"] = self._settings["temperature"]
+        if is_given(self._settings.temperature):
+            payload["temperature"] = self._settings.temperature
 
         # Use WORD timestamps for simplicity and correct spacing/capitalization
         payload["timestampType"] = self._timestamp_type
-        if "timestampTransportStrategy" in self._settings:
-            payload["timestampTransportStrategy"] = self._settings["timestampTransportStrategy"]
+        if is_given(self._settings.timestamp_transport_strategy):
+            payload["timestampTransportStrategy"] = self._settings.timestamp_transport_strategy
 
         request_id = str(uuid.uuid4())
         headers = {
@@ -419,6 +475,8 @@ class InworldTTSService(AudioContextWordTTSService):
     with word-level timestamps.
     """
 
+    _settings: InworldTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for Inworld WebSocket TTS configuration.
 
@@ -486,29 +544,27 @@ class InworldTTSService(AudioContextWordTTSService):
 
         self._api_key = api_key
         self._url = url
-        self._settings: Dict[str, Any] = {
-            "voiceId": voice_id,
-            "modelId": model,
-            "audioConfig": {
-                "audioEncoding": encoding,
-                "sampleRateHertz": 0,
-            },
-        }
+        self._settings = InworldTTSSettings(
+            model=model,
+            voice=voice_id,
+            audio_encoding=encoding,
+            audio_sample_rate=0,
+        )
         self._timestamp_type = "WORD"
 
         if params.temperature is not None:
-            self._settings["temperature"] = params.temperature
+            self._settings.temperature = params.temperature
         if params.speaking_rate is not None:
-            self._settings["audioConfig"]["speakingRate"] = params.speaking_rate
+            self._settings.speaking_rate = params.speaking_rate
         if params.apply_text_normalization is not None:
-            self._settings["applyTextNormalization"] = params.apply_text_normalization
+            self._settings.apply_text_normalization = params.apply_text_normalization
         if params.timestamp_transport_strategy is not None:
-            self._settings["timestampTransportStrategy"] = params.timestamp_transport_strategy
+            self._settings.timestamp_transport_strategy = params.timestamp_transport_strategy
 
         if params.auto_mode is not None:
-            self._settings["autoMode"] = params.auto_mode
+            self._settings.auto_mode = params.auto_mode
         else:
-            self._settings["autoMode"] = aggregate_sentences
+            self._settings.auto_mode = aggregate_sentences
 
         self._buffer_settings = {
             "maxBufferDelayMs": params.max_buffer_delay_ms,
@@ -526,8 +582,7 @@ class InworldTTSService(AudioContextWordTTSService):
         # Track the end time of the last word in the current generation
         self._generation_end_time = 0.0
 
-        self.set_voice(voice_id)
-        self.set_model_name(model)
+        self._sync_model_name_to_metrics()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -544,7 +599,7 @@ class InworldTTSService(AudioContextWordTTSService):
             frame: The start frame.
         """
         await super().start(frame)
-        self._settings["audioConfig"]["sampleRateHertz"] = self.sample_rate
+        self._settings.audio_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -699,6 +754,21 @@ class InworldTTSService(AudioContextWordTTSService):
             self._keepalive_task = None
 
         await self._disconnect_websocket()
+
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+        """Apply a settings update.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(update)
+
+        if not changed:
+            return changed
+
+        await self._disconnect()
+        await self._connect()
+
+        return changed
 
     async def _connect_websocket(self):
         """Connect to the Inworld WebSocket TTS service.
@@ -883,22 +953,29 @@ class InworldTTSService(AudioContextWordTTSService):
         Args:
             context_id: The context ID.
         """
+        audio_config = {
+            "audioEncoding": self._settings.audio_encoding,
+            "sampleRateHertz": self._settings.audio_sample_rate,
+        }
+        if is_given(self._settings.speaking_rate):
+            audio_config["speakingRate"] = self._settings.speaking_rate
+
         create_config: Dict[str, Any] = {
-            "voiceId": self._settings["voiceId"],
-            "modelId": self._settings["modelId"],
-            "audioConfig": self._settings["audioConfig"],
+            "voiceId": self._settings.voice,
+            "modelId": self._settings.model,
+            "audioConfig": audio_config,
         }
 
-        if "temperature" in self._settings:
-            create_config["temperature"] = self._settings["temperature"]
-        if "applyTextNormalization" in self._settings:
-            create_config["applyTextNormalization"] = self._settings["applyTextNormalization"]
-        if "autoMode" in self._settings:
-            create_config["autoMode"] = self._settings["autoMode"]
-        if "timestampTransportStrategy" in self._settings:
-            create_config["timestampTransportStrategy"] = self._settings[
-                "timestampTransportStrategy"
-            ]
+        if is_given(self._settings.temperature):
+            create_config["temperature"] = self._settings.temperature
+        if is_given(self._settings.apply_text_normalization):
+            create_config["applyTextNormalization"] = self._settings.apply_text_normalization
+        if is_given(self._settings.auto_mode):
+            create_config["autoMode"] = self._settings.auto_mode
+        if is_given(self._settings.timestamp_transport_strategy):
+            create_config["timestampTransportStrategy"] = (
+                self._settings.timestamp_transport_strategy
+            )
 
         # Set buffer settings for timely audio generation.
         # Use provided values or defaults that work well for streaming LLM output.

@@ -12,6 +12,7 @@ WebSocket API for streaming audio transcription.
 
 import asyncio
 import json
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, Optional
 from urllib.parse import urlencode
 
@@ -29,6 +30,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import ASSEMBLYAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -52,6 +54,21 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class AssemblyAISTTSettings(STTSettings):
+    """Settings for the AssemblyAI STT service.
+
+    See :class:`AssemblyAIConnectionParams` for detailed parameter descriptions.
+
+    Parameters:
+        connection_params: Connection configuration parameters.
+    """
+
+    connection_params: AssemblyAIConnectionParams | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+
 class AssemblyAISTTService(WebsocketSTTService):
     """AssemblyAI real-time speech-to-text service.
 
@@ -59,6 +76,8 @@ class AssemblyAISTTService(WebsocketSTTService):
     Supports both interim and final transcriptions with configurable parameters
     for audio processing and connection management.
     """
+
+    _settings: AssemblyAISTTSettings
 
     def __init__(
         self,
@@ -96,9 +115,11 @@ class AssemblyAISTTService(WebsocketSTTService):
         )
 
         self._api_key = api_key
-        self._language = language
+        self._settings = AssemblyAISTTSettings(
+            language=language,
+            connection_params=connection_params,
+        )
         self._api_endpoint_base_url = api_endpoint_base_url
-        self._connection_params = connection_params
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
 
         self._termination_event = asyncio.Event()
@@ -164,6 +185,37 @@ class AssemblyAISTTService(WebsocketSTTService):
             True if metrics generation is supported.
         """
         return True
+
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
+        """Apply a settings update.
+
+        Settings are stored but not applied to the active connection.
+
+        Args:
+            update: A :class:`STTSettings` (or ``AssemblyAISTTSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(update)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # # Re-apply manual turn mode config if vad_force_turn_endpoint is active
+        # # and connection_params were updated.
+        # if self._vad_force_turn_endpoint and "connection_params" in changed:
+        #     self._settings.connection_params = self._configure_manual_turn_mode(
+        #         self._settings.connection_params
+        #     )
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the speech-to-text service.
@@ -239,7 +291,7 @@ class AssemblyAISTTService(WebsocketSTTService):
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
         params = {}
-        for k, v in self._connection_params.model_dump().items():
+        for k, v in self._settings.connection_params.model_dump().items():
             if v is not None:
                 if k == "keyterms_prompt":
                     params[k] = json.dumps(v)
@@ -415,18 +467,18 @@ class AssemblyAISTTService(WebsocketSTTService):
         if not message.transcript:
             return
         if message.end_of_turn and (
-            not self._connection_params.formatted_finals or message.turn_is_formatted
+            not self._settings.connection_params.formatted_finals or message.turn_is_formatted
         ):
             await self.push_frame(
                 TranscriptionFrame(
                     message.transcript,
                     self._user_id,
                     time_now_iso8601(),
-                    self._language,
+                    self._settings.language,
                     message,
                 )
             )
-            await self._trace_transcription(message.transcript, True, self._language)
+            await self._trace_transcription(message.transcript, True, self._settings.language)
             await self.stop_processing_metrics()
         else:
             await self.push_frame(
@@ -434,7 +486,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                     message.transcript,
                     self._user_id,
                     time_now_iso8601(),
-                    self._language,
+                    self._settings.language,
                     message,
                 )
             )

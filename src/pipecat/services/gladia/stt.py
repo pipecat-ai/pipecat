@@ -14,6 +14,7 @@ import asyncio
 import base64
 import json
 import warnings
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, Literal, Optional
 
 import aiohttp
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -178,6 +180,17 @@ class _InputParamsDescriptor:
         return GladiaInputParams
 
 
+@dataclass
+class GladiaSTTSettings(STTSettings):
+    """Settings for Gladia STT service.
+
+    Parameters:
+        input_params: Gladia ``GladiaInputParams`` for detailed configuration.
+    """
+
+    input_params: GladiaInputParams | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class GladiaSTTService(WebsocketSTTService):
     """Speech-to-Text service using Gladia's API.
 
@@ -190,6 +203,8 @@ class GladiaSTTService(WebsocketSTTService):
     .. deprecated:: 0.0.62
         Use :class:`~pipecat.services.gladia.config.GladiaInputParams` directly instead.
     """
+
+    _settings: GladiaSTTSettings
 
     # Maintain backward compatibility
     InputParams = _InputParamsDescriptor()
@@ -264,10 +279,9 @@ class GladiaSTTService(WebsocketSTTService):
         self._api_key = api_key
         self._region = region
         self._url = url
-        self.set_model_name(model)
-        self._params = params
         self._receive_task = None
-        self._settings = {}
+        self._settings = GladiaSTTSettings(model=model, input_params=params)
+        self._sync_model_name_to_metrics()
 
         # Session management
         self._session_url = None
@@ -307,31 +321,33 @@ class GladiaSTTService(WebsocketSTTService):
         return language_to_gladia_language(language)
 
     def _prepare_settings(self) -> Dict[str, Any]:
+        params = self._settings.input_params
+
         settings = {
-            "encoding": self._params.encoding or "wav/pcm",
-            "bit_depth": self._params.bit_depth or 16,
+            "encoding": params.encoding or "wav/pcm",
+            "bit_depth": params.bit_depth or 16,
             "sample_rate": self.sample_rate,
-            "channels": self._params.channels or 1,
-            "model": self._model_name,
+            "channels": params.channels or 1,
+            "model": self._settings.model,
         }
 
         # Add custom_metadata if provided
-        settings["custom_metadata"] = dict(self._params.custom_metadata or {})
+        settings["custom_metadata"] = dict(params.custom_metadata or {})
         settings["custom_metadata"]["pipecat"] = pipecat_version()
 
         # Add endpointing parameters if provided
-        if self._params.endpointing is not None:
-            settings["endpointing"] = self._params.endpointing
-        if self._params.maximum_duration_without_endpointing is not None:
+        if params.endpointing is not None:
+            settings["endpointing"] = params.endpointing
+        if params.maximum_duration_without_endpointing is not None:
             settings["maximum_duration_without_endpointing"] = (
-                self._params.maximum_duration_without_endpointing
+                params.maximum_duration_without_endpointing
             )
 
         # Add language configuration (prioritize language_config over deprecated language)
-        if self._params.language_config:
-            settings["language_config"] = self._params.language_config.model_dump(exclude_none=True)
-        elif self._params.language:  # Backward compatibility for deprecated parameter
-            language_code = self.language_to_service_language(self._params.language)
+        if params.language_config:
+            settings["language_config"] = params.language_config.model_dump(exclude_none=True)
+        elif params.language:  # Backward compatibility for deprecated parameter
+            language_code = self.language_to_service_language(params.language)
             if language_code:
                 settings["language_config"] = {
                     "languages": [language_code],
@@ -339,21 +355,18 @@ class GladiaSTTService(WebsocketSTTService):
                 }
 
         # Add pre_processing configuration if provided
-        if self._params.pre_processing:
-            settings["pre_processing"] = self._params.pre_processing.model_dump(exclude_none=True)
+        if params.pre_processing:
+            settings["pre_processing"] = params.pre_processing.model_dump(exclude_none=True)
 
         # Add realtime_processing configuration if provided
-        if self._params.realtime_processing:
-            settings["realtime_processing"] = self._params.realtime_processing.model_dump(
+        if params.realtime_processing:
+            settings["realtime_processing"] = params.realtime_processing.model_dump(
                 exclude_none=True
             )
 
         # Add messages_config if provided
-        if self._params.messages_config:
-            settings["messages_config"] = self._params.messages_config.model_dump(exclude_none=True)
-
-        # Store settings for tracing
-        self._settings = settings
+        if params.messages_config:
+            settings["messages_config"] = params.messages_config.model_dump(exclude_none=True)
 
         return settings
 
@@ -365,6 +378,33 @@ class GladiaSTTService(WebsocketSTTService):
         """
         await super().start(frame)
         await self._connect()
+
+    async def _update_settings(self, update: GladiaSTTSettings) -> dict[str, Any]:
+        """Apply settings update.
+
+        Settings are stored but not applied to the active session.
+
+        Args:
+            update: A settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(update)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # self._session_url = None
+        # self._session_id = None
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     async def stop(self, frame: EndFrame):
         """Stop the Gladia STT websocket connection.
@@ -522,7 +562,7 @@ class GladiaSTTService(WebsocketSTTService):
         Broadcasts UserStartedSpeakingFrame and optionally triggers interruption
         when VAD is enabled.
         """
-        if not self._params.enable_vad or self._is_speaking:
+        if not self._settings.input_params.enable_vad or self._is_speaking:
             return
 
         logger.debug(f"{self} User started speaking")
@@ -537,7 +577,7 @@ class GladiaSTTService(WebsocketSTTService):
 
         Broadcasts UserStoppedSpeakingFrame when VAD is enabled.
         """
-        if not self._params.enable_vad or not self._is_speaking:
+        if not self._settings.input_params.enable_vad or not self._is_speaking:
             return
         self._is_speaking = False
         await self.broadcast_frame(UserStoppedSpeakingFrame)

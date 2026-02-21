@@ -117,7 +117,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             # First flush any existing audio to finish the current context
             await tts.flush_audio()
             # Then set the new voice
-            tts.set_voice(VOICE_IDS[voice_name])
+            await tts.set_voice(VOICE_IDS[voice_name])
             logger.info(f"Switched to {voice_name} voice")
         else:
             logger.warning(f"Unknown voice: {voice_name}")

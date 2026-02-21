@@ -8,6 +8,7 @@
 
 import asyncio
 import uuid
+import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import (
@@ -18,7 +19,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -52,6 +52,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.settings import TTSSettings, is_given
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -102,6 +103,8 @@ class TTSService(AIService):
         async def on_tts_request(tts: TTSService, context_id: str, text: str):
             logger.debug(f"TTS request: {context_id} - {text}")
     """
+
+    _settings: TTSSettings
 
     def __init__(
         self,
@@ -188,8 +191,9 @@ class TTSService(AIService):
         self._append_trailing_space: bool = append_trailing_space
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._voice_id: str = ""
-        self._settings: Dict[str, Any] = {}
+        self._settings = TTSSettings(
+            voice=""
+        )  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         if text_aggregator:
             import warnings
@@ -261,18 +265,42 @@ class TTSService(AIService):
     async def set_model(self, model: str):
         """Set the TTS model to use.
 
+        .. deprecated:: 0.0.103
+            Use ``TTSUpdateSettingsFrame(model=...)`` instead.
+
         Args:
             model: The name of the TTS model.
         """
-        self.set_model_name(model)
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated, use 'TTSUpdateSettingsFrame(model=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        logger.info(f"Switching TTS model to: [{model}]")
+        settings_cls = type(self._settings)
+        await self._update_settings(settings_cls(model=model))
 
-    def set_voice(self, voice: str):
+    async def set_voice(self, voice: str):
         """Set the voice for speech synthesis.
+
+        .. deprecated:: 0.0.103
+            Use ``TTSUpdateSettingsFrame(voice=...)`` instead.
 
         Args:
             voice: The voice identifier or name.
         """
-        self._voice_id = voice
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_voice' is deprecated, use 'TTSUpdateSettingsFrame(voice=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        logger.info(f"Switching TTS voice to: [{voice}]")
+        settings_cls = type(self._settings)
+        await self._update_settings(settings_cls(voice=voice))
 
     def create_context_id(self) -> str:
         """Generate a unique context ID for a TTS request.
@@ -323,15 +351,6 @@ class TTSService(AIService):
         if self._append_trailing_space and not text.endswith(" "):
             return text + " "
         return text
-
-    async def update_setting(self, key: str, value: Any):
-        """Update a service-specific setting.
-
-        Args:
-            key: The setting key to update.
-            value: The new value for the setting.
-        """
-        pass
 
     async def flush_audio(self):
         """Flush any buffered audio data."""
@@ -403,22 +422,26 @@ class TTSService(AIService):
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        for key, value in settings.items():
-            if key in self._settings:
-                logger.info(f"Updating TTS setting {key} to: [{value}]")
-                self._settings[key] = value
-                if key == "language":
-                    self._settings[key] = self.language_to_service_language(value)
-            elif key == "model":
-                self.set_model_name(value)
-            elif key == "voice" or key == "voice_id":
-                self.set_voice(value)
-            elif key == "text_filter":
-                for filter in self._text_filters:
-                    await filter.update_settings(value)
-            else:
-                logger.warning(f"Unknown setting for TTS service: {key}")
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+        """Apply a TTS settings update.
+
+        Translates language to service-specific value before applying.
+
+        Args:
+            update: A TTS settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        # Translate language *before* applying so the stored value is canonical
+        if is_given(update.language) and isinstance(update.language, Language):
+            converted = self.language_to_service_language(update.language)
+            if converted is not None:
+                update.language = converted
+
+        changed = await super()._update_settings(update)
+
+        return changed
 
     async def say(self, text: str):
         """Immediately speak the provided text.
@@ -501,7 +524,20 @@ class TTSService(AIService):
             await self.flush_audio()
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
+            if frame.update is not None:
+                await self._update_settings(frame.update)
+            elif frame.settings:
+                # Backward-compatible path: convert legacy dict to settings object.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "Passing a dict via TTSUpdateSettingsFrame(settings={...}) is deprecated "
+                        "since 0.0.103, use TTSUpdateSettingsFrame(update=TTSSettings(...)) instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                update = type(self._settings).from_mapping(frame.settings)
+                await self._update_settings(update)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)

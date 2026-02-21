@@ -8,7 +8,8 @@
 
 import base64
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, ClassVar, Dict, Optional
 
 from loguru import logger
 
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import AudioContextWordTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -36,6 +38,26 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class ResembleAITTSSettings(TTSSettings):
+    """Settings for Resemble AI TTS service.
+
+    Parameters:
+        precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).
+        output_format: Audio format (wav or mp3).
+        resemble_sample_rate: Audio sample rate sent to the API.
+    """
+
+    precision: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    output_format: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    resemble_sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    _aliases: ClassVar[Dict[str, str]] = {
+        "voice_id": "voice",
+        "sample_rate": "resemble_sample_rate",
+    }
+
+
 class ResembleAITTSService(AudioContextWordTTSService):
     """Resemble AI TTS service with WebSocket streaming and word timestamps.
 
@@ -43,6 +65,8 @@ class ResembleAITTSService(AudioContextWordTTSService):
     Supports word-level timestamps and audio context management for handling
     multiple simultaneous synthesis requests with proper interruption support.
     """
+
+    _settings: ResembleAITTSSettings
 
     def __init__(
         self,
@@ -73,13 +97,13 @@ class ResembleAITTSService(AudioContextWordTTSService):
         )
 
         self._api_key = api_key
-        self._voice_id = voice_id
         self._url = url
-        self._settings = {
-            "precision": precision,
-            "output_format": output_format,
-            "sample_rate": sample_rate,
-        }
+        self._settings = ResembleAITTSSettings(
+            voice=voice_id,
+            precision=precision,
+            output_format=output_format,
+            resemble_sample_rate=sample_rate,
+        )
 
         self._websocket = None
         self._request_id_counter = 0
@@ -100,8 +124,6 @@ class ResembleAITTSService(AudioContextWordTTSService):
         self._jitter_buffer_bytes = 44100  # ~1000ms at 22050Hz to handle 400ms+ network gaps
         self._playback_started: dict[str, bool] = {}  # Track if we've started playback per request
 
-        self.set_voice(voice_id)
-
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
 
@@ -120,13 +142,13 @@ class ResembleAITTSService(AudioContextWordTTSService):
             JSON string containing the request payload.
         """
         msg = {
-            "voice_uuid": self._voice_id,
+            "voice_uuid": self._settings.voice,
             "data": text,
             "binary_response": False,  # Use JSON frames to get timestamps
             "request_id": self._request_id_counter,  # ResembleAI only accepts number
-            "output_format": self._settings["output_format"],
-            "sample_rate": self._settings["sample_rate"],
-            "precision": self._settings["precision"],
+            "output_format": self._settings.output_format,
+            "sample_rate": self._settings.resemble_sample_rate,
+            "precision": self._settings.precision,
             "no_audio_header": True,
         }
 
@@ -140,7 +162,7 @@ class ResembleAITTSService(AudioContextWordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["sample_rate"] = self.sample_rate
+        self._settings.resemble_sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):

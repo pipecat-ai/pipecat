@@ -72,7 +72,7 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
         # Build kwargs dict with only set parameters
         kwargs = {
             "file": ("audio.wav", audio, "audio/wav"),
-            "model": self.model_name,
+            "model": self._settings.model,
             "response_format": "json",
             "language": self._language,
         }

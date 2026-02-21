@@ -53,7 +53,8 @@ class OpenAIImageGenService(ImageGenService):
             model: DALL-E model to use for generation. Defaults to "dall-e-3".
         """
         super().__init__()
-        self.set_model_name(model)
+        self._settings.model = model
+        self._sync_model_name_to_metrics()
         self._image_size = image_size
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._aiohttp_session = aiohttp_session
@@ -70,7 +71,7 @@ class OpenAIImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         image = await self._client.images.generate(
-            prompt=prompt, model=self.model_name, n=1, size=self._image_size
+            prompt=prompt, model=self._settings.model, n=1, size=self._image_size
         )
 
         image_url = image.data[0].url

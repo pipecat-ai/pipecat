@@ -13,7 +13,19 @@ with support for streaming audio, word timestamps, and voice customization.
 import asyncio
 import base64
 import json
-from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from typing import (
+    Any,
+    AsyncGenerator,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import aiohttp
 from loguru import logger
@@ -32,6 +44,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
 from pipecat.services.tts_service import (
     AudioContextWordTTSService,
     WordTTSService,
@@ -136,12 +149,12 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
 
 
 def build_elevenlabs_voice_settings(
-    settings: Dict[str, Any],
+    settings: Union[Dict[str, Any], "TTSSettings"],
 ) -> Optional[Dict[str, Union[float, bool]]]:
     """Build voice settings dictionary for ElevenLabs based on provided settings.
 
     Args:
-        settings: Dictionary containing voice settings parameters.
+        settings: Dictionary or settings containing voice settings parameters.
 
     Returns:
         Dictionary of voice settings or None if no valid settings are provided.
@@ -150,8 +163,11 @@ def build_elevenlabs_voice_settings(
 
     voice_settings = {}
     for key in voice_setting_keys:
-        if key in settings and settings[key] is not None:
-            voice_settings[key] = settings[key]
+        val = (
+            getattr(settings, key, None) if isinstance(settings, TTSSettings) else settings.get(key)
+        )
+        if val is not None and is_given(val):
+            voice_settings[key] = val
 
     return voice_settings or None
 
@@ -166,6 +182,79 @@ class PronunciationDictionaryLocator(BaseModel):
 
     pronunciation_dictionary_id: str
     version_id: str
+
+
+@dataclass
+class ElevenLabsTTSSettings(TTSSettings):
+    """Settings for the ElevenLabs WebSocket TTS service.
+
+    Fields that appear in the WebSocket URL (``voice``, ``model``,
+    ``language``) require a full reconnect when changed.  Fields that
+    affect the voice character (``stability``, ``similarity_boost``,
+    ``style``, ``use_speaker_boost``, ``speed``) can be applied by closing
+    the current audio context so a new one is opened with updated settings.
+
+    Parameters:
+        stability: Voice stability control (0.0 to 1.0).
+        similarity_boost: Similarity boost control (0.0 to 1.0).
+        style: Style control for voice expression (0.0 to 1.0).
+        use_speaker_boost: Whether to use speaker boost enhancement.
+        speed: Voice speed control (0.7 to 1.2).
+        auto_mode: Whether to enable automatic mode optimization.
+        enable_ssml_parsing: Whether to parse SSML tags in text.
+        enable_logging: Whether to enable ElevenLabs logging.
+        apply_text_normalization: Text normalization mode ("auto", "on", "off").
+    """
+
+    stability: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    similarity_boost: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    use_speaker_boost: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    auto_mode: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_ssml_parsing: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_logging: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: Literal["auto", "on", "off"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+    #: Fields in the WS URL — changing any of these requires a reconnect.
+    URL_FIELDS: ClassVar[frozenset[str]] = frozenset({"voice", "model", "language"})
+
+    #: Fields affecting voice character — changing these requires closing the
+    #: current audio context so the next one picks up new settings.
+    VOICE_SETTINGS_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"stability", "similarity_boost", "style", "use_speaker_boost", "speed"}
+    )
+
+    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
+
+
+@dataclass
+class ElevenLabsHttpTTSSettings(TTSSettings):
+    """Settings for the ElevenLabs HTTP TTS service.
+
+    Parameters:
+        optimize_streaming_latency: Latency optimization level (0-4).
+        stability: Voice stability control (0.0 to 1.0).
+        similarity_boost: Similarity boost control (0.0 to 1.0).
+        style: Style control for voice expression (0.0 to 1.0).
+        use_speaker_boost: Whether to use speaker boost enhancement.
+        speed: Voice speed control (0.25 to 4.0).
+        apply_text_normalization: Text normalization mode ("auto", "on", "off").
+    """
+
+    optimize_streaming_latency: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    stability: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    similarity_boost: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    style: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    use_speaker_boost: bool | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    speed: float | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    apply_text_normalization: Literal["auto", "on", "off"] | None | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+
+    _aliases: ClassVar[Dict[str, str]] = {"voice_id": "voice"}
 
 
 def calculate_word_times(
@@ -235,6 +324,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
     Supports word-level timestamps, audio context management, and various voice
     customization options including stability, similarity boost, and speed controls.
     """
+
+    _settings: ElevenLabsTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs TTS configuration.
@@ -316,22 +407,24 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
         self._api_key = api_key
         self._url = url
-        self._settings = {
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else None,
-            "stability": params.stability,
-            "similarity_boost": params.similarity_boost,
-            "style": params.style,
-            "use_speaker_boost": params.use_speaker_boost,
-            "speed": params.speed,
-            "auto_mode": str(params.auto_mode).lower(),
-            "enable_ssml_parsing": params.enable_ssml_parsing,
-            "enable_logging": params.enable_logging,
-            "apply_text_normalization": params.apply_text_normalization,
-        }
-        self.set_model_name(model)
-        self.set_voice(voice_id)
+        self._settings = ElevenLabsTTSSettings(
+            model=model,
+            voice=voice_id,
+            language=(
+                self.language_to_service_language(params.language) if params.language else None
+            ),
+            stability=params.stability,
+            similarity_boost=params.similarity_boost,
+            style=params.style,
+            use_speaker_boost=params.use_speaker_boost,
+            speed=params.speed,
+            auto_mode=str(params.auto_mode).lower(),
+            enable_ssml_parsing=params.enable_ssml_parsing,
+            enable_logging=params.enable_logging,
+            apply_text_normalization=params.apply_text_normalization,
+        )
+        self._sync_model_name_to_metrics()
+
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
@@ -365,54 +458,57 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         return language_to_elevenlabs_language(language)
 
     def _set_voice_settings(self):
-        return build_elevenlabs_voice_settings(self._settings)
+        ts = self._settings
+        voice_setting_keys = [
+            "stability",
+            "similarity_boost",
+            "style",
+            "use_speaker_boost",
+            "speed",
+        ]
+        voice_settings = {}
+        for key in voice_setting_keys:
+            val = getattr(ts, key, None)
+            if val is not None and is_given(val):
+                voice_settings[key] = val
+        return voice_settings or None
 
-    async def set_model(self, model: str):
-        """Set the TTS model and reconnect.
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+        """Apply a settings update, reconnecting as needed.
+
+        Uses the declarative ``URL_FIELDS`` and ``VOICE_SETTINGS_FIELDS``
+        sets on :class:`ElevenLabsTTSSettings` to decide whether to
+        reconnect the WebSocket or close the current audio context.
 
         Args:
-            model: The model name to use for synthesis.
+            update: A :class:`TTSSettings` (or ``ElevenLabsTTSSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
         """
-        await super().set_model(model)
-        logger.info(f"Switching TTS model to: [{model}]")
-        await self._disconnect()
-        await self._connect()
+        changed = await super()._update_settings(update)
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if voice, model, or language changed."""
-        # Track previous values for settings that require reconnection
-        prev_voice = self._voice_id
-        prev_model = self.model_name
-        prev_language = self._settings.get("language")
-        # Create snapshot of current voice settings to detect changes after update
-        prev_voice_settings = self._voice_settings.copy() if self._voice_settings else None
+        if not changed:
+            return changed
 
-        await super()._update_settings(settings)
-
-        # Update voice settings for the next context creation
+        # Rebuild voice settings for next context
         self._voice_settings = self._set_voice_settings()
 
-        # Check if URL-level settings changed (these require reconnection)
-        url_changed = (
-            prev_voice != self._voice_id
-            or prev_model != self.model_name
-            or prev_language != self._settings.get("language")
-        )
-
-        # Check if only voice settings changed (speed, stability, etc.)
-        voice_settings_changed = prev_voice_settings != self._voice_settings
+        url_changed = bool(changed.keys() & ElevenLabsTTSSettings.URL_FIELDS)
+        voice_settings_changed = bool(changed.keys() & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS)
 
         if url_changed:
-            # These settings are in the WebSocket URL, so we need to reconnect
             logger.debug(
-                f"URL-level setting changed (voice/model/language), reconnecting WebSocket"
+                f"URL-level setting changed ({changed.keys() & ElevenLabsTTSSettings.URL_FIELDS}), "
+                f"reconnecting WebSocket"
             )
             await self._disconnect()
             await self._connect()
         elif voice_settings_changed and self.has_active_audio_context():
-            # Voice settings can be updated by closing current context
-            # so new one gets created with updated voice settings
-            logger.debug(f"Voice settings changed, closing current context to apply changes")
+            logger.debug(
+                f"Voice settings changed ({changed.keys() & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS}), "
+                f"closing current context to apply changes"
+            )
             context_id = self.get_active_audio_context_id()
             try:
                 if self._websocket:
@@ -422,6 +518,14 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
             self.reset_active_audio_context()
+
+        if not url_changed:
+            # Reconnect applies all settings; only warn about fields not handled
+            # by voice settings or URL changes.
+            handled = ElevenLabsTTSSettings.URL_FIELDS | ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS
+            self._warn_unhandled_updated_settings(changed.keys() - handled)
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the ElevenLabs TTS service.
@@ -503,22 +607,22 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             logger.debug("Connecting to ElevenLabs")
 
-            voice_id = self._voice_id
-            model = self.model_name
+            voice_id = self._settings.voice
+            model = self._settings.model
             output_format = self._output_format
-            url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings['auto_mode']}"
+            url = f"{self._url}/v1/text-to-speech/{voice_id}/multi-stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings.auto_mode}"
 
-            if self._settings["enable_ssml_parsing"]:
-                url += f"&enable_ssml_parsing={self._settings['enable_ssml_parsing']}"
+            if self._settings.enable_ssml_parsing:
+                url += f"&enable_ssml_parsing={self._settings.enable_ssml_parsing}"
 
-            if self._settings["enable_logging"]:
-                url += f"&enable_logging={self._settings['enable_logging']}"
+            if self._settings.enable_logging:
+                url += f"&enable_logging={self._settings.enable_logging}"
 
-            if self._settings["apply_text_normalization"] is not None:
-                url += f"&apply_text_normalization={self._settings['apply_text_normalization']}"
+            if self._settings.apply_text_normalization is not None:
+                url += f"&apply_text_normalization={self._settings.apply_text_normalization}"
 
             # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
-            language = self._settings["language"]
+            language = self._settings.language
             if model in ELEVENLABS_MULTILINGUAL_MODELS and language is not None:
                 url += f"&language_code={language}"
                 logger.debug(f"Using language code: {language}")
@@ -742,6 +846,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
     connection is not required or desired.
     """
 
+    _settings: ElevenLabsHttpTTSSettings
+
     class InputParams(BaseModel):
         """Input parameters for ElevenLabs HTTP TTS configuration.
 
@@ -808,20 +914,21 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self._params = params
         self._session = aiohttp_session
 
-        self._settings = {
-            "language": self.language_to_service_language(params.language)
+        self._settings = ElevenLabsHttpTTSSettings(
+            model=model,
+            voice=voice_id,
+            language=self.language_to_service_language(params.language)
             if params.language
             else None,
-            "optimize_streaming_latency": params.optimize_streaming_latency,
-            "stability": params.stability,
-            "similarity_boost": params.similarity_boost,
-            "style": params.style,
-            "use_speaker_boost": params.use_speaker_boost,
-            "speed": params.speed,
-            "apply_text_normalization": params.apply_text_normalization,
-        }
-        self.set_model_name(model)
-        self.set_voice(voice_id)
+            optimize_streaming_latency=params.optimize_streaming_latency,
+            stability=params.stability,
+            similarity_boost=params.similarity_boost,
+            style=params.style,
+            use_speaker_boost=params.use_speaker_boost,
+            speed=params.speed,
+            apply_text_normalization=params.apply_text_normalization,
+        )
+        self._sync_model_name_to_metrics()
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators
@@ -858,10 +965,19 @@ class ElevenLabsHttpTTSService(WordTTSService):
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        await super()._update_settings(settings)
-        # Update voice settings for the next context creation
-        self._voice_settings = self._set_voice_settings()
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+        """Apply a settings update and rebuild voice settings.
+
+        Args:
+            update: A :class:`TTSSettings` (or ``ElevenLabsHttpTTSSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(update)
+        if changed:
+            self._voice_settings = self._set_voice_settings()
+        return changed
 
     def _reset_state(self):
         """Reset internal state variables."""
@@ -979,11 +1095,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         # Use the with-timestamps endpoint
-        url = f"{self._base_url}/v1/text-to-speech/{self._voice_id}/stream/with-timestamps"
+        url = f"{self._base_url}/v1/text-to-speech/{self._settings.voice}/stream/with-timestamps"
 
         payload: Dict[str, Union[str, Dict[str, Union[float, bool]]]] = {
             "text": text,
-            "model_id": self._model_name,
+            "model_id": self._settings.model,
         }
 
         # Include previous text as context if available
@@ -998,11 +1114,14 @@ class ElevenLabsHttpTTSService(WordTTSService):
                 locator.model_dump() for locator in self._pronunciation_dictionary_locators
             ]
 
-        if self._settings["apply_text_normalization"] is not None:
-            payload["apply_text_normalization"] = self._settings["apply_text_normalization"]
+        if (
+            is_given(self._settings.apply_text_normalization)
+            and self._settings.apply_text_normalization is not None
+        ):
+            payload["apply_text_normalization"] = self._settings.apply_text_normalization
 
-        language = self._settings["language"]
-        if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
+        language = self._settings.language
+        if self._settings.model in ELEVENLABS_MULTILINGUAL_MODELS and language:
             payload["language_code"] = language
             logger.debug(f"Using language code: {language}")
         elif language:
@@ -1019,8 +1138,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
         params = {
             "output_format": self._output_format,
         }
-        if self._settings["optimize_streaming_latency"] is not None:
-            params["optimize_streaming_latency"] = self._settings["optimize_streaming_latency"]
+        if (
+            is_given(self._settings.optimize_streaming_latency)
+            and self._settings.optimize_streaming_latency is not None
+        ):
+            params["optimize_streaming_latency"] = self._settings.optimize_streaming_latency
 
         try:
             await self.start_ttfb_metrics()

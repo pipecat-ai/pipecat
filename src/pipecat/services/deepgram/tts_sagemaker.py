@@ -14,7 +14,8 @@ streaming audio output.
 
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -32,8 +33,20 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
+
+
+@dataclass
+class DeepgramSageMakerTTSSettings(TTSSettings):
+    """Settings for Deepgram SageMaker TTS service.
+
+    Parameters:
+        encoding: Audio encoding format (e.g. "linear16").
+    """
+
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramSageMakerTTSService(TTSService):
@@ -57,6 +70,8 @@ class DeepgramSageMakerTTSService(TTSService):
             voice="aura-2-helena-en",
         )
     """
+
+    _settings: DeepgramSageMakerTTSSettings
 
     def __init__(
         self,
@@ -89,8 +104,12 @@ class DeepgramSageMakerTTSService(TTSService):
 
         self._endpoint_name = endpoint_name
         self._region = region
-        self._encoding = encoding
-        self.set_voice(voice)
+        self._settings = DeepgramSageMakerTTSSettings(
+            model=voice,
+            voice=voice,
+            encoding=encoding,
+        )
+        self._sync_model_name_to_metrics()
 
         self._client: Optional[SageMakerBidiClient] = None
         self._response_task: Optional[asyncio.Task] = None
@@ -156,7 +175,8 @@ class DeepgramSageMakerTTSService(TTSService):
         logger.debug("Connecting to Deepgram TTS on SageMaker...")
 
         query_string = (
-            f"model={self._voice_id}&encoding={self._encoding}&sample_rate={self.sample_rate}"
+            f"model={self._settings.voice}&encoding={self._settings.encoding}"
+            f"&sample_rate={self.sample_rate}"
         )
 
         self._client = SageMakerBidiClient(
@@ -199,6 +219,25 @@ class DeepgramSageMakerTTSService(TTSService):
 
             logger.debug("Disconnected from Deepgram TTS on SageMaker")
             await self._call_event_handler("on_disconnected")
+
+    async def _update_settings(self, update: TTSSettings) -> dict[str, Any]:
+        """Apply a settings update and reconnect if necessary.
+
+        Since all settings are part of the SageMaker session query string,
+        any setting change requires reconnecting to apply the new values.
+        """
+        changed = await super()._update_settings(update)
+
+        # Deepgram uses voice as the model, so keep them in sync for metrics
+        if "voice" in changed:
+            self._settings.model = self._settings.voice
+            self._sync_model_name_to_metrics()
+
+        if changed:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
 
     async def _process_responses(self):
         """Process streaming responses from Deepgram TTS on SageMaker.

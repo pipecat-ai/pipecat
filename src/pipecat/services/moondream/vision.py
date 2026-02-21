@@ -81,7 +81,8 @@ class MoondreamService(VisionService):
         """
         super().__init__(**kwargs)
 
-        self.set_model_name(model)
+        self._settings.model = model
+        self._sync_model_name_to_metrics()
 
         if not use_cpu:
             device, dtype = detect_device()

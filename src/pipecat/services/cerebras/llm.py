@@ -66,16 +66,16 @@ class CerebrasLLMService(OpenAILLMService):
             Dictionary of parameters for the chat completion request.
         """
         params = {
-            "model": self.model_name,
+            "model": self._settings.model,
             "stream": True,
-            "seed": self._settings["seed"],
-            "temperature": self._settings["temperature"],
-            "top_p": self._settings["top_p"],
-            "max_completion_tokens": self._settings["max_completion_tokens"],
+            "seed": self._settings.seed,
+            "temperature": self._settings.temperature,
+            "top_p": self._settings.top_p,
+            "max_completion_tokens": self._settings.max_completion_tokens,
         }
 
         # Messages, tools, tool_choice
         params.update(params_from_context)
 
-        params.update(self._settings["extra"])
+        params.update(self._settings.extra)
         return params

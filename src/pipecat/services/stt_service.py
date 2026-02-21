@@ -9,9 +9,10 @@
 import asyncio
 import io
 import time
+import warnings
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, Mapping, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 from websockets.protocol import State
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
+from pipecat.services.settings import STTSettings, is_given
 from pipecat.services.stt_latency import DEFAULT_TTFS_P99
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
@@ -73,6 +75,8 @@ class STTService(AIService):
             logger.error(f"STT connection error: {error}")
     """
 
+    _settings: STTSettings
+
     def __init__(
         self,
         *,
@@ -111,7 +115,8 @@ class STTService(AIService):
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._settings: Dict[str, Any] = {}
+
+        self._settings = STTSettings()  # Here in case subclass doesn't implement more specific settings (hopefully shouldn't happen)
         self._muted: bool = False
         self._user_id: str = ""
         self._ttfs_p99_latency = ttfs_p99_latency
@@ -179,18 +184,53 @@ class STTService(AIService):
     async def set_model(self, model: str):
         """Set the speech recognition model.
 
+        .. deprecated:: 0.0.103
+            Use ``STTUpdateSettingsFrame(model=...)`` instead.
+
         Args:
             model: The name of the model to use for speech recognition.
         """
-        self.set_model_name(model)
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_model' is deprecated, use 'STTUpdateSettingsFrame(model=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        logger.info(f"Switching STT model to: [{model}]")
+        settings_cls = type(self._settings)
+        await self._update_settings(settings_cls(model=model))
 
     async def set_language(self, language: Language):
         """Set the language for speech recognition.
 
+        .. deprecated:: 0.0.103
+            Use ``STTUpdateSettingsFrame(language=...)`` instead.
+
         Args:
             language: The language to use for speech recognition.
         """
-        pass
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'set_language' is deprecated, use 'STTUpdateSettingsFrame(language=...)' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        logger.info(f"Switching STT language to: [{language}]")
+        settings_cls = type(self._settings)
+        await self._update_settings(settings_cls(language=language))
+
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a language to the service-specific language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The service-specific language identifier, or None if not supported.
+        """
+        return Language(language)
 
     @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -222,20 +262,29 @@ class STTService(AIService):
         await self._cancel_ttfb_timeout()
         await self._cancel_keepalive_task()
 
-    async def _update_settings(self, settings: Mapping[str, Any]):
-        logger.info(f"Updating STT settings: {self._settings}")
-        for key, value in settings.items():
-            if key in self._settings:
-                logger.info(f"Updating STT setting {key} to: [{value}]")
-                self._settings[key] = value
-                if key == "language":
-                    await self.set_language(value)
-            elif key == "language":
-                await self.set_language(value)
-            elif key == "model":
-                self.set_model_name(value)
-            else:
-                logger.warning(f"Unknown setting for STT service: {key}")
+    async def _update_settings(self, update: STTSettings) -> dict[str, Any]:
+        """Apply an STT settings update.
+
+        Handles ``model`` (via parent). Translates ``Language`` enum values
+        before applying so the stored value is a service-specific string.
+        Concrete services should override this method and handle language
+        changes (including any reconnect logic) based on the returned
+        changed-field dict.
+
+        Args:
+            update: An STT settings delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        # Translate language *before* applying so the stored value is canonical
+        if is_given(update.language) and isinstance(update.language, Language):
+            converted = self.language_to_service_language(update.language)
+            if converted is not None:
+                update.language = converted
+
+        changed = await super()._update_settings(update)
+        return changed
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process an audio frame for speech recognition.
@@ -300,7 +349,20 @@ class STTService(AIService):
             await self._handle_vad_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
+            if frame.update is not None:
+                await self._update_settings(frame.update)
+            elif frame.settings:
+                # Backward-compatible path: convert legacy dict to settings object.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "Passing a dict via STTUpdateSettingsFrame(settings={...}) is deprecated "
+                        "since 0.0.103, use STTUpdateSettingsFrame(update=STTSettings(...)) instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+                update = type(self._settings).from_mapping(frame.settings)
+                await self._update_settings(update)
         elif isinstance(frame, STTMuteFrame):
             self._muted = frame.mute
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
