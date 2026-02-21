@@ -219,6 +219,28 @@ class TestUserIdleProcessor(unittest.IsolatedAsyncioTestCase):
 
         assert callback_called.is_set(), "Idle callback not called after bot speech"
 
+    async def test_signal_preserved_during_callback(self):
+        """Regression: event set during callback must not be cleared by finally."""
+
+        class _Sentinel(Exception):
+            pass
+
+        async def callback(proc, retry_count):
+            proc._idle_event.set()  # Simulate activity arriving during callback
+            raise _Sentinel()  # Exit handler to observe event state
+
+        processor = UserIdleProcessor(callback=callback, timeout=0.01)
+
+        with self.assertRaises(_Sentinel):
+            await processor._idle_task_handler()
+
+        # Bug (finally: clear): event is cleared -> False -> FAILS
+        # Fix (no finally):     event is preserved -> True -> PASSES
+        self.assertTrue(
+            processor._idle_event.is_set(),
+            "Signal set during callback was lost — finally: clear() bug",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
