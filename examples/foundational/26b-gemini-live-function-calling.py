@@ -5,6 +5,7 @@
 #
 
 
+import asyncio
 import os
 from datetime import datetime
 
@@ -15,7 +16,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, LLMSetToolsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -49,6 +50,18 @@ async def fetch_weather_from_api(params: FunctionCallParams):
 
 async def fetch_restaurant_recommendation(params: FunctionCallParams):
     await params.result_callback({"name": "The Golden Dragon"})
+
+
+async def get_news(params: FunctionCallParams):
+    await params.result_callback(
+        {
+            "news": [
+                "Massive UFO currently hovering above New York City",
+                "Stock markets reach all-time highs",
+                "Living dinosaur species discovered in the Amazon rainforest",
+            ],
+        }
+    )
 
 
 system_instruction = """
@@ -109,6 +122,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
         required=["location"],
     )
+    get_news_function = FunctionSchema(
+        name="get_news",
+        description="Get the current news.",
+        properties={},
+        required=[],
+    )
     search_tool = {"google_search": {}}
     # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
     # you cannot use the "google_search" tool alongside other tools.
@@ -126,6 +145,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm.register_function("get_current_weather", fetch_weather_from_api)
     llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+    llm.register_function("get_news", get_news)
 
     # You can provide the system instructions and tools in the context rather
     # than as arguments to GeminiLiveLLMService, but note that doing so will
@@ -173,6 +193,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
+
+        # Add a new tool (get_news) at runtime after a delay
+        await asyncio.sleep(15)
+        logger.info(f"Adding new tool get_news at runtime...")
+        new_tools = ToolsSchema(
+            standard_tools=[weather_function, restaurant_function, get_news_function]
+        )
+        await task.queue_frames([LLMSetToolsFrame(tools=new_tools)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

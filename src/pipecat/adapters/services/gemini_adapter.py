@@ -53,19 +53,32 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         """Get the identifier used in LLMSpecificMessage instances for Google."""
         return "google"
 
-    def get_llm_invocation_params(self, context: LLMContext) -> GeminiLLMInvocationParams:
+    def get_llm_invocation_params(
+        self, context: LLMContext, *, convert_function_messages_to_text: bool = False
+    ) -> GeminiLLMInvocationParams:
         """Get Gemini-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            convert_function_messages_to_text: If True, convert function_call and function_response
+                parts to specially-formatted text messages. This is needed for Gemini Live
+                (at least with "models/gemini-2.5-flash-native-audio-preview-12-2025", the
+                default at the time of this writing) which cannot handle function-call-related
+                messages when initializing conversation history.
+                See https://stackoverflow.com/a/79851394.
 
         Returns:
             Dictionary of parameters for Gemini's API.
         """
-        messages = self._from_universal_context_messages(self.get_messages(context))
+        converted = self._from_universal_context_messages(self.get_messages(context))
+        messages = converted.messages
+
+        if convert_function_messages_to_text:
+            messages = self._convert_function_messages_to_text(messages)
+
         return {
-            "system_instruction": messages.system_instruction,
-            "messages": messages.messages,
+            "system_instruction": converted.system_instruction,
+            "messages": messages,
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
         }
@@ -668,3 +681,43 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             return True
 
         return False
+
+    def _convert_function_messages_to_text(self, messages: List[Content]) -> List[Content]:
+        """Convert function_call and function_response parts to text messages.
+
+        Args:
+            messages: List of Content messages to process.
+
+        Returns:
+            List of Content messages with function-related parts converted to text.
+        """
+        converted_messages = []
+        for msg in messages:
+            if msg.parts:
+                converted_parts = []
+                for part in msg.parts:
+                    if func_call := getattr(part, "function_call", None):
+                        # Convert function call to text
+                        args_str = json.dumps(func_call.args) if func_call.args else "{}"
+                        text = (
+                            f"[Historical function call (for context only, not a template): "
+                            f"{func_call.name}({args_str})]"
+                        )
+                        converted_parts.append(Part(text=text))
+                    elif func_response := getattr(part, "function_response", None):
+                        # Convert function response to text
+                        response_str = (
+                            json.dumps(func_response.response) if func_response.response else "{}"
+                        )
+                        text = (
+                            f"[Historical function result (for context only): "
+                            f"{func_response.name} returned {response_str}]"
+                        )
+                        converted_parts.append(Part(text=text))
+                    else:
+                        converted_parts.append(part)
+                if converted_parts:
+                    converted_messages.append(Content(role=msg.role, parts=converted_parts))
+            else:
+                converted_messages.append(msg)
+        return converted_messages

@@ -1057,5 +1057,287 @@ class TestLLMAssistantAggregator(
         )
 
 
+class TestLLMContextDiff(unittest.TestCase):
+    """Tests for the LLMContext.diff() method."""
+
+    def test_diff_identical_contexts(self):
+        """Test diff of two identical contexts returns no changes."""
+        messages = [{"role": "user", "content": "Hello"}]
+        context1 = LLMContext(messages=messages.copy())
+        context2 = LLMContext(messages=messages.copy())
+
+        diff = context1.diff(context2)
+        self.assertFalse(diff.has_changes())
+        self.assertEqual(diff.messages_appended, [])
+        self.assertFalse(diff.history_edited)
+        self.assertEqual(diff.tool_calls_resolved, [])
+        self.assertFalse(diff.tools_diff.has_changes())
+        self.assertFalse(diff.tool_choice_changed)
+
+    def test_diff_messages_appended(self):
+        """Test diff detects appended messages."""
+        msg1 = {"role": "user", "content": "Hello"}
+        msg2 = {"role": "assistant", "content": "Hi there!"}
+
+        context1 = LLMContext(messages=[msg1])
+        context2 = LLMContext(messages=[msg1, msg2])
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertEqual(len(diff.messages_appended), 1)
+        self.assertEqual(diff.messages_appended[0], msg2)
+        self.assertFalse(diff.history_edited)
+
+    def test_diff_multiple_messages_appended(self):
+        """Test diff detects multiple appended messages."""
+        msg1 = {"role": "user", "content": "Hello"}
+        msg2 = {"role": "assistant", "content": "Hi!"}
+        msg3 = {"role": "user", "content": "How are you?"}
+
+        context1 = LLMContext(messages=[msg1])
+        context2 = LLMContext(messages=[msg1, msg2, msg3])
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertEqual(len(diff.messages_appended), 2)
+        self.assertEqual(diff.messages_appended[0], msg2)
+        self.assertEqual(diff.messages_appended[1], msg3)
+        self.assertFalse(diff.history_edited)
+
+    def test_diff_message_removed(self):
+        """Test diff detects message removal as history edit."""
+        msg1 = {"role": "user", "content": "Hello"}
+        msg2 = {"role": "assistant", "content": "Hi!"}
+
+        context1 = LLMContext(messages=[msg1, msg2])
+        context2 = LLMContext(messages=[msg1])
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertEqual(diff.messages_appended, [])  # Empty when history edited
+        self.assertTrue(diff.history_edited)
+
+    def test_diff_message_modified(self):
+        """Test diff detects message modification as history edit."""
+        msg1 = {"role": "user", "content": "Hello"}
+        msg2_v1 = {"role": "assistant", "content": "Hi!"}
+        msg2_v2 = {"role": "assistant", "content": "Hello there!"}
+
+        context1 = LLMContext(messages=[msg1, msg2_v1])
+        context2 = LLMContext(messages=[msg1, msg2_v2])
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertTrue(diff.history_edited)
+        self.assertEqual(diff.messages_appended, [])
+
+    def test_diff_message_inserted_in_middle(self):
+        """Test diff detects message insertion in middle as history edit."""
+        msg1 = {"role": "user", "content": "Hello"}
+        msg2 = {"role": "assistant", "content": "Hi!"}
+        msg_inserted = {"role": "system", "content": "System message"}
+
+        context1 = LLMContext(messages=[msg1, msg2])
+        context2 = LLMContext(messages=[msg1, msg_inserted, msg2])
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertTrue(diff.history_edited)
+        self.assertEqual(diff.messages_appended, [])
+
+    def test_diff_tool_call_resolved_to_result(self):
+        """Test diff detects tool call resolution to actual result."""
+        msg1 = {"role": "user", "content": "What's the weather?"}
+        msg2 = {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "call_123", "function": {"name": "get_weather", "arguments": "{}"}}
+            ],
+        }
+        tool_in_progress = {"role": "tool", "content": "IN_PROGRESS", "tool_call_id": "call_123"}
+        tool_resolved = {
+            "role": "tool",
+            "content": '{"temperature": 72}',
+            "tool_call_id": "call_123",
+        }
+
+        context1 = LLMContext(messages=[msg1, msg2, tool_in_progress])
+        context2 = LLMContext(messages=[msg1, msg2, tool_resolved])
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertEqual(diff.tool_calls_resolved, ["call_123"])
+        # Note: the tool message content changed, so history is edited
+        self.assertTrue(diff.history_edited)
+
+    def test_diff_tool_call_resolved_to_completed(self):
+        """Test diff detects tool call resolution to COMPLETED."""
+        msg1 = {"role": "user", "content": "Do something"}
+        tool_in_progress = {"role": "tool", "content": "IN_PROGRESS", "tool_call_id": "call_456"}
+        tool_completed = {"role": "tool", "content": "COMPLETED", "tool_call_id": "call_456"}
+
+        context1 = LLMContext(messages=[msg1, tool_in_progress])
+        context2 = LLMContext(messages=[msg1, tool_completed])
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertEqual(diff.tool_calls_resolved, ["call_456"])
+
+    def test_diff_tool_call_resolved_to_cancelled(self):
+        """Test diff detects tool call resolution to CANCELLED."""
+        msg1 = {"role": "user", "content": "Do something"}
+        tool_in_progress = {"role": "tool", "content": "IN_PROGRESS", "tool_call_id": "call_789"}
+        tool_cancelled = {"role": "tool", "content": "CANCELLED", "tool_call_id": "call_789"}
+
+        context1 = LLMContext(messages=[msg1, tool_in_progress])
+        context2 = LLMContext(messages=[msg1, tool_cancelled])
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertEqual(diff.tool_calls_resolved, ["call_789"])
+
+    def test_diff_tool_call_still_in_progress(self):
+        """Test diff does not report tool call as resolved if still IN_PROGRESS."""
+        msg1 = {"role": "user", "content": "Do something"}
+        tool_in_progress = {"role": "tool", "content": "IN_PROGRESS", "tool_call_id": "call_123"}
+
+        context1 = LLMContext(messages=[msg1, tool_in_progress])
+        context2 = LLMContext(messages=[msg1, tool_in_progress])
+
+        diff = context1.diff(context2)
+        self.assertFalse(diff.has_changes())
+        self.assertEqual(diff.tool_calls_resolved, [])
+
+    def test_diff_tool_choice_changed(self):
+        """Test diff detects tool_choice changes."""
+        msg1 = {"role": "user", "content": "Hello"}
+
+        context1 = LLMContext(messages=[msg1], tool_choice="auto")
+        context2 = LLMContext(messages=[msg1], tool_choice="none")
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertTrue(diff.tool_choice_changed)
+
+    def test_diff_tool_choice_unchanged(self):
+        """Test diff reports no change when tool_choice is the same."""
+        msg1 = {"role": "user", "content": "Hello"}
+
+        context1 = LLMContext(messages=[msg1], tool_choice="auto")
+        context2 = LLMContext(messages=[msg1], tool_choice="auto")
+
+        diff = context1.diff(context2)
+        self.assertFalse(diff.has_changes())
+        self.assertFalse(diff.tool_choice_changed)
+
+    def test_diff_empty_contexts(self):
+        """Test diff of two empty contexts returns no changes."""
+        context1 = LLMContext()
+        context2 = LLMContext()
+
+        diff = context1.diff(context2)
+        self.assertFalse(diff.has_changes())
+
+
+class TestLLMContextDiffWithTools(unittest.TestCase):
+    """Tests for LLMContext.diff() with tools configuration changes."""
+
+    def _create_tools_schema(self, tool_names: list[str]) -> "ToolsSchema":
+        """Helper to create a ToolsSchema with named tools."""
+        from pipecat.adapters.schemas.function_schema import FunctionSchema
+        from pipecat.adapters.schemas.tools_schema import ToolsSchema
+
+        tools = [
+            FunctionSchema(name=name, description=f"Test {name}", properties={}, required=[])
+            for name in tool_names
+        ]
+        return ToolsSchema(standard_tools=tools)
+
+    def test_diff_tools_added_from_not_given(self):
+        """Test diff detects tools being added when self has no tools."""
+        from pipecat.processors.aggregators.llm_context import NOT_GIVEN
+
+        msg1 = {"role": "user", "content": "Hello"}
+        tools = self._create_tools_schema(["get_weather", "get_time"])
+
+        context1 = LLMContext(messages=[msg1], tools=NOT_GIVEN)
+        context2 = LLMContext(messages=[msg1], tools=tools)
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertEqual(sorted(diff.tools_diff.standard_tools_added), ["get_time", "get_weather"])
+        self.assertEqual(diff.tools_diff.standard_tools_removed, [])
+
+    def test_diff_tools_removed_to_not_given(self):
+        """Test diff detects tools being removed when other has no tools."""
+        from pipecat.processors.aggregators.llm_context import NOT_GIVEN
+
+        msg1 = {"role": "user", "content": "Hello"}
+        tools = self._create_tools_schema(["get_weather", "get_time"])
+
+        context1 = LLMContext(messages=[msg1], tools=tools)
+        context2 = LLMContext(messages=[msg1], tools=NOT_GIVEN)
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertEqual(diff.tools_diff.standard_tools_added, [])
+        self.assertEqual(
+            sorted(diff.tools_diff.standard_tools_removed), ["get_time", "get_weather"]
+        )
+
+    def test_diff_both_not_given(self):
+        """Test diff returns None tools_diff when both have no tools."""
+        from pipecat.processors.aggregators.llm_context import NOT_GIVEN
+
+        msg1 = {"role": "user", "content": "Hello"}
+
+        context1 = LLMContext(messages=[msg1], tools=NOT_GIVEN)
+        context2 = LLMContext(messages=[msg1], tools=NOT_GIVEN)
+
+        diff = context1.diff(context2)
+        self.assertFalse(diff.has_changes())
+        self.assertFalse(diff.tools_diff.has_changes())
+
+    def test_diff_tools_modified(self):
+        """Test diff detects tool modification via ToolsSchema.diff()."""
+        from pipecat.adapters.schemas.function_schema import FunctionSchema
+        from pipecat.adapters.schemas.tools_schema import ToolsSchema
+
+        msg1 = {"role": "user", "content": "Hello"}
+
+        tool_v1 = FunctionSchema(
+            name="get_weather",
+            description="Get weather v1",
+            properties={"location": {"type": "string"}},
+            required=["location"],
+        )
+        tool_v2 = FunctionSchema(
+            name="get_weather",
+            description="Get weather v2",
+            properties={"city": {"type": "string"}},
+            required=["city"],
+        )
+
+        context1 = LLMContext(messages=[msg1], tools=ToolsSchema(standard_tools=[tool_v1]))
+        context2 = LLMContext(messages=[msg1], tools=ToolsSchema(standard_tools=[tool_v2]))
+
+        diff = context1.diff(context2)
+        self.assertTrue(diff.has_changes())
+        self.assertTrue(diff.tools_diff.standard_tools_modified)
+
+    def test_diff_tools_unchanged(self):
+        """Test diff returns None tools_diff when tools are identical."""
+        msg1 = {"role": "user", "content": "Hello"}
+        tools1 = self._create_tools_schema(["get_weather"])
+        tools2 = self._create_tools_schema(["get_weather"])
+
+        context1 = LLMContext(messages=[msg1], tools=tools1)
+        context2 = LLMContext(messages=[msg1], tools=tools2)
+
+        diff = context1.diff(context2)
+        self.assertFalse(diff.has_changes())
+        self.assertFalse(diff.tools_diff.has_changes())
+
+
 if __name__ == "__main__":
     unittest.main()

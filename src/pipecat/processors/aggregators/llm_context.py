@@ -18,8 +18,8 @@ import asyncio
 import base64
 import io
 import wave
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, TypeAlias, Union
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -30,7 +30,7 @@ from openai.types.chat import (
 )
 from PIL import Image
 
-from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema, ToolsSchemaDiff
 from pipecat.frames.frames import AudioRawFrame
 
 if TYPE_CHECKING:
@@ -45,6 +45,39 @@ LLMStandardMessage = ChatCompletionMessageParam
 LLMContextToolChoice = ChatCompletionToolChoiceOptionParam
 NOT_GIVEN = OPEN_AI_NOT_GIVEN
 NotGiven = OpenAINotGiven
+
+
+@dataclass
+class LLMContextDiff:
+    """Represents the differences between two LLMContext instances.
+
+    Parameters:
+        messages_appended: New messages appended at the end. Empty if history_edited is True.
+        history_edited: True if earlier messages were changed, inserted, or removed.
+        tool_calls_resolved: List of tool_call_ids that changed from "IN_PROGRESS" to a result.
+        tools_diff: Differences in tools configuration, or None if unchanged or both NOT_GIVEN.
+        tool_choice_changed: True if the tool_choice setting differs.
+    """
+
+    messages_appended: List["LLMContextMessage"] = field(default_factory=list)
+    history_edited: bool = False
+    tool_calls_resolved: List[str] = field(default_factory=list)
+    tools_diff: ToolsSchemaDiff = field(default_factory=ToolsSchemaDiff)
+    tool_choice_changed: bool = False
+
+    def has_changes(self) -> bool:
+        """Check if there are any differences.
+
+        Returns:
+            True if any field indicates a change, False otherwise.
+        """
+        return bool(
+            self.messages_appended
+            or self.history_edited
+            or self.tool_calls_resolved
+            or self.tools_diff.has_changes()
+            or self.tool_choice_changed
+        )
 
 
 @dataclass
@@ -341,6 +374,19 @@ class LLMContext:
         """
         self._messages[:] = messages
 
+    def transform_messages(
+        self, transform: Callable[[List[LLMContextMessage]], List[LLMContextMessage]]
+    ):
+        """Transform the current messages using the provided function.
+
+        Args:
+            transform: A function that takes the current list of messages and returns
+                a modified list of messages to set in the context.
+        """
+        current_messages = self._messages
+        new_messages = transform(current_messages)
+        self.set_messages(new_messages)
+
     def set_tools(self, tools: ToolsSchema | NotGiven = NOT_GIVEN):
         """Set the available tools for the LLM.
 
@@ -410,3 +456,137 @@ class LLMContext:
             raise TypeError(
                 f"In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN. Got type: {type(tools)}",
             )
+
+    def diff(self, other: "LLMContext") -> LLMContextDiff:
+        """Compare this context to another and return the differences.
+
+        Compares self (the "before" state) to other (the "after" state) and
+        identifies what has changed.
+
+        Args:
+            other: The LLMContext to compare against (the "after" state).
+
+        Returns:
+            ContextDiff containing the differences between self and other.
+        """
+        result = LLMContextDiff()
+
+        # Compare messages
+        self_messages = self._messages
+        other_messages = other._messages
+        self_len = len(self_messages)
+        other_len = len(other_messages)
+
+        # Check if history was edited (messages removed, modified, or inserted in the middle)
+        if other_len < self_len:
+            # Messages were removed
+            result.history_edited = True
+        else:
+            # Check if the prefix matches (first self_len messages should be identical)
+            for i in range(self_len):
+                if not self._messages_equal(self_messages[i], other_messages[i]):
+                    result.history_edited = True
+                    break
+
+        # If history wasn't edited, capture appended messages
+        if not result.history_edited and other_len > self_len:
+            result.messages_appended = other_messages[self_len:]
+
+        # Find resolved tool calls (IN_PROGRESS -> something else)
+        result.tool_calls_resolved = self._find_resolved_tool_calls(other)
+
+        # Compare tools
+        result.tools_diff = self._compute_tools_diff(other)
+
+        # Compare tool_choice
+        # (For some reason if they're both NOT_GIVEN, equality check returns False?)
+        if not self._tool_choice and not other._tool_choice:
+            result.tool_choice_changed = False
+        else:
+            result.tool_choice_changed = self._tool_choice != other._tool_choice
+
+        return result
+
+    def _messages_equal(self, msg1: LLMContextMessage, msg2: LLMContextMessage) -> bool:
+        """Compare two messages for equality.
+
+        Args:
+            msg1: First message to compare.
+            msg2: Second message to compare.
+
+        Returns:
+            True if the messages are equal, False otherwise.
+        """
+        # Handle LLMSpecificMessage
+        if isinstance(msg1, LLMSpecificMessage) and isinstance(msg2, LLMSpecificMessage):
+            return msg1.llm == msg2.llm and msg1.message == msg2.message
+        elif isinstance(msg1, LLMSpecificMessage) or isinstance(msg2, LLMSpecificMessage):
+            return False
+
+        # Both are standard messages (dicts)
+        return msg1 == msg2
+
+    def _find_resolved_tool_calls(self, other: "LLMContext") -> List[str]:
+        """Find tool calls that changed from IN_PROGRESS to a resolved state.
+
+        Args:
+            other: The context to compare against (the "after" state).
+
+        Returns:
+            List of tool_call_ids that were resolved.
+        """
+        resolved: List[str] = []
+
+        # Build a map of tool_call_id -> content for "other" context
+        other_tool_contents: Dict[str, Any] = {}
+        for msg in other._messages:
+            if isinstance(msg, dict) and msg.get("role") == "tool":
+                tool_call_id = msg.get("tool_call_id")
+                if tool_call_id:
+                    other_tool_contents[tool_call_id] = msg.get("content")
+
+        # Find tool messages in self that are IN_PROGRESS but resolved in other
+        for msg in self._messages:
+            if isinstance(msg, dict) and msg.get("role") == "tool":
+                if msg.get("content") == "IN_PROGRESS":
+                    tool_call_id = msg.get("tool_call_id")
+                    if tool_call_id and tool_call_id in other_tool_contents:
+                        other_content = other_tool_contents[tool_call_id]
+                        if other_content != "IN_PROGRESS":
+                            resolved.append(tool_call_id)
+
+        return resolved
+
+    def _compute_tools_diff(self, other: "LLMContext") -> ToolsSchemaDiff:
+        """Compute the difference in tools between self and other.
+
+        Args:
+            other: The context to compare against (the "after" state).
+
+        Returns:
+            ToolsSchemaDiff if there are changes, None if both are NOT_GIVEN or identical.
+        """
+        self_has_tools = isinstance(self._tools, ToolsSchema)
+        other_has_tools = isinstance(other._tools, ToolsSchema)
+
+        if not self_has_tools and not other_has_tools:
+            # Both are NOT_GIVEN
+            return ToolsSchemaDiff()
+
+        if self_has_tools and other_has_tools:
+            # Both have tools - use ToolsSchema.diff()
+            diff = self._tools.diff(other._tools)
+            return diff
+
+        if not self_has_tools and other_has_tools:
+            # Tools were added (self is NOT_GIVEN, other has tools)
+            return ToolsSchemaDiff(
+                standard_tools_added=[tool.name for tool in other._tools.standard_tools],
+                custom_tools_changed=other._tools.custom_tools is not None,
+            )
+
+        # Tools were removed (self has tools, other is NOT_GIVEN)
+        return ToolsSchemaDiff(
+            standard_tools_removed=[tool.name for tool in self._tools.standard_tools],
+            custom_tools_changed=self._tools.custom_tools is not None,
+        )

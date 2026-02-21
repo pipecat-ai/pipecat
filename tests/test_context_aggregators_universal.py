@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMMessagesTransformFrame,
     LLMMessagesUpdateFrame,
     LLMRunFrame,
     LLMTextFrame,
@@ -152,6 +153,52 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
         )
         assert context.messages[0]["content"] == "Hi there!"
+
+    async def test_llm_messages_transform(self):
+        context = LLMContext()
+        # Set up initial messages
+        context.set_messages(
+            [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ]
+        )
+
+        pipeline = Pipeline([LLMUserAggregator(context)])
+
+        # Transform that keeps only user messages
+        def keep_user_messages(messages):
+            return [m for m in messages if m["role"] == "user"]
+
+        frames_to_send = [LLMMessagesTransformFrame(transform=keep_user_messages)]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+        )
+        assert len(context.messages) == 2
+        assert context.messages[0]["content"] == "Hello"
+        assert context.messages[1]["content"] == "How are you?"
+
+    async def test_llm_messages_transform_run(self):
+        context = LLMContext()
+        # Set up initial messages
+        context.set_messages([{"role": "user", "content": "Hello"}])
+
+        pipeline = Pipeline([LLMUserAggregator(context)])
+
+        # Transform that modifies the content
+        def uppercase_content(messages):
+            return [{"role": m["role"], "content": m["content"].upper()} for m in messages]
+
+        frames_to_send = [LLMMessagesTransformFrame(transform=uppercase_content, run_llm=True)]
+        expected_down_frames = [LLMContextFrame]
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        assert context.messages[0]["content"] == "HELLO"
 
     async def test_default_user_turn_strategies(self):
         context = LLMContext()

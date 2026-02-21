@@ -13,6 +13,7 @@ voice transcription, streaming responses, and tool usage.
 
 import asyncio
 import base64
+import copy
 import io
 import time
 import uuid
@@ -59,7 +60,12 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import (
+    NOT_GIVEN,
+    LLMContext,
+    LLMContextDiff,
+    LLMContextMessage,
+)
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -684,6 +690,7 @@ class GeminiLiveLLMService(LLMService):
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
         self._context = None
+        self._context_snapshot = None
         self._api_key = api_key
         self._http_options = update_google_client_http_options(http_options)
         self._session: AsyncSession = None
@@ -826,6 +833,9 @@ class GeminiLiveLLMService(LLMService):
             logger.error("Context already set. Can only set up Gemini Live context once.")
             return
         self._context = GeminiLiveContext.upgrade(context)
+        self._context_snapshot = copy.deepcopy(
+            self._context
+        )  # Take a static snapshot guaranteed not to change
         await self._create_initial_response()
 
     #
@@ -915,7 +925,12 @@ class GeminiLiveLLMService(LLMService):
                 if isinstance(frame, LLMContextFrame)
                 else LLMContext.from_openai_context(frame.context)
             )
-            await self._handle_context(context)
+            messages_programmatically_edited = (
+                frame.messages_programmatically_edited
+                if isinstance(frame, LLMContextFrame)
+                else False
+            )
+            await self._handle_context(context, messages_programmatically_edited)
         elif isinstance(frame, InputTextRawFrame):
             await self._send_user_text(frame.text)
             await self.push_frame(frame, direction)
@@ -950,14 +965,21 @@ class GeminiLiveLLMService(LLMService):
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMSetToolsFrame):
-            await self._update_settings()
+            # We actually don't need to do anything here; the next time we get
+            # a context frame (like after a user transcription is appended),
+            # we'll detect that tools have changed and reconnect then to apply
+            # the new tools.
+            pass
         else:
             await self.push_frame(frame, direction)
 
-    async def _handle_context(self, context: LLMContext):
+    async def _handle_context(self, context: LLMContext, messages_programmatically_edited: bool):
         if not self._context:
             # We got our initial context
             self._context = context
+            self._context_snapshot = copy.deepcopy(
+                context
+            )  # Take a static snapshot guaranteed not to change
 
             # If context contains system instruction or tools, reconnect in
             # order to apply them.
@@ -981,6 +1003,7 @@ class GeminiLiveLLMService(LLMService):
                     "Tools provided both at init time and in context; using context-provided value."
                 )
             if system_instruction or tools:
+                self._session_resumption_handle = None
                 await self._reconnect()
 
             # Initialize our bookkeeping of already-completed tool calls in
@@ -1011,17 +1034,71 @@ class GeminiLiveLLMService(LLMService):
             # We got an updated context.
             self._context = context
 
-            # Here we assume that the updated context will contain either:
-            # - new messages (that the Gemini Live service, with its own
-            #   context management, is already aware of), or
-            # - tool call results (that we need to tell the remote service
-            #   about).
-            # (In the future, we could do more sophisticated diffing here,
-            # which would enable the user to programmatically manipulate the
-            # context).
+            diff = self._context_snapshot.diff(self._context)
+            self._context_snapshot = copy.deepcopy(
+                context
+            )  # Take a static snapshot guaranteed not to change
 
-            # Send results for newly-completed function calls, if any.
-            await self._process_completed_function_calls(send_new_results=True)
+            if self._context_update_requires_reconnect(diff, messages_programmatically_edited):
+                logger.debug("Context update requires reconnect.")
+
+                # Reconnect
+                self._session_resumption_handle = None
+                await self._reconnect()
+
+                # Initialize our bookkeeping of already-completed tool calls in
+                # the context
+                await self._process_completed_function_calls(send_new_results=False)
+
+                # Trigger "initial" response with new connection
+                await self._create_initial_response()
+            else:
+                logger.debug("Context update does not require reconnect.")
+
+                # Send results for newly-completed function calls, if any.
+                await self._process_completed_function_calls(send_new_results=True)
+
+    def _context_update_requires_reconnect(
+        self, diff: LLMContextDiff, messages_programmatically_edited: bool
+    ) -> bool:
+        """Check if an update to our LLM context requires reconnection.
+
+        Args:
+            diff: The context diff representing the update
+            messages_programmatically_edited: Whether context messages were
+                programmatically edited (e.g. with LLMMessagesAppendFrame)
+
+        Returns:
+            True if reconnection is required, False otherwise.
+        """
+        # We need to reconnect in 3 cases:
+        # 1. If the conversation history was edited
+        # 2. If the tools available to the model were changed
+        # 3. If messages were appended programmatically by the user, e.g. with
+        #    LLMMessagesAppendFrame (NOT if they originated from Gemini Live
+        #    itself, since the remote service's internal bookkeeping is already
+        #    aware of those)
+        #
+        # Note that *ideally* in this 3rd case we would just send the newly
+        # appended messages without reconnecting, but in all my testing so far,
+        # I haven't been able to get that to work as reliably as I'd like.
+        # (Commments in the Gemini Live Python SDK also warn against
+        # programmatically sending new messages after the initial conversation
+        # history seeding is done and the voice chat has begun.)
+        if (
+            diff.history_edited
+            or diff.tools_diff.has_changes()
+            or (diff.messages_appended and messages_programmatically_edited)
+        ):
+            if diff.history_edited:
+                logger.debug("Context update: history edited.")
+            if diff.tools_diff.has_changes():
+                logger.debug("Context update: tools changed.")
+            if diff.messages_appended and messages_programmatically_edited:
+                logger.debug(f"Context update: messages programmatically appended.")
+            return True
+
+        return False
 
     async def _process_completed_function_calls(self, send_new_results: bool):
         # Check for set of completed function calls in the context
@@ -1042,6 +1119,9 @@ class GeminiLiveLLMService(LLMService):
                         ):
                             # Found a newly-completed function call - send the result to the service
                             if send_new_results:
+                                logger.debug(
+                                    f"Sending newly-completed tool call result for tool '{tool_name}'"
+                                )
                                 await self._tool_result(
                                     tool_call_id, tool_name, part.function_response.response
                                 )
@@ -1383,7 +1463,9 @@ class GeminiLiveLLMService(LLMService):
             return
 
         adapter: GeminiLLMAdapter = self.get_llm_adapter()
-        messages = adapter.get_llm_invocation_params(self._context).get("messages", [])
+        messages = adapter.get_llm_invocation_params(
+            self._context, convert_function_messages_to_text=True
+        ).get("messages", [])
         if not messages:
             return
 
@@ -1413,7 +1495,9 @@ class GeminiLiveLLMService(LLMService):
         # in the right format
         context = LLMContext(messages=messages_list)
         adapter: GeminiLLMAdapter = self.get_llm_adapter()
-        messages = adapter.get_llm_invocation_params(context).get("messages", [])
+        messages = adapter.get_llm_invocation_params(
+            context, convert_function_messages_to_text=True
+        ).get("messages", [])
 
         if not messages:
             return
