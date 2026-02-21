@@ -15,7 +15,7 @@ from typing import List, Optional
 
 from loguru import logger
 
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 
 # Token estimation constants
 CHARS_PER_TOKEN = 4  # Industry-standard heuristic: 1 token ≈ 4 characters
@@ -188,6 +188,9 @@ class LLMContextSummarizationUtil:
         total = 0
 
         for message in context.messages:
+            if isinstance(message, LLMSpecificMessage):
+                continue
+
             # Role and structure overhead
             total += TOKEN_OVERHEAD_PER_MESSAGE
 
@@ -248,6 +251,9 @@ class LLMContextSummarizationUtil:
 
         for i in range(start_idx, len(messages)):
             msg = messages[i]
+            if isinstance(msg, LLMSpecificMessage):
+                continue
+
             role = msg.get("role")
 
             # Check for tool calls in assistant messages
@@ -298,7 +304,12 @@ class LLMContextSummarizationUtil:
 
         # Find first system message index
         first_system_index = next(
-            (i for i, msg in enumerate(messages) if msg.get("role") == "system"), -1
+            (
+                i
+                for i, msg in enumerate(messages)
+                if not isinstance(msg, LLMSpecificMessage) and msg.get("role") == "system"
+            ),
+            -1,
         )
 
         # Messages to summarize are between first system and recent messages
@@ -356,6 +367,9 @@ class LLMContextSummarizationUtil:
         transcript_parts = []
 
         for msg in messages:
+            if isinstance(msg, LLMSpecificMessage):
+                continue
+
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
 
