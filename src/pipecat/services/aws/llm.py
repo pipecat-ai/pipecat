@@ -675,7 +675,7 @@ class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
             frame: The function call result frame to handle.
         """
         if frame.result:
-            result = json.dumps(frame.result)
+            result = json.dumps(frame.result, ensure_ascii=False)
             await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
         else:
             await self._update_function_call_result(
