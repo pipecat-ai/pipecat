@@ -14,7 +14,7 @@ as a unit regardless of internal punctuation.
 from typing import AsyncIterator, Optional, Sequence
 
 from pipecat.utils.string import StartEndTags, parse_start_end_tags
-from pipecat.utils.text.base_text_aggregator import Aggregation
+from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 
@@ -31,14 +31,15 @@ class SkipTagsAggregator(SimpleTextAggregator):
     identified and that content within tags is never split at sentence boundaries.
     """
 
-    def __init__(self, tags: Sequence[StartEndTags]):
+    def __init__(self, tags: Sequence[StartEndTags], **kwargs):
         """Initialize the skip tags aggregator.
 
         Args:
             tags: Sequence of StartEndTags objects defining the tag pairs
                   that should prevent sentence boundary detection.
+            **kwargs: Additional arguments passed to SimpleTextAggregator (e.g. aggregation_type).
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._tags = tags
         self._current_tag: Optional[StartEndTags] = None
         self._current_tag_index: int = 0
@@ -50,13 +51,33 @@ class SkipTagsAggregator(SimpleTextAggregator):
         uses the parent's lookahead logic for sentence detection when not
         inside tags.
 
+        In TOKEN mode, text is passed through immediately unless we're inside
+        a tag, in which case we buffer until the closing tag is found.
+
         Args:
             text: Text to aggregate.
 
         Yields:
             Aggregation objects containing text up to a sentence boundary,
-            marked as SENTENCE type.
+            marked as SENTENCE type (or TOKEN type in TOKEN mode).
         """
+        if self._aggregation_type == AggregationType.TOKEN:
+            # In TOKEN mode, process chars for tag tracking but yield the
+            # full input as a single token when not inside a tag.
+            for char in text:
+                self._text += char
+
+                # Update tag state
+                (self._current_tag, self._current_tag_index) = parse_start_end_tags(
+                    self._text, self._tags, self._current_tag, self._current_tag_index
+                )
+
+            # After processing all chars: if not inside a tag, yield accumulated text
+            if not self._current_tag and self._text:
+                yield Aggregation(text=self._text, type=AggregationType.TOKEN)
+                self._text = ""
+            return
+
         # Process text character by character
         for char in text:
             self._text += char

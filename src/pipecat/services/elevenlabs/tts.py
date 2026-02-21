@@ -274,7 +274,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        aggregate_sentences: Optional[bool] = True,
+        text_aggregation_mode=None,
+        aggregate_sentences: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize the ElevenLabs TTS service.
@@ -286,13 +287,19 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
+
+                .. deprecated:: 0.0.102
+                    Use ``text_aggregation_mode`` instead.
+
             **kwargs: Additional arguments passed to the parent service.
         """
-        # Aggregating sentences still gives cleaner-sounding results and fewer
-        # artifacts than streaming one word at a time. On average, waiting for a
-        # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
-        # 3 model, and it's worth it for the better audio quality.
+        # By default, we aggregate sentences before sending to TTS. This adds
+        # ~200-300ms of latency per sentence (waiting for the sentence-ending
+        # punctuation token from the LLM). Setting aggregate_sentences=False
+        # streams tokens directly. To use this mode, you must set auto_mode=False.
+        # This eliminates aggregation time, but slows down ElevenLabs.
         #
         # We also don't want to automatically push LLM response text frames,
         # because the context aggregators will add them to the LLM context even
@@ -304,6 +311,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         # speaking for a while, so we want the parent class to send TTSStopFrame
         # after a short period not receiving any audio.
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
@@ -777,7 +785,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        aggregate_sentences: Optional[bool] = True,
+        text_aggregation_mode=None,
+        aggregate_sentences: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize the ElevenLabs HTTP TTS service.
@@ -790,10 +799,16 @@ class ElevenLabsHttpTTSService(WordTTSService):
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
+
+                .. deprecated:: 0.0.102
+                    Use ``text_aggregation_mode`` instead.
+
             **kwargs: Additional arguments passed to the parent service.
         """
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
