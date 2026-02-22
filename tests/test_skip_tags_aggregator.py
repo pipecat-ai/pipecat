@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -62,3 +62,7 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, text)
         self.assertEqual(self.aggregator.text.text, "")
         self.assertEqual(self.aggregator.text.type, "sentence")
+
+
+if __name__ == "__main__":
+    unittest.main()

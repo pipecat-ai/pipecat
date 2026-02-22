@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -269,6 +269,10 @@ class TranscriptProcessor:
         @transcript.event_handler("on_transcript_update")
         async def handle_update(processor, frame):
             print(f"New messages: {frame.messages}")
+
+    .. deprecated:: 0.0.99
+        `TranscriptProcessor` is deprecated and will be removed in a future version.
+        Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.
     """
 
     def __init__(self, *, process_thoughts: bool = False):
@@ -282,6 +286,16 @@ class TranscriptProcessor:
         self._user_processor = None
         self._assistant_processor = None
         self._event_handlers = {}
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`TranscriptProcessor` is deprecated and will be removed in a future version. "
+                "Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.",
+                DeprecationWarning,
+            )
 
     def user(self, **kwargs) -> UserTranscriptProcessor:
         """Get the user transcript processor.

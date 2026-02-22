@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -525,6 +525,14 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         # note: ttfb is faster by 1/2 RTT than ttfb as measured for other services, since we're getting
         # this event from the server
         await self.stop_ttfb_metrics()
+
+        if self._current_audio_response and self._current_audio_response.item_id != evt.item_id:
+            logger.warning(
+                f"Received a new audio delta for an already completed audio response before receiving the BotStoppedSpeakingFrame."
+            )
+            logger.debug("Forcing previous audio response to None")
+            self._current_audio_response = None
+
         if not self._current_audio_response:
             self._current_audio_response = CurrentAudioResponse(
                 item_id=evt.item_id,
@@ -656,13 +664,13 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
+        await self.broadcast_frame(UserStartedSpeakingFrame)
         await self.push_interruption_task_frame_and_wait()
-        await self.push_frame(UserStartedSpeakingFrame())
 
     async def _handle_evt_speech_stopped(self, evt):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
         """Maybe handle an error event related to retrieving a conversation item.

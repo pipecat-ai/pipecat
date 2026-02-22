@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -25,6 +25,8 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
+    InputTransportMessageUrgentFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -214,6 +216,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
                 if isinstance(frame, InputAudioRawFrame):
                     await self.push_audio_frame(frame)
+                elif isinstance(frame, InputTransportMessageFrame):
+                    await self.broadcast_frame(InputTransportMessageFrame, message=frame.message)
                 else:
                     await self.push_frame(frame)
         except Exception as e:
@@ -417,6 +421,19 @@ class WebsocketServerTransport(BaseTransport):
     Provides a complete WebSocket server implementation with separate input and
     output transports, client connection management, and event handling for
     real-time audio and data streaming applications.
+
+    Event handlers available:
+
+    - on_client_connected(transport, websocket): Client WebSocket connected
+    - on_client_disconnected(transport, websocket): Client WebSocket disconnected
+    - on_session_timeout(transport, websocket): Session timed out
+    - on_websocket_ready(transport): WebSocket server is ready to accept connections
+
+    Example::
+
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, websocket):
+            ...
     """
 
     def __init__(

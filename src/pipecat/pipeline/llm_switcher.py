@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -44,7 +44,7 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         return self.services
 
     @property
-    def active_llm(self) -> Optional[LLMService]:
+    def active_llm(self) -> LLMService:
         """Get the currently active LLM.
 
         Returns:

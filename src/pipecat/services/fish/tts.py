@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -135,7 +135,6 @@ class FishAudioTTSService(InterruptibleTTSService):
         self._websocket = None
         self._receive_task = None
         self._request_id = None
-        self._started = False
 
         self._settings = {
             "sample_rate": 0,
@@ -199,12 +198,16 @@ class FishAudioTTSService(InterruptibleTTSService):
         await self._disconnect()
 
     async def _connect(self):
+        await super()._connect()
+
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -245,7 +248,6 @@ class FishAudioTTSService(InterruptibleTTSService):
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
             self._request_id = None
-            self._started = False
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
@@ -287,11 +289,12 @@ class FishAudioTTSService(InterruptibleTTSService):
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Fish Audio's streaming API.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames and control frames for the synthesized speech.
@@ -304,7 +307,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             if not self._request_id:
                 await self.start_ttfb_metrics()
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
                 self._request_id = str(uuid.uuid4())
 
             # Send the text
@@ -321,7 +324,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 await self._get_websocket().send(ormsgpack.packb(flush_message))
             except Exception as e:
                 yield ErrorFrame(error=f"Unknown error occurred: {e}")
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
                 await self._disconnect()
                 await self._connect()
 

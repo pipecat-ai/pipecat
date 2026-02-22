@@ -56,6 +56,7 @@ Every pull request that makes a user-facing change should include a changelog en
    - `removed.md` - Removed features
    - `fixed.md` - Bug fixes
    - `security.md` - Security fixes
+   - `other.md` - Other changes (documentation, dependencies, etc.)
 
 3. Write your changelog entry as a Markdown bullet point. Include the `-` at the start:
 

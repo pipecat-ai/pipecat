@@ -12,14 +12,14 @@ cd "$(dirname "$0")/.."
 
 # Format check
 echo "📝 Checking code formatting..."
-if ! NO_COLOR=1 ruff format --diff --check; then
-    echo -e "${RED}❌ Code formatting issues found. Run 'ruff format' to fix.${NC}"
+if ! NO_COLOR=1 uv run ruff format --diff --check; then
+    echo -e "${RED}❌ Code formatting issues found. Run 'uv run ruff format' to fix.${NC}"
     exit 1
 fi
 
 # Lint check
 echo "🔍 Running linter..."
-if ! ruff check; then
+if ! uv run ruff check; then
     echo -e "${RED}❌ Linting issues found.${NC}"
     exit 1
 fi

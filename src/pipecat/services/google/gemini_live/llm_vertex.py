@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -51,7 +51,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         credentials_path: Optional[str] = None,
         location: str,
         project_id: str,
-        model="google/gemini-2.0-flash-live-preview-04-09",
+        model="google/gemini-live-2.5-flash-native-audio",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
@@ -70,7 +70,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             credentials_path: Path to the service account JSON file.
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
-            model: Model identifier to use. Defaults to "models/gemini-2.0-flash-live-preview-04-09".
+            model: Model identifier to use. Defaults to "models/gemini-live-2.5-flash-native-audio".
             voice_id: TTS voice identifier. Defaults to "Charon".
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.

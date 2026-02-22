@@ -1,12 +1,10 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Fireworks AI service implementation using OpenAI-compatible interface."""
-
-from typing import List
 
 from loguru import logger
 

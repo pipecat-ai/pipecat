@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,7 +14,7 @@ as a unit regardless of internal punctuation.
 from typing import AsyncIterator, Optional, Sequence
 
 from pipecat.utils.string import StartEndTags, parse_start_end_tags
-from pipecat.utils.text.base_text_aggregator import Aggregation, AggregationType
+from pipecat.utils.text.base_text_aggregator import Aggregation
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 
 

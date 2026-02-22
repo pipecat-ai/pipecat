@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -240,3 +240,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(transcription_frames), 1)
         self.assertEqual(transcription_frames[0].text, "DTMF: 0123456789*#")
+
+
+if __name__ == "__main__":
+    unittest.main()

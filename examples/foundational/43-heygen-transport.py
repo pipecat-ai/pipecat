@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,10 +12,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -23,11 +20,13 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response_universal import (
     LLMContext,
     LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.transports.heygen.transport import HeyGenParams, HeyGenTransport
+from pipecat.services.heygen.api_liveavatar import LiveAvatarNewSessionRequest
+from pipecat.transports.heygen.transport import HeyGenParams, HeyGenTransport, ServiceType
 
 load_dotenv(override=True)
 
@@ -38,13 +37,18 @@ logger.add(sys.stderr, level="DEBUG")
 async def main():
     async with aiohttp.ClientSession() as session:
         transport = HeyGenTransport(
-            api_key=os.getenv("HEYGEN_API_KEY"),
+            api_key=os.getenv("HEYGEN_LIVE_AVATAR_API_KEY"),
+            service_type=ServiceType.LIVE_AVATAR,
             session=session,
             params=HeyGenParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-                turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
+            ),
+            session_request=LiveAvatarNewSessionRequest(
+                is_sandbox=True,
+                # Sandbox mode only works with this specific avatar
+                # https://docs.liveavatar.com/docs/developing-in-sandbox-mode#sandbox-mode-behaviors
+                avatar_id="dd73ea75-1218-4ef3-92ce-606d5f7fbc0a",
             ),
         )
 
@@ -65,17 +69,20 @@ async def main():
         ]
 
         context = LLMContext(messages)
-        context_aggregator = LLMContextAggregatorPair(context)
+        user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        )
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 stt,  # STT
-                context_aggregator.user(),  # User responses
+                user_aggregator,  # User responses
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
+                assistant_aggregator,  # Assistant spoken responses
             ]
         )
 

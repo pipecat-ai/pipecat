@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -17,3 +17,8 @@ with warnings.catch_warnings():
         DeprecationWarning,
         stacklevel=2,
     )
+
+__all__ = [
+    "AWSNovaSonicLLMService",
+    "Params",
+]

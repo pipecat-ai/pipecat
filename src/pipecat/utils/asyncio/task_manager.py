@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -157,7 +157,7 @@ class TaskManager(BaseTaskManager):
 
         async def run_coroutine():
             try:
-                await coroutine
+                return await coroutine
             except asyncio.CancelledError:
                 logger.trace(f"{name}: task cancelled")
                 # Re-raise the exception to ensure the task is cancelled.

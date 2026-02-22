@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -29,10 +29,11 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -191,9 +192,10 @@ class ElevenLabsSTTService(SegmentedSTTService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         base_url: str = "https://api.elevenlabs.io",
-        model: str = "scribe_v1",
+        model: str = "scribe_v2",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = ELEVENLABS_TTFS_P99,
         **kwargs,
     ):
         """Initialize the ElevenLabs STT service.
@@ -202,13 +204,16 @@ class ElevenLabsSTTService(SegmentedSTTService):
             api_key: ElevenLabs API key for authentication.
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             base_url: Base URL for ElevenLabs API.
-            model: Model ID for transcription. Defaults to "scribe_v1".
+            model: Model ID for transcription. Defaults to "scribe_v2".
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
         super().__init__(
             sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
 
@@ -310,7 +315,6 @@ class ElevenLabsSTTService(SegmentedSTTService):
         self, transcript: str, is_final: bool, language: Optional[str] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -328,7 +332,6 @@ class ElevenLabsSTTService(SegmentedSTTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
 
             # Upload audio and get transcription result directly
             result = await self._transcribe_audio(audio)
@@ -417,6 +420,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 Only used when commit_strategy is VAD. None uses ElevenLabs default.
             include_timestamps: Whether to include word-level timestamps in transcripts.
             enable_logging: Whether to enable logging on ElevenLabs' side.
+            include_language_detection: Whether to include language detection in transcripts.
         """
 
         language_code: Optional[str] = None
@@ -427,6 +431,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         min_silence_duration_ms: Optional[int] = None
         include_timestamps: bool = False
         enable_logging: bool = False
+        include_language_detection: bool = False
 
     def __init__(
         self,
@@ -436,6 +441,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         model: str = "scribe_v2_realtime",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = ELEVENLABS_REALTIME_TTFS_P99,
         **kwargs,
     ):
         """Initialize the ElevenLabs Realtime STT service.
@@ -446,10 +452,15 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             model: Model ID for transcription. Defaults to "scribe_v2_realtime".
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
         super().__init__(
             sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=10,
+            keepalive_interval=5,
             **kwargs,
         )
 
@@ -537,9 +548,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def start_metrics(self):
+    async def _start_metrics(self):
         """Start performance metrics collection for transcription processing."""
-        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -551,10 +561,10 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, VADUserStartedSpeakingFrame):
             # Start metrics when user starts speaking
-            await self.start_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._start_metrics()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send commit when user stops speaking (manual commit mode)
             if self._params.commit_strategy == CommitStrategy.MANUAL:
                 if self._websocket and self._websocket.state is State.OPEN:
@@ -605,16 +615,35 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """Establish WebSocket connection to ElevenLabs Realtime STT."""
         await self._connect_websocket()
 
+        await super()._connect()
+
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         """Close WebSocket connection and cleanup tasks."""
+        await super()._disconnect()
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
         await self._disconnect_websocket()
+
+    async def _send_keepalive(self, silence: bytes):
+        """Send silent audio wrapped in ElevenLabs' JSON protocol.
+
+        Args:
+            silence: Silent 16-bit mono PCM audio bytes.
+        """
+        audio_base64 = base64.b64encode(silence).decode("utf-8")
+        message = {
+            "message_type": "input_audio_chunk",
+            "audio_base_64": audio_base64,
+            "commit": False,
+            "sample_rate": self.sample_rate,
+        }
+        await self._websocket.send(json.dumps(message))
 
     async def _connect_websocket(self):
         """Connect to ElevenLabs Realtime STT WebSocket endpoint."""
@@ -639,6 +668,11 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
 
             if self._params.enable_logging:
                 params.append(f"enable_logging={str(self._params.enable_logging).lower()}")
+
+            if self._params.include_language_detection:
+                params.append(
+                    f"include_language_detection={str(self._params.include_language_detection).lower()}"
+                )
 
             # Add VAD parameters if using VAD commit strategy and values are specified
             if self._params.commit_strategy == CommitStrategy.VAD:
@@ -690,8 +724,8 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _process_messages(self):
-        """Process incoming WebSocket messages."""
+    async def _receive_messages(self):
+        """Continuously receive and process WebSocket messages."""
         async for message in self._get_websocket():
             try:
                 data = json.loads(message)
@@ -700,13 +734,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
                 logger.warning(f"Received non-JSON message: {message}")
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
-
-    async def _receive_messages(self):
-        """Continuously receive and process WebSocket messages."""
-        try:
-            await self._process_messages()
-        except Exception as e:
-            logger.warning(f"{self} WebSocket connection closed: {e}")
             # Connection closed, will reconnect on next audio chunk
 
     async def _process_response(self, data: dict):
@@ -729,21 +756,24 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         elif message_type == "committed_transcript_with_timestamps":
             await self._on_committed_transcript_with_timestamps(data)
 
-        elif message_type == "error":
-            error_msg = data.get("error", "Unknown error")
-            logger.error(f"ElevenLabs error: {error_msg}")
+        elif message_type in (
+            "error",
+            "auth_error",
+            "quota_exceeded_error",
+            "transcriber_error",
+            "input_error",
+            "commit_throttled",
+            "transcriber_error",
+            "unaccepted_terms_error",
+            "rate_limited",
+            "queue_overflow",
+            "resource_exhausted",
+            "session_time_limit_exceeded",
+            "chunk_size_exceeded",
+            "insufficient_audio_activity",
+        ):
+            error_msg = data.get("error", f"Unknown error - {message_type}")
             await self.push_error(error_msg=f"Error: {error_msg}")
-
-        elif message_type == "auth_error":
-            error_msg = data.get("error", "Authentication error")
-            logger.error(f"ElevenLabs auth error: {error_msg}")
-            await self.push_error(error_msg=f"Auth error: {error_msg}")
-
-        elif message_type == "quota_exceeded_error":
-            error_msg = data.get("error", "Quota exceeded")
-            logger.error(f"ElevenLabs quota exceeded: {error_msg}")
-            await self.push_error(error_msg=f"Quota exceeded: {error_msg}")
-
         else:
             logger.debug(f"Unknown message type: {message_type}")
 
@@ -756,8 +786,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         text = data.get("text", "").strip()
         if not text:
             return
-
-        await self.stop_ttfb_metrics()
 
         # Get language if provided
         language = data.get("language_code")
@@ -796,7 +824,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
         # Get language if provided
@@ -838,7 +865,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
         # Get language if provided

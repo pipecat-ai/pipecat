@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -115,3 +115,7 @@ class TestAudioBufferProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(merged_audio[6:8], bot_audio[2:4])
         self.assertEqual(len(self.processor._user_audio_buffer), 0)
         self.assertEqual(len(self.processor._bot_audio_buffer), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

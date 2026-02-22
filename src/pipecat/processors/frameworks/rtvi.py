@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,7 +14,8 @@ and frame observation for the RTVI protocol.
 import asyncio
 import base64
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import (
     Any,
     Awaitable,
@@ -24,6 +25,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Set,
     Tuple,
     Union,
 )
@@ -31,6 +33,7 @@ from typing import (
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
+from pipecat import version as pipecat_version
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.frames.frames import (
     AggregatedTextFrame,
@@ -43,7 +46,10 @@ from pipecat.frames.frames import (
     EndTaskFrame,
     ErrorFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
     InterimTranscriptionFrame,
@@ -62,6 +68,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserMuteStartedFrame,
+    UserMuteStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -72,10 +80,7 @@ from pipecat.metrics.metrics import (
     TTSUsageMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
@@ -85,7 +90,7 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.string import match_endofsentence
 
-RTVI_PROTOCOL_VERSION = "1.0.0"
+RTVI_PROTOCOL_VERSION = "1.2.0"
 
 RTVI_MESSAGE_LABEL = "rtvi-ai"
 RTVIMessageLiteral = Literal["rtvi-ai"]
@@ -576,6 +581,9 @@ class RTVILLMFunctionCallMessageData(BaseModel):
     """Data for LLM function call notification.
 
     Contains function call details including name, ID, and arguments.
+
+    .. deprecated:: 0.0.102
+        Use ``RTVILLMFunctionCallInProgressMessageData`` instead.
     """
 
     function_name: str
@@ -587,6 +595,10 @@ class RTVILLMFunctionCallMessage(BaseModel):
     """Message notifying of an LLM function call.
 
     Sent when the LLM makes a function call.
+
+    .. deprecated:: 0.0.102
+        Use ``RTVILLMFunctionCallInProgressMessage`` with the
+        ``llm-function-call-in-progress`` event type instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -641,10 +653,11 @@ class RTVIAppendToContext(BaseModel):
 class RTVILLMFunctionCallStartMessageData(BaseModel):
     """Data for LLM function call start notification.
 
-    Contains the function name being called.
+    Contains the function name being called. Fields may be omitted based on
+    the configured function_call_report_level for security.
     """
 
-    function_name: str
+    function_name: Optional[str] = None
 
 
 class RTVILLMFunctionCallStartMessage(BaseModel):
@@ -654,7 +667,7 @@ class RTVILLMFunctionCallStartMessage(BaseModel):
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
-    type: Literal["llm-function-call-start"] = "llm-function-call-start"
+    type: Literal["llm-function-call-started"] = "llm-function-call-started"
     data: RTVILLMFunctionCallStartMessageData
 
 
@@ -668,6 +681,54 @@ class RTVILLMFunctionCallResultData(BaseModel):
     tool_call_id: str
     arguments: dict
     result: dict | str
+
+
+class RTVILLMFunctionCallInProgressMessageData(BaseModel):
+    """Data for LLM function call in-progress notification.
+
+    Contains function call details including name, ID, and arguments.
+    Fields may be omitted based on the configured function_call_report_level for security.
+    """
+
+    tool_call_id: str
+    function_name: Optional[str] = None
+    arguments: Optional[Mapping[str, Any]] = None
+
+
+class RTVILLMFunctionCallInProgressMessage(BaseModel):
+    """Message notifying that an LLM function call is in progress.
+
+    Sent when the LLM function call execution begins.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["llm-function-call-in-progress"] = "llm-function-call-in-progress"
+    data: RTVILLMFunctionCallInProgressMessageData
+
+
+class RTVILLMFunctionCallStoppedMessageData(BaseModel):
+    """Data for LLM function call stopped notification.
+
+    Contains details about the function call that stopped, including
+    whether it was cancelled or completed with a result.
+    Fields may be omitted based on the configured function_call_report_level for security.
+    """
+
+    tool_call_id: str
+    cancelled: bool
+    function_name: Optional[str] = None
+    result: Optional[Any] = None
+
+
+class RTVILLMFunctionCallStoppedMessage(BaseModel):
+    """Message notifying that an LLM function call has stopped.
+
+    Sent when a function call completes (with result) or is cancelled.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["llm-function-call-stopped"] = "llm-function-call-stopped"
+    data: RTVILLMFunctionCallStoppedMessageData
 
 
 class RTVIBotLLMStartedMessage(BaseModel):
@@ -833,6 +894,20 @@ class RTVIUserStoppedSpeakingMessage(BaseModel):
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
+class RTVIUserMuteStartedMessage(BaseModel):
+    """Message indicating user has been muted."""
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["user-mute-started"] = "user-mute-started"
+
+
+class RTVIUserMuteStoppedMessage(BaseModel):
+    """Message indicating user has been unmuted."""
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["user-mute-stopped"] = "user-mute-stopped"
+
+
 class RTVIBotStartedSpeakingMessage(BaseModel):
     """Message indicating bot has started speaking."""
 
@@ -914,6 +989,24 @@ class RTVIServerMessageFrame(SystemFrame):
         return f"{self.name}(data: {self.data})"
 
 
+class RTVIFunctionCallReportLevel(str, Enum):
+    """Level of detail to include in function call RTVI events.
+
+    Controls what information is exposed in function call events for security.
+
+    Values:
+        DISABLED: No events emitted for this function call.
+        NONE: Events only with tool_call_id, no function name or metadata (most secure).
+        NAME: Events with function name, no arguments or results.
+        FULL: Events with function name, arguments, and results.
+    """
+
+    DISABLED = "disabled"
+    NONE = "none"
+    NAME = "name"
+    FULL = "full"
+
+
 @dataclass
 class RTVIObserverParams:
     """Parameters for configuring RTVI Observer behavior.
@@ -934,6 +1027,11 @@ class RTVIObserverParams:
         metrics_enabled: Indicates if metrics messages should be sent.
         system_logs_enabled: Indicates if system logs should be sent.
         errors_enabled: [Deprecated] Indicates if errors messages should be sent.
+        ignored_sources: List of frame processors whose frames should be silently ignored
+            by this observer. Useful for suppressing RTVI messages from secondary pipeline
+            branches (e.g. a silent evaluation LLM) that should not be visible to clients.
+            Sources can also be added and removed dynamically via ``add_ignored_source()``
+            and ``remove_ignored_source()``.
         skip_aggregator_types: List of aggregation types to skip sending as tts/output messages.
             Note: if using this to avoid sending secure information, be sure to also disable
             bot_llm_enabled to avoid leaking through LLM messages.
@@ -942,6 +1040,22 @@ class RTVIObserverParams:
             transformed text. To register, provide a list of tuples of
             (aggregation_type | '*', transform_function).
         audio_level_period_secs: How often audio levels should be sent if enabled.
+        function_call_report_level: Controls what information is exposed in function call
+            events for security. A dict mapping function names to levels, where ``"*"``
+            sets the default level for unlisted functions::
+
+                function_call_report_level={
+                    "*": RTVIFunctionCallReportLevel.NONE,  # Default: events with no metadata
+                    "get_weather": RTVIFunctionCallReportLevel.FULL,  # Expose everything
+                }
+
+            Levels:
+                - DISABLED: No events emitted for this function.
+                - NONE: Events with tool_call_id only (most secure when events needed).
+                - NAME: Adds function name to events.
+                - FULL: Adds function name, arguments, and results.
+
+            Defaults to ``{"*": RTVIFunctionCallReportLevel.NONE}``.
     """
 
     bot_output_enabled: bool = True
@@ -951,11 +1065,13 @@ class RTVIObserverParams:
     bot_audio_level_enabled: bool = False
     user_llm_enabled: bool = True
     user_speaking_enabled: bool = True
+    user_mute_enabled: bool = True
     user_transcription_enabled: bool = True
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
     errors_enabled: Optional[bool] = None
+    ignored_sources: List[FrameProcessor] = field(default_factory=list)
     skip_aggregator_types: Optional[List[AggregationType | str]] = None
     bot_output_transforms: Optional[
         List[
@@ -966,6 +1082,9 @@ class RTVIObserverParams:
         ]
     ] = None
     audio_level_period_secs: float = 0.15
+    function_call_report_level: Dict[str, RTVIFunctionCallReportLevel] = field(
+        default_factory=lambda: {"*": RTVIFunctionCallReportLevel.NONE}
+    )
 
 
 class RTVIObserver(BaseObserver):
@@ -998,11 +1117,16 @@ class RTVIObserver(BaseObserver):
         self._rtvi = rtvi
         self._params = params or RTVIObserverParams()
 
+        self._ignored_sources: Set[FrameProcessor] = set(self._params.ignored_sources)
         self._frames_seen = set()
 
         self._bot_transcription = ""
         self._last_user_audio_level = 0
         self._last_bot_audio_level = 0
+
+        # Track bot speaking state for queuing aggregated text frames
+        self._bot_is_speaking = False
+        self._queued_aggregated_text_frames: List[AggregatedTextFrame] = []
 
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
@@ -1054,6 +1178,46 @@ class RTVIObserver(BaseObserver):
             if not (agg_type == aggregation_type and func == transform_function)
         ]
 
+    def add_ignored_source(self, source: FrameProcessor):
+        """Ignore all frames pushed by the given processor.
+
+        Any frame whose source matches ``source`` will be silently skipped,
+        preventing RTVI messages from being emitted for activity in that
+        processor. Useful for suppressing events from secondary pipeline
+        branches (e.g. a silent evaluation LLM) that should not be visible
+        to clients.
+
+        Args:
+            source: The frame processor to ignore.
+        """
+        self._ignored_sources.add(source)
+
+    def remove_ignored_source(self, source: FrameProcessor):
+        """Stop ignoring frames pushed by the given processor.
+
+        Reverses a previous call to ``add_ignored_source()``. If ``source``
+        was not previously ignored this is a no-op.
+
+        Args:
+            source: The frame processor to stop ignoring.
+        """
+        self._ignored_sources.discard(source)
+
+    def _get_function_call_report_level(self, function_name: str) -> RTVIFunctionCallReportLevel:
+        """Get the report level for a specific function call.
+
+        Args:
+            function_name: The name of the function to get the report level for.
+
+        Returns:
+            The report level for the function. Looks up the function name first,
+            then falls back to "*" key, then NONE.
+        """
+        levels = self._params.function_call_report_level
+        if function_name in levels:
+            return levels[function_name]
+        return levels.get("*", RTVIFunctionCallReportLevel.NONE)
+
     async def _logger_sink(self, message):
         """Logger sink so we can send system logs to RTVI clients."""
         message = RTVISystemLogMessage(data=RTVITextMessageData(text=message))
@@ -1089,6 +1253,15 @@ class RTVIObserver(BaseObserver):
         frame = data.frame
         direction = data.direction
 
+        # Frames from explicitly ignored sources are always skipped.
+        if self._ignored_sources and src in self._ignored_sources:
+            return
+
+        # For broadcast frames (pushed in both directions), only process
+        # the downstream copy to avoid sending duplicate RTVI messages.
+        if frame.broadcast_sibling_id is not None and direction != FrameDirection.DOWNSTREAM:
+            return
+
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
             return
@@ -1099,13 +1272,16 @@ class RTVIObserver(BaseObserver):
 
         if (
             isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame))
-            and (direction == FrameDirection.DOWNSTREAM)
             and self._params.user_speaking_enabled
         ):
             await self._handle_interruptions(frame)
         elif (
+            isinstance(frame, (UserMuteStartedFrame, UserMuteStoppedFrame))
+            and self._params.user_mute_enabled
+        ):
+            await self._handle_user_mute(frame)
+        elif (
             isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame))
-            and (direction == FrameDirection.UPSTREAM)
             and self._params.bot_speaking_enabled
         ):
             await self._handle_bot_speaking(frame)
@@ -1140,6 +1316,62 @@ class RTVIObserver(BaseObserver):
                 await self._handle_aggregated_llm_text(frame)
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            for function_call in frame.function_calls:
+                report_level = self._get_function_call_report_level(function_call.function_name)
+                if report_level == RTVIFunctionCallReportLevel.DISABLED:
+                    continue
+                data = RTVILLMFunctionCallStartMessageData()
+                if report_level in (
+                    RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
+                    data.function_name = function_call.function_name
+                message = RTVILLMFunctionCallStartMessage(data=data)
+                await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            report_level = self._get_function_call_report_level(frame.function_name)
+            if report_level != RTVIFunctionCallReportLevel.DISABLED:
+                data = RTVILLMFunctionCallInProgressMessageData(tool_call_id=frame.tool_call_id)
+                if report_level in (
+                    RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
+                    data.function_name = frame.function_name
+                if report_level == RTVIFunctionCallReportLevel.FULL:
+                    data.arguments = frame.arguments
+                message = RTVILLMFunctionCallInProgressMessage(data=data)
+                await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallCancelFrame):
+            report_level = self._get_function_call_report_level(frame.function_name)
+            if report_level != RTVIFunctionCallReportLevel.DISABLED:
+                data = RTVILLMFunctionCallStoppedMessageData(
+                    tool_call_id=frame.tool_call_id,
+                    cancelled=True,
+                )
+                if report_level in (
+                    RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
+                    data.function_name = frame.function_name
+                message = RTVILLMFunctionCallStoppedMessage(data=data)
+                await self.send_rtvi_message(message)
+        elif isinstance(frame, FunctionCallResultFrame):
+            report_level = self._get_function_call_report_level(frame.function_name)
+            if report_level != RTVIFunctionCallReportLevel.DISABLED:
+                data = RTVILLMFunctionCallStoppedMessageData(
+                    tool_call_id=frame.tool_call_id,
+                    cancelled=False,
+                )
+                if report_level in (
+                    RTVIFunctionCallReportLevel.NAME,
+                    RTVIFunctionCallReportLevel.FULL,
+                ):
+                    data.function_name = frame.function_name
+                if report_level == RTVIFunctionCallReportLevel.FULL:
+                    data.result = frame.result if frame.result else None
+                message = RTVILLMFunctionCallStoppedMessage(data=data)
+                await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVIServerMessage(data=frame.data)
             await self.send_rtvi_message(message)
@@ -1179,19 +1411,43 @@ class RTVIObserver(BaseObserver):
         if message:
             await self.send_rtvi_message(message)
 
-    async def _handle_bot_speaking(self, frame: Frame):
-        """Handle bot speaking event frames."""
+    async def _handle_user_mute(self, frame: Frame):
+        """Handle user mute/unmute frames."""
         message = None
-        if isinstance(frame, BotStartedSpeakingFrame):
-            message = RTVIBotStartedSpeakingMessage()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            message = RTVIBotStoppedSpeakingMessage()
+        if isinstance(frame, UserMuteStartedFrame):
+            message = RTVIUserMuteStartedMessage()
+        elif isinstance(frame, UserMuteStoppedFrame):
+            message = RTVIUserMuteStoppedMessage()
 
         if message:
             await self.send_rtvi_message(message)
 
+    async def _handle_bot_speaking(self, frame: Frame):
+        """Handle bot speaking event frames."""
+        if isinstance(frame, BotStartedSpeakingFrame):
+            message = RTVIBotStartedSpeakingMessage()
+            await self.send_rtvi_message(message)
+            # Flush any queued aggregated text frames
+            for queued_frame in self._queued_aggregated_text_frames:
+                await self._send_aggregated_llm_text(queued_frame)
+            self._queued_aggregated_text_frames.clear()
+            self._bot_is_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            message = RTVIBotStoppedSpeakingMessage()
+            await self.send_rtvi_message(message)
+            self._bot_is_speaking = False
+
     async def _handle_aggregated_llm_text(self, frame: AggregatedTextFrame):
         """Handle aggregated LLM text output frames."""
+        if self._bot_is_speaking:
+            # Bot has already started speaking, send directly
+            await self._send_aggregated_llm_text(frame)
+        else:
+            # Bot hasn't started speaking yet, queue the frame
+            self._queued_aggregated_text_frames.append(frame)
+
+    async def _send_aggregated_llm_text(self, frame: AggregatedTextFrame):
+        """Send aggregated LLM text messages."""
         # Skip certain aggregator types if configured to do so.
         if (
             self._params.skip_aggregator_types
@@ -1412,20 +1668,37 @@ class RTVIProcessor(FrameProcessor):
 
         self._registered_services[service.name] = service
 
+    def create_rtvi_observer(self, *, params: Optional[RTVIObserverParams] = None, **kwargs):
+        """Creates a new RTVI Observer.
+
+        Args:
+            params: Settings to enable/disable specific messages.
+            **kwargs: Additional arguments passed to the observer.
+
+        Returns:
+            A new RTVI observer.
+        """
+        return RTVIObserver(self, params=params, **kwargs)
+
     async def set_client_ready(self):
         """Mark the client as ready and trigger the ready event."""
         self._client_ready = True
         await self._call_event_handler("on_client_ready")
 
-    async def set_bot_ready(self):
-        """Mark the bot as ready and send the bot-ready message."""
+    async def set_bot_ready(self, about: Mapping[str, Any] = None):
+        """Mark the bot as ready and send the bot-ready message.
+
+        Args:
+            about: Optional information about the bot to include in the ready message.
+                   If left as None, the Pipecat library and version will be used.
+        """
         self._bot_ready = True
         # Only call the (deprecated) _update_config method if the we're using a
         # config (which is deprecated). Otherwise we'd always print an
         # unnecessary deprecation warning.
         if self._config.config:
             await self._update_config(self._config, False)
-        await self._send_bot_ready()
+        await self._send_bot_ready(about=about)
 
     async def interrupt_bot(self):
         """Send a bot interruption frame upstream."""
@@ -1475,40 +1748,26 @@ class RTVIProcessor(FrameProcessor):
 
         Args:
             params: The function call parameters.
+
+        .. deprecated:: 0.0.102
+            This method is deprecated. Function call events are now automatically
+            sent by ``RTVIObserver`` using the ``llm-function-call-in-progress`` event.
+            Configure reporting level via ``RTVIObserverParams.function_call_report_level``.
         """
+        import warnings
+
+        warnings.warn(
+            "handle_function_call is deprecated. Function call events are now "
+            "automatically sent by RTVIObserver using llm-function-call-in-progress.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         fn = RTVILLMFunctionCallMessageData(
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
             args=params.arguments,
         )
         message = RTVILLMFunctionCallMessage(data=fn)
-        await self.push_transport_message(message, exclude_none=False)
-
-    async def handle_function_call_start(
-        self, function_name: str, llm: FrameProcessor, context: OpenAILLMContext
-    ):
-        """Handle the start of a function call from the LLM.
-
-        .. deprecated:: 0.0.66
-            This method is deprecated and will be removed in a future version.
-            Use `RTVIProcessor.handle_function_call()` instead.
-
-        Args:
-            function_name: Name of the function being called.
-            llm: The LLM processor making the call.
-            context: The LLM context.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "Function `RTVIProcessor.handle_function_call_start()` is deprecated, use `RTVIProcessor.handle_function_call()` instead.",
-                DeprecationWarning,
-            )
-
-        fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
-        message = RTVILLMFunctionCallStartMessage(data=fn)
         await self.push_transport_message(message, exclude_none=False)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -1873,14 +2132,21 @@ class RTVIProcessor(FrameProcessor):
             message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
             await self.push_transport_message(message)
 
-    async def _send_bot_ready(self):
-        """Send the bot-ready message to the client."""
+    async def _send_bot_ready(self, about: Mapping[str, Any] = None):
+        """Send the bot-ready message to the client.
+
+        Args:
+            about: Optional information about the bot to include in the ready message.
+                   If left as None, the pipecat library and version will be used.
+        """
         config = None
         if self._client_version and self._client_version[0] < 1:
             config = self._config.config
+        if not about:
+            about = {"library": "pipecat-ai", "library_version": f"{pipecat_version()}"}
         message = RTVIBotReady(
             id=self._client_ready_id,
-            data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, config=config),
+            data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, about=about, config=config),
         )
         await self.push_transport_message(message)
 

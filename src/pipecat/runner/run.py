@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -153,25 +153,18 @@ def _get_bot_module():
     )
 
 
-async def _run_telephony_bot(websocket: WebSocket):
+async def _run_telephony_bot(websocket: WebSocket, args: argparse.Namespace):
     """Run a bot for telephony transports."""
     bot_module = _get_bot_module()
 
     # Just pass the WebSocket - let the bot handle parsing
     runner_args = WebSocketRunnerArguments(websocket=websocket)
+    runner_args.cli_args = args
 
     await bot_module.bot(runner_args)
 
 
-def _create_server_app(
-    *,
-    transport_type: str,
-    host: str = "localhost",
-    proxy: str,
-    esp32_mode: bool = False,
-    whatsapp_enabled: bool = False,
-    folder: Optional[str] = None,
-):
+def _create_server_app(args: argparse.Namespace):
     """Create FastAPI app with transport-specific routes."""
     app = FastAPI()
 
@@ -184,23 +177,21 @@ def _create_server_app(
     )
 
     # Set up transport-specific routes
-    if transport_type == "webrtc":
-        _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host, folder=folder)
-        if whatsapp_enabled:
-            _setup_whatsapp_routes(app)
-    elif transport_type == "daily":
-        _setup_daily_routes(app)
-    elif transport_type in TELEPHONY_TRANSPORTS:
-        _setup_telephony_routes(app, transport_type=transport_type, proxy=proxy)
+    if args.transport == "webrtc":
+        _setup_webrtc_routes(app, args)
+        if args.whatsapp:
+            _setup_whatsapp_routes(app, args)
+    elif args.transport == "daily":
+        _setup_daily_routes(app, args)
+    elif args.transport in TELEPHONY_TRANSPORTS:
+        _setup_telephony_routes(app, args)
     else:
-        logger.warning(f"Unknown transport type: {transport_type}")
+        logger.warning(f"Unknown transport type: {args.transport}")
 
     return app
 
 
-def _setup_webrtc_routes(
-    app: FastAPI, *, esp32_mode: bool = False, host: str = "localhost", folder: Optional[str] = None
-):
+def _setup_webrtc_routes(app: FastAPI, args: argparse.Namespace):
     """Set up WebRTC-specific routes."""
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
@@ -240,11 +231,11 @@ def _setup_webrtc_routes(
     @app.get("/files/{filename:path}")
     async def download_file(filename: str):
         """Handle file downloads."""
-        if not folder:
+        if not args.folder:
             logger.warning(f"Attempting to dowload {filename}, but downloads folder not setup.")
             return
 
-        file_path = Path(folder) / filename
+        file_path = Path(args.folder) / filename
         if not os.path.exists(file_path):
             raise HTTPException(404)
 
@@ -254,7 +245,7 @@ def _setup_webrtc_routes(
 
     # Initialize the SmallWebRTC request handler
     small_webrtc_handler: SmallWebRTCRequestHandler = SmallWebRTCRequestHandler(
-        esp32_mode=esp32_mode, host=host
+        esp32_mode=args.esp32, host=args.host
     )
 
     @app.post("/api/offer")
@@ -262,12 +253,13 @@ def _setup_webrtc_routes(
         """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
 
         # Prepare runner arguments with the callback to run your bot
-        async def webrtc_connection_callback(connection):
+        async def webrtc_connection_callback(connection: SmallWebRTCConnection):
             bot_module = _get_bot_module()
 
             runner_args = SmallWebRTCRunnerArguments(
                 webrtc_connection=connection, body=request.request_data
             )
+            runner_args.cli_args = args
             background_tasks.add_task(bot_module.bot, runner_args)
 
         # Delegate handling to SmallWebRTCRequestHandler
@@ -297,7 +289,7 @@ def _setup_webrtc_routes(
 
         # Store session info immediately in memory, replicate the behavior expected on Pipecat Cloud
         session_id = str(uuid.uuid4())
-        active_sessions[session_id] = request_data
+        active_sessions[session_id] = request_data.get("body", {})
 
         result: StartBotResult = {"sessionId": session_id}
         if request_data.get("enableDefaultIceServers"):
@@ -330,7 +322,8 @@ def _setup_webrtc_routes(
                         pc_id=request_data.get("pc_id"),
                         restart_pc=request_data.get("restart_pc"),
                         request_data=request_data.get("request_data")
-                        or request_data.get("requestData"),
+                        or request_data.get("requestData")
+                        or active_session,
                     )
                     return await offer(webrtc_request, background_tasks)
                 elif request.method == HTTPMethod.PATCH.value:
@@ -379,8 +372,8 @@ def _add_lifespan_to_app(app: FastAPI, new_lifespan):
         app.router.lifespan_context = new_lifespan
 
 
-def _setup_whatsapp_routes(app: FastAPI):
-    """Set up WebRTC-specific routes."""
+def _setup_whatsapp_routes(app: FastAPI, args: argparse.Namespace):
+    """Set up WhatsApp-specific routes."""
     WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
     WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
     WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
@@ -405,13 +398,7 @@ def _setup_whatsapp_routes(app: FastAPI):
         return
 
     try:
-        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
-
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-        from pipecat.transports.smallwebrtc.request_handler import (
-            SmallWebRTCRequest,
-            SmallWebRTCRequestHandler,
-        )
         from pipecat.transports.whatsapp.api import WhatsAppWebhookRequest
         from pipecat.transports.whatsapp.client import WhatsAppClient
     except ImportError as e:
@@ -488,6 +475,7 @@ def _setup_whatsapp_routes(app: FastAPI):
             """
             bot_module = _get_bot_module()
             runner_args = SmallWebRTCRunnerArguments(webrtc_connection=connection)
+            runner_args.cli_args = args
             background_tasks.add_task(bot_module.bot, runner_args)
 
         try:
@@ -533,7 +521,7 @@ def _setup_whatsapp_routes(app: FastAPI):
     _add_lifespan_to_app(app, whatsapp_lifespan)
 
 
-def _setup_daily_routes(app: FastAPI):
+def _setup_daily_routes(app: FastAPI, args: argparse.Namespace):
     """Set up Daily-specific routes."""
 
     @app.get("/")
@@ -551,6 +539,7 @@ def _setup_daily_routes(app: FastAPI):
             # Start the bot in the background with empty body for GET requests
             bot_module = _get_bot_module()
             runner_args = DailyRunnerArguments(room_url=room_url, token=token)
+            runner_args.cli_args = args
             asyncio.create_task(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
 
@@ -583,13 +572,13 @@ def _setup_daily_routes(app: FastAPI):
 
         bot_module = _get_bot_module()
 
-        existing_room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
+        existing_room_url = os.getenv("DAILY_ROOM_URL")
 
         result = None
 
         # Configure room if:
         # 1. Explicitly requested via createDailyRoom in payload
-        # 2. Using pre-configured room from DAILY_SAMPLE_ROOM_URL env var
+        # 2. Using pre-configured room from DAILY_ROOM_URL env var
         if create_daily_room or existing_room_url:
             import aiohttp
 
@@ -634,50 +623,164 @@ def _setup_daily_routes(app: FastAPI):
         else:
             runner_args = RunnerArguments(body=body)
 
+        # Update CLI args.
+        runner_args.cli_args = args
+
         # Start the bot in the background
         asyncio.create_task(bot_module.bot(runner_args))
 
         return result
 
+    if args.dialin:
 
-def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
+        @app.post("/daily-dialin-webhook")
+        async def handle_dialin_webhook(request: Request):
+            """Handle incoming Daily PSTN dial-in webhook.
+
+            This endpoint mimics Pipecat Cloud's dial-in webhook handler.
+            It receives Daily webhook data, creates a SIP-enabled room, and starts the bot.
+
+            Expected webhook payload::
+
+                {
+                    "From": "+15551234567",
+                    "To": "+15559876543",
+                    "callId": "uuid-call-id",
+                    "callDomain": "uuid-call-domain",
+                    "sipHeaders": {...}  // optional
+                }
+
+            Returns::
+
+                {
+                    "dailyRoom": "https://...",
+                    "dailyToken": "...",
+                    "sessionId": "uuid"
+                }
+            """
+            logger.debug("Received Daily dial-in webhook")
+
+            try:
+                data = await request.json()
+                logger.debug(f"Webhook data: {data}")
+            except Exception as e:
+                logger.error(f"Failed to parse webhook data: {e}")
+                raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+            # Handle webhook verification test (sent by Daily when configuring webhook)
+            if data.get("test") or data.get("Test"):
+                logger.debug("Webhook verification test received")
+                return {"status": "OK"}
+
+            # Validate required fields
+            if not all(key in data for key in ["From", "To", "callId", "callDomain"]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Missing required fields: From, To, callId, callDomain",
+                )
+
+            import aiohttp
+
+            from pipecat.runner.daily import configure
+            from pipecat.runner.types import DailyDialinRequest, DialinSettings
+
+            # Create Daily room with SIP capabilities
+            async with aiohttp.ClientSession() as session:
+                try:
+                    room_config = await configure(session, sip_caller_phone=data.get("From"))
+                except Exception as e:
+                    logger.error(f"Failed to create Daily room: {e}")
+                    raise HTTPException(
+                        status_code=500, detail=f"Failed to create Daily room: {str(e)}"
+                    )
+
+            # Get Daily API URL from environment, fallback to production
+            daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
+
+            # Get Daily API key from environment
+            daily_api_key = os.getenv("DAILY_API_KEY")
+            if not daily_api_key:
+                logger.error("DAILY_API_KEY not found in environment")
+                raise HTTPException(
+                    status_code=500, detail="DAILY_API_KEY not configured on server"
+                )
+
+            # Prepare dial-in settings matching Pipecat Cloud structure
+            dialin_settings = DialinSettings(
+                call_id=data.get("callId"),
+                call_domain=data.get("callDomain"),
+                To=data.get("To"),
+                From=data.get("From"),
+                sip_headers=data.get("sipHeaders"),
+            )
+
+            # Create request body matching Pipecat Cloud payload
+            request_body = DailyDialinRequest(
+                dialin_settings=dialin_settings,
+                daily_api_key=daily_api_key,
+                daily_api_url=daily_api_url,
+            )
+
+            # Start bot with dial-in context
+            bot_module = _get_bot_module()
+            runner_args = DailyRunnerArguments(
+                room_url=room_config.room_url,
+                token=room_config.token,
+                body=request_body.model_dump(),
+            )
+            runner_args.cli_args = args
+
+            asyncio.create_task(bot_module.bot(runner_args))
+
+            # Generate session ID
+            session_id = str(uuid.uuid4())
+
+            # Return response matching Pipecat Cloud format
+            return {
+                "dailyRoom": room_config.room_url,
+                "dailyToken": room_config.token,
+                "sessionId": session_id,
+            }
+
+
+def _setup_telephony_routes(app: FastAPI, args: argparse.Namespace):
     """Set up telephony-specific routes."""
     # XML response templates (Exotel doesn't use XML webhooks)
     XML_TEMPLATES = {
         "twilio": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="wss://{proxy}/ws"></Stream>
+    <Stream url="wss://{args.proxy}/ws"></Stream>
   </Connect>
   <Pause length="40"/>
 </Response>""",
         "telnyx": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="wss://{proxy}/ws" bidirectionalMode="rtp"></Stream>
+    <Stream url="wss://{args.proxy}/ws" bidirectionalMode="rtp"></Stream>
   </Connect>
   <Pause length="40"/>
 </Response>""",
         "plivo": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{proxy}/ws</Stream>
+  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{args.proxy}/ws</Stream>
 </Response>""",
     }
 
     @app.post("/")
     async def start_call():
         """Handle telephony webhook and return XML response."""
-        if transport_type == "exotel":
+        if args.transport == "exotel":
             # Exotel doesn't use POST webhooks - redirect to proper documentation
             logger.debug("POST Exotel endpoint - not used")
             return {
                 "error": "Exotel doesn't use POST webhooks",
-                "websocket_url": f"wss://{proxy}/ws",
+                "websocket_url": f"wss://{args.proxy}/ws",
                 "note": "Configure the WebSocket URL above in your Exotel App Bazaar Voicebot Applet",
             }
         else:
-            logger.debug(f"POST {transport_type.upper()} XML")
-            xml_content = XML_TEMPLATES.get(transport_type, "<Response></Response>")
+            logger.debug(f"POST {args.transport.upper()} XML")
+            xml_content = XML_TEMPLATES.get(args.transport, "<Response></Response>")
             return HTMLResponse(content=xml_content, media_type="application/xml")
 
     @app.websocket("/ws")
@@ -685,15 +788,15 @@ def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
         """Handle WebSocket connections for telephony."""
         await websocket.accept()
         logger.debug("WebSocket connection accepted")
-        await _run_telephony_bot(websocket)
+        await _run_telephony_bot(websocket, args)
 
     @app.get("/")
     async def start_agent():
         """Simple status endpoint for telephony transports."""
-        return {"status": f"Bot started with {transport_type}"}
+        return {"status": f"Bot started with {args.transport}"}
 
 
-async def _run_daily_direct():
+async def _run_daily_direct(args: argparse.Namespace):
     """Run Daily bot with direct connection (no FastAPI server)."""
     try:
         from pipecat.runner.daily import configure
@@ -709,6 +812,7 @@ async def _run_daily_direct():
         # Direct connections have no request body, so use empty dict
         runner_args = DailyRunnerArguments(room_url=room_url, token=token)
         runner_args.handle_sigint = True
+        runner_args.cli_args = args
 
         # Get the bot module and run it directly
         bot_module = _get_bot_module()
@@ -756,29 +860,38 @@ def runner_port() -> int:
     return RUNNER_PORT
 
 
-def main():
+def main(parser: Optional[argparse.ArgumentParser] = None):
     """Start the Pipecat development runner.
 
     Parses command-line arguments and starts a FastAPI server configured
-    for the specified transport type. The runner will discover and run
-    any bot() function found in the current directory.
+    for the specified transport type.
+
+    The runner discovers and runs any ``bot(runner_args)`` function found in the
+    calling module.
 
     Command-line arguments:
+       - --host: Server host address (default: localhost) 879
+       - --port: Server port (default: 7860)
+       - -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo, exotel)
+       - -x/--proxy: Public proxy hostname for telephony webhooks
+       - -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
+       - -f/--folder: Path to downloads folder
+       - --dialin: Enable Daily PSTN dial-in webhook handling (requires Daily transport)
+       - --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
+       - --whatsapp: Ensure requried WhatsApp environment variables are present
+       - -v/--verbose: Increase logging verbosity
 
     Args:
-        --host: Server host address (default: localhost)
-        --port: Server port (default: 7860)
-        -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo, exotel)
-        -x/--proxy: Public proxy hostname for telephony webhooks
-        --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
-        -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
-        -v/--verbose: Increase logging verbosity
+        parser: Optional custom argument parser. If provided, default runner
+            arguments are added to it so bots can define their own CLI
+            arguments. Custom arguments should not conflict with the default
+            ones. Custom args are accessible via `runner_args.cli_args`.
 
-    The bot file must contain a `bot(runner_args)` function as the entry point.
     """
     global RUNNER_DOWNLOADS_FOLDER, RUNNER_HOST, RUNNER_PORT
 
-    parser = argparse.ArgumentParser(description="Pipecat Development Runner")
+    if not parser:
+        parser = argparse.ArgumentParser(description="Pipecat Development Runner")
     parser.add_argument("--host", type=str, default=RUNNER_HOST, help="Host address")
     parser.add_argument("--port", type=int, default=RUNNER_PORT, help="Port number")
     parser.add_argument(
@@ -789,13 +902,7 @@ def main():
         default="webrtc",
         help="Transport type",
     )
-    parser.add_argument("--proxy", "-x", help="Public proxy host name")
-    parser.add_argument(
-        "--esp32",
-        action="store_true",
-        default=False,
-        help="Enable SDP munging for ESP32 compatibility (requires --host with IP address)",
-    )
+    parser.add_argument("-x", "--proxy", help="Public proxy host name")
     parser.add_argument(
         "-d",
         "--direct",
@@ -805,7 +912,19 @@ def main():
     )
     parser.add_argument("-f", "--folder", type=str, help="Path to downloads folder")
     parser.add_argument(
-        "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
+        "-v", "--verbose", action="count", default=0, help="Increase logging verbosity"
+    )
+    parser.add_argument(
+        "--dialin",
+        action="store_true",
+        default=False,
+        help="Enable Daily PSTN dial-in webhook handling (requires Daily transport)",
+    )
+    parser.add_argument(
+        "--esp32",
+        action="store_true",
+        default=False,
+        help="Enable SDP munging for ESP32 compatibility (requires --host with IP address)",
     )
     parser.add_argument(
         "--whatsapp",
@@ -832,6 +951,11 @@ def main():
         logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
         return
 
+    # Validate dial-in requirements
+    if args.dialin and args.transport != "daily":
+        logger.error("--dialin flag only works with Daily transport (-t daily)")
+        return
+
     # Log level
     logger.remove()
     logger.add(sys.stderr, level="TRACE" if args.verbose else "DEBUG")
@@ -843,7 +967,7 @@ def main():
         print()
 
         # Run direct Daily connection
-        asyncio.run(_run_daily_direct())
+        asyncio.run(_run_daily_direct(args))
         return
 
     # Print startup message for server-based transports
@@ -860,7 +984,13 @@ def main():
     elif args.transport == "daily":
         print()
         print(f"🚀 Bot ready!")
-        print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
+        if args.dialin:
+            print(
+                f"   → Daily dial-in webhook: http://{args.host}:{args.port}/daily-dialin-webhook"
+            )
+            print(f"   → Configure this URL in your Daily phone number settings")
+        else:
+            print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
         print()
 
     RUNNER_DOWNLOADS_FOLDER = args.folder
@@ -868,14 +998,7 @@ def main():
     RUNNER_PORT = args.port
 
     # Create the app with transport-specific setup
-    app = _create_server_app(
-        transport_type=args.transport,
-        host=args.host,
-        proxy=args.proxy,
-        esp32_mode=args.esp32,
-        whatsapp_enabled=args.whatsapp,
-        folder=args.folder,
-    )
+    app = _create_server_app(args)
 
     # Run the server
     uvicorn.run(app, host=args.host, port=args.port)

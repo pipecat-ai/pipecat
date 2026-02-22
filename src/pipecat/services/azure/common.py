@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,8 +7,6 @@
 """Language conversion utilities for Azure services."""
 
 from typing import Optional
-
-from loguru import logger
 
 from pipecat.transcriptions.language import Language, resolve_language
 

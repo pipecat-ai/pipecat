@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024-2025 Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -192,3 +192,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
         # Buffer should be empty
         self.assertEqual(self.aggregator.text.text, "")
+
+
+if __name__ == "__main__":
+    unittest.main()

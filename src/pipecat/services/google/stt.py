@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -29,12 +29,12 @@ from pydantic import BaseModel, Field, field_validator
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -439,6 +439,7 @@ class GoogleSTTService(STTService):
         location: str = "global",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        ttfs_p99_latency: Optional[float] = GOOGLE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Google STT service.
@@ -449,9 +450,11 @@ class GoogleSTTService(STTService):
             location: Google Cloud location (e.g., "global", "us-central1").
             sample_rate: Audio sample rate in Hertz.
             params: Configuration parameters for the service.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         params = params or GoogleSTTService.InputParams()
 
@@ -824,7 +827,6 @@ class GoogleSTTService(STTService):
         """
         if self._streaming_task:
             # Queue the audio data
-            await self.start_ttfb_metrics()
             await self.start_processing_metrics()
             await self._request_queue.put(audio)
         yield None
@@ -876,7 +878,6 @@ class GoogleSTTService(STTService):
                         )
                     else:
                         self._last_transcript_was_final = False
-                        await self.stop_ttfb_metrics()
                         await self.push_frame(
                             InterimTranscriptionFrame(
                                 transcript,

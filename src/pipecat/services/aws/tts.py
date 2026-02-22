@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,7 +10,6 @@ This module provides integration with Amazon Polly for text-to-speech synthesis,
 supporting multiple languages, voices, and SSML features.
 """
 
-import asyncio
 import os
 from typing import AsyncGenerator, List, Optional
 
@@ -254,11 +253,12 @@ class AWSPollyTTSService(TTSService):
         return ssml
 
     @traced_tts
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using AWS Polly.
 
         Args:
             text: The text to synthesize into speech.
+            context_id: The context ID for tracking audio frames.
 
         Yields:
             Frame: Audio frames containing the synthesized speech.
@@ -299,7 +299,7 @@ class AWSPollyTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                yield TTSStartedFrame()
+                yield TTSStartedFrame(context_id=context_id)
 
                 CHUNK_SIZE = self.chunk_size
 
@@ -307,16 +307,16 @@ class AWSPollyTTSService(TTSService):
                     chunk = audio_data[i : i + CHUNK_SIZE]
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1, context_id=context_id)
                         yield frame
 
-                yield TTSStoppedFrame()
+                yield TTSStoppedFrame(context_id=context_id)
         except (BotoCoreError, ClientError) as error:
             error_message = f"AWS Polly TTS error: {str(error)}"
             yield ErrorFrame(error=error_message)
 
         finally:
-            yield TTSStoppedFrame()
+            yield TTSStoppedFrame(context_id=context_id)
 
 
 class PollyTTSService(AWSPollyTTSService):

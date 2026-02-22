@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -74,6 +73,20 @@ class DeepgramFluxSTTService(WebsocketSTTService):
     Provides real-time speech recognition using Deepgram's WebSocket API with Flux capabilities.
     Supports configurable models, VAD events, and various audio processing options
     including advanced turn detection and EagerEndOfTurn events for improved conversational AI performance.
+
+    Event handlers available (in addition to WebsocketSTTService events):
+
+    - on_speech_started(service): Deepgram detected start of speech
+    - on_utterance_end(service): Deepgram detected end of utterance
+    - on_end_of_turn(service): Deepgram detected end of turn (EOT)
+    - on_eager_end_of_turn(service): Deepgram predicted end of turn (EagerEOT)
+    - on_turn_resumed(service): User resumed speaking after EagerEOT
+
+    Example::
+
+        @stt.event_handler("on_end_of_turn")
+        async def on_end_of_turn(service):
+            ...
     """
 
     class InputParams(BaseModel):
@@ -116,6 +129,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         model: str = "flux-general-en",
         flux_encoding: str = "linear16",
         params: Optional[InputParams] = None,
+        should_interrupt: bool = True,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT service.
@@ -129,6 +143,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 Raw signed little-endian 16-bit PCM encoding.
             params: InputParams instance containing detailed API configuration options.
                 If None, default parameters will be used.
+            should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
             **kwargs: Additional arguments passed to the parent WebsocketSTTService class.
 
         Examples:
@@ -160,12 +175,17 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         # was never destroyed.
         # So we can keep it here as false, because inside the method send_with_retry, it will
         # already try to reconnect if needed.
-        super().__init__(sample_rate=sample_rate, reconnect_on_error=False, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            reconnect_on_error=False,
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._url = url
         self._model = model
         self._params = params or DeepgramFluxSTTService.InputParams()
+        self._should_interrupt = should_interrupt
         self._flux_encoding = flux_encoding
         # This is the currently only supported language
         self._language = Language.EN
@@ -191,6 +211,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Establishes the WebSocket connection to the Deepgram Flux API and starts
         the background task for receiving transcription results.
         """
+        await super()._connect()
+
         await self._connect_websocket()
 
     async def _disconnect(self):
@@ -199,6 +221,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Gracefully disconnects from the Deepgram Flux API, cancels background tasks,
         and cleans up resources to prevent memory leaks.
         """
+        await super()._disconnect()
+
         try:
             await self._disconnect_websocket()
         except Exception as e:
@@ -591,8 +615,9 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
         logger.debug("User started speaking")
         self._user_is_speaking = True
-        await self.push_interruption_task_frame_and_wait()
         await self.broadcast_frame(UserStartedSpeakingFrame)
+        if self._should_interrupt:
+            await self.push_interruption_task_frame_and_wait()
         await self.start_metrics()
         await self._call_event_handler("on_start_of_turn", transcript)
         if transcript:
@@ -652,6 +677,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         average_confidence = self._calculate_average_confidence(data)
 
         if not self._params.min_confidence or average_confidence > self._params.min_confidence:
+            # EndOfTurn means Flux has determined the turn is complete,
+            # so this TranscriptionFrame is always finalized
             await self.push_frame(
                 TranscriptionFrame(
                     transcript,
@@ -659,6 +686,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                     time_now_iso8601(),
                     self._language,
                     result=data,
+                    finalized=True,
                 )
             )
         else:
@@ -668,8 +696,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         await self._handle_transcription(transcript, True, self._language)
         await self.stop_processing_metrics()
-        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
-        await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
         await self._call_event_handler("on_end_of_turn", transcript)
 
     async def _handle_eager_end_of_turn(self, transcript: str, data: Dict[str, Any]):

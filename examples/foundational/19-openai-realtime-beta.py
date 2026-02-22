@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -86,9 +86,8 @@ restaurant_function = FunctionSchema(
 tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
 
-# We store functions so objects (e.g. SileroVADAnalyzer) don't get
-# instantiated. The function will be called when the desired transport gets
-# selected.
+# We use lambdas to defer transport parameter creation until the transport
+# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -143,7 +142,6 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     llm = OpenAIRealtimeBetaLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         session_properties=session_properties,
-        start_audio_paused=False,
     )
 
     # you can either register a single function for all function calls, or specific functions

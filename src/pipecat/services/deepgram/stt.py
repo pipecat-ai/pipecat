@@ -1,12 +1,11 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Deepgram speech-to-text service implementation."""
 
-import asyncio
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -14,15 +13,17 @@ from loguru import logger
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -48,8 +49,18 @@ class DeepgramSTTService(STTService):
     """Deepgram speech-to-text service.
 
     Provides real-time speech recognition using Deepgram's WebSocket API.
-    Supports configurable models, languages, VAD events, and various audio
-    processing options.
+    Supports configurable models, languages, and various audio processing options.
+
+    Event handlers available (in addition to STTService events):
+
+    - on_speech_started(service): Deepgram detected start of speech
+    - on_utterance_end(service): Deepgram detected end of utterance
+
+    Example::
+
+        @stt.event_handler("on_speech_started")
+        async def on_speech_started(service):
+            ...
     """
 
     def __init__(
@@ -61,6 +72,8 @@ class DeepgramSTTService(STTService):
         sample_rate: Optional[int] = None,
         live_options: Optional[LiveOptions] = None,
         addons: Optional[Dict] = None,
+        should_interrupt: bool = True,
+        ttfs_p99_latency: Optional[float] = DEEPGRAM_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Deepgram STT service.
@@ -76,10 +89,20 @@ class DeepgramSTTService(STTService):
             sample_rate: Audio sample rate. If None, uses default or live_options value.
             live_options: Deepgram LiveOptions for detailed configuration.
             addons: Additional Deepgram features to enable.
+            should_interrupt: Determine whether the bot should be interrupted when Deepgram VAD events are enabled and the system detects that the user is speaking.
+
+                .. deprecated:: 0.0.99
+                    This parameter will be removed along with `vad_events` support.
+
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
+
+        Note:
+            The `vad_events` option in LiveOptions is deprecated as of version 0.0.99 and will be removed in a future version. Please use the Silero VAD instead.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         if url:
             import warnings
@@ -98,7 +121,7 @@ class DeepgramSTTService(STTService):
             model="nova-3-general",
             channels=1,
             interim_results=True,
-            smart_format=True,
+            smart_format=False,
             punctuate=True,
             profanity_filter=True,
             vad_events=False,
@@ -119,6 +142,19 @@ class DeepgramSTTService(STTService):
         self.set_model_name(merged_options["model"])
         self._settings = merged_options
         self._addons = addons
+        self._should_interrupt = should_interrupt
+
+        if merged_options.get("vad_events"):
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'vad_events' parameter is deprecated and will be removed in a future version. "
+                    "Please use the Silero VAD instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
         self._client = DeepgramClient(
             api_key,
@@ -255,9 +291,8 @@ class DeepgramSTTService(STTService):
             # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
             await self._connection.finish()
 
-    async def start_metrics(self):
-        """Start TTFB and processing metrics collection."""
-        await self.start_ttfb_metrics()
+    async def _start_metrics(self):
+        """Start processing metrics collection for this utterance."""
         await self.start_processing_metrics()
 
     async def _on_error(self, *args, **kwargs):
@@ -271,11 +306,15 @@ class DeepgramSTTService(STTService):
         await self._connect()
 
     async def _on_speech_started(self, *args, **kwargs):
-        await self.start_metrics()
+        await self._start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
+        await self.broadcast_frame(UserStartedSpeakingFrame)
+        if self._should_interrupt:
+            await self.push_interruption_task_frame_and_wait()
 
     async def _on_utterance_end(self, *args, **kwargs):
         await self._call_event_handler("on_utterance_end", *args, **kwargs)
+        await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     @traced_stt
     async def _handle_transcription(
@@ -295,8 +334,12 @@ class DeepgramSTTService(STTService):
             language = result.channel.alternatives[0].languages[0]
             language = Language(language)
         if len(transcript) > 0:
-            await self.stop_ttfb_metrics()
             if is_final:
+                # Check if this response is from a finalize() call.
+                # Only mark as finalized when both we requested it AND Deepgram confirms it.
+                from_finalize = getattr(result, "from_finalize", False)
+                if from_finalize:
+                    self.confirm_finalize()
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,
@@ -329,10 +372,12 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame) and not self.vad_enabled:
+        if isinstance(frame, VADUserStartedSpeakingFrame) and not self.vad_enabled:
             # Start metrics if Deepgram VAD is disabled & pipeline VAD has detected speech
-            await self.start_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._start_metrics()
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
+            # Mark that we're awaiting a from_finalize response
+            self.request_finalize()
             await self._connection.finalize()
             logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
+from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -63,6 +64,7 @@ class AzureSTTService(STTService):
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
         endpoint_id: Optional[str] = None,
+        ttfs_p99_latency: Optional[float] = AZURE_TTFS_P99,
         **kwargs,
     ):
         """Initialize the Azure STT service.
@@ -73,9 +75,11 @@ class AzureSTTService(STTService):
             language: Language for speech recognition. Defaults to English (US).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             endpoint_id: Custom model endpoint id.
+            ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
+                Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
 
         self._speech_config = SpeechConfig(
             subscription=api_key,
@@ -116,7 +120,6 @@ class AzureSTTService(STTService):
         """
         try:
             await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
             if self._audio_stream:
                 self._audio_stream.write(audio)
             yield None
@@ -191,7 +194,6 @@ class AzureSTTService(STTService):
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
     def _on_handle_recognized(self, event):

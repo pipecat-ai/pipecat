@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2024-2026, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,8 +7,6 @@
 """Base notifier interface for Pipecat."""
 
 import warnings
-
-from pipecat.utils.sync.base_notifier import BaseNotifier
 
 with warnings.catch_warnings():
     warnings.simplefilter("always")
