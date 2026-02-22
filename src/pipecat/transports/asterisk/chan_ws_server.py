@@ -11,10 +11,8 @@ It implementes audio buffering, flow-controlled audio streaming and and some bas
 """
 
 import asyncio
-import io
 import time
-import wave
-from typing import Awaitable, Callable, Optional
+from typing import Optional
 
 from loguru import logger
 from pydantic import BaseModel
