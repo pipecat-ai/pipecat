@@ -461,6 +461,8 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+            # Push TranscriptionFrame downstream so clients can receive user transcriptions
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
