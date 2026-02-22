@@ -27,7 +27,6 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
@@ -185,6 +184,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._is_open = False
         self._is_paused = False
         self._position = timedelta(0)
+        self._waiting_for_close = False
 
         # Session metadata
         self._conversation_id: Optional[str] = None
@@ -222,6 +222,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
     def is_paused(self) -> bool:
         """Check if audio streaming is paused."""
         return self._is_paused
+
+    @property
+    def is_waiting_for_close(self) -> bool:
+        """Check if server-initiated disconnect is waiting for close."""
+        return self._waiting_for_close
 
     @property
     def participant(self) -> Optional[Dict[str, Any]]:
@@ -394,6 +399,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         )
 
         self._is_open = True
+        self._waiting_for_close = False
 
         logger.debug(f"AudioHook session opened: {self._session_id}")
 
@@ -438,6 +444,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         )
 
         self._is_open = False
+        self._waiting_for_close = False
         logger.debug(f"AudioHook session closed: {self._session_id}")
 
         return msg
@@ -495,6 +502,10 @@ class GenesysAudioHookSerializer(FrameSerializer):
     ) -> Dict[str, Any]:
         """Create a 'disconnect' message to initiate session termination.
 
+        This starts a server-initiated shutdown. The transport should keep the
+        websocket open until Genesys sends a `close` request, then answer with
+        `closed`.
+
         Args:
             reason: Disconnect reason (e.g., "completed", "error").
             action: Action to take ("transfer" to agent, "finished" if completed).
@@ -522,6 +533,56 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         logger.debug(f"AudioHook disconnect: reason={reason}, action={action}")
         return msg
+
+    def _start_disconnect(
+        self,
+        reason: str = "completed",
+        action: str = "transfer",
+        output_variables: Optional[Dict[str, Any]] = None,
+        info: Optional[str] = None,
+    ) -> Dict[str, Any] | None:
+        """Start server-initiated disconnect once per session."""
+        if not self._is_open:
+            logger.debug("Ignoring disconnect request because session is not open")
+            return None
+
+        if self._waiting_for_close:
+            logger.debug("Ignoring duplicate disconnect request while waiting for close")
+            return None
+
+        self._waiting_for_close = True
+        logger.info("AudioHook disconnect initiated by server, waiting for close from Genesys")
+
+        return self.create_disconnect_message(
+            reason=reason,
+            action=action,
+            output_variables=output_variables,
+            info=info,
+        )
+
+    def create_disconnect_frame(
+        self,
+        reason: str = "completed",
+        action: str = "transfer",
+        output_variables: Optional[Dict[str, Any]] = None,
+        info: Optional[str] = None,
+    ) -> OutputTransportMessageUrgentFrame | None:
+        """Create an urgent transport frame to initiate disconnect.
+
+        This lets applications request protocol disconnect without sending
+        EndFrame/CancelFrame yet, so transport shutdown can happen after the
+        close/closed handshake completes.
+        """
+        disconnect_msg = self._start_disconnect(
+            reason=reason,
+            action=action,
+            output_variables=output_variables,
+            info=info,
+        )
+        if not disconnect_msg:
+            return None
+
+        return OutputTransportMessageUrgentFrame(message=disconnect_msg)
 
     def create_error_message(
         self,
@@ -558,9 +619,14 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         Handles conversion of various frame types to AudioHook messages:
         - AudioRawFrame -> Binary PCMU audio data (resampled to 8kHz)
-        - EndFrame/CancelFrame -> Disconnect message (JSON)
+        - EndFrame/CancelFrame -> One disconnect message (JSON), then wait for close
         - InterruptionFrame -> Barge-in event (JSON)
         - OutputTransportMessageFrame -> Pass-through JSON
+
+        For strict AudioHook shutdown sequencing, applications can call
+        `create_disconnect_frame()` and delay EndFrame/CancelFrame until
+        the close/closed handshake has finished. Session output variables are
+        returned in `closed`, not in this automatic `disconnect` path.
 
         Args:
             frame: The Pipecat frame to serialize.
@@ -570,14 +636,13 @@ class GenesysAudioHookSerializer(FrameSerializer):
             the frame type is not handled or session is not open.
         """
         if isinstance(frame, (EndFrame, CancelFrame)):
-            return json.dumps(
-                self.create_disconnect_message(
-                    output_variables=self.output_variables, reason="completed"
-                )
+            disconnect_msg = self._start_disconnect(
+                reason="completed",
             )
+            return json.dumps(disconnect_msg) if disconnect_msg else None
 
         elif isinstance(frame, AudioRawFrame):
-            if not self._is_open or self._is_paused:
+            if not self._is_open or self._is_paused or self._waiting_for_close:
                 return None
 
             data = frame.audio
@@ -775,6 +840,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
             OutputTransportMessageUrgentFrame with the 'opened' response.
         """
         self._session_id = message.get("id", str(uuid.uuid4()))
+        self._waiting_for_close = False
 
         params = message.get("parameters", {})
         self._conversation_id = params.get("conversationId")
@@ -841,6 +907,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         logger.info(f"🔴 Genesys closed the connection: {reason}")
 
         self._is_open = False
+        self._waiting_for_close = False
 
         logger.info(f"Sending closed response to Genesys...")
 
