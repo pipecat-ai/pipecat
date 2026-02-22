@@ -433,9 +433,10 @@ class AsteriskWSServerOutputTransport(BaseOutputTransport):
             raise ValueError("MEDIA_START message missing ptime")
 
         # Update internal parameters
-        self._optimal_frame_size = optimal_frame_size
+        self._optimal_frame_size = int(optimal_frame_size)
         logger.debug(f"{self} optimal frame size set to {self._optimal_frame_size} bytes")
 
+        ptime = int(ptime)
         if ptime / 1000 != self._ptime:
             self._ptime = ptime / 1000  # convert to seconds
             logger.debug(f"{self} ptime set to {self._ptime} seconds")
