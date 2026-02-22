@@ -496,9 +496,6 @@ class GenesysAudioHookSerializer(FrameSerializer):
     def create_disconnect_message(
         self,
         reason: str = "completed",
-        action: str = "transfer",
-        output_variables: Optional[Dict[str, Any]] = None,
-        info: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a 'disconnect' message to initiate session termination.
 
@@ -508,38 +505,23 @@ class GenesysAudioHookSerializer(FrameSerializer):
 
         Args:
             reason: Disconnect reason (e.g., "completed", "error").
-            action: Action to take ("transfer" to agent, "finished" if completed).
-            output_variables: Custom output variables to pass back to Genesys.
-            info: Optional additional information.
 
         Returns:
             Dictionary of the disconnect message.
         """
         parameters: Dict[str, Any] = {"reason": reason}
 
-        # Build outputVariables
-        out_vars = {"action": action}
-        if output_variables:
-            out_vars.update(output_variables)
-        parameters["outputVariables"] = out_vars
-
-        if info:
-            parameters["info"] = info
-
         msg = self._create_message(
             AudioHookMessageType.DISCONNECT,
             parameters=parameters,
         )
 
-        logger.debug(f"AudioHook disconnect: reason={reason}, action={action}")
+        logger.debug(f"AudioHook disconnect: reason={reason}")
         return msg
 
     def _start_disconnect(
         self,
         reason: str = "completed",
-        action: str = "transfer",
-        output_variables: Optional[Dict[str, Any]] = None,
-        info: Optional[str] = None,
     ) -> Dict[str, Any] | None:
         """Start server-initiated disconnect once per session."""
         if not self._is_open:
@@ -553,19 +535,11 @@ class GenesysAudioHookSerializer(FrameSerializer):
         self._waiting_for_close = True
         logger.info("AudioHook disconnect initiated by server, waiting for close from Genesys")
 
-        return self.create_disconnect_message(
-            reason=reason,
-            action=action,
-            output_variables=output_variables,
-            info=info,
-        )
+        return self.create_disconnect_message(reason=reason)
 
     def create_disconnect_frame(
         self,
         reason: str = "completed",
-        action: str = "transfer",
-        output_variables: Optional[Dict[str, Any]] = None,
-        info: Optional[str] = None,
     ) -> OutputTransportMessageUrgentFrame | None:
         """Create an urgent transport frame to initiate disconnect.
 
@@ -573,12 +547,7 @@ class GenesysAudioHookSerializer(FrameSerializer):
         EndFrame/CancelFrame yet, so transport shutdown can happen after the
         close/closed handshake completes.
         """
-        disconnect_msg = self._start_disconnect(
-            reason=reason,
-            action=action,
-            output_variables=output_variables,
-            info=info,
-        )
+        disconnect_msg = self._start_disconnect(reason=reason)
         if not disconnect_msg:
             return None
 

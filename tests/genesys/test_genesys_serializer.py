@@ -126,34 +126,27 @@ class TestGenesysAudioHookSerializer:
         """Test creating a disconnect message."""
         serializer = GenesysAudioHookSerializer()
 
-        msg = serializer.create_disconnect_message(
-            reason="completed",
-            action="transfer",
-        )
+        msg = serializer.create_disconnect_message(reason="completed")
 
         assert msg["type"] == "disconnect"
         assert msg["parameters"]["reason"] == "completed"
-        assert msg["parameters"]["outputVariables"]["action"] == "transfer"
+        assert "outputVariables" not in msg["parameters"]
 
-    def test_create_disconnect_message_with_output_variables(self):
-        """Test creating a disconnect message with custom output variables."""
+    def test_create_disconnect_message_with_custom_reason(self):
+        """Test creating a disconnect message with a custom reason."""
         serializer = GenesysAudioHookSerializer()
 
-        msg = serializer.create_disconnect_message(
-            reason="completed",
-            action="finished",
-            output_variables={"result": "success", "code": "123"},
-        )
+        msg = serializer.create_disconnect_message(reason="error")
 
-        assert msg["parameters"]["outputVariables"]["result"] == "success"
-        assert msg["parameters"]["outputVariables"]["code"] == "123"
+        assert msg["parameters"]["reason"] == "error"
+        assert "outputVariables" not in msg["parameters"]
 
     def test_create_disconnect_frame(self):
         """Test creating an urgent disconnect transport frame."""
         serializer = GenesysAudioHookSerializer()
         serializer._is_open = True
 
-        frame = serializer.create_disconnect_frame(reason="completed", action="finished")
+        frame = serializer.create_disconnect_frame(reason="completed")
 
         assert frame is not None
         assert isinstance(frame, OutputTransportMessageUrgentFrame)
@@ -445,7 +438,7 @@ class TestGenesysAudioHookSerializer:
         assert payload is not None
         message = json.loads(payload)
         assert message["type"] == "disconnect"
-        assert message["parameters"]["outputVariables"] == {"action": "transfer"}
+        assert "outputVariables" not in message["parameters"]
 
     @pytest.mark.asyncio
     async def test_serialize_audio_returns_none_while_waiting_for_close(self):
