@@ -209,6 +209,12 @@ class AsteriskWsFrameSerializer(FrameSerializer):
                 logger.warning(f"Invalid DTMF digit received: {digit}")
                 return None
         return None
+    
+    def form_command(self, command: str) -> str:
+        if self._asterisk_command_format == "plain-text":
+            return command
+        else:
+            return f'{{"command": "{command}"}}'
 
     @property
     def type(self) -> FrameSerializerType:
