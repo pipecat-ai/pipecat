@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
     StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.serializers.asterisk import AsteriskWsFrameSerializer
+from pipecat.serializers.asterisk_ws_channel import AsteriskWsFrameSerializer
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -479,6 +479,18 @@ class AsteriskWSServerOutputTransport(BaseOutputTransport):
         # Start the buffer consumer and state monitor tasks
         self._buffer_state_monitor_task = self.create_task(self._buffer_state_monitor())
         self._buffer_consumer_task = self.create_task(self._buffer_consumer())
+
+    async def _write_frame(self, frame: Frame):
+        """Serialize and send a frame to the WebSocket client."""
+        if not self._params.serializer:
+            return
+
+        try:
+            payload = await self._params.serializer.serialize(frame)
+            if payload and self._websocket:
+                await self._websocket.send(payload)
+        except Exception as e:
+            logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
     async def _write_to_buffer(self, frame: OutputAudioRawFrame):
         """Write an raw audio bytes to the local audio buffer."""
