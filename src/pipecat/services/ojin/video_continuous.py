@@ -405,12 +405,6 @@ class OjinVideoService(FrameProcessor):
                 self._is_speaking = not is_silence
 
                 if not is_silence:
-                    if self._interrupting and len(self._video_frames) > MIN_FRAMES_BUFFER:
-                        skip_count += 1
-                        if skip_count % 2 == 0:
-                            self._video_frames.popleft()
-                        continue
-
                     if self._latency_start_ts is not None:
                         play_ts = time.perf_counter()
 
