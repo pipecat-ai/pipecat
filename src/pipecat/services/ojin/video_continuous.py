@@ -231,7 +231,6 @@ class OjinVideoService(FrameProcessor):
         elif isinstance(frame, TTSStartedFrame):
             logger.warning("TTSStartedFrame received")
             self._last_tts_sent = time.perf_counter()
-            self._interrupting = False
             if self._latency_start_ts is None:
                 self._latency_start_ts = time.perf_counter()
             await self.push_frame(frame, direction)
@@ -250,7 +249,6 @@ class OjinVideoService(FrameProcessor):
                 logger.debug("Interrupting, stopping audio playback")
                 self._interrupting = True
                 await self._client.send_message(OjinCancelInteractionMessage())
-                await self._stop_audio_playback()
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -407,6 +405,12 @@ class OjinVideoService(FrameProcessor):
                 self._is_speaking = not is_silence
 
                 if not is_silence:
+                    if self._interrupting and len(self._video_frames) > MIN_FRAMES_BUFFER:
+                        skip_count += 1
+                        if skip_count % 2 == 0:
+                            self._video_frames.popleft()
+                        continue
+
                     if self._latency_start_ts is not None:
                         play_ts = time.perf_counter()
 
@@ -425,6 +429,11 @@ class OjinVideoService(FrameProcessor):
                         # Encoding: measured after encode_and_send below
                         self._pending_latency_report = (inference_s, buffer_s)
                         self._latency_start_ts = None
+                elif self._interrupting:
+                    logger.debug("Interrupting, skipping silence frame")
+                    self._interrupting = False
+                    self._stop_audio_playback()
+                    continue
 
                 if video_frame.volume > 0 and not self._audio_playback_task:
                     await self._start_audio_playback()
