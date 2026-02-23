@@ -379,13 +379,13 @@ class OjinVideoService(FrameProcessor):
 
             # Sleep for most of the wait time
             now = time.perf_counter()
-            sleep_time = next_frame_time - now - 0.005
+            sleep_time = next_frame_time - now  # - 0.005
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
 
             # Spin lock for precise timing
-            while time.perf_counter() < next_frame_time:
-                pass
+            # while time.perf_counter() < next_frame_time:
+            #     pass
 
             next_frame_time += self._frame_duration
 
@@ -523,7 +523,7 @@ class OjinVideoService(FrameProcessor):
 
         next_push_time = time.perf_counter()
         try:
-            while True:
+            while self._initialized:
                 if not self._speech_buffer:
                     now = time.perf_counter()
                     if empty_since is None:
@@ -617,6 +617,7 @@ class OjinVideoService(FrameProcessor):
             await self.cancel_task(self._video_playback_task)
             self._video_playback_task = None
 
+        self._stop_audio_playback()
         logger.debug(f"OjinVideoService {self._settings.config_id} stopped")
 
     async def _check_started_speaking(self):
