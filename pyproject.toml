@@ -38,8 +38,9 @@ dependencies = [
     # Pinning numba to resolve package dependencies
     "numba==0.61.2",
     "wait_for2>=0.4.1; python_version<'3.12'",
-    # Pipecat optionals
-    "pipecat-ai[local-smart-turn-v3]",
+    # Local smart turn v3 (inlined to avoid self-referential dependency)
+    "transformers",
+    "onnxruntime~=1.23.2",
 ]
 
 [project.urls]
