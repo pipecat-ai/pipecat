@@ -19,6 +19,7 @@ from pipecat.turns.user_start import (
 from pipecat.turns.user_stop import (
     BaseUserTurnStopStrategy,
     ExternalUserTurnStopStrategy,
+    PreemptiveUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
 )
 
@@ -48,6 +49,26 @@ class UserTurnStrategies:
             self.start = [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
         if not self.stop:
             self.stop = [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+
+
+@dataclass
+class PreemptiveUserTurnStrategies(UserTurnStrategies):
+    """Default container for preemptive user turn start and stop strategies.
+
+    This class provides a convenience default for configuring preemptive turn
+    detection. It preconfigures `UserTurnStrategies` with
+    `PreemptiveUserTurnStopStrategy`, which triggers LLM generation as soon as
+    VAD detects silence and any transcription text is available, without waiting
+    for ML turn analysis or finalized transcripts.
+
+    The existing interruption mechanism handles cancellation if the user resumes
+    speaking, so no additional cancellation logic is needed.
+    """
+
+    def __post_init__(self):
+        if not self.start:
+            self.start = [VADUserTurnStartStrategy(), TranscriptionUserTurnStartStrategy()]
+        self.stop = [PreemptiveUserTurnStopStrategy()]
 
 
 @dataclass

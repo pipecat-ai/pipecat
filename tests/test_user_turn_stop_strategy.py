@@ -16,7 +16,11 @@ from pipecat.frames.frames import (
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.turns.user_stop import ExternalUserTurnStopStrategy, SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_stop import (
+    ExternalUserTurnStopStrategy,
+    PreemptiveUserTurnStopStrategy,
+    SpeechTimeoutUserTurnStopStrategy,
+)
 from pipecat.utils.asyncio.task_manager import TaskManager, TaskManagerParams
 
 AGGREGATION_TIMEOUT = 0.1
@@ -492,6 +496,238 @@ class TestSpeechTimeoutUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Finalized transcript received after timeout, triggers immediately
         self.assertTrue(should_start)
+
+
+class TestPreemptiveUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.task_manager = TaskManager()
+        self.task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    async def _create_strategy(self):
+        """Create strategy and configure STT timeout via metadata frame."""
+        strategy = PreemptiveUserTurnStopStrategy()
+        await strategy.setup(self.task_manager)
+        # Set STT timeout via metadata frame (as would happen in real pipeline)
+        await strategy.process_frame(
+            STTMetadataFrame(service_name="test", ttfs_p99_latency=STT_TIMEOUT)
+        )
+        return strategy
+
+    async def test_ste(self):
+        """VAD start → Transcription → VAD stop: fires immediately on stop."""
+        strategy = await self._create_strategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # T
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        self.assertIsNone(should_start)
+
+        # E - triggers immediately since we have text
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertTrue(should_start)
+
+    async def test_set(self):
+        """VAD start → VAD stop → Transcription: fires immediately on transcription."""
+        strategy = await self._create_strategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # E
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # T - triggers immediately since VAD already stopped
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)
+
+    async def test_seit(self):
+        """VAD start → VAD stop → Interim → Transcription: fires immediately on transcription."""
+        strategy = await self._create_strategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # E
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # I - interim transcription, not a TranscriptionFrame
+        await strategy.process_frame(
+            InterimTranscriptionFrame(text="How", user_id="cat", timestamp="")
+        )
+        self.assertIsNone(should_start)
+
+        # T - triggers immediately since VAD already stopped
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        self.assertTrue(should_start)
+
+    async def test_site(self):
+        """VAD start → Interim → Transcription → VAD stop: fires immediately on stop."""
+        strategy = await self._create_strategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # I
+        await strategy.process_frame(
+            InterimTranscriptionFrame(text="Hello!", user_id="cat", timestamp="")
+        )
+        self.assertIsNone(should_start)
+
+        # T
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        self.assertIsNone(should_start)
+
+        # E - triggers immediately since we have text
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertTrue(should_start)
+
+    async def test_se_no_text(self):
+        """VAD start → VAD stop with no transcription: does NOT fire."""
+        strategy = await self._create_strategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # S
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # E
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        # Wait for any fallback timeout to expire
+        await asyncio.sleep(0.2)
+        self.assertIsNone(should_start)
+
+    async def test_st1et2(self):
+        """Two clean turns: fires on each VAD stop, resets between turns."""
+        strategy = await self._create_strategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # Turn 1: S → T1 → E
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        self.assertIsNone(should_start)
+
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertTrue(should_start)
+
+        # Reset for next turn
+        should_start = None
+        await strategy.reset()
+
+        # Turn 2: S → T2 → E
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertIsNone(should_start)
+
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        self.assertIsNone(should_start)
+
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertTrue(should_start)
+
+    async def test_t(self):
+        """Transcription without VAD: fires after fallback timeout."""
+        strategy = await self._create_strategy()
+
+        should_start = None
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal should_start
+            should_start = True
+
+        # T - no VAD, starts fallback timeout
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        self.assertIsNone(should_start)
+
+        # Fallback timeout fires (STT_TIMEOUT is 0, so it fires quickly)
+        await asyncio.sleep(0.1)
+        self.assertTrue(should_start)
+
+    async def test_set1t2(self):
+        """VAD start → VAD stop → T1 → T2: fires on T1 immediately, ignores T2."""
+        strategy = await self._create_strategy()
+
+        trigger_count = 0
+
+        @strategy.event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(strategy, params):
+            nonlocal trigger_count
+            trigger_count += 1
+
+        # S
+        await strategy.process_frame(VADUserStartedSpeakingFrame())
+        self.assertEqual(trigger_count, 0)
+
+        # E
+        await strategy.process_frame(VADUserStoppedSpeakingFrame())
+        self.assertEqual(trigger_count, 0)
+
+        # T1 - triggers immediately
+        await strategy.process_frame(TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""))
+        self.assertEqual(trigger_count, 1)
+
+        # T2 - should NOT trigger again (already triggered this turn)
+        await strategy.process_frame(
+            TranscriptionFrame(text="How are you?", user_id="cat", timestamp="")
+        )
+        self.assertEqual(trigger_count, 1)
 
 
 class TestExternalUserTurnStopStrategy(unittest.IsolatedAsyncioTestCase):
