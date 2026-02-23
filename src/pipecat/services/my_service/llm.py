@@ -3,9 +3,15 @@ from typing import Any, Optional
 import asyncio
 from openai import AsyncOpenAI
 
-
-
+from pipecat.frames.frames import (
+    Frame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 
 
@@ -44,9 +50,41 @@ class MyLLMService(LLMService):
             result = self.get_current_time()
             return result
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        # print("================================================")
+        # print("into my LLM process_frame")
+        # print("frame", frame, "direction", direction)
+
+        """Process frames: run LLM on context frames and push all other frames through.
+
+        StartFrame, EndFrame, CancelFrame, etc. must be pushed so the pipeline
+        can complete startup (agent ready) and shutdown.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, LLMContextFrame):
+            # print("into if frame")
+            try:
+                # print("frame", frame)
+                # print("direction", direction)
+                params = self.get_llm_adapter().get_llm_invocation_params(frame.context)
+                messages = params["messages"]
+                response = await self.generate(messages)
+                await self.push_frame(LLMFullResponseStartFrame())
+                if response.text:
+                    await self.push_frame(LLMTextFrame(text=response.text))
+            except Exception as e:
+                await self.push_error(error_msg=str(e) or type(e).__name__, exception=e)
+            finally:
+                await self.push_frame(LLMFullResponseEndFrame())
+        else:
+            # print("into else frame")
+            await self.push_frame(frame, direction)
           
     
-    async def generate(self, messages: list[LLMContext]) -> LLMResponse:
+    async def generate(self, messages: list) -> LLMResponse:
+        print("================================================")
+        print("into my LLM generate")
         client = AsyncOpenAI(api_key=self.api_key)
 
         messages = self._to_provider_messages(messages)
@@ -60,8 +98,8 @@ class MyLLMService(LLMService):
         if not last_message:
             return LLMResponse(text= "", raw = None)
             
-
         try:
+            print("into MyLLM generate try block")
             response = await client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -97,6 +135,8 @@ class MyLLMService(LLMService):
 
                 response_text = response.choices[0].message.content
 
+                print("before return LLMResponse")
+
                 return LLMResponse(
                 text=response_text,
                 raw=response
@@ -104,6 +144,8 @@ class MyLLMService(LLMService):
                 
             else:
                 response_text = response.choices[0].message.content
+                print("response_text", response_text)
+                print("================================================")
                 return LLMResponse(
                 text=response_text,
                 raw=response

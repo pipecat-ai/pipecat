@@ -658,7 +658,6 @@ def _setup_daily_routes(app: FastAPI, dialin_enabled: bool = False):
 
     @app.post("/start")
     async def start_agent(request: Request):
-        print("Daily start request received")
         """Handler for /start endpoints.
 
         Expects POST body like::
