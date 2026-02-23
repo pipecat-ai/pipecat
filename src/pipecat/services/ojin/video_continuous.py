@@ -377,13 +377,13 @@ class OjinVideoService(FrameProcessor):
 
             # Sleep for most of the wait time
             now = time.perf_counter()
-            sleep_time = next_frame_time - now - 0.005
+            sleep_time = next_frame_time - now
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
 
-            # Spin lock for precise timing
-            while time.perf_counter() < next_frame_time:
-                pass
+            # # Spin lock for precise timing
+            # while time.perf_counter() < next_frame_time:
+            #     pass
 
             next_frame_time += self._frame_duration
 
