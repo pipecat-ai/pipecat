@@ -241,7 +241,7 @@ class OjinVideoService(FrameProcessor):
             if not self._interrupting and self._is_speaking:
                 logger.debug("Interrupting, stopping audio playback")
                 self._interrupting = True
-                self._stop_audio_playback()
+                await self._stop_audio_playback()
                 await self._client.send_message(OjinCancelInteractionMessage())
             await self.push_frame(frame, direction)
         else:
@@ -421,7 +421,6 @@ class OjinVideoService(FrameProcessor):
                 elif self._interrupting:
                     logger.debug("Interrupting, skipping silence frame")
                     self._interrupting = False
-                    self._stop_audio_playback()
                     continue
 
                 if video_frame.volume > 0 and not self._audio_playback_task:
