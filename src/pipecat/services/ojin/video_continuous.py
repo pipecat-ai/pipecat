@@ -45,13 +45,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 @dataclass
-class OjinVideoStartFrame(Frame):
-    """Frame indicating that the service has been initialized."""
-
-    session_data: Optional[dict] = None
-
-
-@dataclass
 class OjinVideoInitializedFrame(Frame):
     """Frame indicating that the service has been initialized."""
 
@@ -310,12 +303,6 @@ class OjinVideoService(FrameProcessor):
             if self._video_playback_task is None:
                 self._video_playback_task = self.create_task(self._video_playback_loop())
 
-            # Notify that we're ready
-            self._initialized = True
-            initialized_frame = OjinVideoInitializedFrame(session_data=self._session_data)
-            await self.push_frame(initialized_frame, direction=FrameDirection.DOWNSTREAM)
-            await self.push_frame(initialized_frame, direction=FrameDirection.UPSTREAM)
-
         elif isinstance(message, OjinInteractionResponseMessage):
             frame_idx = message.index
             samples = [
@@ -370,7 +357,7 @@ class OjinVideoService(FrameProcessor):
         silence_bytes_per_frame = b"\x00" * BYTES_PER_FRAME
         skip_count = 0
 
-        while self._initialized:
+        while True:
             # Check speaking state notifications
             await self._check_started_speaking()
             await self._check_stopped_speaking()
@@ -395,6 +382,13 @@ class OjinVideoService(FrameProcessor):
 
             # Check if we have a ready video frame
             if len(self._video_frames) > 0:
+                if not self._initialized:
+                    # Notify that we're ready
+                    self._initialized = True
+                    initialized_frame = OjinVideoInitializedFrame(session_data=self._session_data)
+                    await self.push_frame(initialized_frame, direction=FrameDirection.DOWNSTREAM)
+                    await self.push_frame(initialized_frame, direction=FrameDirection.UPSTREAM)
+
                 video_frame = self._video_frames.popleft()
                 frame_count += 1
                 image_bytes = video_frame.image_bytes
