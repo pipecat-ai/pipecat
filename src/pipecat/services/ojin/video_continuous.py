@@ -621,6 +621,7 @@ class OjinVideoService(FrameProcessor):
             return
 
         elapsed = time.perf_counter() - self._first_tts_received_at
+
         if elapsed >= self._settings.started_speaking_delay_s:
             self._bot_speaking = True
             # logger.info(f"Bot started speaking after {elapsed:.3f}s")
