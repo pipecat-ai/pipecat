@@ -158,7 +158,6 @@ class OjinVideoService(FrameProcessor):
 
         # Playback state
         self.fps = 25
-
         self._initialized = False
         self._is_speaking = False
         self._current_frame_idx = -1
@@ -167,6 +166,7 @@ class OjinVideoService(FrameProcessor):
 
         # Audio input handling
         self._resampler = create_default_resampler()
+        self._last_tts_sent: Optional[float] = None
 
         # Tasks
         self._receive_msg_task: Optional[asyncio.Task] = None
@@ -230,6 +230,7 @@ class OjinVideoService(FrameProcessor):
 
         elif isinstance(frame, TTSStartedFrame):
             logger.warning("TTSStartedFrame received")
+            self._last_tts_sent = time.perf_counter()
             self._interrupting = False
             if self._latency_start_ts is None:
                 self._latency_start_ts = time.perf_counter()
@@ -244,8 +245,9 @@ class OjinVideoService(FrameProcessor):
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStartedSpeakingFrame):
+        elif isinstance(frame, StartInterruptionFrame):
             if not self._interrupting and self._is_speaking:
+                logger.debug("Interrupting, stopping audio playback")
                 self._interrupting = True
                 await self._client.send_message(OjinCancelInteractionMessage())
                 await self._stop_audio_playback()
@@ -259,6 +261,8 @@ class OjinVideoService(FrameProcessor):
         The server maintains a virtual timeline and will generate silence
         when no client audio is available.
         """
+        if not self._initialized:
+            return
         # Resample audio to target sample rate
         resampled_audio = await self._resampler.resample(
             frame.audio, frame.sample_rate, OJIN_PERSONA_SAMPLE_RATE
@@ -284,6 +288,10 @@ class OjinVideoService(FrameProcessor):
                 },
             )
         )
+        # logger.info(
+        #     f"TTS audio sent to server audio_size: {len(resampled_audio)} [+{time.perf_counter() - self._last_tts_sent}]"
+        # )
+        self._last_tts_sent = time.perf_counter()
 
         if self._settings.tts_audio_passthrough:
             await self.push_frame(frame, FrameDirection.DOWNSTREAM)
@@ -309,14 +317,6 @@ class OjinVideoService(FrameProcessor):
             initialized_frame = OjinVideoInitializedFrame(session_data=self._session_data)
             await self.push_frame(initialized_frame, direction=FrameDirection.DOWNSTREAM)
             await self.push_frame(initialized_frame, direction=FrameDirection.UPSTREAM)
-
-            await self._send_tts_audio(
-                TTSAudioRawFrame(
-                    audio=b"\x00" * BYTES_PER_FRAME,
-                    sample_rate=OJIN_PERSONA_SAMPLE_RATE,
-                    num_channels=1,
-                )
-            )
 
         elif isinstance(message, OjinInteractionResponseMessage):
             frame_idx = message.index
