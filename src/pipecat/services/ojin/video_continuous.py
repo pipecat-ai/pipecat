@@ -113,6 +113,9 @@ class OjinVideoSettings:
     start_frame_cls: Type[Frame] = field(default=StartFrame)
 
 
+OJIN_VIDEO_SERVICE_VERSION = 1
+
+
 class OjinVideoService(FrameProcessor):
     """Continuous audio streaming service.
 
@@ -128,7 +131,9 @@ class OjinVideoService(FrameProcessor):
         client: IOjinClient | None = None,
     ) -> None:
         super().__init__()
-        logger.debug(f"OjinVideoService initialized with settings {settings}")
+        logger.debug(
+            f"OjinVideoService initialized with settings {settings} version: {OJIN_VIDEO_SERVICE_VERSION}"
+        )
 
         self._settings = settings
         if client is None:
