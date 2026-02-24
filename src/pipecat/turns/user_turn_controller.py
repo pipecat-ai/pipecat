@@ -91,6 +91,7 @@ class UserTurnController(BaseObject):
         self._user_turn = False
         self._user_turn_stop_timeout_event = asyncio.Event()
         self._user_turn_stop_timeout_task: Optional[asyncio.Task] = None
+        self._user_turn_transition_lock = asyncio.Lock()
 
         self._latest_transcription_text: Optional[str] = None
         self._latest_transcription_is_interim: Optional[bool] = None
@@ -256,53 +257,55 @@ class UserTurnController(BaseObject):
     async def _trigger_user_turn_start(
         self, strategy: Optional[BaseUserTurnStartStrategy], params: UserTurnStartedParams
     ):
-        # Prevent two consecutive user turn starts.
-        if self._user_turn:
-            return
+        async with self._user_turn_transition_lock:
+            # Prevent two consecutive user turn starts.
+            if self._user_turn:
+                return
 
-        should_start = await self._run_gate(
-            self._user_turn_strategies.start_gate,
-            strategy,
-            allow_on_error=self._user_turn_strategies.start_gate_on_error,
-        )
-        if not should_start:
-            return
+            should_start = await self._run_gate(
+                self._user_turn_strategies.start_gate,
+                strategy,
+                allow_on_error=self._user_turn_strategies.start_gate_on_error,
+            )
+            if not should_start:
+                return
 
-        self._user_turn = True
-        self._user_turn_stop_timeout_event.set()
+            self._user_turn = True
+            self._user_turn_stop_timeout_event.set()
 
-        # Reset all user turn start strategies to start fresh.
-        for s in self._user_turn_strategies.start or []:
-            await s.reset()
+            # Reset all user turn start strategies to start fresh.
+            for s in self._user_turn_strategies.start or []:
+                await s.reset()
 
-        await self._call_event_handler("on_user_turn_started", strategy, params)
+            await self._call_event_handler("on_user_turn_started", strategy, params)
 
     async def _trigger_user_turn_stop(
         self, strategy: Optional[BaseUserTurnStopStrategy], params: UserTurnStoppedParams
     ):
-        # Prevent two consecutive user turn stops.
-        if not self._user_turn:
-            return
+        async with self._user_turn_transition_lock:
+            # Prevent two consecutive user turn stops.
+            if not self._user_turn:
+                return
 
-        should_stop = await self._run_gate(
-            self._user_turn_strategies.stop_gate,
-            strategy,
-            allow_on_error=self._user_turn_strategies.stop_gate_on_error,
-        )
-        if not should_stop:
-            return
+            should_stop = await self._run_gate(
+                self._user_turn_strategies.stop_gate,
+                strategy,
+                allow_on_error=self._user_turn_strategies.stop_gate_on_error,
+            )
+            if not should_stop:
+                return
 
-        self._user_turn = False
-        self._user_turn_stop_timeout_event.set()
+            self._user_turn = False
+            self._user_turn_stop_timeout_event.set()
 
-        # Reset all user turn stop strategies to start fresh.
-        for s in self._user_turn_strategies.stop or []:
-            await s.reset()
+            # Reset all user turn stop strategies to start fresh.
+            for s in self._user_turn_strategies.stop or []:
+                await s.reset()
 
-        await self._call_event_handler("on_user_turn_stopped", strategy, params)
+            await self._call_event_handler("on_user_turn_stopped", strategy, params)
 
-        self._latest_transcription_text = None
-        self._latest_transcription_is_interim = None
+            self._latest_transcription_text = None
+            self._latest_transcription_is_interim = None
 
     async def _user_turn_stop_timeout_task_handler(self):
         while True:
