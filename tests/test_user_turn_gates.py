@@ -84,3 +84,62 @@ async def test_stop_gate_denied_keeps_turn_open():
 
     assert events == ["started"]
     assert controller._user_turn is True
+
+
+@pytest.mark.asyncio
+async def test_start_gate_timeout_denies_by_default():
+    events = []
+
+    async def slow_gate(ctx):
+        await asyncio.sleep(0.2)
+        return True
+
+    task_manager = TaskManager()
+    task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    controller = UserTurnController(
+        user_turn_strategies=UserTurnStrategies(
+            start=[TriggerStartStrategy()],
+            stop=[],
+            start_gate=slow_gate,
+            gate_timeout_secs=0.01,
+        ),
+    )
+
+    @controller.event_handler("on_user_turn_started")
+    async def on_start(controller, strategy, params):
+        events.append("started")
+
+    await controller.setup(task_manager)
+    await controller._user_turn_strategies.start[0].trigger_user_turn_started()
+
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_start_gate_error_denies_when_configured():
+    events = []
+
+    async def error_gate(ctx):
+        raise RuntimeError("boom")
+
+    task_manager = TaskManager()
+    task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    controller = UserTurnController(
+        user_turn_strategies=UserTurnStrategies(
+            start=[TriggerStartStrategy()],
+            stop=[],
+            start_gate=error_gate,
+            start_gate_on_error=False,
+        ),
+    )
+
+    @controller.event_handler("on_user_turn_started")
+    async def on_start(controller, strategy, params):
+        events.append("started")
+
+    await controller.setup(task_manager)
+    await controller._user_turn_strategies.start[0].trigger_user_turn_started()
+
+    assert events == []
