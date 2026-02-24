@@ -349,6 +349,8 @@ class UserTurnController(BaseObject):
             if timeout is None:
                 return await _invoke_gate()
             return await asyncio.wait_for(_invoke_gate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return False
         except asyncio.CancelledError:
             raise
         except Exception:
