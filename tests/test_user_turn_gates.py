@@ -43,3 +43,37 @@ async def test_start_gate_denied():
     await controller._user_turn_strategies.start[0].trigger_user_turn_started()
 
     assert events == []
+
+
+@pytest.mark.asyncio
+async def test_start_gate_cancel_propagates():
+    gate_started = asyncio.Event()
+    gate_release = asyncio.Event()
+
+    async def start_gate(ctx):
+        gate_started.set()
+        await gate_release.wait()
+        return True
+
+    task_manager = TaskManager()
+    task_manager.setup(TaskManagerParams(loop=asyncio.get_running_loop()))
+
+    controller = UserTurnController(
+        user_turn_strategies=UserTurnStrategies(
+            start=[TriggerStartStrategy()],
+            stop=[],
+            start_gate=start_gate,
+        ),
+    )
+
+    await controller.setup(task_manager)
+
+    trigger_task = asyncio.create_task(
+        controller._user_turn_strategies.start[0].trigger_user_turn_started()
+    )
+
+    await gate_started.wait()
+    trigger_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await trigger_task

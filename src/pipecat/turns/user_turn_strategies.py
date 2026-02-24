@@ -53,9 +53,9 @@ class UserTurnStrategies:
 
     start: Optional[List[BaseUserTurnStartStrategy]] = None
     stop: Optional[List[BaseUserTurnStopStrategy]] = None
-    start_gate: Optional[Callable[[UserTurnGateContext], Awaitable[bool]]] = None
-    stop_gate: Optional[Callable[[UserTurnGateContext], Awaitable[bool]]] = None
-    gate_timeout_secs: float = 3.0
+    start_gate: Optional[Callable[[UserTurnGateContext], Awaitable[bool] | bool]] = None
+    stop_gate: Optional[Callable[[UserTurnGateContext], Awaitable[bool] | bool]] = None
+    gate_timeout_secs: Optional[float] = 3.0
     start_gate_on_error: bool = True
     stop_gate_on_error: bool = True
 
