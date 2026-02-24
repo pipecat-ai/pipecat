@@ -334,7 +334,12 @@ class UserTurnController(BaseObject):
             return True
 
         async def _invoke_gate() -> bool:
-            result = gate(self._build_gate_context(strategy))
+            context = self._build_gate_context(strategy)
+
+            if inspect.iscoroutinefunction(gate):
+                return bool(await gate(context))
+
+            result = await asyncio.to_thread(gate, context)
             if inspect.isawaitable(result):
                 result = await result
             return bool(result)
