@@ -10,6 +10,8 @@ import asyncio
 import inspect
 from typing import Awaitable, Callable, Optional, Type
 
+from loguru import logger
+
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
@@ -353,8 +355,16 @@ class UserTurnController(BaseObject):
                 return await _invoke_gate()
             return await asyncio.wait_for(_invoke_gate(), timeout=timeout)
         except asyncio.TimeoutError:
+            logger.warning(
+                f"{self}: gate timeout gate={getattr(gate, '__name__', type(gate).__name__)} "
+                f"strategy={type(strategy).__name__} timeout={self._user_turn_strategies.gate_timeout_secs}"
+            )
             return False
         except asyncio.CancelledError:
             raise
         except Exception:
+            logger.error(
+                f"{self}: gate error gate={getattr(gate, '__name__', type(gate).__name__)} "
+                f"strategy={type(strategy).__name__} timeout={self._user_turn_strategies.gate_timeout_secs}"
+            )
             return allow_on_error
