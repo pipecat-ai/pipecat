@@ -363,7 +363,7 @@ class UserTurnController(BaseObject):
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.error(
+            logger.exception(
                 f"{self}: gate error gate={getattr(gate, '__name__', type(gate).__name__)} "
                 f"strategy={type(strategy).__name__} timeout={self._user_turn_strategies.gate_timeout_secs}"
             )
