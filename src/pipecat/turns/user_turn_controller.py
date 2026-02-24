@@ -262,6 +262,8 @@ class UserTurnController(BaseObject):
             if self._user_turn:
                 return
 
+            # Gate decides if the turn can start. Timeouts return False;
+            # exceptions fall back to the configured allow_on_error policy.
             should_start = await self._run_gate(
                 self._user_turn_strategies.start_gate,
                 strategy,
@@ -287,6 +289,8 @@ class UserTurnController(BaseObject):
             if not self._user_turn:
                 return
 
+            # Gate decides if the turn can stop. Timeouts return False;
+            # exceptions fall back to the configured allow_on_error policy.
             should_stop = await self._run_gate(
                 self._user_turn_strategies.stop_gate,
                 strategy,

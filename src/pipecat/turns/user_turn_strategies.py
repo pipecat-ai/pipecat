@@ -49,11 +49,19 @@ class UserTurnStrategies:
         stop: A list of user turn stop strategies used to decide when
             the user stops speaking.
         start_gate: Optional gate callable invoked before a user turn starts.
-            Sync callables run in a background thread and may continue after a
-            timeout; keep them side-effect free.
+            Receives `UserTurnGateContext` and returns True to allow the start
+            or False to block it. Sync callables run in a background thread and
+            may continue after a timeout; keep them side-effect free.
         stop_gate: Optional gate callable invoked before a user turn stops.
-            Sync callables run in a background thread and may continue after a
-            timeout; keep them side-effect free.
+            Receives `UserTurnGateContext` and returns True to allow the stop
+            or False to block it. Sync callables run in a background thread and
+            may continue after a timeout; keep them side-effect free.
+        gate_timeout_secs: Max seconds to wait for a gate decision. If None,
+            gate evaluation waits without a timeout.
+        start_gate_on_error: Whether to allow a start if the start gate raises
+            an exception.
+        stop_gate_on_error: Whether to allow a stop if the stop gate raises an
+            exception.
 
     """
 
