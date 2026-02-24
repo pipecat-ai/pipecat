@@ -17,33 +17,24 @@ Dependencies:
     Source: https://www.nltk.org/api/nltk.tokenize.punkt.html
 """
 
+import functools
 import re
 from dataclasses import dataclass
 from typing import FrozenSet, List, Optional, Sequence, Tuple
 
 from loguru import logger
 
-# Lazy-loaded NLTK components
-_nltk_initialized = False
-_sent_tokenize = None
 
-
-def _ensure_nltk_initialized():
-    """Lazily initialize NLTK and download required data.
+@functools.lru_cache(maxsize=1)
+def _get_sent_tokenize():
+    """Lazily initialize NLTK and return the sent_tokenize function.
 
     This function is called on-demand when sentence tokenization is needed,
     avoiding import-time downloads that can fail in containerized environments
     where the filesystem may be read-only.
     """
-    global _nltk_initialized, _sent_tokenize
-
-    if _nltk_initialized:
-        return
-
     import nltk
     from nltk.tokenize import sent_tokenize
-
-    _sent_tokenize = sent_tokenize
 
     # Ensure punkt_tab tokenizer data is available
     try:
@@ -61,7 +52,7 @@ def _ensure_nltk_initialized():
                 "See https://www.nltk.org/data.html for more information."
             )
 
-    _nltk_initialized = True
+    return sent_tokenize
 
 
 SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
@@ -158,16 +149,14 @@ def match_endofsentence(text: str) -> int:
     Returns:
         The position of the end of the sentence if found, otherwise 0.
     """
-    # Lazily initialize NLTK on first use
-    _ensure_nltk_initialized()
-
     text = text.rstrip()
 
     if not text:
         return 0
 
     # Use NLTK's sentence tokenizer to find sentence boundaries
-    sentences = _sent_tokenize(text)
+    sent_tokenize = _get_sent_tokenize()
+    sentences = sent_tokenize(text)
 
     if not sentences:
         return 0
