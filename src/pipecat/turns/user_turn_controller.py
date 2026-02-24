@@ -299,6 +299,9 @@ class UserTurnController(BaseObject):
 
         await self._call_event_handler("on_user_turn_stopped", strategy, params)
 
+        self._latest_transcription_text = None
+        self._latest_transcription_is_interim = None
+
     async def _user_turn_stop_timeout_task_handler(self):
         while True:
             try:
