@@ -381,6 +381,7 @@ class GoogleSTTSettings(STTSettings):
         enable_word_confidence: Include confidence scores for each word.
         enable_interim_results: Stream partial recognition results.
         enable_voice_activity_events: Detect voice activity in audio.
+        encoding: Audio encoding format. Supported: LINEAR16 (default), MULAW, ALAW, FLAC, MP3, OGG_OPUS.
     """
 
     languages: List[Language] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -396,6 +397,7 @@ class GoogleSTTSettings(STTSettings):
     enable_word_confidence: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     enable_voice_activity_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class GoogleSTTService(STTService):
@@ -437,6 +439,8 @@ class GoogleSTTService(STTService):
             enable_word_confidence: Include confidence scores for each word.
             enable_interim_results: Stream partial recognition results.
             enable_voice_activity_events: Detect voice activity in audio.
+            encoding: Audio encoding format for input audio. Supported values:
+                LINEAR16 (default), MULAW, ALAW, FLAC, MP3, OGG_OPUS.
         """
 
         languages: Union[Language, List[Language]] = Field(default_factory=lambda: [Language.EN_US])
@@ -450,6 +454,7 @@ class GoogleSTTService(STTService):
         enable_word_confidence: Optional[bool] = False
         enable_interim_results: Optional[bool] = True
         enable_voice_activity_events: Optional[bool] = False
+        encoding: Optional[str] = "LINEAR16"
 
         @field_validator("languages", mode="before")
         @classmethod
@@ -565,6 +570,7 @@ class GoogleSTTService(STTService):
             enable_word_confidence=params.enable_word_confidence,
             enable_interim_results=params.enable_interim_results,
             enable_voice_activity_events=params.enable_voice_activity_events,
+            encoding=params.encoding,
         )
 
     def can_generate_metrics(self) -> bool:
@@ -785,7 +791,11 @@ class GoogleSTTService(STTService):
         self._config = cloud_speech.StreamingRecognitionConfig(
             config=cloud_speech.RecognitionConfig(
                 explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
-                    encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
+                    encoding=getattr(
+                        cloud_speech.ExplicitDecodingConfig.AudioEncoding,
+                        self._settings.encoding,
+                        cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
+                    ),
                     sample_rate_hertz=self.sample_rate,
                     audio_channel_count=1,
                 ),
