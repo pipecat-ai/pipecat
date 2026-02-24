@@ -7,7 +7,8 @@
 """This module defines a controller for managing user turn lifecycle."""
 
 import asyncio
-from typing import Optional, Type
+import inspect
+from typing import Awaitable, Callable, Optional, Type
 
 from pipecat.frames.frames import (
     Frame,
@@ -21,7 +22,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.turns.user_start import BaseUserTurnStartStrategy, UserTurnStartedParams
 from pipecat.turns.user_stop import BaseUserTurnStopStrategy, UserTurnStoppedParams
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.turns.user_turn_strategies import UserTurnGateContext, UserTurnStrategies
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
@@ -89,6 +90,10 @@ class UserTurnController(BaseObject):
         self._user_turn_stop_timeout_event = asyncio.Event()
         self._user_turn_stop_timeout_task: Optional[asyncio.Task] = None
 
+        self._latest_transcription_text: Optional[str] = None
+        self._latest_transcription_is_interim: Optional[bool] = None
+        self._last_frame: Optional[Frame] = None
+
         self._register_event_handler("on_push_frame", sync=True)
         self._register_event_handler("on_broadcast_frame", sync=True)
         self._register_event_handler("on_user_turn_started", sync=True)
@@ -149,6 +154,8 @@ class UserTurnController(BaseObject):
             frame: The frame to be processed.
 
         """
+        self._last_frame = frame
+
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
         elif isinstance(frame, UserStoppedSpeakingFrame):
@@ -213,6 +220,8 @@ class UserTurnController(BaseObject):
     async def _handle_transcription(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
         # We have received a transcription, let's reset the user turn timeout.
         self._user_turn_stop_timeout_event.set()
+        self._latest_transcription_text = frame.text
+        self._latest_transcription_is_interim = isinstance(frame, InterimTranscriptionFrame)
 
     async def _on_push_frame(
         self,
@@ -249,6 +258,14 @@ class UserTurnController(BaseObject):
         if self._user_turn:
             return
 
+        should_start = await self._run_gate(
+            self._user_turn_strategies.start_gate,
+            strategy,
+            allow_on_error=self._user_turn_strategies.start_gate_on_error,
+        )
+        if not should_start:
+            return
+
         self._user_turn = True
         self._user_turn_stop_timeout_event.set()
 
@@ -263,6 +280,14 @@ class UserTurnController(BaseObject):
     ):
         # Prevent two consecutive user turn stops.
         if not self._user_turn:
+            return
+
+        should_stop = await self._run_gate(
+            self._user_turn_strategies.stop_gate,
+            strategy,
+            allow_on_error=self._user_turn_strategies.stop_gate_on_error,
+        )
+        if not should_stop:
             return
 
         self._user_turn = False
@@ -288,3 +313,36 @@ class UserTurnController(BaseObject):
                     await self._trigger_user_turn_stop(
                         None, UserTurnStoppedParams(enable_user_speaking_frames=True)
                     )
+
+    def _build_gate_context(
+        self, strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy | None
+    ) -> UserTurnGateContext:
+        return UserTurnGateContext(
+            strategy=strategy,
+            transcription_text=self._latest_transcription_text,
+            transcription_is_interim=self._latest_transcription_is_interim,
+            last_frame=self._last_frame,
+        )
+
+    async def _run_gate(
+        self,
+        gate: Optional[Callable[[UserTurnGateContext], Awaitable[bool] | bool]],
+        strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy | None,
+        allow_on_error: bool,
+    ) -> bool:
+        if not gate:
+            return True
+
+        async def _invoke_gate() -> bool:
+            result = gate(self._build_gate_context(strategy))
+            if inspect.isawaitable(result):
+                result = await result
+            return bool(result)
+
+        try:
+            timeout = self._user_turn_strategies.gate_timeout_secs
+            if timeout is None:
+                return await _invoke_gate()
+            return await asyncio.wait_for(_invoke_gate(), timeout=timeout)
+        except Exception:
+            return allow_on_error

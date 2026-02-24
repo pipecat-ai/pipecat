@@ -7,9 +7,10 @@
 """Turn start strategy configuration."""
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Awaitable, Callable, List, Optional
 
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+from pipecat.frames.frames import Frame
 from pipecat.turns.user_start import (
     BaseUserTurnStartStrategy,
     ExternalUserTurnStartStrategy,
@@ -21,6 +22,16 @@ from pipecat.turns.user_stop import (
     ExternalUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
 )
+
+
+@dataclass
+class UserTurnGateContext:
+    """Context passed to user turn gates."""
+
+    strategy: BaseUserTurnStartStrategy | BaseUserTurnStopStrategy | None
+    transcription_text: Optional[str]
+    transcription_is_interim: Optional[bool]
+    last_frame: Optional[Frame]
 
 
 @dataclass
@@ -42,6 +53,11 @@ class UserTurnStrategies:
 
     start: Optional[List[BaseUserTurnStartStrategy]] = None
     stop: Optional[List[BaseUserTurnStopStrategy]] = None
+    start_gate: Optional[Callable[[UserTurnGateContext], Awaitable[bool]]] = None
+    stop_gate: Optional[Callable[[UserTurnGateContext], Awaitable[bool]]] = None
+    gate_timeout_secs: float = 3.0
+    start_gate_on_error: bool = True
+    stop_gate_on_error: bool = True
 
     def __post_init__(self):
         if not self.start:
