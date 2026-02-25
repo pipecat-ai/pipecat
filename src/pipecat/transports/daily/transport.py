@@ -55,10 +55,11 @@ try:
         CallClient,
         CustomAudioSource,
         CustomAudioTrack,
+        CustomVideoSource,
+        CustomVideoTrack,
         Daily,
         EventHandler,
         VideoFrame,
-        VirtualCameraDevice,
         VirtualSpeakerDevice,
     )
     from daily import LogLevel as DailyLogLevel
@@ -428,6 +429,19 @@ class DailyAudioTrack:
     track: CustomAudioTrack
 
 
+@dataclass
+class DailyVideoTrack:
+    """Container for Daily video track components.
+
+    Parameters:
+        source: The custom video source for the track.
+        track: The custom video track instance.
+    """
+
+    source: CustomVideoSource
+    track: CustomVideoTrack
+
+
 # This is just a type alias for the errors returned by daily-python. Right now
 # they are just a string.
 CallClientError = str
@@ -517,14 +531,11 @@ class DailyTransportClient(EventHandler):
         self._in_sample_rate = 0
         self._out_sample_rate = 0
 
-        self._camera: Optional[VirtualCameraDevice] = None
         self._speaker: Optional[VirtualSpeakerDevice] = None
+        self._camera_track: Optional[DailyVideoTrack] = None
         self._microphone_track: Optional[DailyAudioTrack] = None
         self._custom_audio_tracks: Dict[str, DailyAudioTrack] = {}
-
-    def _camera_name(self):
-        """Generate a unique virtual camera name for this client instance."""
-        return f"camera-{self}"
+        self._custom_video_tracks: Dict[str, DailyVideoTrack] = {}
 
     def _speaker_name(self):
         """Generate a unique virtual speaker name for this client instance."""
@@ -626,6 +637,31 @@ class DailyTransportClient(EventHandler):
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
+    async def register_video_destination(self, destination: str):
+        """Register a custom video destination for multi-track output.
+
+        Args:
+            destination: The destination identifier to register.
+        """
+        self._custom_video_tracks[destination] = await self.add_custom_video_track(destination)
+        send_settings = {
+            "maxQuality": "low",
+            **(
+                {"preferredCodec": self._params.video_out_codec}
+                if self._params.video_out_codec
+                else {}
+            ),
+            "encodings": {
+                "low": {
+                    "maxBitrate": self._params.video_out_bitrate,
+                    "maxFramerate": self._params.video_out_framerate,
+                }
+            },
+        }
+        self._client.update_publishing(
+            {"customVideo": {destination: {"sendSettings": send_settings}}}
+        )
+
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the appropriate audio track.
 
@@ -655,7 +691,7 @@ class DailyTransportClient(EventHandler):
         return num_frames > 0
 
     async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
-        """Write a video frame to the camera device.
+        """Write a video frame to the appropriate video track.
 
         Args:
             frame: The image frame to write.
@@ -663,10 +699,20 @@ class DailyTransportClient(EventHandler):
         Returns:
             True if the video frame was written successfully, False otherwise.
         """
-        if not frame.transport_destination and self._camera:
-            self._camera.write_frame(frame.image)
+        destination = frame.transport_destination
+        video_source: Optional[CustomVideoSource] = None
+        if not destination and self._camera_track:
+            video_source = self._camera_track.source
+        elif destination and destination in self._custom_video_tracks:
+            track = self._custom_video_tracks[destination]
+            video_source = track.source
+
+        if video_source:
+            video_source.write_frame(frame.image)
             return True
-        return False
+        else:
+            logger.warning(f"{self} unable to write video frames to destination [{destination}]")
+            return False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client with task manager and event queues.
@@ -731,13 +777,14 @@ class DailyTransportClient(EventHandler):
                 self._callback_task_handler(self._video_queue),
                 f"{self}::video_callback_task",
             )
-        if self._params.video_out_enabled and not self._camera:
-            self._camera = Daily.create_camera_device(
-                self._camera_name(),
-                width=self._params.video_out_width,
-                height=self._params.video_out_height,
-                color_format=self._params.video_out_color_format,
+        if self._params.video_out_enabled and not self._camera_track:
+            video_source = CustomVideoSource(
+                self._params.video_out_width,
+                self._params.video_out_height,
+                self._params.video_out_color_format,
             )
+            video_track = CustomVideoTrack(video_source)
+            self._camera_track = DailyVideoTrack(source=video_source, track=video_track)
 
         if self._params.audio_out_enabled and not self._microphone_track:
             audio_source = CustomAudioSource(self._out_sample_rate, self._params.audio_out_channels)
@@ -807,7 +854,11 @@ class DailyTransportClient(EventHandler):
                     "camera": {
                         "isEnabled": camera_enabled,
                         "settings": {
-                            "deviceId": self._camera_name(),
+                            "customTrack": {
+                                "id": self._camera_track.track.id
+                                if self._camera_track
+                                else "no-camera-track"
+                            }
                         },
                     },
                     "microphone": {
@@ -872,6 +923,8 @@ class DailyTransportClient(EventHandler):
         # Remove any custom tracks, if any.
         for track_name, _ in self._custom_audio_tracks.items():
             await self.remove_custom_audio_track(track_name)
+        for track_name, _ in self._custom_video_tracks.items():
+            await self.remove_custom_video_track(track_name)
 
         error = await self._leave()
         if not error:
@@ -1210,6 +1263,51 @@ class DailyTransportClient(EventHandler):
         """
         future = self._get_event_loop().create_future()
         self._client.remove_custom_audio_track(
+            track_name=track_name,
+            completion=completion_callback(future),
+        )
+        return await future
+
+    async def add_custom_video_track(self, track_name: str) -> DailyVideoTrack:
+        """Add a custom video track for multi-stream output.
+
+        Args:
+            track_name: Name for the custom video track.
+
+        Returns:
+            The created DailyVideoTrack instance.
+        """
+        future = self._get_event_loop().create_future()
+
+        video_source = CustomVideoSource(
+            self._params.video_out_width,
+            self._params.video_out_height,
+            self._params.video_out_color_format,
+        )
+
+        video_track = CustomVideoTrack(video_source)
+
+        self._client.add_custom_video_track(
+            track_name=track_name,
+            video_track=video_track,
+            completion=completion_callback(future),
+        )
+
+        await future
+
+        return DailyVideoTrack(source=video_source, track=video_track)
+
+    async def remove_custom_video_track(self, track_name: str) -> Optional[CallClientError]:
+        """Remove a custom video track.
+
+        Args:
+            track_name: Name of the custom video track to remove.
+
+        Returns:
+            error: An error description or None.
+        """
+        future = self._get_event_loop().create_future()
+        self._client.remove_custom_video_track(
             track_name=track_name,
             completion=completion_callback(future),
         )
@@ -1984,7 +2082,7 @@ class DailyOutputTransport(BaseOutputTransport):
         Args:
             destination: The destination identifier to register.
         """
-        logger.warning(f"{self} registering video destinations is not supported yet")
+        await self._client.register_video_destination(destination)
 
     async def register_audio_destination(self, destination: str):
         """Register an audio output destination.
