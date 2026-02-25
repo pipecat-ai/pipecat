@@ -613,7 +613,6 @@ class CartesiaTTSService(WebsocketTTSService):
                 )
                 await self.add_word_timestamps(processed_timestamps, ctx_id)
             elif msg["type"] == "chunk":
-                await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,

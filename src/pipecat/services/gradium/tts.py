@@ -295,8 +295,6 @@ class GradiumTTSService(WebsocketTTSService):
             if msg["type"] == "audio":
                 if not ctx_id or not self.audio_context_available(ctx_id):
                     continue
-                await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["audio"]),
                     sample_rate=self.sample_rate,

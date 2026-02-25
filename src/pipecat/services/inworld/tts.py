@@ -871,8 +871,6 @@ class InworldTTSService(WebsocketTTSService):
 
             if audio_b64:
                 logger.trace(f"{self}: Processing audio chunk for context {ctx_id}")
-                await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
                 audio = base64.b64decode(audio_b64)
                 if len(audio) > 44 and audio.startswith(b"RIFF"):
                     audio = audio[44:]

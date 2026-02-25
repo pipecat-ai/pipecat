@@ -1132,6 +1132,7 @@ class TTSService(AIService):
                         logger.info(
                             f"{self} FF => Starting word timestamps for context {context_id}"
                         )
+                        await self.stop_ttfb_metrics()
                         await self.start_word_timestamps()
                         timestamps_started = True
 

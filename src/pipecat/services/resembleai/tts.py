@@ -286,9 +286,6 @@ class ResembleAITTSService(WebsocketTTSService):
                 continue
 
             if msg_type == "audio":
-                await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
-
                 # Decode base64 audio content
                 audio_content = msg.get("audio_content", "")
                 if not audio_content:

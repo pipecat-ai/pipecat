@@ -734,9 +734,6 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     continue
 
             if msg.get("audio"):
-                await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
-
                 audio = base64.b64decode(msg["audio"])
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1, context_id=received_ctx_id)
                 await self.append_to_audio_context(received_ctx_id, frame)
