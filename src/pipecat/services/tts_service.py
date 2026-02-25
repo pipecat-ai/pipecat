@@ -74,7 +74,7 @@ class TTSContext:
 
 @dataclass
 class _WordTimestampEntry:
-    """Internal: word timestamp routed through an audio context queue (concurrent mode)."""
+    """Internal: word timestamp routed through an audio context queue."""
 
     word: str
     timestamp: float
@@ -156,7 +156,7 @@ class TTSService(AIService):
         text_filter: Optional[BaseTextFilter] = None,
         # Audio transport destination of the generated frames.
         transport_destination: Optional[str] = None,
-        # if True, the context ID is reused within an LLM turn (non-concurrent mode)
+        # if True, the context ID is reused within an LLM turn
         reuse_context_id_within_turn: bool = True,
         **kwargs,
     ):
@@ -192,7 +192,7 @@ class TTSService(AIService):
 
             transport_destination: Destination for generated audio frames.
             reuse_context_id_within_turn: Whether the service should reuse context IDs within the
-                same turn (non-concurrent mode only).
+                same turn.
             **kwargs: Additional arguments passed to the parent AIService.
         """
         super().__init__(**kwargs)
@@ -251,8 +251,6 @@ class TTSService(AIService):
         # correct PTS to sentinel frames ("TTSStoppedFrame", "Reset") that follow.
         self._word_last_pts: int = 0
         self._llm_response_started: bool = False
-
-        # Audio context state (active when using AudioContextTTSService-style services)
         self._reuse_context_id_within_turn: bool = reuse_context_id_within_turn
 
         # _turn_context_id:
@@ -262,13 +260,11 @@ class TTSService(AIService):
         #   Temporarily set to None for TTSSpeakFrame utterances, which are standalone.
         #
         # _playing_context_id (playback-side cursor):
-        #   Set by _audio_context_task_handler as it dequeues contexts for playback,
-        #   and also set by create_audio_context() for the first context created.
+        #   Set by _audio_context_task_handler as it dequeues contexts for playback.
         #   Cleared by reset_active_audio_context() on interruption. Used by
-        #   has_active_audio_context(), get_active_audio_context_id(), and
-        #   create_context_id() reuse in non-concurrent mode.
+        #   has_active_audio_context() and get_active_audio_context_id().
         #
-        # In concurrent mode both fields may hold the same value during a turn, but
+        # Both fields may hold the same value during a turn, but
         # they clear at different times: _turn_context_id is cleared when the LLM turn
         # ends (synthesis done) while _playing_context_id remains set until the audio
         # finishes playing. Merging them would null out the playback cursor prematurely.
@@ -886,9 +882,6 @@ class TTSService(AIService):
             self._initial_word_timestamp = (
                 self._word_last_pts if self._word_last_pts > current_time else current_time
             )
-            logger.info(
-                f"{self} FF => Starting word timestamp, {self._initial_word_timestamp}, initial words {self._initial_word_times}"
-            )
             # If we cached some initial word times (because we didn't receive
             # audio), let's add them now.
             if self._initial_word_times:
@@ -899,7 +892,6 @@ class TTSService(AIService):
 
     async def reset_word_timestamps(self):
         """Reset word timestamp tracking."""
-        logger.info(f"{self} FF => Resetting word timestamp")
         self._initial_word_timestamp = -1
 
     async def add_word_timestamps(
@@ -907,10 +899,10 @@ class TTSService(AIService):
     ):
         """Add word timestamps for processing.
 
-        When an audio context exists for this context_id (websocket concurrent mode),
-        timestamps are routed into the per-context audio queue alongside audio frames so
-        they are processed in strict playback order by _handle_audio_context. Otherwise
-        they are processed immediately via _add_word_timestamps.
+        When an audio context exists for this context_id, timestamps are routed into the
+        per-context audio queue alongside audio frames so they are processed in strict
+        playback order by _handle_audio_context. Otherwise they are processed immediately
+        via _add_word_timestamps.
 
         Args:
             word_times: List of (word, timestamp) tuples where timestamp is in seconds.
@@ -946,7 +938,6 @@ class TTSService(AIService):
         called (i.e. when the first audio chunk is received).
         """
         for word, timestamp in word_times:
-            logger.info(f"{self} FF => Adding word timestamp {word}, {timestamp}, {context_id}")
             if word == "Reset" and timestamp == 0:
                 await self.reset_word_timestamps()
                 if self._llm_response_started:
@@ -968,7 +959,6 @@ class TTSService(AIService):
                     # we can rely on the default includes_inter_frame_spaces=False
                     frame = TTSTextFrame(word, aggregated_by=AggregationType.WORD)
                     frame.pts = self._initial_word_timestamp + ts_ns
-                    logger.info(f"{self} FF => PTS {frame.pts}, {context_id}")
                     frame.context_id = context_id
                     if context_id in self._tts_contexts:
                         frame.append_to_context = self._tts_contexts[context_id].append_to_context
@@ -1086,10 +1076,7 @@ class TTSService(AIService):
             if context_id:
                 # Process the audio context until the context doesn't have more
                 # audio available (i.e. we find None).
-                logger.info(f"{self} FF => START processing audio context {context_id}")
                 await self._handle_audio_context(context_id)
-
-                logger.info(f"{self} FF => FINISHED processing audio context {context_id}")
 
                 # We just finished processing the context, so we can safely remove it.
                 del self._audio_contexts[context_id]
@@ -1123,7 +1110,6 @@ class TTSService(AIService):
                     # Context is still in use, reset the timeout.
                     continue
                 elif frame is None:
-                    logger.info(f"{self} FF => Closing audio context {context_id}")
                     running = False
                 elif isinstance(frame, _WordTimestampEntry):
                     # _add_word_timestamps is the single processing path: it handles
@@ -1136,9 +1122,6 @@ class TTSService(AIService):
                 elif isinstance(frame, TTSAudioRawFrame):
                     # Set the word-timestamp baseline once, on the first audio chunk.
                     if not timestamps_started:
-                        logger.info(
-                            f"{self} FF => Starting word timestamps for context {context_id}"
-                        )
                         await self.stop_ttfb_metrics()
                         await self.start_word_timestamps()
                         timestamps_started = True
@@ -1146,7 +1129,8 @@ class TTSService(AIService):
                 if frame:
                     await self.push_frame(frame)
             except asyncio.TimeoutError:
-                logger.info(f"FF => {self} time out on audio context {context_id}")
+                # We didn't get audio, so let's consider this context finished.
+                logger.trace(f"{self} time out on audio context {context_id}")
                 break
 
     async def on_audio_context_interrupted(self, context_id: str):
