@@ -189,6 +189,7 @@ class PiperHttpTTSService(TTSService):
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
         voice_id: Optional[str] = None,
+        speed: float = 1.0,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
@@ -197,6 +198,8 @@ class PiperHttpTTSService(TTSService):
             base_url: Base URL for the Piper TTS HTTP server.
             aiohttp_session: aiohttp ClientSession for making HTTP requests.
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
+            speed: Speed multiplier for speech synthesis (default: 1.0). Values >1.0 speed up the speech,
+                while values <1.0 slow it down.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         super().__init__(**kwargs)
@@ -207,6 +210,7 @@ class PiperHttpTTSService(TTSService):
 
         self._base_url = base_url
         self._session = aiohttp_session
+        self._speed = speed
         self._settings = PiperHttpTTSSettings(model=None, voice=voice_id, language=None)
 
     def can_generate_metrics(self) -> bool:
@@ -238,6 +242,7 @@ class PiperHttpTTSService(TTSService):
             data = {
                 "text": text,
                 "voice": self._settings.voice,
+                "length_scale": self._speed,
             }
 
             async with self._session.post(self._base_url, json=data, headers=headers) as response:
