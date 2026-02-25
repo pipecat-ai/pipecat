@@ -513,8 +513,6 @@ class RimeTTSService(WebsocketTTSService):
 
         logger.trace(f"{self}: flushing audio")
         await self._get_websocket().send(json.dumps({"operation": "flush"}))
-        if not context_id:
-            self.reset_active_audio_context()
 
     async def _receive_messages(self):
         """Process incoming websocket messages."""

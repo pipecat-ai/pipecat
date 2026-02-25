@@ -256,8 +256,6 @@ class GradiumTTSService(WebsocketTTSService):
         try:
             msg = {"type": "end_of_stream", "client_req_id": flush_id}
             await self._websocket.send(json.dumps(msg))
-            if not context_id:
-                self.reset_active_audio_context()
         except ConnectionClosedOK:
             logger.debug(f"{self}: connection closed normally during flush")
         except Exception as e:

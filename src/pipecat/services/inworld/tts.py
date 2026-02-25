@@ -916,18 +916,17 @@ class InworldTTSService(WebsocketTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    if self._audio_contexts:
-                        for ctx_id in list(self._audio_contexts):
-                            keepalive_message = {
-                                "send_text": {"text": ""},
-                                "contextId": ctx_id,
-                            }
-                            logger.trace(f"Sending keepalive for context {ctx_id}")
-                            await self._websocket.send(json.dumps(keepalive_message))
+                    context_id = self.get_active_audio_context_id()
+                    if context_id:
+                        keepalive_message = {
+                            "send_text": {"text": ""},
+                            "contextId": context_id,
+                        }
+                        logger.trace(f"Sending keepalive for context {context_id}")
                     else:
                         keepalive_message = {"send_text": {"text": ""}}
                         logger.trace("Sending keepalive without context")
-                        await self._websocket.send(json.dumps(keepalive_message))
+                    await self._websocket.send(json.dumps(keepalive_message))
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} keepalive error: {e}")
                 break

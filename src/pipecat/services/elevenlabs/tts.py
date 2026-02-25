@@ -775,19 +775,21 @@ class ElevenLabsTTSService(WebsocketTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    if self._audio_contexts:
-                        # Send keepalive for every open context to prevent server-side timeouts
-                        for ctx_id in list(self._audio_contexts):
-                            keepalive_message = {"text": "", "context_id": ctx_id}
-                            logger.trace(f"Sending keepalive for context {ctx_id}")
-                            await self._websocket.send(json.dumps(keepalive_message))
+                    context_id = self.get_active_audio_context_id()
+                    if context_id:
+                        # Send keepalive with context ID to keep the connection alive
+                        keepalive_message = {
+                            "text": "",
+                            "context_id": context_id,
+                        }
+                        logger.trace(f"Sending keepalive for context {context_id}")
                     else:
                         # It's possible to have a user interruption which clears the context
                         # without generating a new TTS response. In this case, we'll just send
                         # an empty message to keep the connection alive.
                         keepalive_message = {"text": ""}
                         logger.trace("Sending keepalive without context")
-                        await self._websocket.send(json.dumps(keepalive_message))
+                    await self._websocket.send(json.dumps(keepalive_message))
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} keepalive error: {e}")
                 break
