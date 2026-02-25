@@ -680,6 +680,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
                 )
             except Exception as e:
                 await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
+        self._cumulative_time = 0.0
         self._partial_word = ""
         self._partial_word_start_time = 0.0
 
@@ -785,9 +786,8 @@ class ElevenLabsTTSService(WebsocketTTSService):
                 logger.warning(f"{self} keepalive error: {e}")
                 break
 
-    async def _send_text(self, text: str):
+    async def _send_text(self, text: str, context_id: str):
         """Send text to the WebSocket for synthesis."""
-        context_id = self.get_active_audio_context_id()
         if self._websocket and context_id:
             msg = {"text": text, "context_id": context_id}
             await self._websocket.send(json.dumps(msg))
@@ -831,7 +831,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
                     await self._websocket.send(json.dumps(msg))
                     logger.trace(f"Created new context {context_id}")
 
-                await self._send_text(text)
+                await self._send_text(text, context_id)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 yield TTSStoppedFrame(context_id=context_id)
