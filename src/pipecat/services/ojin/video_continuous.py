@@ -77,8 +77,8 @@ OJIN_PERSONA_SAMPLE_RATE = 16000
 SPEECH_FILTER_AMOUNT = 5
 SPEECH_MOUTH_OPENING_SCALE = 1.0
 BYTES_PER_FRAME = int(OJIN_PERSONA_SAMPLE_RATE / 25 * 2)
-MAX_FRAMES_BUFFER = 2
-MIN_FRAMES_BUFFER = 1
+MAX_FRAMES_BUFFER = 3
+MIN_FRAMES_BUFFER = 0
 
 
 @dataclass
@@ -404,9 +404,13 @@ class OjinVideoService(FrameProcessor):
                 is_silence = video_frame.is_silence()
                 self._is_speaking = not is_silence
 
-                if not is_silence:
-                    if self._latency_start_ts is not None:
+                if video_frame.volume > 0 and not self._audio_playback_task:
+                    if (
+                        self._latency_start_ts is not None
+                        and self._first_tts_received_at is not None
+                    ):
                         play_ts = time.perf_counter()
+                        logger.warning(f"Ojin TTFB: {play_ts - self._first_tts_received_at}")
 
                         # Inference: first TTS audio → first speech frame from server
                         inference_s = (
@@ -423,8 +427,6 @@ class OjinVideoService(FrameProcessor):
                         # Encoding: measured after encode_and_send below
                         self._pending_latency_report = (inference_s, buffer_s)
                         self._latency_start_ts = None
-
-                if video_frame.volume > 0 and not self._audio_playback_task:
                     await self._start_audio_playback()
 
                 if self._settings.frame_debugging_enabled:
