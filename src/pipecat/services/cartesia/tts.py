@@ -438,7 +438,7 @@ class CartesiaTTSService(WebsocketTTSService):
         text: str = "",
         continue_transcript: bool = True,
         add_timestamps: bool = True,
-        context_id: Optional[str] = None,
+        context_id: str = "",
     ):
         voice_config = {}
         voice_config["mode"] = "id"
@@ -458,7 +458,7 @@ class CartesiaTTSService(WebsocketTTSService):
         msg = {
             "transcript": text,
             "continue": continue_transcript,
-            "context_id": context_id or self.get_active_audio_context_id(),
+            "context_id": context_id,
             "model_id": self._settings.model,
             "voice": voice_config,
             "output_format": {

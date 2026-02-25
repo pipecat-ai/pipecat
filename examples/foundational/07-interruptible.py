@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame, TTSUpdateSettingsFrame
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -98,16 +98,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames(
-            [
-                TTSSpeakFrame(text="Hello, how are you ?"),
-                TTSUpdateSettingsFrame(settings={"language": "pt"}),
-                TTSSpeakFrame(text="Olá, como você está?"),
-                TTSUpdateSettingsFrame(settings={"language": "es"}),
-                TTSSpeakFrame(text="Hola, ¿cómo estás?"),
-                TTSUpdateSettingsFrame(settings={"language": "en"}),
-            ]
-        )
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
