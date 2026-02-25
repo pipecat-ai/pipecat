@@ -334,7 +334,11 @@ class FrameProcessor(BaseObject):
             return
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
-            await self.push_error(ErrorFrame(str(e)))
+            # Don't call push_error if we're already pushing an ErrorFrame
+            # or cancelling, to prevent infinite recursion:
+            # push_error -> push_frame -> __internal_push_frame -> exception -> push_error -> ...
+            if not isinstance(frame, ErrorFrame) and not self._cancelling:
+                await self.push_error(ErrorFrame(str(e)))
             raise
 
     def _check_ready(self, frame: Frame):

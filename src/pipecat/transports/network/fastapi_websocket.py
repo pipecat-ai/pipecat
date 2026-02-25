@@ -311,6 +311,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 await self._client.send(payload)
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
+            # Mark client as closing to prevent infinite retry loop
+            self._client._closing = True
 
     async def _write_audio_sleep(self):
         # Simulate a clock.
