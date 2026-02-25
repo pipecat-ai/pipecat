@@ -726,10 +726,13 @@ class TTSService(AIService):
         await self.reset_word_timestamps()
 
         await self._stop_audio_context_task()
-        # TODO here we should interrupt all contexts.
-        await self.on_audio_context_interrupted(context_id=self._playing_context_id)
+        audio_contexts = self.get_audio_contexts()
+        if audio_contexts:
+            for ctx_id in audio_contexts:
+                await self.on_audio_context_interrupted(context_id=ctx_id)
         self.reset_active_audio_context()
         self._turn_context_id = None
+        self._word_last_pts = 0
         self._create_audio_context_task()
 
     async def _maybe_pause_frame_processing(self):
