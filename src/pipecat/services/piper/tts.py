@@ -198,6 +198,8 @@ class PiperHttpTTSService(TTSService):
             base_url: Base URL for the Piper TTS HTTP server.
             aiohttp_session: aiohttp ClientSession for making HTTP requests.
             voice_id: Piper voice model identifier (e.g. `en_US-ryan-high`).
+            speed: Speed multiplier for speech synthesis (default: 1.0). Values >1.0 speed up the speech,
+                while values <1.0 slow it down.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
         super().__init__(**kwargs)
