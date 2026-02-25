@@ -189,6 +189,7 @@ class PiperHttpTTSService(TTSService):
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
         voice_id: Optional[str] = None,
+        speed: float = 1.0,
         **kwargs,
     ):
         """Initialize the Piper TTS service.
@@ -207,6 +208,7 @@ class PiperHttpTTSService(TTSService):
 
         self._base_url = base_url
         self._session = aiohttp_session
+        self._speed = speed
         self._settings = PiperHttpTTSSettings(model=None, voice=voice_id, language=None)
 
     def can_generate_metrics(self) -> bool:
@@ -238,6 +240,7 @@ class PiperHttpTTSService(TTSService):
             data = {
                 "text": text,
                 "voice": self._settings.voice,
+                "length_scale": self._speed,
             }
 
             async with self._session.post(self._base_url, json=data, headers=headers) as response:
