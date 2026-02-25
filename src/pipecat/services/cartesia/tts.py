@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-from pipecat.services.tts_service import AudioContextTTSService, TTSService
+from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -227,7 +227,7 @@ class CartesiaTTSSettings(TTSSettings):
         return super().from_mapping(flat)
 
 
-class CartesiaTTSService(AudioContextTTSService):
+class CartesiaTTSService(WebsocketTTSService):
     """Cartesia TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using Cartesia's streaming WebSocket API.
@@ -308,7 +308,7 @@ class CartesiaTTSService(AudioContextTTSService):
         super().__init__(
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
-            pause_frame_processing=True,
+            pause_frame_processing=False,
             supports_word_timestamps=True,
             sample_rate=sample_rate,
             text_aggregator=text_aggregator,
@@ -435,7 +435,11 @@ class CartesiaTTSService(AudioContextTTSService):
             return list(zip(words, starts))
 
     def _build_msg(
-        self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
+        self,
+        text: str = "",
+        continue_transcript: bool = True,
+        add_timestamps: bool = True,
+        context_id: Optional[str] = None,
     ):
         voice_config = {}
         voice_config["mode"] = "id"
@@ -455,7 +459,7 @@ class CartesiaTTSService(AudioContextTTSService):
         msg = {
             "transcript": text,
             "continue": continue_transcript,
-            "context_id": self.get_active_audio_context_id(),
+            "context_id": context_id or self.get_active_audio_context_id(),
             "model_id": self._settings.model,
             "voice": voice_config,
             "output_format": {
@@ -577,15 +581,21 @@ class CartesiaTTSService(AudioContextTTSService):
         """
         pass
 
-    async def flush_audio(self):
-        """Flush any pending audio and finalize the current context."""
-        context_id = self.get_active_audio_context_id()
-        if not context_id or not self._websocket:
+    async def flush_audio(self, context_id: Optional[str] = None):
+        """Flush any pending audio and finalize the current context.
+
+        Args:
+            context_id: The specific context to flush. If None, falls back to the
+                currently active context.
+        """
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = self._build_msg(text="", continue_transcript=False)
+        msg = self._build_msg(text="", continue_transcript=False, context_id=flush_id)
         await self._websocket.send(msg)
-        self.reset_active_audio_context()
+        if not context_id:
+            self.reset_active_audio_context()
 
     async def _process_messages(self):
         async for message in self._get_websocket():
@@ -605,7 +615,6 @@ class CartesiaTTSService(AudioContextTTSService):
                 await self.add_word_timestamps(processed_timestamps, ctx_id)
             elif msg["type"] == "chunk":
                 await self.stop_ttfb_metrics()
-                await self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
                     sample_rate=self.sample_rate,
@@ -646,12 +655,12 @@ class CartesiaTTSService(AudioContextTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self.has_active_audio_context():
+            if not self.audio_context_available(context_id):
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame(context_id=context_id)
                 await self.create_audio_context(context_id)
 
-            msg = self._build_msg(text=text)
+            msg = self._build_msg(text=text, context_id=context_id)
 
             try:
                 await self._get_websocket().send(msg)

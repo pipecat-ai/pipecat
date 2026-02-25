@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-from pipecat.services.tts_service import AudioContextTTSService
+from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -56,7 +56,7 @@ class ResembleAITTSSettings(TTSSettings):
     }
 
 
-class ResembleAITTSService(AudioContextTTSService):
+class ResembleAITTSService(WebsocketTTSService):
     """Resemble AI TTS service with WebSocket streaming and word timestamps.
 
     Provides text-to-speech using Resemble AI's streaming WebSocket API.
@@ -258,7 +258,7 @@ class ResembleAITTSService(AudioContextTTSService):
         """
         pass
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio and finalize the current context."""
         logger.trace(f"{self}: flushing audio")
         # For Resemble AI, we just wait for the audio_end message

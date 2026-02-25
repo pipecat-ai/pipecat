@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-from pipecat.services.tts_service import AudioContextTTSService
+from pipecat.services.tts_service import WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -49,7 +49,7 @@ class GradiumTTSSettings(TTSSettings):
     output_format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
-class GradiumTTSService(AudioContextTTSService):
+class GradiumTTSService(WebsocketTTSService):
     """Text-to-Speech service using Gradium's websocket API."""
 
     _settings: GradiumTTSSettings
@@ -135,12 +135,12 @@ class GradiumTTSService(AudioContextTTSService):
             self._warn_unhandled_updated_settings(changed)
         return changed
 
-    def _build_msg(self, text: str = "") -> dict:
+    def _build_msg(self, text: str = "", context_id: Optional[str] = None) -> dict:
         """Build JSON message for Gradium API."""
         msg = {"text": text, "type": "text"}
-        context_id = self.get_active_audio_context_id()
-        if context_id:
-            msg["client_req_id"] = context_id
+        ctx_id = context_id or self.get_active_audio_context_id()
+        if ctx_id:
+            msg["client_req_id"] = ctx_id
         return msg
 
     async def start(self, frame: StartFrame):
@@ -249,15 +249,16 @@ class GradiumTTSService(AudioContextTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis."""
-        context_id = self.get_active_audio_context_id()
-        if not context_id or not self._websocket:
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
             return
         try:
-            msg = {"type": "end_of_stream", "client_req_id": context_id}
+            msg = {"type": "end_of_stream", "client_req_id": flush_id}
             await self._websocket.send(json.dumps(msg))
-            self.reset_active_audio_context()
+            if not context_id:
+                self.reset_active_audio_context()
         except ConnectionClosedOK:
             logger.debug(f"{self}: connection closed normally during flush")
         except Exception as e:
@@ -338,12 +339,12 @@ class GradiumTTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                if not self.has_active_audio_context():
+                if not self.audio_context_available(context_id):
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
                     await self.create_audio_context(context_id)
 
-                msg = self._build_msg(text=text)
+                msg = self._build_msg(text=text, context_id=context_id)
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:

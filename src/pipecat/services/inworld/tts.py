@@ -51,7 +51,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextTTSService, TTSService
+from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -467,7 +467,7 @@ class InworldHttpTTSService(TTSService):
             )
 
 
-class InworldTTSService(AudioContextTTSService):
+class InworldTTSService(WebsocketTTSService):
     """Inworld AI WebSocket-based TTS service.
 
     Uses bidirectional WebSocket for lower latency streaming. Supports multiple
@@ -613,17 +613,17 @@ class InworldTTSService(AudioContextTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio without closing the context.
 
         This triggers synthesis of all accumulated text in the buffer while
         keeping the context open for subsequent text. The context is only
         closed on interruption, disconnect, or end of session.
         """
-        context_id = self.get_active_audio_context_id()
-        if context_id and self._websocket:
-            logger.trace(f"Flushing audio for context {context_id}")
-            await self._send_flush(context_id)
+        flush_id = context_id or self.get_active_audio_context_id()
+        if flush_id and self._websocket:
+            logger.trace(f"Flushing audio for context {flush_id}")
+            await self._send_flush(flush_id)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
@@ -920,17 +920,18 @@ class InworldTTSService(AudioContextTTSService):
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
-                    context_id = self.get_active_audio_context_id()
-                    if context_id:
-                        keepalive_message = {
-                            "send_text": {"text": ""},
-                            "contextId": context_id,
-                        }
-                        logger.trace(f"Sending keepalive for context {context_id}")
+                    if self._audio_contexts:
+                        for ctx_id in list(self._audio_contexts):
+                            keepalive_message = {
+                                "send_text": {"text": ""},
+                                "contextId": ctx_id,
+                            }
+                            logger.trace(f"Sending keepalive for context {ctx_id}")
+                            await self._websocket.send(json.dumps(keepalive_message))
                     else:
                         keepalive_message = {"send_text": {"text": ""}}
                         logger.trace("Sending keepalive without context")
-                    await self._websocket.send(json.dumps(keepalive_message))
+                        await self._websocket.send(json.dumps(keepalive_message))
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} keepalive error: {e}")
                 break
@@ -1022,7 +1023,7 @@ class InworldTTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                if not self.has_active_audio_context():
+                if not self.audio_context_available(context_id):
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
                     await self.create_audio_context(context_id)

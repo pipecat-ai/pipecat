@@ -33,9 +33,9 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import (
-    AudioContextTTSService,
     InterruptibleTTSService,
     TTSService,
+    WebsocketTTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -130,7 +130,7 @@ class RimeNonJsonTTSSettings(TTSSettings):
     _aliases: ClassVar[Dict[str, str]] = {"speaker": "voice"}
 
 
-class RimeTTSService(AudioContextTTSService):
+class RimeTTSService(WebsocketTTSService):
     """Text-to-Speech service using Rime's websocket API.
 
     Uses Rime's websocket JSON API to convert text to speech with word-level timing
@@ -357,9 +357,9 @@ class RimeTTSService(AudioContextTTSService):
 
         return changed
 
-    def _build_msg(self, text: str = "") -> dict:
+    def _build_msg(self, text: str = "", context_id: Optional[str] = None) -> dict:
         """Build JSON message for Rime API."""
-        msg = {"text": text, "contextId": self.get_active_audio_context_id()}
+        msg = {"text": text, "contextId": context_id or self.get_active_audio_context_id()}
         if self._extra_msg_fields:
             msg |= self._extra_msg_fields
             self._extra_msg_fields = {}
@@ -506,15 +506,16 @@ class RimeTTSService(AudioContextTTSService):
 
         return word_pairs
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis."""
-        context_id = self.get_active_audio_context_id()
-        if not context_id or not self._websocket:
+        flush_id = context_id or self.get_active_audio_context_id()
+        if not flush_id or not self._websocket:
             return
 
         logger.trace(f"{self}: flushing audio")
         await self._get_websocket().send(json.dumps({"operation": "flush"}))
-        self.reset_active_audio_context()
+        if not context_id:
+            self.reset_active_audio_context()
 
     async def _receive_messages(self):
         """Process incoming websocket messages."""
@@ -587,13 +588,13 @@ class RimeTTSService(AudioContextTTSService):
                 await self._connect()
 
             try:
-                if not self.has_active_audio_context():
+                if not self.audio_context_available(context_id):
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame(context_id=context_id)
                     self._cumulative_time = 0
                     await self.create_audio_context(context_id)
 
-                msg = self._build_msg(text=text)
+                msg = self._build_msg(text=text, context_id=context_id)
                 await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
