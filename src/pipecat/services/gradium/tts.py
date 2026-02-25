@@ -134,12 +134,9 @@ class GradiumTTSService(WebsocketTTSService):
             self._warn_unhandled_updated_settings(changed)
         return changed
 
-    def _build_msg(self, text: str = "", context_id: Optional[str] = None) -> dict:
+    def _build_msg(self, text: str = "", context_id: str = "") -> dict:
         """Build JSON message for Gradium API."""
-        msg = {"text": text, "type": "text"}
-        ctx_id = context_id or self.get_active_audio_context_id()
-        if ctx_id:
-            msg["client_req_id"] = ctx_id
+        msg = {"text": text, "type": "text", "client_req_id": context_id}
         return msg
 
     async def start(self, frame: StartFrame):
