@@ -879,6 +879,8 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._handle_llm_end(frame)
+        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame, TranslationFrame)):
+            await self.push_frame(frame, direction)
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
         elif isinstance(frame, LLMThoughtStartFrame):
@@ -1110,10 +1112,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self._trigger_assistant_turn_stopped()
 
     async def _handle_text(self, frame: TextFrame):
-        # Skip TextFrame types not intended to build the assistant context
-        if isinstance(frame, (TranscriptionFrame, TranslationFrame, InterimTranscriptionFrame)):
-            return
-
         if not frame.append_to_context:
             return
 

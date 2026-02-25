@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
@@ -669,6 +670,70 @@ class TestLLMAssistantAggregator(unittest.IsolatedAsyncioTestCase):
         # The incomplete marker should be stripped (resulting in empty content)
         self.assertEqual(len(stop_messages), 1)
         self.assertEqual(stop_messages[0].content, "")
+
+    async def test_transcription_frames_not_aggregated(self):
+        """TranscriptionFrame should pass through, not be aggregated as assistant text."""
+        context = LLMContext()
+
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hello!"),
+            TranscriptionFrame(text="user speech", user_id="user1", timestamp="now"),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            TranscriptionFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        # Only LLM text should be in the assistant message, not user transcription
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hello!")
+
+    async def test_interim_transcription_frames_not_aggregated(self):
+        """InterimTranscriptionFrame should pass through, not be aggregated as assistant text."""
+        context = LLMContext()
+
+        aggregator = LLMAssistantAggregator(context)
+
+        stop_messages = []
+
+        @aggregator.event_handler("on_assistant_turn_stopped")
+        async def on_assistant_turn_stopped(aggregator, message: AssistantTurnStoppedMessage):
+            stop_messages.append(message)
+
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            LLMTextFrame("Hi there!"),
+            InterimTranscriptionFrame(text="partial user", user_id="user1", timestamp="now"),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            InterimTranscriptionFrame,
+            LLMContextFrame,
+            LLMContextAssistantTimestampFrame,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        # Only LLM text should be in the assistant message, not interim transcription
+        self.assertEqual(len(stop_messages), 1)
+        self.assertEqual(stop_messages[0].content, "Hi there!")
 
 
 if __name__ == "__main__":

@@ -774,6 +774,34 @@ class BaseTestAssistantContextAggregator:
         self.check_message_multi_content(context, 0, 0, "Hello Pipecat.")
         self.check_message_multi_content(context, 0, 1, "How are you?")
 
+    async def test_transcription_frames_not_aggregated(self):
+        """TranscriptionFrame and InterimTranscriptionFrame should pass through the assistant
+        aggregator without being aggregated as assistant text (fixes #3638)."""
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+        frames_to_send = [
+            LLMFullResponseStartFrame(),
+            TextFrame(text="Hello!"),
+            TranscriptionFrame(text="user speech", user_id="user1", timestamp="now"),
+            InterimTranscriptionFrame(text="partial user", user_id="user1", timestamp="now"),
+            LLMFullResponseEndFrame(),
+        ]
+        expected_down_frames = [
+            TranscriptionFrame,
+            InterimTranscriptionFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
+        ]
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        # Only the TextFrame text should appear in the assistant message
+        self.check_message_content(context, 0, "Hello!")
+
     async def test_function_call(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"

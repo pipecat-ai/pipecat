@@ -901,6 +901,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             await self._handle_llm_start(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._handle_llm_end(frame)
+        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+            await self.push_frame(frame, direction)
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
         elif isinstance(frame, LLMRunFrame):
