@@ -89,7 +89,6 @@ class GradiumTTSService(WebsocketTTSService):
             push_stop_frames=True,
             push_text_frames=False,
             pause_frame_processing=True,
-            supports_word_timestamps=True,
             sample_rate=SAMPLE_RATE,
             **kwargs,
         )

@@ -931,7 +931,7 @@ class SarvamTTSService(InterruptibleTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending flush command."""
         try:
             if self._websocket:

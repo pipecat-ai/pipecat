@@ -277,7 +277,7 @@ class LmntTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis."""
         if not self._websocket or self._websocket.state is State.CLOSED:
             return

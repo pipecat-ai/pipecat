@@ -139,8 +139,6 @@ class TTSService(AIService):
         append_trailing_space: bool = False,
         # TTS output sample rate
         sample_rate: Optional[int] = None,
-        # if True, enables word-level timestamp tracking and synchronization
-        supports_word_timestamps: bool = False,
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
         text_aggregator: Optional[BaseTextAggregator] = None,
         # Types of text aggregations that should not be spoken.
@@ -175,9 +173,6 @@ class TTSService(AIService):
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
                 This helps prevent some TTS services from vocalizing trailing punctuation (e.g., "dot").
             sample_rate: Output sample rate for generated audio.
-            supports_word_timestamps: Whether this service supports word-level timestamp tracking.
-                When True, enables synchronization of audio with spoken words so only spoken words
-                are added to the conversation context.
             text_aggregator: Custom text aggregator for processing incoming text.
 
                 .. deprecated:: 0.0.95
@@ -249,8 +244,7 @@ class TTSService(AIService):
         self._processing_text: bool = False
         self._tts_contexts: Dict[str, TTSContext] = {}
 
-        # Word timestamp state (active when supports_word_timestamps=True)
-        self._supports_word_timestamps: bool = supports_word_timestamps
+        # Word timestamp state
         self._initial_word_timestamp: int = -1
         self._initial_word_times: List[Tuple[str, float, Optional[str]]] = []
         # PTS of the last word frame pushed via _add_word_timestamps, used to assign
@@ -582,8 +576,7 @@ class TTSService(AIService):
             else:
                 await self.push_frame(frame, direction)
             # Flush any pending audio so the TTS service closes the current context.
-            if self._supports_word_timestamps:
-                await self.flush_audio(context_id=self._turn_context_id)
+            await self.flush_audio(context_id=self._turn_context_id)
             # Reset the turn context ID
             self._turn_context_id = None
         elif isinstance(frame, TTSSpeakFrame):
@@ -730,8 +723,7 @@ class TTSService(AIService):
             await filter.handle_interruption()
 
         self._llm_response_started = False
-        if self._supports_word_timestamps:
-            await self.reset_word_timestamps()
+        await self.reset_word_timestamps()
 
         await self._stop_audio_context_task()
         # TODO here we should interrupt all contexts.
@@ -879,7 +871,7 @@ class TTSService(AIService):
                     has_started = False
 
     #
-    # Word timestamp methods (active when supports_word_timestamps=True)
+    # Word timestamp methods
     #
 
     async def start_word_timestamps(self):
@@ -1136,7 +1128,7 @@ class TTSService(AIService):
                     continue
                 elif isinstance(frame, TTSAudioRawFrame):
                     # Set the word-timestamp baseline once, on the first audio chunk.
-                    if self._supports_word_timestamps and not timestamps_started:
+                    if not timestamps_started:
                         logger.info(
                             f"{self} FF => Starting word timestamps for context {context_id}"
                         )
@@ -1180,11 +1172,10 @@ class TTSService(AIService):
 
 
 class WordTTSService(TTSService):
-    """Deprecated. Use TTSService with supports_word_timestamps=True instead.
+    """Deprecated. Use TTSService directly instead.
 
     .. deprecated::
-        Word timestamp functionality has been moved to TTSService. Pass
-        ``supports_word_timestamps=True`` to TTSService (or any subclass) instead.
+        Word timestamp functionality is now always active in TTSService.
     """
 
     def __init__(self, **kwargs):
@@ -1193,7 +1184,7 @@ class WordTTSService(TTSService):
         Args:
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        super().__init__(supports_word_timestamps=True, **kwargs)
+        super().__init__(**kwargs)
 
 
 class WebsocketTTSService(TTSService, WebsocketService):
@@ -1269,11 +1260,10 @@ class InterruptibleTTSService(WebsocketTTSService):
 
 
 class WebsocketWordTTSService(WebsocketTTSService):
-    """Deprecated. Use WebsocketTTSService with supports_word_timestamps=True instead.
+    """Deprecated. Use WebsocketTTSService directly instead.
 
     .. deprecated::
-        Word timestamp functionality has been moved to TTSService. Pass
-        ``supports_word_timestamps=True`` to WebsocketTTSService instead.
+        Word timestamp functionality is now always active in TTSService.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -1283,17 +1273,14 @@ class WebsocketWordTTSService(WebsocketTTSService):
             reconnect_on_error: Whether to automatically reconnect on websocket errors.
             **kwargs: Additional arguments passed to parent classes.
         """
-        super().__init__(
-            supports_word_timestamps=True, reconnect_on_error=reconnect_on_error, **kwargs
-        )
+        super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)
 
 
 class InterruptibleWordTTSService(InterruptibleTTSService):
-    """Deprecated. Use InterruptibleTTSService with supports_word_timestamps=True instead.
+    """Deprecated. Use InterruptibleTTSService directly instead.
 
     .. deprecated::
-        Word timestamp functionality has been moved to TTSService. Pass
-        ``supports_word_timestamps=True`` to InterruptibleTTSService instead.
+        Word timestamp functionality is now always active in TTSService.
     """
 
     def __init__(self, **kwargs):
@@ -1302,7 +1289,7 @@ class InterruptibleWordTTSService(InterruptibleTTSService):
         Args:
             **kwargs: Additional arguments passed to the parent InterruptibleTTSService.
         """
-        super().__init__(supports_word_timestamps=True, **kwargs)
+        super().__init__(**kwargs)
 
 
 class AudioContextTTSService(WebsocketTTSService):
@@ -1347,11 +1334,10 @@ class AudioContextTTSService(WebsocketTTSService):
 
 
 class AudioContextWordTTSService(AudioContextTTSService):
-    """Deprecated. Use WebsocketTTSService with supports_word_timestamps=True instead.
+    """Deprecated. Use WebsocketTTSService directly instead.
 
     .. deprecated::
-        Subclass :class:`WebsocketTTSService` directly and pass
-        ``supports_word_timestamps=True`` to its ``__init__``.
+        Subclass :class:`WebsocketTTSService` directly.
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -1364,11 +1350,8 @@ class AudioContextWordTTSService(AudioContextTTSService):
         import warnings
 
         warnings.warn(
-            "AudioContextWordTTSService is deprecated. Inherit from WebsocketTTSService directly "
-            "and pass supports_word_timestamps=True as a kwarg.",
+            "AudioContextWordTTSService is deprecated. Inherit from WebsocketTTSService directly.",
             DeprecationWarning,
             stacklevel=2,
         )
-        super().__init__(
-            supports_word_timestamps=True, reconnect_on_error=reconnect_on_error, **kwargs
-        )
+        super().__init__(reconnect_on_error=reconnect_on_error, **kwargs)

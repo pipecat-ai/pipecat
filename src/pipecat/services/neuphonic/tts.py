@@ -216,7 +216,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending stop command."""
         if self._websocket:
             msg = {"text": "<STOP>"}
@@ -486,7 +486,7 @@ class NeuphonicHttpTTSService(TTSService):
         """
         await super().start(frame)
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis.
 
         Note:

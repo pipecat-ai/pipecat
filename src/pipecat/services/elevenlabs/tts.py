@@ -399,7 +399,6 @@ class ElevenLabsTTSService(WebsocketTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
-            supports_word_timestamps=True,
             sample_rate=sample_rate,
             **kwargs,
         )
@@ -918,7 +917,6 @@ class ElevenLabsHttpTTSService(TTSService):
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
-            supports_word_timestamps=True,
             sample_rate=sample_rate,
             **kwargs,
         )

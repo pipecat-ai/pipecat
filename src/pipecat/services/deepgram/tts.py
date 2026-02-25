@@ -311,7 +311,7 @@ class DeepgramTTSService(WebsocketTTSService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis by sending Flush command.
 
         This should be called when the LLM finishes a complete response to force

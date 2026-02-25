@@ -125,7 +125,6 @@ class HumeTTSService(TTSService):
             sample_rate=sample_rate,
             push_text_frames=False,
             push_stop_frames=True,
-            supports_word_timestamps=True,
             **kwargs,
         )
 

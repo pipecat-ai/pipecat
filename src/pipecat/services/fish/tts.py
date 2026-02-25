@@ -308,7 +308,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             self._websocket = None
             await self._call_event_handler("on_disconnected")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any buffered audio by sending a flush event to Fish Audio."""
         logger.trace(f"{self}: Flushing audio buffers")
         if not self._websocket or self._websocket.state is State.CLOSED:

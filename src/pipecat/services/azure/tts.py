@@ -294,7 +294,6 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             push_text_frames=False,  # We'll push text frames based on word timestamps
             push_stop_frames=True,
             pause_frame_processing=True,
-            supports_word_timestamps=True,
             sample_rate=sample_rate,
             **kwargs,
         )
@@ -585,7 +584,7 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         self._last_timestamp = None
         self._current_context_id = None
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio data."""
         logger.trace(f"{self}: flushing audio")
 

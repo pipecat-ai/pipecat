@@ -91,7 +91,6 @@ class ResembleAITTSService(WebsocketTTSService):
         super().__init__(
             sample_rate=sample_rate,
             reuse_context_id_within_turn=False,
-            supports_word_timestamps=True,
             **kwargs,
         )
 

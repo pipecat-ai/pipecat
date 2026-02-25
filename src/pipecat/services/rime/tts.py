@@ -207,7 +207,6 @@ class RimeTTSService(WebsocketTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
-            supports_word_timestamps=True,
             append_trailing_space=True,
             sample_rate=sample_rate,
             **kwargs,
@@ -997,7 +996,7 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def flush_audio(self):
+    async def flush_audio(self, context_id: Optional[str] = None):
         """Flush any pending audio synthesis."""
         if not self._websocket:
             return

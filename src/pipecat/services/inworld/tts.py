@@ -153,7 +153,6 @@ class InworldHttpTTSService(TTSService):
         super().__init__(
             push_text_frames=False,
             push_stop_frames=True,
-            supports_word_timestamps=True,
             sample_rate=sample_rate,
             **kwargs,
         )
@@ -534,7 +533,6 @@ class InworldTTSService(WebsocketTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
-            supports_word_timestamps=True,
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
             append_trailing_space=append_trailing_space,
