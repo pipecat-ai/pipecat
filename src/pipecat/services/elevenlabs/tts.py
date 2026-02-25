@@ -572,7 +572,6 @@ class ElevenLabsTTSService(WebsocketTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        # TODO need to fix this, we don't have a single context anymore
         if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)], self.get_active_audio_context_id())
