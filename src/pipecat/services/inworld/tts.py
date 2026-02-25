@@ -791,12 +791,10 @@ class InworldTTSService(WebsocketTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Inworld WebSocket TTS")
-                context_id = self.get_active_audio_context_id()
-                if context_id:
-                    try:
-                        await self._send_close_context(context_id)
-                    except Exception:
-                        pass
+                audio_contexts = self.get_audio_contexts()
+                if audio_contexts:
+                    for ctx_id in audio_contexts:
+                        await self._send_close_context(ctx_id)
                 await self._websocket.close()
                 logger.debug("Disconnected from Inworld WebSocket TTS")
         except Exception as e:
@@ -826,10 +824,7 @@ class InworldTTSService(WebsocketTTSService):
                 for k in ["contextCreated", "audioChunk", "flushCompleted", "contextClosed"]
                 if k in result
             ]
-            logger.debug(
-                f"{self}: Received message types={msg_types}, ctx_id={ctx_id}, "
-                f"current_ctx={self.get_active_audio_context_id()}, available={self.audio_context_available(ctx_id) if ctx_id else 'N/A'}"
-            )
+            logger.debug(f"{self}: Received message types={msg_types}, ctx_id={ctx_id}")
 
             # Check for errors
             status = result.get("status", {})
@@ -840,9 +835,7 @@ class InworldTTSService(WebsocketTTSService):
                 # Handle "Context not found" error (code 5)
                 # This can happen when a keepalive message is sent but no context is available.
                 if error_code == 5 and "not found" in error_msg.lower():
-                    logger.debug(
-                        f"{self}: Context {ctx_id or self.get_active_audio_context_id()} not found."
-                    )
+                    logger.debug(f"{self}: Context {ctx_id} not found.")
                     continue
 
                 # For other errors, push error frame
@@ -853,17 +846,10 @@ class InworldTTSService(WebsocketTTSService):
                 await self.push_error(error_msg=str(msg["error"]))
                 continue
 
-            # Check if this message belongs to an available context.
-            # If the context isn't available but matches our current context ID,
-            # recreate it (handles race conditions during interruption recovery).
+            # If the context isn't available recreate it (handles race conditions during interruption recovery).
             if ctx_id and not self.audio_context_available(ctx_id):
-                if self.get_active_audio_context_id() == ctx_id:
-                    logger.trace(f"{self}: Recreating audio context for current context: {ctx_id}")
-                    await self.create_audio_context(ctx_id)
-                else:
-                    # This is a message from an old/closed context - skip it
-                    logger.trace(f"{self}: Skipping message from unavailable context: {ctx_id}")
-                    continue
+                logger.trace(f"{self}: Recreating audio context for current context: {ctx_id}")
+                await self.create_audio_context(ctx_id)
 
             # Process audio chunk
             audio_chunk = result.get("audioChunk", {})
@@ -902,12 +888,8 @@ class InworldTTSService(WebsocketTTSService):
             if "contextClosed" in result:
                 logger.trace(f"{self}: Context closed on server: {ctx_id}")
                 await self.stop_ttfb_metrics()
-                # Only reset if this is our current context
-                if ctx_id == self.get_active_audio_context_id():
-                    self.reset_active_audio_context()
-                if ctx_id and self.audio_context_available(ctx_id):
-                    await self.remove_audio_context(ctx_id)
                 await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)], ctx_id)
+                await self.remove_audio_context(ctx_id)
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
