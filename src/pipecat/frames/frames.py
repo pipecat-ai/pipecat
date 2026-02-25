@@ -42,6 +42,7 @@ from pipecat.utils.utils import obj_count, obj_id
 if TYPE_CHECKING:
     from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.services.settings import ServiceSettings
     from pipecat.utils.tracing.tracing_context import TracingContext
 
 
@@ -2117,16 +2118,24 @@ class TTSStoppedFrame(ControlFrame):
 
 
 @dataclass
-class ServiceUpdateSettingsFrame(ControlFrame):
+class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
     """Base frame for updating service settings.
 
-    A control frame containing a request to update service settings.
+    Supports both a ``settings`` dict (for backward compatibility) and a
+    ``delta`` object.  When both are provided, ``delta`` takes precedence.
 
     Parameters:
         settings: Dictionary of setting name to value mappings.
+
+            .. deprecated:: 0.0.104
+                Use ``delta`` with a typed settings object instead.
+
+        delta: :class:`~pipecat.services.settings.ServiceSettings` delta-mode
+            object describing the fields to change.
     """
 
-    settings: Mapping[str, Any]
+    settings: Mapping[str, Any] = field(default_factory=dict)
+    delta: Optional["ServiceSettings"] = None
 
 
 @dataclass

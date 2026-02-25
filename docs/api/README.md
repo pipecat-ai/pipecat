@@ -42,7 +42,7 @@ This script:
 
 - Creates a fresh virtual environment
 - Installs all dependencies as specified in requirements files
-- Handles conflicting dependencies (like grpcio versions for Riva and PlayHT)
+- Handles conflicting dependencies (like grpcio versions for Riva)
 - Builds the documentation in an isolated environment
 - Provides detailed logging of the build process
 
@@ -74,7 +74,6 @@ start _build/html/index.html
 ├── index.rst       # Main documentation entry point
 ├── requirements-base.txt    # Base documentation dependencies
 ├── requirements-riva.txt    # Riva-specific dependencies
-├── requirements-playht.txt  # PlayHT-specific dependencies
 ├── build-docs.sh   # Local build script
 └── rtd-test.py     # ReadTheDocs test build script
 ```

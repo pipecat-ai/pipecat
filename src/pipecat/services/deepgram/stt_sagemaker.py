@@ -14,7 +14,8 @@ languages, and various Deepgram features.
 
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import DEEPGRAM_SAGEMAKER_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -45,6 +47,17 @@ except ModuleNotFoundError as e:
         "In order to use DeepgramSageMakerSTTService, you need to `pip install pipecat-ai[deepgram,sagemaker]`."
     )
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class DeepgramSageMakerSTTSettings(STTSettings):
+    """Settings for the Deepgram SageMaker STT service.
+
+    Parameters:
+        live_options: Deepgram ``LiveOptions`` for detailed configuration.
+    """
+
+    live_options: LiveOptions | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramSageMakerSTTService(STTService):
@@ -75,6 +88,8 @@ class DeepgramSageMakerSTTService(STTService):
         )
     """
 
+    _settings: DeepgramSageMakerSTTSettings
+
     def __init__(
         self,
         *,
@@ -100,10 +115,6 @@ class DeepgramSageMakerSTTService(STTService):
             **kwargs: Additional arguments passed to the parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
-        self._endpoint_name = endpoint_name
-        self._region = region
 
         # Create default options similar to DeepgramSTTService
         default_options = LiveOptions(
@@ -128,8 +139,20 @@ class DeepgramSageMakerSTTService(STTService):
         if "language" in merged_options and isinstance(merged_options["language"], Language):
             merged_options["language"] = merged_options["language"].value
 
-        self.set_model_name(merged_options["model"])
-        self._settings = merged_options
+        merged_live_options = LiveOptions(**merged_options)
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=DeepgramSageMakerSTTSettings(
+                model=merged_options.get("model"),
+                language=merged_options.get("language"),
+                live_options=merged_live_options,
+            ),
+            **kwargs,
+        )
+
+        self._endpoint_name = endpoint_name
+        self._region = region
 
         self._client: Optional[SageMakerBidiClient] = None
         self._response_task: Optional[asyncio.Task] = None
@@ -143,35 +166,55 @@ class DeepgramSageMakerSTTService(STTService):
         """
         return True
 
-    async def set_model(self, model: str):
-        """Set the Deepgram model and reconnect.
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta, keeping ``live_options`` in sync.
 
-        Disconnects from the current session, updates the model setting, and
-        establishes a new connection with the updated model.
+        Top-level ``model`` and ``language`` are the source of truth.  When
+        they are given in *delta* their values are propagated into
+        ``live_options``.  When only ``live_options`` is given, its ``model``
+        and ``language`` are propagated *up* to the top-level fields.
 
-        Args:
-            model: The Deepgram model name to use (e.g., "nova-3").
+        Any change triggers a reconnect.
         """
-        await super().set_model(model)
-        logger.info(f"Switching STT model to: [{model}]")
-        self._settings["model"] = model
-        await self._disconnect()
-        await self._connect()
+        # Determine which top-level fields are explicitly provided.
+        model_given = isinstance(delta, DeepgramSageMakerSTTSettings) and is_given(
+            getattr(delta, "model", NOT_GIVEN)
+        )
+        language_given = isinstance(delta, DeepgramSageMakerSTTSettings) and is_given(
+            getattr(delta, "language", NOT_GIVEN)
+        )
 
-    async def set_language(self, language: Language):
-        """Set the recognition language and reconnect.
+        changed = await super()._update_settings(delta)
 
-        Disconnects from the current session, updates the language setting, and
-        establishes a new connection with the updated language.
+        if not changed:
+            return changed
 
-        Args:
-            language: The language to use for speech recognition (e.g., Language.EN,
-                Language.ES).
-        """
-        logger.info(f"Switching STT language to: [{language}]")
-        self._settings["language"] = language
-        await self._disconnect()
-        await self._connect()
+        # --- Sync model --------------------------------------------------
+        if model_given:
+            # Top-level model wins → push into live_options.
+            self._settings.live_options.model = self._settings.model
+        elif "live_options" in changed and self._settings.live_options.model is not None:
+            # Only live_options was given → pull model up.
+            self._settings.model = self._settings.live_options.model
+            self._sync_model_name_to_metrics()
+
+        # --- Sync language -----------------------------------------------
+        if language_given:
+            lang = self._settings.language
+            if isinstance(lang, Language):
+                lang = lang.value
+            self._settings.live_options.language = lang
+        elif "live_options" in changed and self._settings.live_options.language is not None:
+            self._settings.language = self._settings.live_options.language
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     async def start(self, frame: StartFrame):
         """Start the Deepgram SageMaker STT service.
@@ -180,7 +223,7 @@ class DeepgramSageMakerSTTService(STTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings["sample_rate"] = self.sample_rate
+        self._settings.live_options.sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -226,12 +269,12 @@ class DeepgramSageMakerSTTService(STTService):
         """
         logger.debug("Connecting to Deepgram on SageMaker...")
 
-        # Update sample rate in settings
-        self._settings["sample_rate"] = self.sample_rate
+        # Update sample rate in live_options
+        self._settings.live_options.sample_rate = self.sample_rate
 
-        # Build query string from settings, converting booleans to strings
+        # Build query string from live_options, converting booleans to strings
         query_params = {}
-        for key, value in self._settings.items():
+        for key, value in self._settings.live_options.to_dict().items():
             if value is not None:
                 # Convert boolean values to lowercase strings for Deepgram API
                 if isinstance(value, bool):

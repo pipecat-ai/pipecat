@@ -13,6 +13,7 @@ for creating images from text prompts using various AI models.
 import asyncio
 import io
 import os
+from dataclasses import dataclass
 from typing import AsyncGenerator, Dict, Optional, Union
 
 import aiohttp
@@ -22,6 +23,7 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
+from pipecat.services.settings import ImageGenSettings
 
 try:
     import fal_client
@@ -29,6 +31,15 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Fal, you need to `pip install pipecat-ai[fal]`.")
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class FalImageGenSettings(ImageGenSettings):
+    """Settings for the Fal image generation service.
+
+    Parameters:
+        model: Fal.ai model identifier.
+    """
 
 
 class FalImageGenService(ImageGenService):
@@ -77,8 +88,7 @@ class FalImageGenService(ImageGenService):
             key: Optional API key for Fal.ai. If provided, sets FAL_KEY environment variable.
             **kwargs: Additional arguments passed to parent ImageGenService.
         """
-        super().__init__(**kwargs)
-        self.set_model_name(model)
+        super().__init__(settings=FalImageGenSettings(model=model), **kwargs)
         self._params = params
         self._aiohttp_session = aiohttp_session
         if key:
@@ -103,7 +113,7 @@ class FalImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         response = await fal_client.run_async(
-            self.model_name,
+            self._settings.model,
             arguments={"prompt": prompt, **self._params.model_dump(exclude_none=True)},
         )
 

@@ -72,8 +72,7 @@ class OpenRouterLLMService(OpenAILLMService):
             Transformed parameters ready for the API call.
         """
         params = super().build_chat_completion_params(params_from_context)
-        model = getattr(self, "model_name", getattr(self, "model", "")).lower()
-        if "gemini" in model:
+        if "gemini" in self._settings.model.lower():
             messages = params.get("messages", [])
             if not messages:
                 return params

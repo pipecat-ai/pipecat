@@ -15,8 +15,8 @@ import io
 import json
 import os
 import uuid
-from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, List, Literal, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator, ClassVar, Dict, List, Literal, Optional
 
 from loguru import logger
 from PIL import Image
@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    LLMUpdateSettingsFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -59,6 +58,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -673,6 +673,62 @@ class GoogleLLMContext(OpenAILLMContext):
         self._messages = [m for m in self._messages if m.parts]
 
 
+class GoogleThinkingConfig(BaseModel):
+    """Configuration for controlling the model's internal "thinking" process used before generating a response.
+
+    Gemini 2.5 and 3 series models have this thinking process.
+
+    Parameters:
+        thinking_level: Thinking level for Gemini 3 models.
+            For Gemini 3 Pro, this can be "low" or "high".
+            For Gemini 3 Flash, this can be "minimal", "low", "medium", or "high".
+            If not provided, Gemini 3 models default to "high".
+            Note: Gemini 2.5 series must use thinking_budget instead.
+        thinking_budget: Token budget for thinking, for Gemini 2.5 series.
+            -1 for dynamic thinking (model decides), 0 to disable thinking,
+            or a specific token count (e.g., 128-32768 for 2.5 Pro).
+            If not provided, most models today default to dynamic thinking.
+            See https://ai.google.dev/gemini-api/docs/thinking#set-budget
+            for default values and allowed ranges.
+            Note: Gemini 3 models must use thinking_level instead.
+        include_thoughts: Whether to include thought summaries in the response.
+            Today's models default to not including thoughts (False).
+    """
+
+    thinking_budget: Optional[int] = Field(default=None)
+
+    # Why `| str` here? To not break compatibility in case Google adds more
+    # levels in the future.
+    thinking_level: Optional[Literal["low", "high", "medium", "minimal"] | str] = Field(
+        default=None
+    )
+
+    include_thoughts: Optional[bool] = Field(default=None)
+
+
+@dataclass
+class GoogleLLMSettings(LLMSettings):
+    """Settings for Google LLM services.
+
+    Parameters:
+        thinking: Thinking configuration.
+    """
+
+    thinking: GoogleThinkingConfig | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    @classmethod
+    def from_mapping(cls, settings):
+        """Convert a plain dict to settings, coercing thinking dicts.
+
+        For backward compatibility, a ``thinking`` value that is a plain dict
+        is converted to a :class:`GoogleThinkingConfig`.
+        """
+        instance = super().from_mapping(settings)
+        if is_given(instance.thinking) and isinstance(instance.thinking, dict):
+            instance.thinking = GoogleThinkingConfig(**instance.thinking)
+        return instance
+
+
 class GoogleLLMService(LLMService):
     """Google AI (Gemini) LLM service implementation.
 
@@ -681,40 +737,13 @@ class GoogleLLMService(LLMService):
     expected by the Google AI model.
     """
 
+    _settings: GoogleLLMSettings
+
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
-    class ThinkingConfig(BaseModel):
-        """Configuration for controlling the model's internal "thinking" process used before generating a response.
-
-        Gemini 2.5 and 3 series models have this thinking process.
-
-        Parameters:
-            thinking_level: Thinking level for Gemini 3 models.
-                For Gemini 3 Pro, this can be "low" or "high".
-                For Gemini 3 Flash, this can be "minimal", "low", "medium", or "high".
-                If not provided, Gemini 3 models default to "high".
-                Note: Gemini 2.5 series must use thinking_budget instead.
-            thinking_budget: Token budget for thinking, for Gemini 2.5 series.
-                -1 for dynamic thinking (model decides), 0 to disable thinking,
-                or a specific token count (e.g., 128-32768 for 2.5 Pro).
-                If not provided, most models today default to dynamic thinking.
-                See https://ai.google.dev/gemini-api/docs/thinking#set-budget
-                for default values and allowed ranges.
-                Note: Gemini 3 models must use thinking_level instead.
-            include_thoughts: Whether to include thought summaries in the response.
-                Today's models default to not including thoughts (False).
-        """
-
-        thinking_budget: Optional[int] = Field(default=None)
-
-        # Why `| str` here? To not break compatibility in case Google adds more
-        # levels in the future.
-        thinking_level: Optional[Literal["low", "high", "medium", "minimal"] | str] = Field(
-            default=None
-        )
-
-        include_thoughts: Optional[bool] = Field(default=None)
+    # Backward compatibility: ThinkingConfig used to be defined inline here.
+    ThinkingConfig = GoogleThinkingConfig
 
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
@@ -737,7 +766,7 @@ class GoogleLLMService(LLMService):
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
         top_k: Optional[int] = Field(default=None, ge=0)
         top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-        thinking: Optional["GoogleLLMService.ThinkingConfig"] = Field(default=None)
+        thinking: Optional[GoogleThinkingConfig] = Field(default=None)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -764,23 +793,29 @@ class GoogleLLMService(LLMService):
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(**kwargs)
-
         params = params or GoogleLLMService.InputParams()
 
-        self.set_model_name(model)
+        super().__init__(
+            settings=GoogleLLMSettings(
+                model=model,
+                max_tokens=params.max_tokens,
+                temperature=params.temperature,
+                top_k=params.top_k,
+                top_p=params.top_p,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                thinking=params.thinking,
+                extra=params.extra if isinstance(params.extra, dict) else {},
+            ),
+            **kwargs,
+        )
+
         self._api_key = api_key
         self._system_instruction = system_instruction
         self._http_options = update_google_client_http_options(http_options)
-
-        self._settings = {
-            "max_tokens": params.max_tokens,
-            "temperature": params.temperature,
-            "top_k": params.top_k,
-            "top_p": params.top_p,
-            "thinking": params.thinking,
-            "extra": params.extra if isinstance(params.extra, dict) else {},
-        }
         self._tools = tools
         self._tool_config = tool_config
 
@@ -840,7 +875,7 @@ class GoogleLLMService(LLMService):
 
         # Use the new google-genai client's async method
         response = await self._client.aio.models.generate_content(
-            model=self._model_name,
+            model=self._settings.model,
             contents=messages,
             config=generation_config,
         )
@@ -874,10 +909,10 @@ class GoogleLLMService(LLMService):
             k: v
             for k, v in {
                 "system_instruction": system_instruction,
-                "temperature": self._settings["temperature"],
-                "top_p": self._settings["top_p"],
-                "top_k": self._settings["top_k"],
-                "max_output_tokens": self._settings["max_tokens"],
+                "temperature": self._settings.temperature,
+                "top_p": self._settings.top_p,
+                "top_k": self._settings.top_k,
+                "max_output_tokens": self._settings.max_tokens,
                 "tools": tools,
                 "tool_config": tool_config,
             }.items()
@@ -885,13 +920,13 @@ class GoogleLLMService(LLMService):
         }
 
         # Add thinking parameters if configured
-        if self._settings["thinking"]:
-            generation_params["thinking_config"] = self._settings["thinking"].model_dump(
+        if self._settings.thinking:
+            generation_params["thinking_config"] = self._settings.thinking.model_dump(
                 exclude_unset=True
             )
 
-        if self._settings["extra"]:
-            generation_params.update(self._settings["extra"])
+        if self._settings.extra:
+            generation_params.update(self._settings.extra)
 
         return generation_params
 
@@ -900,10 +935,10 @@ class GoogleLLMService(LLMService):
             # There's no way to introspect on model capabilities, so
             # to check for models that we know default to thinkin on
             # and can be configured to turn it off.
-            if not self._model_name.startswith("gemini-2.5-flash"):
+            if not self._settings.model.startswith("gemini-2.5-flash"):
                 return
             # If we have an image model, we don't use a budget either.
-            if "image" in self._model_name:
+            if "image" in self._settings.model:
                 return
             # If thinking_config is already set, don't override it.
             if "thinking_config" in generation_params:
@@ -944,7 +979,7 @@ class GoogleLLMService(LLMService):
 
         await self.start_ttfb_metrics()
         return await self._client.aio.models.generate_content_stream(
-            model=self._model_name,
+            model=self._settings.model,
             contents=messages,
             config=generation_config,
         )
@@ -1190,8 +1225,6 @@ class GoogleLLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = GoogleLLMContext(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 
@@ -1214,14 +1247,6 @@ class GoogleLLMService(LLMService):
         except Exception:
             # Do nothing - we're shutting down anyway
             pass
-
-    async def _update_settings(self, settings):
-        """Override to handle ThinkingConfig validation."""
-        # Convert thinking dict to ThinkingConfig if needed
-        if "thinking" in settings and isinstance(settings["thinking"], dict):
-            settings = dict(settings)  # Make a copy to avoid modifying the original
-            settings["thinking"] = self.ThinkingConfig(**settings["thinking"])
-        await super()._update_settings(settings)
 
     def create_context_aggregator(
         self,

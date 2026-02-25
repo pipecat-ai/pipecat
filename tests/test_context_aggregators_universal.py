@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    InterimTranscriptionFrame,
     InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
@@ -26,6 +27,7 @@ from pipecat.frames.frames import (
     LLMThoughtTextFrame,
     StartFrame,
     TranscriptionFrame,
+    TranslationFrame,
     UserMuteStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -426,6 +428,44 @@ class TestLLMUserAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=[],
             expected_down_frames=[StartFrame, UserMuteStartedFrame],
             ignore_start=False,
+        )
+
+    async def test_interim_transcription_not_pushed_downstream(self):
+        """InterimTranscriptionFrame should be consumed and not pushed downstream."""
+        context = LLMContext()
+        pipeline = Pipeline([LLMUserAggregator(context)])
+
+        frames_to_send = [
+            InterimTranscriptionFrame(text="Hel", user_id="", timestamp="now"),
+            InterimTranscriptionFrame(text="Hello", user_id="", timestamp="now"),
+        ]
+        # The interim transcription triggers a user turn start via the default
+        # TranscriptionUserTurnStartStrategy, so we expect turn-related frames
+        # but NOT the InterimTranscriptionFrame itself.
+        expected_down_frames = [
+            UserStartedSpeakingFrame,
+            InterruptionFrame,
+        ]
+        (down_frames, _) = await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.assertFalse(any(isinstance(f, InterimTranscriptionFrame) for f in down_frames))
+
+    async def test_translation_not_pushed_downstream(self):
+        """TranslationFrame should be consumed and not pushed downstream."""
+        context = LLMContext()
+        pipeline = Pipeline([LLMUserAggregator(context)])
+
+        frames_to_send = [
+            TranslationFrame(text="Hola!", user_id="", timestamp="now", language="es"),
+        ]
+        # No downstream frames expected — translations are consumed.
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[],
         )
 
 

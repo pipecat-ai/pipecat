@@ -39,7 +39,11 @@ class KrispVivaFilter(BaseAudioFilter):
     """
 
     def __init__(
-        self, model_path: str = None, frame_duration: int = 10, noise_suppression_level: int = 100
+        self,
+        model_path: str = None,
+        frame_duration: int = 10,
+        noise_suppression_level: int = 100,
+        api_key: str = "",
     ) -> None:
         """Initialize the Krisp noise reduction filter.
 
@@ -48,6 +52,8 @@ class KrispVivaFilter(BaseAudioFilter):
                 If None, uses KRISP_VIVA_FILTER_MODEL_PATH environment variable.
             frame_duration: Frame duration in milliseconds.
             noise_suppression_level: Noise suppression level.
+            api_key: Krisp SDK API key. If empty, falls back to
+                the KRISP_VIVA_API_KEY environment variable.
 
         Raises:
             ValueError: If model_path is not provided and KRISP_VIVA_FILTER_MODEL_PATH is not set.
@@ -56,6 +62,8 @@ class KrispVivaFilter(BaseAudioFilter):
             RuntimeError: If Krisp SDK initialization fails.
         """
         super().__init__()
+
+        self._api_key = api_key
 
         try:
             # Set model path, checking environment if not specified
@@ -132,7 +140,7 @@ class KrispVivaFilter(BaseAudioFilter):
         """
         try:
             # Acquire SDK reference (will initialize on first call)
-            KrispVivaSDKManager.acquire()
+            KrispVivaSDKManager.acquire(api_key=self._api_key)
             self._session = self._create_session(sample_rate, self._frame_duration_ms)
         except Exception as e:
             logger.error(f"Failed to start Krisp session: {e}", exc_info=True)

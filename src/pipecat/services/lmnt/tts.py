@@ -7,7 +7,8 @@
 """LMNT text-to-speech service implementation."""
 
 import json
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -23,6 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -71,6 +73,17 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=True)
 
 
+@dataclass
+class LmntTTSSettings(TTSSettings):
+    """Settings for LMNT TTS service.
+
+    Parameters:
+        format: Audio output format. Defaults to "raw".
+    """
+
+    format: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class LmntTTSService(InterruptibleTTSService):
     """LMNT real-time text-to-speech service.
 
@@ -78,6 +91,8 @@ class LmntTTSService(InterruptibleTTSService):
     Supports streaming audio generation with configurable voice models and
     language settings.
     """
+
+    _settings: LmntTTSSettings
 
     def __init__(
         self,
@@ -103,16 +118,16 @@ class LmntTTSService(InterruptibleTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            settings=LmntTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=self.language_to_service_language(language),
+                format="raw",
+            ),
             **kwargs,
         )
 
         self._api_key = api_key
-        self.set_voice(voice_id)
-        self.set_model_name(model)
-        self._settings = {
-            "language": self.language_to_service_language(language),
-            "format": "raw",  # Use raw format for direct PCM data
-        }
         self._receive_task = None
         self._context_id: Optional[str] = None
 
@@ -190,6 +205,23 @@ class LmntTTSService(InterruptibleTTSService):
 
         await self._disconnect_websocket()
 
+    async def _update_settings(self, delta: TTSSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Args:
+            delta: A :class:`TTSSettings` (or ``LmntTTSSettings``) delta.
+
+        Returns:
+            Dict mapping changed field names to their previous values.
+        """
+        changed = await super()._update_settings(delta)
+
+        if changed:
+            await self._disconnect()
+            await self._connect()
+
+        return changed
+
     async def _connect_websocket(self):
         """Connect to LMNT websocket."""
         try:
@@ -201,11 +233,11 @@ class LmntTTSService(InterruptibleTTSService):
             # Build initial connection message
             init_msg = {
                 "X-API-Key": self._api_key,
-                "voice": self._voice_id,
-                "format": self._settings["format"],
+                "voice": self._settings.voice,
+                "format": self._settings.format,
                 "sample_rate": self.sample_rate,
-                "language": self._settings["language"],
-                "model": self.model_name,
+                "language": self._settings.language,
+                "model": self._settings.model,
             }
 
             # Connect to LMNT's websocket directly

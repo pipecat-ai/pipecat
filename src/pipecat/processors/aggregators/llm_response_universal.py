@@ -461,6 +461,10 @@ class LLMUserAggregator(LLMContextAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
+        elif isinstance(frame, (InterimTranscriptionFrame, TranslationFrame)):
+            # Interim transcriptions and translations are consumed here
+            # and not pushed downstream, same as final TranscriptionFrame.
+            pass
         elif isinstance(frame, LLMRunFrame):
             await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):

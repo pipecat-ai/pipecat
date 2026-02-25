@@ -13,20 +13,12 @@ local end-of-turn detection without requiring network connectivity.
 from typing import Any, Dict, Optional
 
 import numpy as np
+import onnxruntime as ort
 from loguru import logger
+from transformers import WhisperFeatureExtractor
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 from pipecat.utils.env import env_truthy
-
-try:
-    import onnxruntime as ort
-    from transformers import WhisperFeatureExtractor
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use LocalSmartTurnAnalyzerV3, you need to `pip install pipecat-ai[local-smart-turn-v3]`."
-    )
-    raise Exception(f"Missing module: {e}")
 
 
 class LocalSmartTurnAnalyzerV3(BaseSmartTurn):

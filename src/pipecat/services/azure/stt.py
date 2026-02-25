@@ -11,7 +11,8 @@ Speech SDK for real-time audio transcription.
 """
 
 import asyncio
-from typing import AsyncGenerator, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -25,6 +26,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -48,6 +50,19 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+@dataclass
+class AzureSTTSettings(STTSettings):
+    """Settings for the Azure STT service.
+
+    Parameters:
+        region: Azure region for the Speech service.
+        sample_rate: Audio sample rate in Hz.
+    """
+
+    region: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    sample_rate: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class AzureSTTService(STTService):
     """Azure Speech-to-Text service for real-time audio transcription.
 
@@ -55,6 +70,8 @@ class AzureSTTService(STTService):
     audio into text transcriptions. It supports continuous recognition and
     provides real-time transcription results with timing information.
     """
+
+    _settings: AzureSTTSettings
 
     def __init__(
         self,
@@ -79,7 +96,17 @@ class AzureSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=AzureSTTSettings(
+                model=None,
+                region=region,
+                language=language_to_azure_language(language),
+                sample_rate=sample_rate,
+            ),
+            **kwargs,
+        )
 
         self._speech_config = SpeechConfig(
             subscription=api_key,
@@ -92,11 +119,6 @@ class AzureSTTService(STTService):
 
         self._audio_stream = None
         self._speech_recognizer = None
-        self._settings = {
-            "region": region,
-            "language": language_to_azure_language(language),
-            "sample_rate": sample_rate,
-        }
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate performance metrics.
@@ -105,6 +127,38 @@ class AzureSTTService(STTService):
             True as this service supports metrics generation.
         """
         return True
+
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Azure service-specific language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Azure-specific language identifier, or None if not supported.
+        """
+        return language_to_azure_language(language)
+
+    async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Settings are stored but not applied to the active recognizer.
+        """
+        changed = await super()._update_settings(delta)
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # if "language" in changed:
+        #     self._speech_config.speech_recognition_language = self._settings.language
+        #     if self._speech_recognizer:
+        #         # Requires refactoring to set up and tear down recognizer, as
+        #         # language is applied at recognizer initialization
+        #         await self._disconnect()
+        #         await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Process audio data for speech-to-text conversion.
@@ -198,7 +252,7 @@ class AzureSTTService(STTService):
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or self._settings.get("language")
+            language = getattr(event.result, "language", None) or self._settings.language
             frame = TranscriptionFrame(
                 event.result.text,
                 self._user_id,
@@ -213,7 +267,7 @@ class AzureSTTService(STTService):
 
     def _on_handle_recognizing(self, event):
         if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
-            language = getattr(event.result, "language", None) or self._settings.get("language")
+            language = getattr(event.result, "language", None) or self._settings.language
             frame = InterimTranscriptionFrame(
                 event.result.text,
                 self._user_id,

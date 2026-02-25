@@ -11,6 +11,7 @@ supporting multiple languages, voices, and SSML features.
 """
 
 import os
+from dataclasses import dataclass, field
 from typing import AsyncGenerator, List, Optional
 
 from loguru import logger
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -121,6 +123,25 @@ def language_to_aws_language(language: Language) -> Optional[str]:
     return resolve_language(language, LANGUAGE_MAP, use_base_code=False)
 
 
+@dataclass
+class AWSPollyTTSSettings(TTSSettings):
+    """Settings for AWS Polly TTS service.
+
+    Parameters:
+        engine: TTS engine to use ('standard', 'neural', etc.).
+        pitch: Voice pitch adjustment (for standard engine only).
+        rate: Speech rate adjustment.
+        volume: Voice volume adjustment.
+        lexicon_names: List of pronunciation lexicons to apply.
+    """
+
+    engine: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    pitch: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    rate: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    volume: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    lexicon_names: List[str] | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class AWSPollyTTSService(TTSService):
     """AWS Polly text-to-speech service.
 
@@ -128,6 +149,8 @@ class AWSPollyTTSService(TTSService):
     multiple languages, voices, SSML features, and voice customization
     options including prosody controls.
     """
+
+    _settings: AWSPollyTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for AWS Polly TTS configuration.
@@ -172,9 +195,24 @@ class AWSPollyTTSService(TTSService):
             params: Additional input parameters for voice customization.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or AWSPollyTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=AWSPollyTTSSettings(
+                model=None,
+                voice=voice_id,
+                engine=params.engine,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                pitch=params.pitch,
+                rate=params.rate,
+                volume=params.volume,
+                lexicon_names=params.lexicon_names,
+            ),
+            **kwargs,
+        )
 
         # Get credentials from environment variables if not provided
         self._aws_params = {
@@ -185,20 +223,8 @@ class AWSPollyTTSService(TTSService):
         }
 
         self._aws_session = aioboto3.Session()
-        self._settings = {
-            "engine": params.engine,
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            "pitch": params.pitch,
-            "rate": params.rate,
-            "volume": params.volume,
-            "lexicon_names": params.lexicon_names,
-        }
 
         self._resampler = create_stream_resampler()
-
-        self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -222,19 +248,19 @@ class AWSPollyTTSService(TTSService):
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
 
-        language = self._settings["language"]
+        language = self._settings.language
         ssml += f"<lang xml:lang='{language}'>"
 
         prosody_attrs = []
         # Prosody tags are only supported for standard and neural engines
-        if self._settings["engine"] == "standard":
-            if self._settings["pitch"]:
-                prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
+        if self._settings.engine == "standard":
+            if self._settings.pitch:
+                prosody_attrs.append(f"pitch='{self._settings.pitch}'")
 
-        if self._settings["rate"]:
-            prosody_attrs.append(f"rate='{self._settings['rate']}'")
-        if self._settings["volume"]:
-            prosody_attrs.append(f"volume='{self._settings['volume']}'")
+        if self._settings.rate:
+            prosody_attrs.append(f"rate='{self._settings.rate}'")
+        if self._settings.volume:
+            prosody_attrs.append(f"volume='{self._settings.volume}'")
 
         if prosody_attrs:
             ssml += f"<prosody {' '.join(prosody_attrs)}>"
@@ -275,11 +301,11 @@ class AWSPollyTTSService(TTSService):
                 "Text": ssml,
                 "TextType": "ssml",
                 "OutputFormat": "pcm",
-                "VoiceId": self._voice_id,
-                "Engine": self._settings["engine"],
+                "VoiceId": self._settings.voice,
+                "Engine": self._settings.engine,
                 # AWS only supports 8000 and 16000 for PCM. We select 16000.
                 "SampleRate": "16000",
-                "LexiconNames": self._settings["lexicon_names"],
+                "LexiconNames": self._settings.lexicon_names,
             }
 
             # Filter out None values

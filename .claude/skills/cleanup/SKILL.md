@@ -1,6 +1,6 @@
 # Code Cleanup Skill
 
-The **Code Cleanup Skill** reviews, refactors, and documents code changes in your current branch, ensuring alignment with **Pipecat’s architecture, coding standards, and example patterns**.
+The **Code Cleanup Skill** reviews, refactors, and documents code changes in your current branch, ensuring alignment with **Pipecat's architecture, coding standards, and example patterns**.
 It focuses on **readability, correctness, performance, and consistency**, while avoiding breaking changes.
 
 ---
@@ -28,9 +28,9 @@ This skill analyzes all changes introduced in your branch and performs the follo
 
 Invoke the skill using any of the following commands:
 
-- “Clean up my branch code”
-- “Refactor the changes in my branch”
-- “Review and improve my branch code”
+- "Clean up my branch code"
+- "Refactor the changes in my branch"
+- "Review and improve my branch code"
 - `/cleanup`
 
 ---

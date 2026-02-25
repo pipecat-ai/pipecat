@@ -16,6 +16,7 @@ Features:
     - Model-specific sample rates: mars-pro (48kHz), mars-flash (22.05kHz)
 """
 
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from camb import StreamTtsOutputConfiguration
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -133,6 +135,18 @@ def _get_aligned_audio(buffer: bytes) -> tuple[bytes, bytes]:
     return buffer[:aligned_size], buffer[aligned_size:]
 
 
+@dataclass
+class CambTTSSettings(TTSSettings):
+    """Settings for Camb.ai TTS service.
+
+    Parameters:
+        user_instructions: Custom instructions for mars-instruct model only.
+            Ignored for other models. Max 1000 characters.
+    """
+
+    user_instructions: str | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class CambTTSService(TTSService):
     """Camb.ai MARS text-to-speech service using the official SDK.
 
@@ -155,6 +169,8 @@ class CambTTSService(TTSService):
             model="mars-pro",
         )
     """
+
+    _settings: CambTTSSettings
 
     class InputParams(BaseModel):
         """Input parameters for Camb.ai TTS configuration.
@@ -197,11 +213,6 @@ class CambTTSService(TTSService):
             params: Additional voice parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
-        self._api_key = api_key
-        self._timeout = timeout
-
         params = params or CambTTSService.InputParams()
 
         # Warn if sample rate doesn't match model's supported rate
@@ -211,17 +222,23 @@ class CambTTSService(TTSService):
                 f"sample rate. Current rate of {sample_rate}Hz may cause issues."
             )
 
-        # Build settings
-        self._settings = {
-            "language": (
-                self.language_to_service_language(params.language) if params.language else "en-us"
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=CambTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=(
+                    self.language_to_service_language(params.language)
+                    if params.language
+                    else "en-us"
+                ),
+                user_instructions=params.user_instructions,
             ),
-            "user_instructions": params.user_instructions,
-        }
+            **kwargs,
+        )
 
-        self.set_model_name(model)
-        self.set_voice(str(voice_id))
-        self._voice_id = voice_id
+        self._api_key = api_key
+        self._timeout = timeout
 
         self._client = None
 
@@ -256,7 +273,7 @@ class CambTTSService(TTSService):
 
         # Use model-specific sample rate if not explicitly specified
         if not self._init_sample_rate:
-            self._sample_rate = MODEL_SAMPLE_RATES.get(self.model_name, 22050)
+            self._sample_rate = MODEL_SAMPLE_RATES.get(self._settings.model, 22050)
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
@@ -282,15 +299,15 @@ class CambTTSService(TTSService):
             # Build SDK parameters
             tts_kwargs: Dict[str, Any] = {
                 "text": text,
-                "voice_id": self._voice_id,
-                "language": self._settings["language"],
-                "speech_model": self.model_name,
+                "voice_id": self._settings.voice,
+                "language": self._settings.language,
+                "speech_model": self._settings.model,
                 "output_configuration": StreamTtsOutputConfiguration(format="pcm_s16le"),
             }
 
             # Add user instructions if using mars-instruct model
-            if self._model_name == "mars-instruct" and self._settings.get("user_instructions"):
-                tts_kwargs["user_instructions"] = self._settings["user_instructions"]
+            if self._settings.model == "mars-instruct" and self._settings.user_instructions:
+                tts_kwargs["user_instructions"] = self._settings.user_instructions
 
             await self.start_tts_usage_metrics(text)
             yield TTSStartedFrame(context_id=context_id)

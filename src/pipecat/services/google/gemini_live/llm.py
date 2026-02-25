@@ -17,9 +17,9 @@ import io
 import time
 import uuid
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, ClassVar, Dict, List, Optional, Union
 
 from loguru import logger
 from PIL import Image
@@ -47,7 +47,6 @@ from pipecat.frames.frames import (
     LLMThoughtEndFrame,
     LLMThoughtStartFrame,
     LLMThoughtTextFrame,
-    LLMUpdateSettingsFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -77,6 +76,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
@@ -602,6 +602,33 @@ class InputParams(BaseModel):
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
+@dataclass
+class GeminiLiveLLMSettings(LLMSettings):
+    """Settings for Gemini Live LLM services.
+
+    Parameters:
+        modalities: Response modalities.
+        language: Language for generation.
+        media_resolution: Media resolution setting.
+        vad: Voice activity detection parameters.
+        context_window_compression: Context window compression configuration.
+        thinking: Thinking configuration.
+        enable_affective_dialog: Whether to enable affective dialog.
+        proactivity: Proactivity configuration.
+    """
+
+    modalities: GeminiModalities | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    language: Language | str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    media_resolution: GeminiMediaResolution | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad: GeminiVADParams | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    context_window_compression: ContextWindowCompressionParams | dict | _NotGiven = field(
+        default_factory=lambda: NOT_GIVEN
+    )
+    thinking: ThinkingConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    enable_affective_dialog: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    proactivity: ProactivityConfig | dict | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+
 class GeminiLiveLLMService(LLMService):
     """Provides access to Google's Gemini Live API.
 
@@ -609,6 +636,8 @@ class GeminiLiveLLMService(LLMService):
     text and audio modalities. It handles voice transcription, streaming audio
     responses, and tool usage.
     """
+
+    _settings: GeminiLiveLLMSettings
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
@@ -666,13 +695,40 @@ class GeminiLiveLLMService(LLMService):
                     stacklevel=2,
                 )
 
-        super().__init__(base_url=base_url, **kwargs)
-
         params = params or InputParams()
+
+        super().__init__(
+            base_url=base_url,
+            settings=GeminiLiveLLMSettings(
+                model=model,
+                frequency_penalty=params.frequency_penalty,
+                max_tokens=params.max_tokens,
+                presence_penalty=params.presence_penalty,
+                temperature=params.temperature,
+                top_k=params.top_k,
+                top_p=params.top_p,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                modalities=params.modalities,
+                language=language_to_gemini_language(params.language)
+                if params.language
+                else "en-US",
+                media_resolution=params.media_resolution,
+                vad=params.vad,
+                context_window_compression=params.context_window_compression.model_dump()
+                if params.context_window_compression
+                else {},
+                thinking=params.thinking or {},
+                enable_affective_dialog=params.enable_affective_dialog or False,
+                proactivity=params.proactivity or {},
+                extra=params.extra if isinstance(params.extra, dict) else {},
+            ),
+            **kwargs,
+        )
 
         self._last_sent_time = 0
         self._base_url = base_url
-        self.set_model_name(model)
         self._voice_id = voice_id
         self._language_code = params.language
 
@@ -713,26 +769,6 @@ class GeminiLiveLLMService(LLMService):
         # Reconnection tracking
         self._consecutive_failures = 0
         self._connection_start_time = None
-
-        self._settings = {
-            "frequency_penalty": params.frequency_penalty,
-            "max_tokens": params.max_tokens,
-            "presence_penalty": params.presence_penalty,
-            "temperature": params.temperature,
-            "top_k": params.top_k,
-            "top_p": params.top_p,
-            "modalities": params.modalities,
-            "language": self._language_code,
-            "media_resolution": params.media_resolution,
-            "vad": params.vad,
-            "context_window_compression": params.context_window_compression.model_dump()
-            if params.context_window_compression
-            else {},
-            "thinking": params.thinking or {},
-            "enable_affective_dialog": params.enable_affective_dialog or False,
-            "proactivity": params.proactivity or {},
-            "extra": params.extra if isinstance(params.extra, dict) else {},
-        }
 
         self._file_api_base_url = file_api_base_url
         self._file_api: Optional[GeminiFileAPI] = None
@@ -776,6 +812,25 @@ class GeminiLiveLLMService(LLMService):
         """
         return True
 
+    async def _update_settings(self, delta: LLMSettings) -> dict[str, Any]:
+        """Apply a settings delta.
+
+        Settings are stored but not applied to the active connection.
+        """
+        changed = await super()._update_settings(delta)
+
+        if not changed:
+            return changed
+
+        # TODO: someday we could reconnect here to apply updated settings.
+        # Code might look something like the below:
+        # await self._disconnect()
+        # await self._connect()
+
+        self._warn_unhandled_updated_settings(changed)
+
+        return changed
+
     def set_audio_input_paused(self, paused: bool):
         """Set the audio input pause state.
 
@@ -798,7 +853,7 @@ class GeminiLiveLLMService(LLMService):
         Args:
             modalities: The modalities to use for responses.
         """
-        self._settings["modalities"] = modalities
+        self._settings.modalities = modalities
 
     def set_language(self, language: Language):
         """Set the language for generation.
@@ -808,7 +863,7 @@ class GeminiLiveLLMService(LLMService):
         """
         self._language = language
         self._language_code = language_to_gemini_language(language) or "en-US"
-        self._settings["language"] = self._language_code
+        self._settings.language = self._language_code
         logger.info(f"Set Gemini language to: {self._language_code}")
 
     async def set_context(self, context: OpenAILLMContext):
@@ -866,7 +921,7 @@ class GeminiLiveLLMService(LLMService):
     async def _handle_interruption(self):
         if self._bot_is_responding:
             await self._set_bot_is_responding(False)
-            if self._settings.get("modalities") == GeminiModalities.AUDIO:
+            if self._settings.modalities == GeminiModalities.AUDIO:
                 await self.push_frame(TTSStoppedFrame())
             # Do not send LLMFullResponseEndFrame here - an interruption
             # already tells the assistant context aggregator that the response
@@ -947,10 +1002,9 @@ class GeminiLiveLLMService(LLMService):
             # uses this frame *without* a user context aggregator still works
             # (we have an example that does just that, actually).
             await self._create_single_response(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
         elif isinstance(frame, LLMSetToolsFrame):
-            await self._update_settings()
+            # TODO: implement runtime tool updates for Gemini Live.
+            pass
         else:
             await self.push_frame(frame, direction)
 
@@ -1074,20 +1128,20 @@ class GeminiLiveLLMService(LLMService):
             # Assemble basic configuration
             config = LiveConnectConfig(
                 generation_config=GenerationConfig(
-                    frequency_penalty=self._settings["frequency_penalty"],
-                    max_output_tokens=self._settings["max_tokens"],
-                    presence_penalty=self._settings["presence_penalty"],
-                    temperature=self._settings["temperature"],
-                    top_k=self._settings["top_k"],
-                    top_p=self._settings["top_p"],
-                    response_modalities=[Modality(self._settings["modalities"].value)],
+                    frequency_penalty=self._settings.frequency_penalty,
+                    max_output_tokens=self._settings.max_tokens,
+                    presence_penalty=self._settings.presence_penalty,
+                    temperature=self._settings.temperature,
+                    top_k=self._settings.top_k,
+                    top_p=self._settings.top_p,
+                    response_modalities=[Modality(self._settings.modalities.value)],
                     speech_config=SpeechConfig(
                         voice_config=VoiceConfig(
                             prebuilt_voice_config={"voice_name": self._voice_id}
                         ),
-                        language_code=self._settings["language"],
+                        language_code=self._settings.language,
                     ),
-                    media_resolution=MediaResolution(self._settings["media_resolution"].value),
+                    media_resolution=MediaResolution(self._settings.media_resolution.value),
                 ),
                 input_audio_transcription=AudioTranscriptionConfig(),
                 output_audio_transcription=AudioTranscriptionConfig(),
@@ -1095,37 +1149,36 @@ class GeminiLiveLLMService(LLMService):
             )
 
             # Add context window compression to configuration, if enabled
-            if self._settings.get("context_window_compression", {}).get("enabled", False):
+            cwc = self._settings.context_window_compression or {}
+            if cwc.get("enabled", False):
                 compression_config = ContextWindowCompressionConfig()
 
                 # Add sliding window (always true if compression is enabled)
                 compression_config.sliding_window = SlidingWindow()
 
                 # Add trigger_tokens if specified
-                trigger_tokens = self._settings.get("context_window_compression", {}).get(
-                    "trigger_tokens"
-                )
+                trigger_tokens = cwc.get("trigger_tokens")
                 if trigger_tokens is not None:
                     compression_config.trigger_tokens = trigger_tokens
 
                 config.context_window_compression = compression_config
 
             # Add thinking configuration to configuration, if provided
-            if self._settings.get("thinking"):
-                config.thinking_config = self._settings["thinking"]
+            if self._settings.thinking:
+                config.thinking_config = self._settings.thinking
 
             # Add affective dialog setting, if provided
-            if self._settings.get("enable_affective_dialog", False):
-                config.enable_affective_dialog = self._settings["enable_affective_dialog"]
+            if self._settings.enable_affective_dialog:
+                config.enable_affective_dialog = self._settings.enable_affective_dialog
 
             # Add proactivity configuration to configuration, if provided
-            if self._settings.get("proactivity"):
-                config.proactivity = self._settings["proactivity"]
+            if self._settings.proactivity:
+                config.proactivity = self._settings.proactivity
 
             # Add VAD configuration to configuration, if provided
-            if self._settings.get("vad"):
+            if self._settings.vad:
                 vad_config = AutomaticActivityDetection()
-                vad_params = self._settings["vad"]
+                vad_params = self._settings.vad
                 has_vad_settings = False
 
                 # Only add parameters that are explicitly set
@@ -1183,7 +1236,9 @@ class GeminiLiveLLMService(LLMService):
             await self.push_error(error_msg=f"Initialization error: {e}", exception=e)
 
     async def _connection_task_handler(self, config: LiveConnectConfig):
-        async with self._client.aio.live.connect(model=self._model_name, config=config) as session:
+        async with self._client.aio.live.connect(
+            model=self._settings.model, config=config
+        ) as session:
             logger.info("Connected to Gemini service")
 
             # Mark connection start time
@@ -1604,7 +1659,7 @@ class GeminiLiveLLMService(LLMService):
             text: The transcription text to push
             result: Optional LiveServerMessage that triggered this transcription
         """
-        await self._handle_user_transcription(text, True, self._settings["language"])
+        await self._handle_user_transcription(text, True, self._settings.language)
         await self.push_frame(
             TranscriptionFrame(
                 text=text,
