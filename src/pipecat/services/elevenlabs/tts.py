@@ -504,21 +504,15 @@ class ElevenLabsTTSService(WebsocketTTSService):
             )
             await self._disconnect()
             await self._connect()
-        elif voice_settings_changed and self.has_active_audio_context():
+        elif voice_settings_changed:
             logger.debug(
                 f"Voice settings changed ({changed.keys() & ElevenLabsTTSSettings.VOICE_SETTINGS_FIELDS}), "
                 f"closing current context to apply changes"
             )
-            # TODO: we should stop all active contexts
-            context_id = self.get_active_audio_context_id()
-            try:
-                if self._websocket:
-                    await self._websocket.send(
-                        json.dumps({"context_id": context_id, "close_context": True})
-                    )
-            except Exception as e:
-                await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
-            self.reset_active_audio_context()
+            audio_contexts = self.get_audio_contexts()
+            if audio_contexts:
+                for ctx_id in audio_contexts:
+                    await self._close_context(ctx_id)
 
         if not url_changed:
             # Reconnect applies all settings; only warn about fields not handled
@@ -655,9 +649,7 @@ class ElevenLabsTTSService(WebsocketTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from ElevenLabs")
-                # Close all contexts and the socket
-                if self.has_active_audio_context():
-                    await self._websocket.send(json.dumps({"close_socket": True}))
+                await self._websocket.send(json.dumps({"close_socket": True}))
                 await self._websocket.close()
                 logger.debug("Disconnected from ElevenLabs")
         except Exception as e:

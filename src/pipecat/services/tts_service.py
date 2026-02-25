@@ -1024,6 +1024,10 @@ class TTSService(AIService):
             self._playing_context_id
         )
 
+    def get_audio_contexts(self) -> List[str]:
+        """Get a list of all available audio contexts."""
+        return list(self._audio_contexts.keys())
+
     def get_active_audio_context_id(self) -> Optional[str]:
         """Get the active audio context ID.
 
