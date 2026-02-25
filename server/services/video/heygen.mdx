@@ -29,7 +29,11 @@ description: "AI avatar video generation service for creating interactive conver
   >
     Official HeyGen API documentation and guides
   </Card>
-  <Card title="HeyGen Platform" icon="microphone" href="https://www.liveavatar.com/">
+  <Card
+    title="HeyGen Platform"
+    icon="microphone"
+    href="https://www.liveavatar.com/"
+  >
     Access interactive avatars and API keys
   </Card>
 </CardGroup>
@@ -67,8 +71,13 @@ Before using HeyGen video services, you need:
   HTTP client session for API requests.
 </ParamField>
 
-<ParamField path="session_request" type="LiveAvatarNewSessionRequest | NewSessionRequest" default="None">
-  Configuration for the HeyGen session. When `None`, defaults to using the `"Shawn_Therapist_public"` avatar.
+<ParamField
+  path="session_request"
+  type="LiveAvatarNewSessionRequest | NewSessionRequest"
+  default="None"
+>
+  Configuration for the HeyGen session. When `None`, defaults to using the
+  `"Shawn_Therapist_public"` avatar.
 </ParamField>
 
 <ParamField path="service_type" type="ServiceType" default="None">

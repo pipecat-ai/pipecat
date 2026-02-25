@@ -73,7 +73,8 @@ Before using ElevenLabs STT services, you need:
 </ParamField>
 
 <ParamField path="aiohttp_session" type="aiohttp.ClientSession" required>
-  An aiohttp session for HTTP requests. You must create and manage this yourself.
+  An aiohttp session for HTTP requests. You must create and manage this
+  yourself.
 </ParamField>
 
 <ParamField path="base_url" type="str" default="https://api.elevenlabs.io">
@@ -85,15 +86,18 @@ Before using ElevenLabs STT services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for the STT service. See [InputParams](#inputparams) below.
+  Configuration parameters for the STT service. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 <ParamField path="ttfs_p99_latency" type="float" default="ELEVENLABS_TTFS_P99">
-  P99 latency from speech end to final transcript in seconds. Override for your deployment.
+  P99 latency from speech end to final transcript in seconds. Override for your
+  deployment.
 </ParamField>
 
 ### ElevenLabsRealtimeSTTService
@@ -111,41 +115,48 @@ Before using ElevenLabs STT services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="params" type="RealtimeInputParams" default="None">
-  Configuration parameters for the Realtime STT service. See [Realtime InputParams](#realtime-inputparams) below.
+  Configuration parameters for the Realtime STT service. See [Realtime
+  InputParams](#realtime-inputparams) below.
 </ParamField>
 
-<ParamField path="ttfs_p99_latency" type="float" default="ELEVENLABS_REALTIME_TTFS_P99">
-  P99 latency from speech end to final transcript in seconds. Override for your deployment.
+<ParamField
+  path="ttfs_p99_latency"
+  type="float"
+  default="ELEVENLABS_REALTIME_TTFS_P99"
+>
+  P99 latency from speech end to final transcript in seconds. Override for your
+  deployment.
 </ParamField>
 
 ### InputParams
 
 Parameters for `ElevenLabsSTTService`, passed via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `None` | Target language for transcription. |
-| `tag_audio_events` | `bool` | `True` | Include audio events like (laughter), (coughing) in transcription. |
+| Parameter          | Type       | Default | Description                                                        |
+| ------------------ | ---------- | ------- | ------------------------------------------------------------------ |
+| `language`         | `Language` | `None`  | Target language for transcription.                                 |
+| `tag_audio_events` | `bool`     | `True`  | Include audio events like (laughter), (coughing) in transcription. |
 
 ### Realtime InputParams
 
 Parameters for `ElevenLabsRealtimeSTTService`, passed via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language_code` | `str` | `None` | ISO-639-1 or ISO-639-3 language code. `None` for auto-detection. |
-| `commit_strategy` | `CommitStrategy` | `CommitStrategy.MANUAL` | How to segment speech: `"manual"` (Pipecat VAD) or `"vad"` (ElevenLabs VAD). |
-| `vad_silence_threshold_secs` | `float` | `None` | Seconds of silence before VAD commits (0.3-3.0). Only used with VAD commit strategy. |
-| `vad_threshold` | `float` | `None` | VAD sensitivity (0.1-0.9, lower is more sensitive). Only used with VAD commit strategy. |
-| `min_speech_duration_ms` | `int` | `None` | Minimum speech duration for VAD (50-2000ms). Only used with VAD commit strategy. |
-| `min_silence_duration_ms` | `int` | `None` | Minimum silence duration for VAD (50-2000ms). Only used with VAD commit strategy. |
-| `include_timestamps` | `bool` | `False` | Include word-level timestamps in transcripts. |
-| `enable_logging` | `bool` | `False` | Enable logging on ElevenLabs' side. |
-| `include_language_detection` | `bool` | `False` | Include language detection in transcripts. |
+| Parameter                    | Type             | Default                 | Description                                                                             |
+| ---------------------------- | ---------------- | ----------------------- | --------------------------------------------------------------------------------------- |
+| `language_code`              | `str`            | `None`                  | ISO-639-1 or ISO-639-3 language code. `None` for auto-detection.                        |
+| `commit_strategy`            | `CommitStrategy` | `CommitStrategy.MANUAL` | How to segment speech: `"manual"` (Pipecat VAD) or `"vad"` (ElevenLabs VAD).            |
+| `vad_silence_threshold_secs` | `float`          | `None`                  | Seconds of silence before VAD commits (0.3-3.0). Only used with VAD commit strategy.    |
+| `vad_threshold`              | `float`          | `None`                  | VAD sensitivity (0.1-0.9, lower is more sensitive). Only used with VAD commit strategy. |
+| `min_speech_duration_ms`     | `int`            | `None`                  | Minimum speech duration for VAD (50-2000ms). Only used with VAD commit strategy.        |
+| `min_silence_duration_ms`    | `int`            | `None`                  | Minimum silence duration for VAD (50-2000ms). Only used with VAD commit strategy.       |
+| `include_timestamps`         | `bool`           | `False`                 | Include word-level timestamps in transcripts.                                           |
+| `enable_logging`             | `bool`           | `False`                 | Enable logging on ElevenLabs' side.                                                     |
+| `include_language_detection` | `bool`           | `False`                 | Include language detection in transcripts.                                              |
 
 ## Usage
 
@@ -218,9 +229,9 @@ stt = ElevenLabsRealtimeSTTService(
 
 `ElevenLabsRealtimeSTTService` supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to ElevenLabs Realtime STT WebSocket |
+| Event             | Description                                         |
+| ----------------- | --------------------------------------------------- |
+| `on_connected`    | Connected to ElevenLabs Realtime STT WebSocket      |
 | `on_disconnected` | Disconnected from ElevenLabs Realtime STT WebSocket |
 
 ```python
@@ -230,5 +241,6 @@ async def on_connected(service):
 ```
 
 <Note>
-  The HTTP service (`ElevenLabsSTTService`) does not have connection events since it uses per-request HTTP calls.
+  The HTTP service (`ElevenLabsSTTService`) does not have connection events
+  since it uses per-request HTTP calls.
 </Note>

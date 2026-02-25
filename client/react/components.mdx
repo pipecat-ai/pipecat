@@ -18,7 +18,7 @@ The root component for providing Pipecat client context to your application.
 **Props**
 
 <ParamField path="client" type="PipecatClient" required>
-A singleton instance of `PipecatClient`
+  A singleton instance of `PipecatClient`
 </ParamField>
 
 ## PipecatClientAudio
@@ -51,16 +51,17 @@ Creates a new `<video>` element that renders either the bot or local participant
 **Props**
 
 <ParamField path="participant" type="('local' | 'bot')" required>
-Defines which participant's video track is rendered
+  Defines which participant's video track is rendered
 </ParamField>
 <ParamField path="fit" type="('contain' | 'cover')">
-Defines whether the video should be fully contained or cover the box. Default: 'contain'
+  Defines whether the video should be fully contained or cover the box. Default:
+  'contain'
 </ParamField>
 <ParamField path="mirror" type="boolean">
-Forces the video to be mirrored, if set
+  Forces the video to be mirrored, if set
 </ParamField>
 <ParamField path="onResize(dimensions: object)" type="function">
-Triggered whenever the video's rendered width or height changes
+  Triggered whenever the video's rendered width or height changes
 </ParamField>
 
 ## PipecatClientCamToggle
@@ -83,13 +84,14 @@ A headless component to read and set the local participant's camera state.
 **Props**
 
 <ParamField path="onCamEnabledChanged(enabled: boolean)" type="function">
-Triggered whenever the local participant's camera state changes
+  Triggered whenever the local participant's camera state changes
 </ParamField>
 <ParamField path="disabled" type="boolean">
-If true, the component will not allow toggling the camera state. Default: false
+  If true, the component will not allow toggling the camera state. Default:
+  false
 </ParamField>
 <ParamField path="children" type="function">
-A render prop that provides state and handlers to the children
+  A render prop that provides state and handlers to the children
 </ParamField>
 
 ## PipecatClientMicToggle
@@ -112,13 +114,14 @@ A headless component to read and set the local participant's microphone state.
 **Props**
 
 <ParamField path="onMicEnabledChanged(enabled: boolean)" type="function">
-Triggered whenever the local participant's microphone state changes
+  Triggered whenever the local participant's microphone state changes
 </ParamField>
 <ParamField path="disabled" type="boolean">
-If true, the component will not allow toggling the microphone state. Default: false
+  If true, the component will not allow toggling the microphone state. Default:
+  false
 </ParamField>
 <ParamField path="children" type="function">
-A render prop that provides state and handlers to the children
+  A render prop that provides state and handlers to the children
 </ParamField>
 
 ## VoiceVisualizer
@@ -139,23 +142,23 @@ Renders a visual representation of audio input levels on a `<canvas>` element.
 **Props**
 
 <ParamField path="participantType" type="string" required>
-The participant type to visualize audio for
+  The participant type to visualize audio for
 </ParamField>
 <ParamField path="backgroundColor" type="string">
-The background color of the canvas. Default: 'transparent'
+  The background color of the canvas. Default: 'transparent'
 </ParamField>
 <ParamField path="barColor" type="string">
-The color of the audio level bars. Default: 'black'
+  The color of the audio level bars. Default: 'black'
 </ParamField>
 <ParamField path="barCount" type="number">
-The number of bars to display. Default: 5
+  The number of bars to display. Default: 5
 </ParamField>
 <ParamField path="barGap" type="number">
-The gap between bars in pixels. Default: 12
+  The gap between bars in pixels. Default: 12
 </ParamField>
 <ParamField path="barWidth" type="number">
-The width of each bar in pixels. Default: 30
+  The width of each bar in pixels. Default: 30
 </ParamField>
 <ParamField path="barMaxHeight" type="number">
-The maximum height at full volume of each bar in pixels. Default: 120
+  The maximum height at full volume of each bar in pixels. Default: 120
 </ParamField>

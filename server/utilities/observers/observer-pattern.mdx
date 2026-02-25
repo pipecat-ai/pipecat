@@ -5,7 +5,12 @@ description: "Understanding and implementing observers in Pipecat"
 
 The Observer pattern in Pipecat allows non-intrusive monitoring of frames as they flow through the pipeline. Observers can watch frame traffic without affecting the pipeline's core functionality.
 
-<Warning>DEPRECATED: The old observer pattern with individual parameters (`on_push_frame(src, dst, frame, direction, timestamp)`) is deprecated. Use the new pattern with data objects (`on_push_frame(data: FramePushed)`) instead.</Warning>
+<Warning>
+  DEPRECATED: The old observer pattern with individual parameters
+  (`on_push_frame(src, dst, frame, direction, timestamp)`) is deprecated. Use
+  the new pattern with data objects (`on_push_frame(data: FramePushed)`)
+  instead.
+</Warning>
 
 ## Base Observer
 
@@ -21,7 +26,7 @@ class CustomObserver(BaseObserver):
     async def on_push_frame(self, data: FramePushed):
         # Your frame observation logic here
         pass
-    
+
     async def on_process_frame(self, data: FrameProcessed):
         # Your frame processing observation logic here
         pass

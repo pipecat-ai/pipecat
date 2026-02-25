@@ -79,7 +79,8 @@ Before using Azure TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="aggregate_sentences" type="bool" default="True">
@@ -87,7 +88,8 @@ Before using Azure TTS services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and synthesis settings. See [InputParams](#inputparams) below.
+  Runtime-configurable voice and synthesis settings. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### AzureHttpTTSService
@@ -118,16 +120,16 @@ The HTTP service accepts the same parameters as the streaming service except `ag
 
 Voice and synthesis settings shared by both service variants. Can be set at initialization via the `params` constructor argument, or changed at runtime via [`UpdateSettingsFrame`](/server/utilities/frame-processor-events#updatesettingsframe).
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `emphasis` | `str` | `None` | Emphasis level for speech (`"strong"`, `"moderate"`, `"reduced"`). |
-| `language` | `Language` | `Language.EN_US` | Language for synthesis. |
-| `pitch` | `str` | `None` | Voice pitch adjustment (e.g., `"+10%"`, `"-5Hz"`, `"high"`). |
-| `rate` | `str` | `None` | Speech rate adjustment (e.g., `"1.0"`, `"1.25"`, `"slow"`, `"fast"`). |
-| `role` | `str` | `None` | Voice role for expression (e.g., `"YoungAdultFemale"`). |
-| `style` | `str` | `None` | Speaking style (e.g., `"cheerful"`, `"sad"`, `"excited"`). |
-| `style_degree` | `str` | `None` | Intensity of the speaking style (0.01 to 2.0). |
-| `volume` | `str` | `None` | Volume level (e.g., `"+20%"`, `"loud"`, `"x-soft"`). |
+| Parameter      | Type       | Default          | Description                                                           |
+| -------------- | ---------- | ---------------- | --------------------------------------------------------------------- |
+| `emphasis`     | `str`      | `None`           | Emphasis level for speech (`"strong"`, `"moderate"`, `"reduced"`).    |
+| `language`     | `Language` | `Language.EN_US` | Language for synthesis.                                               |
+| `pitch`        | `str`      | `None`           | Voice pitch adjustment (e.g., `"+10%"`, `"-5Hz"`, `"high"`).          |
+| `rate`         | `str`      | `None`           | Speech rate adjustment (e.g., `"1.0"`, `"1.25"`, `"slow"`, `"fast"`). |
+| `role`         | `str`      | `None`           | Voice role for expression (e.g., `"YoungAdultFemale"`).               |
+| `style`        | `str`      | `None`           | Speaking style (e.g., `"cheerful"`, `"sad"`, `"excited"`).            |
+| `style_degree` | `str`      | `None`           | Intensity of the speaking style (0.01 to 2.0).                        |
+| `volume`       | `str`      | `None`           | Volume level (e.g., `"+20%"`, `"loud"`, `"x-soft"`).                  |
 
 ## Usage
 

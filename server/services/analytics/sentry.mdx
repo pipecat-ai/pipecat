@@ -71,7 +71,9 @@ Before using Sentry metrics services, you need:
 `SentryMetrics` takes no constructor parameters. It automatically detects whether the Sentry SDK has been initialized and logs a warning if it has not.
 
 <Note>
-  You must initialize the Sentry SDK in your application before creating `SentryMetrics`. The metrics collector checks `sentry_sdk.is_initialized()` at construction time.
+  You must initialize the Sentry SDK in your application before creating
+  `SentryMetrics`. The metrics collector checks `sentry_sdk.is_initialized()` at
+  construction time.
 </Note>
 
 ## Usage

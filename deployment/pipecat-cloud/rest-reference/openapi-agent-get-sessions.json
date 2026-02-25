@@ -120,7 +120,7 @@
               "type": "integer",
               "default": 0
             }
-          },
+          }
         ],
         "responses": {
           "200": {
@@ -154,7 +154,7 @@
                           },
                           "deploymentId": {
                             "type": "string",
-                            "description": "ID of the deployment that this session is associated with",
+                            "description": "ID of the deployment that this session is associated with"
                           },
                           "endedAt": {
                             "type": "string",
@@ -185,7 +185,7 @@
                             "type": "string",
                             "format": "date-time",
                             "description": "Timestamp when the session was last updated"
-                          },
+                          }
                         }
                       }
                     }
@@ -249,14 +249,8 @@
                       {
                         "received": "bad_value",
                         "code": "invalid_enum_value",
-                        "options": [
-                          "active",
-                          "ended",
-                          "all"
-                        ],
-                        "path": [
-                          "status"
-                        ],
+                        "options": ["active", "ended", "all"],
+                        "path": ["status"],
                         "message": "Invalid enum value. Expected 'active' | 'ended' | 'all', received 'bad_value'"
                       }
                     ],

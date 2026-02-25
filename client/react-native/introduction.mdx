@@ -23,8 +23,8 @@ Install the SDK and a transport implementation. Follow the appropriate docs for 
 - [SmallWebRTC](https://github.com/pipecat-ai/pipecat-client-react-native-transports/tree/main/transports/smallwebrtc#installation)
 
 <Note>
-  Installing the React Native automatically includes
-  the corresponding version of the JavaScript SDK.
+  Installing the React Native automatically includes the corresponding version
+  of the JavaScript SDK.
 </Note>
 
 ## Requirements
@@ -46,7 +46,7 @@ import { PipecatClient } from "@pipecat-ai/client-js";
 let pipecatClient = new PipecatClient({
   transport: new RNDailyTransport(),
   enableMic: true,
-  enableCam: false
+  enableCam: false,
 });
 
 // Connect to your bot
@@ -71,16 +71,16 @@ await pipecatClient.startBotAndConnect({
     icon="mobile"
     href="https://github.com/pipecat-ai/pipecat-examples/tree/main/simple-chatbot/client/react-native"
   >
-    A more comprehensive Daily example showcasing a more feature-rich React Native
-    application along with a server-side bot component.
+    A more comprehensive Daily example showcasing a more feature-rich React
+    Native application along with a server-side bot component.
   </Card>
   <Card
     title="SmallWebRTC Full Example"
     icon="mobile"
     href="https://github.com/pipecat-ai/pipecat-examples/tree/main/p2p-webrtc/video-transform"
   >
-    A more comprehensive SmallWebRTC example showcasing a more feature-rich React Native
-    application along with a server-side bot component.
+    A more comprehensive SmallWebRTC example showcasing a more feature-rich
+    React Native application along with a server-side bot component.
   </Card>
 </CardGroup>
 

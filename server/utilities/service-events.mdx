@@ -13,11 +13,11 @@ All WebSocket-based STT and TTS services share a common set of connection events
 
 ### Events Summary
 
-| Event | Available On | Description |
-| --- | --- | --- |
-| `on_connected` | STT, TTS | WebSocket connection established |
-| `on_disconnected` | STT, TTS | WebSocket connection closed |
-| `on_connection_error` | STT, TTS | WebSocket connection error occurred |
+| Event                 | Available On | Description                         |
+| --------------------- | ------------ | ----------------------------------- |
+| `on_connected`        | STT, TTS     | WebSocket connection established    |
+| `on_disconnected`     | STT, TTS     | WebSocket connection closed         |
+| `on_connection_error` | STT, TTS     | WebSocket connection error occurred |
 
 ### on_connected
 
@@ -35,12 +35,13 @@ async def on_tts_connected(service):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter | Type                        | Description          |
+| --------- | --------------------------- | -------------------- |
 | `service` | `STTService` / `TTSService` | The service instance |
 
 <Note>
-Not all STT and TTS services use WebSocket connections. HTTP-based services (e.g., Azure TTS, Google TTS) do not emit connection events.
+  Not all STT and TTS services use WebSocket connections. HTTP-based services
+  (e.g., Azure TTS, Google TTS) do not emit connection events.
 </Note>
 
 ### on_disconnected
@@ -55,8 +56,8 @@ async def on_stt_disconnected(service):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter | Type                        | Description          |
+| --------- | --------------------------- | -------------------- |
 | `service` | `STTService` / `TTSService` | The service instance |
 
 ### on_connection_error
@@ -71,13 +72,15 @@ async def on_tts_connection_error(service, error):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter | Type                        | Description          |
+| --------- | --------------------------- | -------------------- |
 | `service` | `STTService` / `TTSService` | The service instance |
-| `error` | `str` | The error message |
+| `error`   | `str`                       | The error message    |
 
 <Note>
-WebSocket-based services automatically reconnect with exponential backoff (3 retries, 4-10s waits) when connection errors occur. The `on_connection_error` event fires for each failed attempt.
+  WebSocket-based services automatically reconnect with exponential backoff (3
+  retries, 4-10s waits) when connection errors occur. The `on_connection_error`
+  event fires for each failed attempt.
 </Note>
 
 ## TTS Events
@@ -94,11 +97,11 @@ async def on_tts_request(service, context_id, text):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `service` | `TTSService` | The TTS service instance |
-| `context_id` | `str` | The context ID for this TTS request |
-| `text` | `str` | The prepared text about to be synthesized |
+| Parameter    | Type         | Description                               |
+| ------------ | ------------ | ----------------------------------------- |
+| `service`    | `TTSService` | The TTS service instance                  |
+| `context_id` | `str`        | The context ID for this TTS request       |
+| `text`       | `str`        | The prepared text about to be synthesized |
 
 ## LLM Events
 
@@ -115,10 +118,10 @@ async def on_function_calls_started(service, function_calls):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `service` | `LLMService` | The LLM service instance |
-| `function_calls` | `list` | List of function call objects from the LLM |
+| Parameter        | Type         | Description                                |
+| ---------------- | ------------ | ------------------------------------------ |
+| `service`        | `LLMService` | The LLM service instance                   |
+| `function_calls` | `list`       | List of function call objects from the LLM |
 
 ### on_completion_timeout
 
@@ -132,8 +135,8 @@ async def on_completion_timeout(service):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter | Type         | Description              |
+| --------- | ------------ | ------------------------ |
 | `service` | `LLMService` | The LLM service instance |
 
 ## Related

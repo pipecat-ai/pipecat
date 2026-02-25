@@ -6,30 +6,38 @@ description: "An overview of the RTVI standard and its key features"
 The RTVI (Real-Time Voice and Video Inference) standard defines a set of message types and structures sent between clients and servers. It is designed to facilitate real-time interactions between clients and AI applications that require voice, video, and text communication. It provides a consistent framework for building applications that can communicate with AI models and the backends running those models in real-time.
 
 <Note>
-This page documents version 1.0 of the RTVI standard, released in June 2025.
+  This page documents version 1.0 of the RTVI standard, released in June 2025.
 </Note>
 
 ## Key Features
 
 <CardGroup cols={2}>
-    <Card title="Connection Management" icon="plug">
-        RTVI provides a flexible connection model that allows clients to connect to AI services and coordinate state.
-    </Card>
-    <Card title="Transcriptions" icon="text">
-    The standard includes built-in support for real-time transcription of audio streams.
-    </Card>
-    <Card title="Client-Server Messaging" icon="comments">
-    The standard defines a messaging protocol for sending and receiving messages between clients and servers, allowing for efficient communication of requests and responses.
-    </Card>
-    <Card title="Advanced LLM Interactions" icon="robot">
-    The standard supports advanced interactions with large language models (LLMs), including context management, function call handline, and search results.
-    </Card>
-    <Card title="Service-Specific Insights" icon="lightbulb">
-    RTVI supports events to provide insight into the input/output and state for typical services that exist in speech-to-speech workflows.
-    </Card>
-    <Card title="Metrics and Monitoring" icon="chart-line">
-    RTVI provides mechanisms for collecting metrics and monitoring the performance of server-side services.
-    </Card>
+  <Card title="Connection Management" icon="plug">
+    RTVI provides a flexible connection model that allows clients to connect to
+    AI services and coordinate state.
+  </Card>
+  <Card title="Transcriptions" icon="text">
+    The standard includes built-in support for real-time transcription of audio
+    streams.
+  </Card>
+  <Card title="Client-Server Messaging" icon="comments">
+    The standard defines a messaging protocol for sending and receiving messages
+    between clients and servers, allowing for efficient communication of
+    requests and responses.
+  </Card>
+  <Card title="Advanced LLM Interactions" icon="robot">
+    The standard supports advanced interactions with large language models
+    (LLMs), including context management, function call handline, and search
+    results.
+  </Card>
+  <Card title="Service-Specific Insights" icon="lightbulb">
+    RTVI supports events to provide insight into the input/output and state for
+    typical services that exist in speech-to-speech workflows.
+  </Card>
+  <Card title="Metrics and Monitoring" icon="chart-line">
+    RTVI provides mechanisms for collecting metrics and monitoring the
+    performance of server-side services.
+  </Card>
 </CardGroup>
 
 ## Terms
@@ -52,17 +60,20 @@ The messages defined as part of the RTVI protocol adhere to the following format
 }
 ```
 
-<ParamField path='id' type='string' required={false}>
-    A unique identifier for the message, used to correlate requests and responses.
+<ParamField path="id" type="string" required={false}>
+  A unique identifier for the message, used to correlate requests and responses.
 </ParamField>
-<ParamField path='label' type='string' required={true} default='rtvi-ai'>
-    A label that identifies this message as an RTVI message. This field is required and should always be set to `'rtvi-ai'`.
+<ParamField path="label" type="string" required={true} default="rtvi-ai">
+  A label that identifies this message as an RTVI message. This field is
+  required and should always be set to `'rtvi-ai'`.
 </ParamField>
-<ParamField path='type' type='string' required={true}>
-    The type of message being sent. This field is required and should be set to one of the predefined RTVI message types listed below.
+<ParamField path="type" type="string" required={true}>
+  The type of message being sent. This field is required and should be set to
+  one of the predefined RTVI message types listed below.
 </ParamField>
-<ParamField path='data' type='unknown' required={false}>
-    The payload of the message, which can be any data structure relevant to the message type.
+<ParamField path="data" type="unknown" required={false}>
+  The payload of the message, which can be any data structure relevant to the
+  message type.
 </ParamField>
 
 ## RTVI Message Types
@@ -70,7 +81,8 @@ The messages defined as part of the RTVI protocol adhere to the following format
 Following the above format, this section describes the various message types defined by the RTVI standard. Each message type has a specific purpose and structure, allowing for clear communication between clients and servers.
 
 <Tip>
-Each message type below includes either a 🤖 or 🏄 emoji to denote whether the message is sent from the bot (🤖) or client (🏄).
+  Each message type below includes either a 🤖 or 🏄 emoji to denote whether the
+  message is sent from the bot (🤖) or client (🏄).
 </Tip>
 
 ### Connection Management
@@ -81,23 +93,28 @@ Indicates that the client is ready to receive messages and interact with the ser
 
 - **type**: `'client-ready'`
 - **data**:
-    - **version**: `string`
-    
-      The version of the RTVI standard being used. This is useful for ensuring compatibility between client and server implementations.
+  - **version**: `string`
 
-    - **about**: `AboutClient Object`
-    
-      An object containing information about the client, such as its rtvi-version, client library, and any other relevant metadata. The `AboutClient` object follows this structure:
+    The version of the RTVI standard being used. This is useful for ensuring compatibility between client and server implementations.
 
-      <Expandable title="AboutClient">
-          <ParamField path="library" type="string" required/>
-          <ParamField path="library_version" type="string" />
-          <ParamField path="platform" type="string" />
-          <ParamField path="platform_version" type="string" />
-          <ParamField path="platform_details" type="any">
-            Any platform-specific details that may be relevant to the server. This could include information about the browser, operating system, or any other environment-specific data needed by the server. This field is optional and open-ended, so please be mindful of the data you include here and any security concerns that may arise from exposing sensitive or personal-identifiable information.
-          </ParamField>
-      </Expandable>
+  - **about**: `AboutClient Object`
+
+    An object containing information about the client, such as its rtvi-version, client library, and any other relevant metadata. The `AboutClient` object follows this structure:
+
+    <Expandable title="AboutClient">
+      <ParamField path="library" type="string" required />
+      <ParamField path="library_version" type="string" />
+      <ParamField path="platform" type="string" />
+      <ParamField path="platform_version" type="string" />
+      <ParamField path="platform_details" type="any">
+        Any platform-specific details that may be relevant to the server. This
+        could include information about the browser, operating system, or any
+        other environment-specific data needed by the server. This field is
+        optional and open-ended, so please be mindful of the data you include
+        here and any security concerns that may arise from exposing sensitive or
+        personal-identifiable information.
+      </ParamField>
+    </Expandable>
 
 #### bot-ready 🤖
 
@@ -105,13 +122,13 @@ Indicates that the bot is ready to receive messages and interact with the client
 
 - **type**: `'bot-ready'`
 - **data**:
-    - **version**: `string`
-    
-        The version of the RTVI standard being used. This is useful for ensuring compatibility between client and server implementations.
-    
-    - **about**: `any` (Optional)
+  - **version**: `string`
 
-        An object containing information about the server or bot. It's structure and value are both undefined by default. This provides flexibility to include any relevant metadata your client may need to know about the server at connection time, without any built-in security concerns. Please be mindful of the data you include here and any security concerns that may arise from exposing sensitive information.
+    The version of the RTVI standard being used. This is useful for ensuring compatibility between client and server implementations.
+
+  - **about**: `any` (Optional)
+
+    An object containing information about the server or bot. It's structure and value are both undefined by default. This provides flexibility to include any relevant metadata your client may need to know about the server at connection time, without any built-in security concerns. Please be mindful of the data you include here and any security concerns that may arise from exposing sensitive information.
 
 #### disconnect-bot 🏄
 
@@ -127,32 +144,40 @@ Indicates an error occurred during bot initialization or runtime.
 - **type**: `'error'`
 - **data**:
   - **message**: `string`
-    
+
     Description of the error.
 
   - **fatal**: `boolean`
-    
+
     Indicates if the error is fatal to the session.
 
 ### Speaking and Transcription
 
 #### user-started-speaking 🤖
+
 Emitted when the user begins speaking
+
 - **type**: `'user-started-speaking'`
 - **data**: None
 
 #### user-stopped-speaking 🤖
+
 Emitted when the user stops speaking
+
 - **type**: `'user-stopped-speaking'`
 - **data**: None
 
 #### bot-started-speaking 🤖
+
 Emitted when the bot begins speaking
+
 - **type**: `'bot-started-speaking'`
 - **data**: None
 
 #### bot-stopped-speaking 🤖
+
 Emitted when the bot stops speaking
+
 - **type**: `'bot-stopped-speaking'`
 - **data**: None
 
@@ -163,6 +188,7 @@ Emitted when the bot stops speaking
 </Note>
 
 Emitted when the server begins ignoring audio from the client (server-side muting). The client should continue sending audio normally but may want to show an indication to the user that their input is not being processed.
+
 - **type**: `'user-mute-started'`
 - **data**: None
 
@@ -173,6 +199,7 @@ Emitted when the server begins ignoring audio from the client (server-side mutin
 </Note>
 
 Emitted when the server stops ignoring audio from the client (server-side muting ends). The client can update its UI to indicate that the user's input is being processed again.
+
 - **type**: `'user-mute-stopped'`
 - **data**: None
 
@@ -183,7 +210,7 @@ Real-time transcription of user speech, including both partial and final results
 - **type**: `'user-transcription'`
 - **data**:
   - **text**: `string`
-    
+
     The transcribed text of the user.
 
   - **final**: `boolean`
@@ -191,11 +218,11 @@ Real-time transcription of user speech, including both partial and final results
     Indicates if this is a final transcription or a partial result.
 
   - **timestamp**: `string`
-    
+
     The timestamp when the transcription was generated.
 
   - **user_id**: `string`
-    
+
     Identifier for the user who spoke.
 
 #### bot-output 🤖
@@ -205,7 +232,7 @@ The best-effort representation of the bot's output text, including both spoken a
 - **type**: `'bot-output'`
 - **data**:
   - **text**: `string`
-    
+
     The output text from the bot.
 
   - **spoken**: `boolean`
@@ -218,14 +245,17 @@ The best-effort representation of the bot's output text, including both spoken a
 
 #### bot-transcription 🤖
 
-<Warning>DEPRECATED in favor of `bot-output` in Pipecat version 0.0.95 and client-js version 1.5.0</Warning>
+<Warning>
+  DEPRECATED in favor of `bot-output` in Pipecat version 0.0.95 and client-js
+  version 1.5.0
+</Warning>
 
 Transcription of the bot's speech. Note: This protocol currently does not match the user transcription format to support real-time timestamping for bot transcriptions. Rather, the event is typically sent for each sentence of the bot's response. This difference is currently due to limitations in TTS services which mostly do not support (or support well), accurate timing information. If/when this changes, this protocol may be updated to include the necessary timing information. For now, if you want to attempt real-time transcription to match your bot's speaking, you can try using the `bot-tts-text` message type.
 
 - **type**: `'bot-transcription'`
 - **data**:
   - **text**: `string`
-    
+
     The transcribed text from the bot, typically aggregated at a per-sentence level.
 
 ### Client-Server Messaging
@@ -245,8 +275,8 @@ An arbitrary message sent from the client to the server. This can be used for cu
 
 - **type**: `'client-message'`
 - **data**:
-    - **t**: `string`
-    - **d**: `unknown` (optional)
+  - **t**: `string`
+  - **d**: `unknown` (optional)
 
   The data payload should contain a `t` field indicating the type of message and an optional `d` field containing any custom, corresponding data needed for the message.
 
@@ -256,8 +286,8 @@ An message sent from the server to the client in response to a `client-message`.
 
 - **type**: `'client-message'`
 - **data**:
-    - **t**: `string`
-    - **d**: `unknown` (optional)
+  - **t**: `string`
+  - **d**: `unknown` (optional)
 
   The data payload should contain a `t` field indicating the type of message and an optional `d` field containing any custom, corresponding data needed for the message.
 
@@ -267,8 +297,7 @@ Error response to a specific client message. **IMPORTANT**: The `id` should matc
 
 - **type**: `'error-response'`
 - **data**:
-    - **error**: `string`
-
+  - **error**: `string`
 
 ### Advanced LLM Interactions
 
@@ -291,10 +320,12 @@ A message sent from the client to the server to send text input to the LLM, appe
 
       If `false`, the bot should bypass the TTS so that the bot does not respond to the text in audio. Defaults to `true`.
 
-
 #### append-to-context 🏄
 
-<Warning>DEPRECATED in favor of `send-text` in Pipecat version 0.0.86 and client-js version 0.0.4</Warning>
+<Warning>
+  DEPRECATED in favor of `send-text` in Pipecat version 0.0.86 and client-js
+  version 0.0.4
+</Warning>
 
 A message sent from the client to the server to append data to the context of the current llm conversation. This is useful for providing text-based content for the user or augmenting the context for the assistant.
 
@@ -376,7 +407,10 @@ Indicates that a function call has completed or been cancelled.
 
 #### llm-function-call 🤖
 
-<Warning>DEPRECATED in favor of `llm-function-call-in-progress` in Pipecat version 0.0.102 and client-js version 1.6.0</Warning>
+<Warning>
+  DEPRECATED in favor of `llm-function-call-in-progress` in Pipecat version
+  0.0.102 and client-js version 1.6.0
+</Warning>
 
 A function call request from the LLM, sent from the bot to the client. Note that for most cases, an LLM function call will be handled completely server-side. However, in the event that the call requires input from the client or the client needs to be aware of the function call, this message/response schema is required.
 
@@ -421,22 +455,27 @@ The result of the function call requested by the LLM, returned from the client.
 Search results from the LLM's knowledge base.
 
 <Note>
-Currently, Google Gemini is the only LLM that supports built-in search. However, we expect other LLMs to follow suite, which is why this message type is defined as part of the RTVI standard. As more LLMs add support for this feature, the format of this message type may evolve to accommodate discrepancies.
+  Currently, Google Gemini is the only LLM that supports built-in search.
+  However, we expect other LLMs to follow suite, which is why this message type
+  is defined as part of the RTVI standard. As more LLMs add support for this
+  feature, the format of this message type may evolve to accommodate
+  discrepancies.
 </Note>
 
 - **type**: `'bot-llm-search-response'`
 - **data**:
   - **search_result**: `string` (optional)
-    
+
     Raw search result text.
 
   - **rendered_content**: `string` (optional)
-    
+
     Formatted version of the search results.
 
   - **origins**: `Array<Origin Object>`
-    
+
     Source information and confidence scores for search results. The `Origin Object` follows this structure:
+
     ```json
     {
         "site_uri": string (optional),
@@ -488,65 +527,81 @@ Currently, Google Gemini is the only LLM that supports built-in search. However,
 ### Service-Specific Insights
 
 #### bot-llm-started 🤖
+
 Indicates LLM processing has begun
+
 - **type**: `bot-llm-started`
 - **data**: None
 
 #### bot-llm-stopped 🤖
+
 Indicates LLM processing has completed
+
 - **type**: `bot-llm-stopped`
 - **data**: None
 
 #### user-llm-text 🤖
+
 Aggregated user input text that is sent to the LLM.
+
 - **type**: `'user-llm-text'`
 - **data**:
   - **text**: `string`
-    
+
     The user's input text to be processed by the LLM.
 
 #### bot-llm-text 🤖
+
 Individual tokens streamed from the LLM as they are generated.
+
 - **type**: `'bot-llm-text'`
 - **data**:
   - **text**: `string`
-    
+
     The token text from the LLM.
 
 #### bot-tts-started 🤖
+
 Indicates text-to-speech (TTS) processing has begun.
+
 - **type**: `'bot-tts-started'`
 - **data**: None
 
 #### bot-tts-stopped 🤖
+
 Indicates text-to-speech (TTS) processing has completed.
+
 - **type**: `'bot-tts-stopped'`
 - **data**: None
 
 #### bot-tts-text 🤖
+
 The per-token text output of the text-to-speech (TTS) service (what the TTS actually says).
+
 - **type**: `'bot-tts-text'`
 - **data**:
   - **text**: `string`
-    
+
     The text representation of the generated bot speech.
 
 ### Metrics and Monitoring
 
 #### metrics 🤖
+
 Performance metrics for various processing stages and services. Each message will contain entries for one or more of the metrics types: `processing`, `ttfb`, `characters`.
+
 - **type**: `'metrics'`
 - **data**:
   - **processing**: [See Below] (optional)
-    
+
     Processing time metrics.
 
-  - **ttfb**:  [See Below] (optional)
-    
+  - **ttfb**: [See Below] (optional)
+
     Time to first byte metrics.
 
-  - **characters**:  [See Below] (optional)
-    
+  - **characters**: [See Below] (optional)
+
     Character processing metrics.
 
 For each metric type, the data structure is an array of objects with the following structure:

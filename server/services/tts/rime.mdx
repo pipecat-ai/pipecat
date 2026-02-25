@@ -77,7 +77,8 @@ Before using Rime TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="aggregate_sentences" type="bool" default="True">
@@ -85,7 +86,8 @@ Before using Rime TTS services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams (WebSocket)](#inputparams-websocket) below.
+  Runtime-configurable voice and generation settings. See [InputParams
+  (WebSocket)](#inputparams-websocket) below.
 </ParamField>
 
 ### RimeHttpTTSService
@@ -107,11 +109,13 @@ Before using Rime TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams (HTTP)](#inputparams-http) below.
+  Runtime-configurable voice and generation settings. See [InputParams
+  (HTTP)](#inputparams-http) below.
 </ParamField>
 
 ### RimeNonJsonTTSService
@@ -139,7 +143,8 @@ A non-JSON WebSocket service for models like Arcana that use plain text messages
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="aggregate_sentences" type="bool" default="True">
@@ -147,40 +152,41 @@ A non-JSON WebSocket service for models like Arcana that use plain text messages
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable settings. See [InputParams (Non-JSON)](#inputparams-non-json) below.
+  Runtime-configurable settings. See [InputParams
+  (Non-JSON)](#inputparams-non-json) below.
 </ParamField>
 
 ### InputParams (WebSocket)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Language for synthesis. |
-| `speed_alpha` | `float` | `1.0` | Speech speed multiplier. |
-| `reduce_latency` | `bool` | `False` | Whether to reduce latency at potential quality cost. |
-| `pause_between_brackets` | `bool` | `False` | Whether to add pauses between bracketed content. |
-| `phonemize_between_brackets` | `bool` | `False` | Whether to phonemize bracketed content. |
+| Parameter                    | Type       | Default       | Description                                          |
+| ---------------------------- | ---------- | ------------- | ---------------------------------------------------- |
+| `language`                   | `Language` | `Language.EN` | Language for synthesis.                              |
+| `speed_alpha`                | `float`    | `1.0`         | Speech speed multiplier.                             |
+| `reduce_latency`             | `bool`     | `False`       | Whether to reduce latency at potential quality cost. |
+| `pause_between_brackets`     | `bool`     | `False`       | Whether to add pauses between bracketed content.     |
+| `phonemize_between_brackets` | `bool`     | `False`       | Whether to phonemize bracketed content.              |
 
 ### InputParams (HTTP)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Language for synthesis. |
-| `speed_alpha` | `float` | `1.0` | Speech speed multiplier. |
-| `reduce_latency` | `bool` | `False` | Whether to reduce latency at potential quality cost. |
-| `pause_between_brackets` | `bool` | `False` | Whether to add pauses between bracketed content. |
-| `phonemize_between_brackets` | `bool` | `False` | Whether to phonemize bracketed content. |
-| `inline_speed_alpha` | `str` | `None` | Inline speed control markup. |
+| Parameter                    | Type       | Default       | Description                                          |
+| ---------------------------- | ---------- | ------------- | ---------------------------------------------------- |
+| `language`                   | `Language` | `Language.EN` | Language for synthesis.                              |
+| `speed_alpha`                | `float`    | `1.0`         | Speech speed multiplier.                             |
+| `reduce_latency`             | `bool`     | `False`       | Whether to reduce latency at potential quality cost. |
+| `pause_between_brackets`     | `bool`     | `False`       | Whether to add pauses between bracketed content.     |
+| `phonemize_between_brackets` | `bool`     | `False`       | Whether to phonemize bracketed content.              |
+| `inline_speed_alpha`         | `str`      | `None`        | Inline speed control markup.                         |
 
 ### InputParams (Non-JSON)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `None` | Language for synthesis. |
-| `segment` | `str` | `None` | Text segmentation mode (`"immediate"`, `"bySentence"`, `"never"`). |
-| `repetition_penalty` | `float` | `None` | Token repetition penalty (1.0-2.0). |
-| `temperature` | `float` | `None` | Sampling temperature (0.0-1.0). |
-| `top_p` | `float` | `None` | Cumulative probability threshold (0.0-1.0). |
-| `extra` | `dict` | `None` | Additional parameters to pass to the API. |
+| Parameter            | Type       | Default | Description                                                        |
+| -------------------- | ---------- | ------- | ------------------------------------------------------------------ |
+| `language`           | `Language` | `None`  | Language for synthesis.                                            |
+| `segment`            | `str`      | `None`  | Text segmentation mode (`"immediate"`, `"bySentence"`, `"never"`). |
+| `repetition_penalty` | `float`    | `None`  | Token repetition penalty (1.0-2.0).                                |
+| `temperature`        | `float`    | `None`  | Sampling temperature (0.0-1.0).                                    |
+| `top_p`              | `float`    | `None`  | Cumulative probability threshold (0.0-1.0).                        |
+| `extra`              | `dict`     | `None`  | Additional parameters to pass to the API.                          |
 
 ## Usage
 
@@ -334,10 +340,10 @@ tts = RimeTTSService(
 
 Rime WebSocket TTS services support the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Rime WebSocket |
-| `on_disconnected` | Disconnected from Rime WebSocket |
+| Event                 | Description                         |
+| --------------------- | ----------------------------------- |
+| `on_connected`        | Connected to Rime WebSocket         |
+| `on_disconnected`     | Disconnected from Rime WebSocket    |
 | `on_connection_error` | WebSocket connection error occurred |
 
 ```python

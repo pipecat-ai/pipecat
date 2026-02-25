@@ -62,10 +62,15 @@ Before using OpenAI image generation services, you need:
 </ParamField>
 
 <ParamField path="aiohttp_session" type="aiohttp.ClientSession" required>
-  HTTP session for downloading generated images. You must create and manage this yourself.
+  HTTP session for downloading generated images. You must create and manage this
+  yourself.
 </ParamField>
 
-<ParamField path="image_size" type="Literal['256x256', '512x512', '1024x1024', '1792x1024', '1024x1792']" required>
+<ParamField
+  path="image_size"
+  type="Literal['256x256', '512x512', '1024x1024', '1792x1024', '1024x1792']"
+  required
+>
   Target size for generated images.
 </ParamField>
 

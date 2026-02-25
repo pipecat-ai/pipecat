@@ -68,7 +68,8 @@ Before using Google Imagen services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for image generation. See [InputParams](#inputparams) below.
+  Configuration parameters for image generation. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 <ParamField path="http_options" type="Any" default="None">
@@ -77,11 +78,11 @@ Before using Google Imagen services, you need:
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `number_of_images` | `int` | `1` | Number of images to generate (1-8). |
-| `model` | `str` | `"imagen-3.0-generate-002"` | Google Imagen model to use. |
-| `negative_prompt` | `str` | `None` | Optional negative prompt to guide what not to include in the generated image. |
+| Parameter          | Type  | Default                     | Description                                                                   |
+| ------------------ | ----- | --------------------------- | ----------------------------------------------------------------------------- |
+| `number_of_images` | `int` | `1`                         | Number of images to generate (1-8).                                           |
+| `model`            | `str` | `"imagen-3.0-generate-002"` | Google Imagen model to use.                                                   |
+| `negative_prompt`  | `str` | `None`                      | Optional negative prompt to guide what not to include in the generated image. |
 
 ## Usage
 

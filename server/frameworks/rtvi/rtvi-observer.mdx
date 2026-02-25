@@ -88,8 +88,8 @@ task = PipelineTask(
   List of aggregation types to skip sending as tts/output messages.
   <Note>
     {" "}
-    If using this to avoid sending secure information, be sure to also disable bot_llm_enabled
-    to avoid leaking through LLM messages.
+    If using this to avoid sending secure information, be sure to also disable
+    bot_llm_enabled to avoid leaking through LLM messages.
   </Note>
 </ParamField>
 
@@ -127,62 +127,64 @@ observer = RTVIObserver(
   `llm-function-call-stopped`). Maps function names to security levels, where
   `"*"` sets the default for unlisted functions.
 
-  **Levels:**
-  - `DISABLED`: No events emitted for this function
-  - `NONE`: Events with `tool_call_id` only (most secure when events are needed)
-  - `NAME`: Adds function name to events
-  - `FULL`: Adds function name, arguments, and results
+**Levels:**
 
-  ```python
-  from pipecat.processors.frameworks.rtvi import (
-      RTVIFunctionCallReportLevel,
-      RTVIObserverParams,
-  )
+- `DISABLED`: No events emitted for this function
+- `NONE`: Events with `tool_call_id` only (most secure when events are needed)
+- `NAME`: Adds function name to events
+- `FULL`: Adds function name, arguments, and results
 
-  task = PipelineTask(
-      pipeline,
-      rtvi_observer_params=RTVIObserverParams(
-          function_call_report_level={
-              "*": RTVIFunctionCallReportLevel.NONE,
-              "get_weather": RTVIFunctionCallReportLevel.FULL,
-          },
-      ),
-  )
-  ```
+```python
+from pipecat.processors.frameworks.rtvi import (
+    RTVIFunctionCallReportLevel,
+    RTVIObserverParams,
+)
+
+task = PipelineTask(
+    pipeline,
+    rtvi_observer_params=RTVIObserverParams(
+        function_call_report_level={
+            "*": RTVIFunctionCallReportLevel.NONE,
+            "get_weather": RTVIFunctionCallReportLevel.FULL,
+        },
+    ),
+)
+```
+
 </ParamField>
 
 ## Frame Translation
 
 The observer maps Pipecat's internal frames to RTVI protocol messages:
 
-| Pipeline Frame              | RTVI Message                                |
-| --------------------------- | ------------------------------------------- |
-| **Speech Events**           |
-| `UserStartedSpeakingFrame`  | `RTVIUserStartedSpeakingMessage`            |
-| `UserStoppedSpeakingFrame`  | `RTVIUserStoppedSpeakingMessage`            |
-| `BotStartedSpeakingFrame`   | `RTVIBotStartedSpeakingMessage`             |
-| `BotStoppedSpeakingFrame`   | `RTVIBotStoppedSpeakingMessage`             |
-| **User Mute**               |
-| `UserMuteStartedFrame`      | `RTVIUserMuteStartedMessage`                |
-| `UserMuteStoppedFrame`      | `RTVIUserMuteStoppedMessage`                |
-| **Transcription**           |
-| `TranscriptionFrame`        | `RTVIUserTranscriptionMessage(final=true)`  |
-| `InterimTranscriptionFrame` | `RTVIUserTranscriptionMessage(final=false)` |
-| **Bot Output**              |
-| `AggregatedTextFrame`       | `RTVIBotOutputMessage`                      |
-| **LLM Processing**          |
-| `LLMFullResponseStartFrame` | `RTVIBotLLMStartedMessage`                  |
-| `LLMFullResponseEndFrame`   | `RTVIBotLLMStoppedMessage`                  |
-| `LLMTextFrame`              | `RTVIBotLLMTextMessage`                     |
-| **TTS Events**              |
-| `TTSStartedFrame`           | `RTVIBotTTSStartedMessage`                  |
-| `TTSStoppedFrame`           | `RTVIBotTTSStoppedMessage`                  |
-| `TTSTextFrame`              | `RTVIBotTTSTextMessage`                     |
-| **Function Calls**          |
-| `FunctionCallsStartedFrame` | `llm-function-call-started`                 |
-| `FunctionCallInProgressFrame` | `llm-function-call-in-progress`           |
-| `FunctionCallResultFrame`   | `llm-function-call-stopped`                 |
-| **Context/Metrics**         |
-| `LLMContextFrame`           | `RTVIUserLLMTextMessage`                    |
-| `MetricsFrame`              | `RTVIMetricsMessage`                        |
-| `RTVIServerMessageFrame`    | `RTVIServerMessage`                         |
+| Pipeline Frame                | RTVI Message                                |
+| ----------------------------- | ------------------------------------------- |
+| **Speech Events**             |
+| `UserStartedSpeakingFrame`    | `RTVIUserStartedSpeakingMessage`            |
+| `UserStoppedSpeakingFrame`    | `RTVIUserStoppedSpeakingMessage`            |
+| `BotStartedSpeakingFrame`     | `RTVIBotStartedSpeakingMessage`             |
+| `BotStoppedSpeakingFrame`     | `RTVIBotStoppedSpeakingMessage`             |
+| **User Mute**                 |
+| `UserMuteStartedFrame`        | `RTVIUserMuteStartedMessage`                |
+| `UserMuteStoppedFrame`        | `RTVIUserMuteStoppedMessage`                |
+| **Transcription**             |
+| `TranscriptionFrame`          | `RTVIUserTranscriptionMessage(final=true)`  |
+| `InterimTranscriptionFrame`   | `RTVIUserTranscriptionMessage(final=false)` |
+| **Bot Output**                |
+| `AggregatedTextFrame`         | `RTVIBotOutputMessage`                      |
+| **LLM Processing**            |
+| `LLMFullResponseStartFrame`   | `RTVIBotLLMStartedMessage`                  |
+| `LLMFullResponseEndFrame`     | `RTVIBotLLMStoppedMessage`                  |
+| `LLMTextFrame`                | `RTVIBotLLMTextMessage`                     |
+| **TTS Events**                |
+| `TTSStartedFrame`             | `RTVIBotTTSStartedMessage`                  |
+| `TTSStoppedFrame`             | `RTVIBotTTSStoppedMessage`                  |
+| `TTSTextFrame`                | `RTVIBotTTSTextMessage`                     |
+| **Function Calls**            |
+| `FunctionCallsStartedFrame`   | `llm-function-call-started`                 |
+| `FunctionCallInProgressFrame` | `llm-function-call-in-progress`             |
+| `FunctionCallResultFrame`     | `llm-function-call-stopped`                 |
+| **Context/Metrics**           |
+| `LLMContextFrame`             | `RTVIUserLLMTextMessage`                    |
+| `MetricsFrame`                | `RTVIMetricsMessage`                        |
+| `RTVIServerMessageFrame`      | `RTVIServerMessage`                         |

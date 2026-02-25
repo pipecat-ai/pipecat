@@ -93,17 +93,18 @@ Before using PlivoFrameSerializer, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for audio and hang-up behavior. See [InputParams](#inputparams) below.
+  Configuration parameters for audio and hang-up behavior. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `plivo_sample_rate` | `int` | `8000` | Sample rate used by Plivo (Hz). |
-| `sample_rate` | `int` | `None` | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
-| `auto_hang_up` | `bool` | `True` | Whether to automatically terminate the call on `EndFrame` or `CancelFrame`. |
-| `ignore_rtvi_messages` | `bool` | `True` | Whether to ignore RTVI protocol messages during serialization. |
+| Parameter              | Type   | Default | Description                                                                                         |
+| ---------------------- | ------ | ------- | --------------------------------------------------------------------------------------------------- |
+| `plivo_sample_rate`    | `int`  | `8000`  | Sample rate used by Plivo (Hz).                                                                     |
+| `sample_rate`          | `int`  | `None`  | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
+| `auto_hang_up`         | `bool` | `True`  | Whether to automatically terminate the call on `EndFrame` or `CancelFrame`.                         |
+| `ignore_rtvi_messages` | `bool` | `True`  | Whether to ignore RTVI protocol messages during serialization.                                      |
 
 ## Usage
 

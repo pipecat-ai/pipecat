@@ -12,36 +12,19 @@ This guide will cover the high-level changes between the old `RTVIClient` and th
 - **Actions and helpers**: These have gone away in favor of some built-in methods for doing common actions like function call handling and appending to the llm context or in the case of custom actions, a simple set of methods for sending messages to the bot and handling responses. See `registerFunctionCallHandler()`, `sendText()`, `sendClientMessage()`, and `sendClientRequest()` for more details.
 - **Bot Configuration**: This functionality as been removed as a security measure, so that a client cannot inherently have the ability to override a bot configuration and use credentials to its own whims. If you need the client to initialize or update the bot configuration, you will need to do so through an API call to your backend or building on top of the client-server messaging, which has now been made easier.
 
-
 ## Migration guides
 
 <CardGroup cols={2}>
-  <Card
-    title="JavaScript"
-    icon="code"
-    href="/client/js/migration-guide"
-  >
+  <Card title="JavaScript" icon="code" href="/client/js/migration-guide">
     Migrate your JavaScript client code to the new `PipecatClient`
   </Card>
-  <Card
-    title="React"
-    icon="react"
-    href="/client/react/migration-guide"
-  >
+  <Card title="React" icon="react" href="/client/react/migration-guide">
     Update your React components to use the new `PipecatClient`
   </Card>
-  <Card
-    title="iOS"
-    icon="swift"
-    href="/client/ios/migration-guide"
-  >
+  <Card title="iOS" icon="swift" href="/client/ios/migration-guide">
     Update your iOS components to use the new `PipecatClient`
   </Card>
-  <Card
-    title="Android"
-    icon="android"
-    href="/client/android/migration-guide"
-  >
+  <Card title="Android" icon="android" href="/client/android/migration-guide">
     Migrate your Android client code to the new `PipecatClient`
   </Card>
   <Card

@@ -267,13 +267,13 @@ function EventListener() {
         .catch((error) => {
           console.error("[CALLBACK] Error getting language:", error);
         });
-    }, [])
+    }, []),
   );
   useRTVIClientEvent(
     RTVIEvent.ServerMessage,
     useCallback((data) => {
       console.log("[CALLBACK] Received message from server:", data);
-    }, [])
+    }, []),
   );
 }
 ```

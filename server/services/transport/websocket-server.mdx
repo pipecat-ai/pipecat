@@ -115,7 +115,9 @@ Inherits from `TransportParams` with additional WebSocket-specific parameters.
 </ParamField>
 
 <ParamField path="session_timeout" type="int" default="None">
-  Timeout in seconds for client sessions. When set, triggers `on_session_timeout` if the session exceeds this duration. `None` disables the timeout.
+  Timeout in seconds for client sessions. When set, triggers
+  `on_session_timeout` if the session exceeds this duration. `None` disables the
+  timeout.
 </ParamField>
 
 ### WebsocketClientTransport
@@ -124,7 +126,11 @@ Inherits from `TransportParams` with additional WebSocket-specific parameters.
   The WebSocket URI to connect to.
 </ParamField>
 
-<ParamField path="params" type="WebsocketClientParams" default="WebsocketClientParams()">
+<ParamField
+  path="params"
+  type="WebsocketClientParams"
+  default="WebsocketClientParams()"
+>
   Client transport configuration parameters.
 </ParamField>
 
@@ -171,12 +177,12 @@ WebSocket transports provide event handlers for client connection lifecycle and 
 
 #### Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Client WebSocket connected |
-| `on_client_disconnected` | Client WebSocket disconnected |
-| `on_session_timeout` | Session timed out |
-| `on_websocket_ready` | WebSocket server is ready to accept connections |
+| Event                    | Description                                     |
+| ------------------------ | ----------------------------------------------- |
+| `on_client_connected`    | Client WebSocket connected                      |
+| `on_client_disconnected` | Client WebSocket disconnected                   |
+| `on_session_timeout`     | Session timed out                               |
+| `on_websocket_ready`     | WebSocket server is ready to accept connections |
 
 #### on_client_connected
 
@@ -190,10 +196,10 @@ async def on_client_connected(transport, websocket):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `WebsocketServerTransport` | The transport instance |
-| `websocket` | `WebSocketServerProtocol` | The WebSocket connection object |
+| Parameter   | Type                       | Description                     |
+| ----------- | -------------------------- | ------------------------------- |
+| `transport` | `WebsocketServerTransport` | The transport instance          |
+| `websocket` | `WebSocketServerProtocol`  | The WebSocket connection object |
 
 #### on_client_disconnected
 
@@ -207,10 +213,10 @@ async def on_client_disconnected(transport, websocket):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `WebsocketServerTransport` | The transport instance |
-| `websocket` | `WebSocketServerProtocol` | The WebSocket connection object |
+| Parameter   | Type                       | Description                     |
+| ----------- | -------------------------- | ------------------------------- |
+| `transport` | `WebsocketServerTransport` | The transport instance          |
+| `websocket` | `WebSocketServerProtocol`  | The WebSocket connection object |
 
 #### on_session_timeout
 
@@ -224,10 +230,10 @@ async def on_session_timeout(transport, websocket):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `WebsocketServerTransport` | The transport instance |
-| `websocket` | `WebSocketServerProtocol` | The WebSocket connection object |
+| Parameter   | Type                       | Description                     |
+| ----------- | -------------------------- | ------------------------------- |
+| `transport` | `WebsocketServerTransport` | The transport instance          |
+| `websocket` | `WebSocketServerProtocol`  | The WebSocket connection object |
 
 #### on_websocket_ready
 
@@ -241,17 +247,17 @@ async def on_websocket_ready(transport):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type                       | Description            |
+| ----------- | -------------------------- | ---------------------- |
 | `transport` | `WebsocketServerTransport` | The transport instance |
 
 ### WebsocketClientTransport Events
 
 #### Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to WebSocket server |
+| Event             | Description                        |
+| ----------------- | ---------------------------------- |
+| `on_connected`    | Connected to WebSocket server      |
 | `on_disconnected` | Disconnected from WebSocket server |
 
 ```python
@@ -266,13 +272,15 @@ async def on_disconnected(transport, websocket):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `WebsocketClientTransport` | The transport instance |
-| `websocket` | `WebSocketClientProtocol` | The WebSocket connection object |
+| Parameter   | Type                       | Description                     |
+| ----------- | -------------------------- | ------------------------------- |
+| `transport` | `WebsocketClientTransport` | The transport instance          |
+| `websocket` | `WebSocketClientProtocol`  | The WebSocket connection object |
 
 <Note>
-The WebSocket server only supports one client connection at a time. If a new client connects while one is already connected, the existing connection will be closed.
+  The WebSocket server only supports one client connection at a time. If a new
+  client connects while one is already connected, the existing connection will
+  be closed.
 </Note>
 
 ## Additional Resources

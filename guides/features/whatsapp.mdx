@@ -23,10 +23,10 @@ Before proceeding, ensure you have completed the following steps:
 > **Note**: Voice calling is only available for WhatsApp Business API numbers with calling capability enabled.
 
 For reference:
+
 - [WhatsApp Cloud API Getting Started](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started/)
 - [Voice Calling API Documentation](https://developers.facebook.com/docs/whatsapp/cloud-api/calling/)
 - [Webhook Setup](https://developers.facebook.com/docs/whatsapp/webhooks/)
-
 
 ## WhatsApp Configuration
 
@@ -50,6 +50,7 @@ Set up your webhook to receive **WhatsApp call events**.
 1. In the **Meta Developer Console**, go to
    **WhatsApp → Configuration → Webhooks**
 2. **Set your callback URL** — this is where WhatsApp will send incoming call notifications.
+
    #### For local development
    - Make sure your local Pipecat server is running (e.g. `http://localhost:7860`).
    - Use **ngrok** (or a similar tunneling tool) to expose your local server:
@@ -67,13 +68,14 @@ Set up your webhook to receive **WhatsApp call events**.
      https://api.pipecat.daily.co/v1/public/webhooks/$ORGANIZATION_ID/$AGENT_NAME/whatsapp
      ```
    - ✅ **Important:** Always include the `/whatsapp` path at the end of your webhook URL.
+
 3. **Enter your Verify Token**
    - For **local development**, set the environment variable
      `WHATSAPP_WEBHOOK_VERIFICATION_TOKEN` to match the verify token you enter in Meta.
    - For **Pipecat Cloud**, set the verify token to your **public API key**.
 4. Click **Verify and Save** to confirm your webhook setup.
 5. Under **Webhook Fields**, enable the following event type:
-   - `calls` → *(required to receive voice call events)*
+   - `calls` → _(required to receive voice call events)_
 
 ### 3. Configure Access Token
 
@@ -94,7 +96,6 @@ Set up your webhook to receive **WhatsApp call events**.
 
 > This secret is used to verify that the webhooks you receive are actually from WhatsApp.
 
-
 ## Pipecat Integration
 
 WhatsApp works with any bot using `SmallWebRTCTransport`.
@@ -102,6 +103,7 @@ WhatsApp works with any bot using `SmallWebRTCTransport`.
 All you need to do is configure WhatsApp as described above and provide the correct environment variables when starting your Pipecat bot.
 
 Make sure your `.env` file includes:
+
 ```bash
 WHATSAPP_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
@@ -131,7 +133,6 @@ transport = SmallWebRTCTransport(
 2. The call will be routed to your Pipecat application.
 3. Your bot should automatically answer and begin the conversation.
 
-
 ## Full demo
 
 <Card
@@ -148,14 +149,16 @@ transport = SmallWebRTCTransport(
 Common issues and their solutions:
 
 1. **Expired WhatsApp Token**
+
    ```bash
    Error validating access token
    ```
+
    - Generate a new access token under **WhatsApp → API Setup**, then update your `WHATSAPP_TOKEN` and redeploy your agent.
 
 2. **Webhook Verification Failed**
    - Ensure the verify token in Meta Developer Console matches your environment variable.
-    - If using Pipecat Cloud, it must be your public API key.
+   - If using Pipecat Cloud, it must be your public API key.
    - Confirm that your webhook URL is publicly accessible.
 
 3. **Bot Not Answering Calls**

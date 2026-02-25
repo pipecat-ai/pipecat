@@ -65,27 +65,30 @@ Before using Fal STT services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for the Wizper API. See [InputParams](#inputparams) below.
+  Configuration parameters for the Wizper API. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 <ParamField path="ttfs_p99_latency" type="float" default="FAL_TTFS_P99">
-  P99 latency from speech end to final transcript in seconds. Override for your deployment.
+  P99 latency from speech end to final transcript in seconds. Override for your
+  deployment.
 </ParamField>
 
 ### InputParams
 
 Parameters passed via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Language of the audio input. |
-| `task` | `str` | `"transcribe"` | Task to perform: `"transcribe"` or `"translate"`. |
-| `chunk_level` | `str` | `"segment"` | Level of chunking for the response. |
-| `version` | `str` | `"3"` | Version of the Wizper model to use. |
+| Parameter     | Type       | Default        | Description                                       |
+| ------------- | ---------- | -------------- | ------------------------------------------------- |
+| `language`    | `Language` | `Language.EN`  | Language of the audio input.                      |
+| `task`        | `str`      | `"transcribe"` | Task to perform: `"transcribe"` or `"translate"`. |
+| `chunk_level` | `str`      | `"segment"`    | Level of chunking for the response.               |
+| `version`     | `str`      | `"3"`          | Version of the Wizper model to use.               |
 
 ## Usage
 

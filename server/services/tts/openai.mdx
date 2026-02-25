@@ -65,7 +65,8 @@ Before using OpenAI TTS services, you need:
 ### OpenAITTSService
 
 <ParamField path="api_key" type="str" default="None">
-  OpenAI API key for authentication. If `None`, uses the `OPENAI_API_KEY` environment variable.
+  OpenAI API key for authentication. If `None`, uses the `OPENAI_API_KEY`
+  environment variable.
 </ParamField>
 
 <ParamField path="base_url" type="str" default="None">
@@ -73,7 +74,8 @@ Before using OpenAI TTS services, you need:
 </ParamField>
 
 <ParamField path="voice" type="str" default="alloy">
-  Voice ID to use for synthesis. Options: `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `fable`, `marin`, `nova`, `onyx`, `sage`, `shimmer`, `verse`.
+  Voice ID to use for synthesis. Options: `alloy`, `ash`, `ballad`, `cedar`,
+  `coral`, `echo`, `fable`, `marin`, `nova`, `onyx`, `sage`, `shimmer`, `verse`.
 </ParamField>
 
 <ParamField path="model" type="str" default="gpt-4o-mini-tts">
@@ -81,21 +83,23 @@ Before using OpenAI TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. If `None`, uses OpenAI's default 24kHz. OpenAI TTS only supports 24kHz output.
+  Output audio sample rate in Hz. If `None`, uses OpenAI's default 24kHz. OpenAI
+  TTS only supports 24kHz output.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams](#inputparams) below.
+  Runtime-configurable voice and generation settings. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### InputParams
 
 Voice and generation settings that can be set at initialization via the `params` constructor argument, or changed at runtime via [`UpdateSettingsFrame`](/server/utilities/frame-processor-events#updatesettingsframe).
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `instructions` | `str` | `None` | Instructions to guide voice synthesis behavior (e.g. affect, tone, pacing). |
-| `speed` | `float` | `None` | Voice speed control (0.25 to 4.0). |
+| Parameter      | Type    | Default | Description                                                                 |
+| -------------- | ------- | ------- | --------------------------------------------------------------------------- |
+| `instructions` | `str`   | `None`  | Instructions to guide voice synthesis behavior (e.g. affect, tone, pacing). |
+| `speed`        | `float` | `None`  | Voice speed control (0.25 to 4.0).                                          |
 
 ## Usage
 

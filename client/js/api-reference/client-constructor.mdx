@@ -10,7 +10,11 @@ import { PipecatClient } from "@pipecat-ai/client-js";
 `PipecatClient` is the primary component for building the client-side portion of a client-bot interaction. It is designed to work with various transport layers, such as WebRTC, WebSockets, or HTTP, allowing you to pick and choose the communication layer that best suits your application while maintaining a consistent API.
 
 <Note>
-  When initializing the `PipecatClient`, you must provide a transport instance to the constructor for your chosen protocol or provider. See [Transport](/client/js/transports) for more information. For the purpose of this guide, we'll demonstrate using the [Daily WebRTC transport](/client/js/transports/daily).
+  When initializing the `PipecatClient`, you must provide a transport instance
+  to the constructor for your chosen protocol or provider. See
+  [Transport](/client/js/transports) for more information. For the purpose of
+  this guide, we'll demonstrate using the [Daily WebRTC
+  transport](/client/js/transports/daily).
 </Note>
 
 ## Example
@@ -58,7 +62,11 @@ const PipecatClient = new PipecatClient({
 An instance of the `Transport` type you will use to connect to your bot service (`PipecatClient.connect()`). Transports implement the underlying device management, connectivity, media transmission, and state logic that manage the lifecycle of your session.
 
 <Note>
-As a best practice, we recommend you construct the transport inline in the client constructor, as opposed to holding a reference to it. Access to the transport is typically unnecessary. For advanced use cases that do require access to the transport, we recommend doing so via the `PipecatClient.transport` property, which provides some additional safeguards.
+  As a best practice, we recommend you construct the transport inline in the
+  client constructor, as opposed to holding a reference to it. Access to the
+  transport is typically unnecessary. For advanced use cases that do require
+  access to the transport, we recommend doing so via the
+  `PipecatClient.transport` property, which provides some additional safeguards.
 </Note>
 
 ```typescript
@@ -84,10 +92,12 @@ const pcClient = new PipecatClient({
   Enable user's local microphone device.
 </ParamField>
 
-<ParamField path="enableCam" type="boolean" default="false" >
-  Enable user's local webcam device. Note: Not all transports support video. Setting this value in that case will have no effect.
+<ParamField path="enableCam" type="boolean" default="false">
+  Enable user's local webcam device. Note: Not all transports support video.
+  Setting this value in that case will have no effect.
 </ParamField>
 
-<ParamField path="enableScreenShare" type="boolean" default="false" >
-  Enable user's local screen share. Note: Not all transports support screen sharing. Setting this value in that case will have no effect.
+<ParamField path="enableScreenShare" type="boolean" default="false">
+  Enable user's local screen share. Note: Not all transports support screen
+  sharing. Setting this value in that case will have no effect.
 </ParamField>

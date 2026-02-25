@@ -77,7 +77,8 @@ Before using Deepgram TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="encoding" type="str" default="linear16">
@@ -95,7 +96,8 @@ Before using Deepgram TTS services, you need:
 </ParamField>
 
 <ParamField path="aiohttp_session" type="aiohttp.ClientSession" required>
-  An aiohttp session for HTTP requests. You must create and manage this yourself.
+  An aiohttp session for HTTP requests. You must create and manage this
+  yourself.
 </ParamField>
 
 <ParamField path="base_url" type="str" default="https://api.deepgram.com">
@@ -147,11 +149,11 @@ async with aiohttp.ClientSession() as session:
 
 Deepgram TTS supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Deepgram WebSocket |
-| `on_disconnected` | Disconnected from Deepgram WebSocket |
-| `on_connection_error` | WebSocket connection error occurred |
+| Event                 | Description                          |
+| --------------------- | ------------------------------------ |
+| `on_connected`        | Connected to Deepgram WebSocket      |
+| `on_disconnected`     | Disconnected from Deepgram WebSocket |
+| `on_connection_error` | WebSocket connection error occurred  |
 
 ```python
 @tts.event_handler("on_connected")

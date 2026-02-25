@@ -107,15 +107,20 @@ Inherits from `TransportParams` with additional WebSocket-specific parameters.
 </ParamField>
 
 <ParamField path="serializer" type="FrameSerializer" default="None">
-  Frame serializer for encoding/decoding WebSocket messages. Use a telephony serializer (e.g., `TwilioFrameSerializer`, `TelnyxFrameSerializer`) for provider-specific audio formats.
+  Frame serializer for encoding/decoding WebSocket messages. Use a telephony
+  serializer (e.g., `TwilioFrameSerializer`, `TelnyxFrameSerializer`) for
+  provider-specific audio formats.
 </ParamField>
 
 <ParamField path="session_timeout" type="int" default="None">
-  Session timeout in seconds. When set, triggers `on_session_timeout` if the session exceeds this duration. `None` disables the timeout.
+  Session timeout in seconds. When set, triggers `on_session_timeout` if the
+  session exceeds this duration. `None` disables the timeout.
 </ParamField>
 
 <ParamField path="fixed_audio_packet_size" type="int" default="None">
-  Optional fixed-size packetization for raw PCM audio payloads. Useful when the remote WebSocket media endpoint requires strict audio framing (e.g., 640 bytes for 20ms at 16kHz PCM16 mono).
+  Optional fixed-size packetization for raw PCM audio payloads. Useful when the
+  remote WebSocket media endpoint requires strict audio framing (e.g., 640 bytes
+  for 20ms at 16kHz PCM16 mono).
 </ParamField>
 
 ## Usage
@@ -135,11 +140,11 @@ FastAPIWebsocketTransport provides event handlers for client connection lifecycl
 
 ### Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Client WebSocket connected |
+| Event                    | Description                   |
+| ------------------------ | ----------------------------- |
+| `on_client_connected`    | Client WebSocket connected    |
 | `on_client_disconnected` | Client WebSocket disconnected |
-| `on_session_timeout` | Session timed out |
+| `on_session_timeout`     | Session timed out             |
 
 ### Connection Lifecycle
 
@@ -155,10 +160,10 @@ async def on_client_connected(transport, websocket):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `FastAPIWebsocketTransport` | The transport instance |
-| `websocket` | `WebSocket` | The FastAPI WebSocket connection object |
+| Parameter   | Type                        | Description                             |
+| ----------- | --------------------------- | --------------------------------------- |
+| `transport` | `FastAPIWebsocketTransport` | The transport instance                  |
+| `websocket` | `WebSocket`                 | The FastAPI WebSocket connection object |
 
 #### on_client_disconnected
 
@@ -172,10 +177,10 @@ async def on_client_disconnected(transport, websocket):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `FastAPIWebsocketTransport` | The transport instance |
-| `websocket` | `WebSocket` | The FastAPI WebSocket connection object |
+| Parameter   | Type                        | Description                             |
+| ----------- | --------------------------- | --------------------------------------- |
+| `transport` | `FastAPIWebsocketTransport` | The transport instance                  |
+| `websocket` | `WebSocket`                 | The FastAPI WebSocket connection object |
 
 #### on_session_timeout
 
@@ -189,10 +194,10 @@ async def on_session_timeout(transport, websocket):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `FastAPIWebsocketTransport` | The transport instance |
-| `websocket` | `WebSocket` | The FastAPI WebSocket connection object |
+| Parameter   | Type                        | Description                             |
+| ----------- | --------------------------- | --------------------------------------- |
+| `transport` | `FastAPIWebsocketTransport` | The transport instance                  |
+| `websocket` | `WebSocket`                 | The FastAPI WebSocket connection object |
 
 ## Additional Resources
 

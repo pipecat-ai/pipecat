@@ -1,11 +1,11 @@
 ---
-title: "Krisp VIVA Noise Cancellation"
-description: "Eliminate background noise and voices for more reliable agent interactions using Krisp's VIVA noise cancellation model"
+title: "Krisp VIVA Voice Isolation"
+description: "Eliminate background noise and voices for more reliable agent interactions using Krisp's VIVA voice isolation model"
 ---
 
 ## Overview
 
-Voice agents are vulnerable to background noise, especially other voices that trigger false interruptions. When this happens, your bot stops mid-sentence unnecessarily, creating a poor user experience. Pipecat Cloud's Krisp integration processes incoming audio to remove ambient noise and background voices before they reach your agent, resulting in cleaner audio input with fewer false interruptions and better transcription.
+Voice agents are vulnerable to background voices and noises, especially other voices that trigger false interruptions. When this happens, your bot stops mid-sentence unnecessarily, creating a poor user experience. Pipecat Cloud's Krisp integration processes incoming audio to remove ambient noise and background voices before they reach your agent, resulting in cleaner audio input with fewer false interruptions and better transcription.
 
 <Info>
   Krisp processes the audio before it reaches your agent's speech recognition
@@ -55,24 +55,25 @@ You can enable Krisp VIVA when deploying your agent through:
     
   In your `pcc-deploy.toml`:
       
-```toml
-agent_name = "voice-starter"
-image = "your-repo/voice-starter:0.1"
-image_credentials = "my-dockerhub-secret"
-secret_set = "voice-starter-secrets"
+    ```toml
+    agent_name = "voice-starter"
+    image = "your-repo/voice-starter:0.1"
+    image_credentials = "my-dockerhub-secret"
+    secret_set = "voice-starter-secrets"
 
-[krisp_viva]
-audio_filter = "tel"
+    [krisp_viva]
+    audio_filter = "tel"
 
-[scaling]
-min_agents = 0
-```
+    [scaling]
+    min_agents = 0
+    ```
+
   </Tab>
   <Tab title="CLI">
 
-```bash
-pipecat cloud deploy --krisp-viva-audio-filter tel
-```
+    ```bash
+    pipecat cloud deploy --krisp-viva-audio-filter tel
+    ```
 
   </Tab>
     <Tab title="REST API">
@@ -140,7 +141,7 @@ Supported values are:
 To verify Krisp is working:
 
 1. Deploy your agent with Krisp enabled
-2. Connect to your agent in an environment with background noise; try turning on a TV or podcast
+2. Connect to your agent in an environment with background noise or talking; try turning on a TV or podcast
 3. Observe whether background noises and voices affect your agent's behavior
 
 ## Pricing
@@ -163,7 +164,7 @@ Krisp cannot be used in local development environments, as it requires a proprie
 
 ## Troubleshooting
 
-If you're experiencing issues with Krisp noise cancellation:
+If you're experiencing issues with Krisp voice isolation:
 
 - Verify Krisp VIVA is enabled in your deployment configuration
 - Confirm you've added the `KrispVivaFilter()` to your transport configuration

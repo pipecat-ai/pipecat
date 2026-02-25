@@ -82,7 +82,11 @@ Before using Gemini Live services, you need:
   Google AI API key for authentication.
 </ParamField>
 
-<ParamField path="model" type="str" default="models/gemini-2.5-flash-native-audio-preview-12-2025">
+<ParamField
+  path="model"
+  type="str"
+  default="models/gemini-2.5-flash-native-audio-preview-12-2025"
+>
   Gemini model identifier to use.
 </ParamField>
 
@@ -95,11 +99,13 @@ Before using Gemini Live services, you need:
 </ParamField>
 
 <ParamField path="tools" type="List[dict] | ToolsSchema" default="None">
-  Tools/functions available to the model. Can also be provided via the LLM context.
+  Tools/functions available to the model. Can also be provided via the LLM
+  context.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="InputParams()">
-  Runtime-configurable generation and session settings. See [InputParams](#inputparams) below.
+  Runtime-configurable generation and session settings. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 <ParamField path="start_audio_paused" type="bool" default="False">
@@ -110,15 +116,25 @@ Before using Gemini Live services, you need:
   Whether to start with video input paused.
 </ParamField>
 
-<ParamField path="inference_on_context_initialization" type="bool" default="True">
-  Whether to generate a response when context is first set. Set to `False` to wait for user input before the model responds.
+<ParamField
+  path="inference_on_context_initialization"
+  type="bool"
+  default="True"
+>
+  Whether to generate a response when context is first set. Set to `False` to
+  wait for user input before the model responds.
 </ParamField>
 
 <ParamField path="http_options" type="HttpOptions" default="None">
-  HTTP options for the Google API client. Use this to set API version (e.g. `HttpOptions(api_version="v1alpha")`) or other request options.
+  HTTP options for the Google API client. Use this to set API version (e.g.
+  `HttpOptions(api_version="v1alpha")`) or other request options.
 </ParamField>
 
-<ParamField path="file_api_base_url" type="str" default="https://generativelanguage.googleapis.com/v1beta/files">
+<ParamField
+  path="file_api_base_url"
+  type="str"
+  default="https://generativelanguage.googleapis.com/v1beta/files"
+>
   Base URL for the Gemini File API.
 </ParamField>
 
@@ -126,42 +142,42 @@ Before using Gemini Live services, you need:
 
 Generation and session settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `frequency_penalty` | `float` | `None` | Frequency penalty for generation (0.0-2.0). |
-| `max_tokens` | `int` | `4096` | Maximum tokens to generate. |
-| `presence_penalty` | `float` | `None` | Presence penalty for generation (0.0-2.0). |
-| `temperature` | `float` | `None` | Sampling temperature (0.0-2.0). |
-| `top_k` | `int` | `None` | Top-k sampling parameter. |
-| `top_p` | `float` | `None` | Top-p (nucleus) sampling parameter (0.0-1.0). |
-| `modalities` | `GeminiModalities` | `AUDIO` | Response modality: `GeminiModalities.AUDIO` or `GeminiModalities.TEXT`. |
-| `language` | `Language` | `EN_US` | Language for generation and transcription. |
-| `media_resolution` | `GeminiMediaResolution` | `UNSPECIFIED` | Media resolution for video input: `UNSPECIFIED`, `LOW` (64 tokens), `MEDIUM` (256 tokens), or `HIGH` (256 tokens with zoom). |
-| `vad` | `GeminiVADParams` | `None` | Voice activity detection parameters. See [GeminiVADParams](#geminivadparams) below. |
-| `context_window_compression` | `ContextWindowCompressionParams` | `None` | Context window compression settings. |
-| `thinking` | `ThinkingConfig` | `None` | Thinking/reasoning configuration. Requires a model that supports it. |
-| `enable_affective_dialog` | `bool` | `None` | Enable affective dialog for expression and tone adaptation. Requires a supporting model and API version (e.g. `v1alpha`). |
-| `proactivity` | `ProactivityConfig` | `None` | Proactivity settings for model behavior. Requires a supporting model and API version. |
-| `extra` | `Dict[str, Any]` | `{}` | Additional parameters passed to the API. |
+| Parameter                    | Type                             | Default       | Description                                                                                                                  |
+| ---------------------------- | -------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `frequency_penalty`          | `float`                          | `None`        | Frequency penalty for generation (0.0-2.0).                                                                                  |
+| `max_tokens`                 | `int`                            | `4096`        | Maximum tokens to generate.                                                                                                  |
+| `presence_penalty`           | `float`                          | `None`        | Presence penalty for generation (0.0-2.0).                                                                                   |
+| `temperature`                | `float`                          | `None`        | Sampling temperature (0.0-2.0).                                                                                              |
+| `top_k`                      | `int`                            | `None`        | Top-k sampling parameter.                                                                                                    |
+| `top_p`                      | `float`                          | `None`        | Top-p (nucleus) sampling parameter (0.0-1.0).                                                                                |
+| `modalities`                 | `GeminiModalities`               | `AUDIO`       | Response modality: `GeminiModalities.AUDIO` or `GeminiModalities.TEXT`.                                                      |
+| `language`                   | `Language`                       | `EN_US`       | Language for generation and transcription.                                                                                   |
+| `media_resolution`           | `GeminiMediaResolution`          | `UNSPECIFIED` | Media resolution for video input: `UNSPECIFIED`, `LOW` (64 tokens), `MEDIUM` (256 tokens), or `HIGH` (256 tokens with zoom). |
+| `vad`                        | `GeminiVADParams`                | `None`        | Voice activity detection parameters. See [GeminiVADParams](#geminivadparams) below.                                          |
+| `context_window_compression` | `ContextWindowCompressionParams` | `None`        | Context window compression settings.                                                                                         |
+| `thinking`                   | `ThinkingConfig`                 | `None`        | Thinking/reasoning configuration. Requires a model that supports it.                                                         |
+| `enable_affective_dialog`    | `bool`                           | `None`        | Enable affective dialog for expression and tone adaptation. Requires a supporting model and API version (e.g. `v1alpha`).    |
+| `proactivity`                | `ProactivityConfig`              | `None`        | Proactivity settings for model behavior. Requires a supporting model and API version.                                        |
+| `extra`                      | `Dict[str, Any]`                 | `{}`          | Additional parameters passed to the API.                                                                                     |
 
 ### GeminiVADParams
 
 Voice activity detection configuration passed via `InputParams.vad`:
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `disabled` | `bool` | `None` | Whether to disable server-side VAD entirely. |
-| `start_sensitivity` | `StartSensitivity` | `None` | Sensitivity for speech start detection. |
-| `end_sensitivity` | `EndSensitivity` | `None` | Sensitivity for speech end detection. |
-| `prefix_padding_ms` | `int` | `None` | Padding before speech starts in milliseconds. |
-| `silence_duration_ms` | `int` | `None` | Silence duration threshold in milliseconds to detect speech end. |
+| Parameter             | Type               | Default | Description                                                      |
+| --------------------- | ------------------ | ------- | ---------------------------------------------------------------- |
+| `disabled`            | `bool`             | `None`  | Whether to disable server-side VAD entirely.                     |
+| `start_sensitivity`   | `StartSensitivity` | `None`  | Sensitivity for speech start detection.                          |
+| `end_sensitivity`     | `EndSensitivity`   | `None`  | Sensitivity for speech end detection.                            |
+| `prefix_padding_ms`   | `int`              | `None`  | Padding before speech starts in milliseconds.                    |
+| `silence_duration_ms` | `int`              | `None`  | Silence duration threshold in milliseconds to detect speech end. |
 
 ### ContextWindowCompressionParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enabled` | `bool` | `False` | Whether context window compression is enabled. |
-| `trigger_tokens` | `int` | `None` | Token count to trigger compression. `None` uses the default (80% of context window). |
+| Parameter        | Type   | Default | Description                                                                          |
+| ---------------- | ------ | ------- | ------------------------------------------------------------------------------------ |
+| `enabled`        | `bool` | `False` | Whether context window compression is enabled.                                       |
+| `trigger_tokens` | `int`  | `None`  | Token count to trigger compression. `None` uses the default (80% of context window). |
 
 ## Usage
 

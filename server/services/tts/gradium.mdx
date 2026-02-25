@@ -68,7 +68,11 @@ Before using Gradium TTS services, you need:
   Voice identifier.
 </ParamField>
 
-<ParamField path="url" type="str" default="wss://eu.api.gradium.ai/api/speech/tts">
+<ParamField
+  path="url"
+  type="str"
+  default="wss://eu.api.gradium.ai/api/speech/tts"
+>
   Gradium WebSocket API endpoint.
 </ParamField>
 
@@ -81,19 +85,21 @@ Before using Gradium TTS services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable generation settings. See [InputParams](#inputparams) below.
+  Runtime-configurable generation settings. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 ### InputParams
 
 Generation settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `temp` | `float` | `0.6` | Temperature for generation. |
+| Parameter | Type    | Default | Description                 |
+| --------- | ------- | ------- | --------------------------- |
+| `temp`    | `float` | `0.6`   | Temperature for generation. |
 
 <Note>
-  The Gradium service outputs audio at a fixed 48kHz sample rate. This is set automatically and cannot be changed.
+  The Gradium service outputs audio at a fixed 48kHz sample rate. This is set
+  automatically and cannot be changed.
 </Note>
 
 ## Usage
@@ -132,10 +138,10 @@ tts = GradiumTTSService(
 
 Gradium TTS supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Gradium WebSocket |
-| `on_disconnected` | Disconnected from Gradium WebSocket |
+| Event                 | Description                         |
+| --------------------- | ----------------------------------- |
+| `on_connected`        | Connected to Gradium WebSocket      |
+| `on_disconnected`     | Disconnected from Gradium WebSocket |
 | `on_connection_error` | WebSocket connection error occurred |
 
 ```python

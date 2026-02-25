@@ -1,5 +1,4 @@
 ---
-
 title: "RTVIClient Migration Guide for Android"
 sidebarTitle: "Migration Guide"
 description: "A Guide to migrating from RTVIClient to PipecatClient for Android"
@@ -98,7 +97,6 @@ client.registerFunctionCallHandler("get_my_current_location") { data, onResult -
 }
 ```
 
-
 ### 5. Pipeline Configuration Initialization
 
 Previously, you could provide a pipeline configuration as part of the `RTVIClient` constructor, and it was expected to be in a specific format. Now, if you would like to pass any initial pipeline configurations, you do so as `requestData` added to the endpoint you provide to `startBot()` or `startBotAndConnect()`. In both cases, you would need server-side code to parse and apply these settings, but now you can define the structure and what pieces of configuration you want to send.
@@ -147,10 +145,9 @@ client.disconnect().await()
 2. **Helpers Removed**: RTVIClientHelper, LLMHelper are gone.
 3. **Configs Removed**: All configuration-related methods, events, and types have been removed: `getConfig()`, `updateConfig()`, `describeConfig()`, `onConfigUpdated`, `onConfigDescribed`, etc.
 4. **Actions Removed**: All actions-related methods, events, and types have been removed: `action()`, `describeActions()`, `onActionsAvailable`, etc.
-8. **New Messaging Methods**:
-
-   * `appendToContext()`
-   * `sendClientRequest()`
-   * `sendClientMessage()`
-   * `disconnectBot()`
-   * `registerFunctionCallHandler()` / `unregisterFunctionCallHandler()` / `unregisterAllFunctionCallHandlers()`
+5. **New Messaging Methods**:
+   - `appendToContext()`
+   - `sendClientRequest()`
+   - `sendClientMessage()`
+   - `disconnectBot()`
+   - `registerFunctionCallHandler()` / `unregisterFunctionCallHandler()` / `unregisterAllFunctionCallHandlers()`

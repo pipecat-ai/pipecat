@@ -70,7 +70,8 @@ Before using Azure OpenAI LLM services, you need:
 </ParamField>
 
 <ParamField path="model" type="str" required>
-  Azure model deployment name. This is the name you gave when deploying the model, not the base model name.
+  Azure model deployment name. This is the name you gave when deploying the
+  model, not the base model name.
 </ParamField>
 
 <ParamField path="api_version" type="str" default="2024-09-01-preview">
@@ -80,15 +81,18 @@ Before using Azure OpenAI LLM services, you need:
 Since `AzureLLMService` inherits from `OpenAILLMService`, it also accepts the following parameters:
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable model settings. See [OpenAI InputParams](/server/services/llm/openai#inputparams) for details.
+  Runtime-configurable model settings. See [OpenAI
+  InputParams](/server/services/llm/openai#inputparams) for details.
 </ParamField>
 
 <ParamField path="retry_timeout_secs" type="float" default="5.0">
-  Request timeout in seconds. Used when `retry_on_timeout` is enabled to determine when to retry.
+  Request timeout in seconds. Used when `retry_on_timeout` is enabled to
+  determine when to retry.
 </ParamField>
 
 <ParamField path="retry_on_timeout" type="bool" default="False">
-  Whether to retry the request once if it times out. The retry attempt has no timeout limit.
+  Whether to retry the request once if it times out. The retry attempt has no
+  timeout limit.
 </ParamField>
 
 ### InputParams
@@ -156,9 +160,9 @@ await task.queue_frame(
 
 `AzureLLMService` supports the same event handlers as `OpenAILLMService`, inherited from [LLMService](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_completion_timeout` | Called when an LLM completion request times out |
+| Event                       | Description                                                             |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `on_completion_timeout`     | Called when an LLM completion request times out                         |
 | `on_function_calls_started` | Called when function calls are received and execution is about to start |
 
 ```python

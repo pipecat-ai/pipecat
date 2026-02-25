@@ -66,7 +66,8 @@ Before using AWS Transcribe STT services, you need:
 ## Configuration
 
 <ParamField path="api_key" type="str" default="None">
-  AWS secret access key. If `None`, uses `AWS_SECRET_ACCESS_KEY` environment variable.
+  AWS secret access key. If `None`, uses `AWS_SECRET_ACCESS_KEY` environment
+  variable.
 </ParamField>
 
 <ParamField path="aws_access_key_id" type="str" default="None">
@@ -74,11 +75,13 @@ Before using AWS Transcribe STT services, you need:
 </ParamField>
 
 <ParamField path="aws_session_token" type="str" default="None">
-  AWS session token for temporary credentials. If `None`, uses `AWS_SESSION_TOKEN` environment variable.
+  AWS session token for temporary credentials. If `None`, uses
+  `AWS_SESSION_TOKEN` environment variable.
 </ParamField>
 
 <ParamField path="region" type="str" default="None">
-  AWS region for the service. If `None`, uses `AWS_REGION` environment variable (defaults to `"us-east-1"`).
+  AWS region for the service. If `None`, uses `AWS_REGION` environment variable
+  (defaults to `"us-east-1"`).
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="16000">
@@ -86,11 +89,18 @@ Before using AWS Transcribe STT services, you need:
 </ParamField>
 
 <ParamField path="language" type="Language" default="Language.EN">
-  Language for transcription. Supports a wide range of languages including English, Spanish, French, German, and many more. See [AWS Transcribe supported languages](https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html).
+  Language for transcription. Supports a wide range of languages including
+  English, Spanish, French, German, and many more. See [AWS Transcribe supported
+  languages](https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html).
 </ParamField>
 
-<ParamField path="ttfs_p99_latency" type="float" default="AWS_TRANSCRIBE_TTFS_P99">
-  P99 latency from speech end to final transcript in seconds. Override for your deployment.
+<ParamField
+  path="ttfs_p99_latency"
+  type="float"
+  default="AWS_TRANSCRIBE_TTFS_P99"
+>
+  P99 latency from speech end to final transcript in seconds. Override for your
+  deployment.
 </ParamField>
 
 ## Usage
@@ -132,9 +142,9 @@ stt = AWSTranscribeSTTService(
 
 AWS Transcribe STT supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to AWS Transcribe WebSocket |
+| Event             | Description                                |
+| ----------------- | ------------------------------------------ |
+| `on_connected`    | Connected to AWS Transcribe WebSocket      |
 | `on_disconnected` | Disconnected from AWS Transcribe WebSocket |
 
 ```python

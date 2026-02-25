@@ -7,11 +7,11 @@ title: "Errors"
 Base `PipecatClient` error type, extends [`Error`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error) and primarily introduces the `status` field. Most methods will try to throw an error of this type when something goes wrong. This is different from the RTVI error event and its corresponding [`onError` callback](./callbacks#param-on-error), which are used for communicating errors that are sent by the bot.
 
 <ParamField path="status" type="number">
-A unique identifier (or HTTP code if applicable) for the error.
+  A unique identifier (or HTTP code if applicable) for the error.
 </ParamField>
 
 <ParamField path="message" type="string">
-A human-readable message describing the error.
+  A human-readable message describing the error.
 </ParamField>
 
 ## Pre-defined RTVIErrors
@@ -25,15 +25,18 @@ Emitted when the bot does not enter a ready state within the specified timeout p
 Emitted from `startBot()` or `startBotAndConnect()` when the endpoint responds with an error or the `fetch` itself fails. This may be due to the endpoint being unavailable, or the server failing to parse the provided data.
 
 <ParamField path="error" type="string" required>
-All `StartBotError` instances will have an `error` field set to `invalid-request-error`.
+  All `StartBotError` instances will have an `error` field set to
+  `invalid-request-error`.
 </ParamField>
 
 <ParamField path="status" type="number">
-HTTP status code returned by the endpoint, if applicable.
+  HTTP status code returned by the endpoint, if applicable.
 </ParamField>
 
 <ParamField path="message" type="string">
-Verbose error message returned by the endpoint, if provided. To take advantage of this, the endpoint should return an error response with a JSON object with an `info` field containing the error message.
+  Verbose error message returned by the endpoint, if provided. To take advantage
+  of this, the endpoint should return an error response with a JSON object with
+  an `info` field containing the error message.
 </ParamField>
 
 ### TransportStartError
@@ -49,21 +52,25 @@ Emitted when the client attempts to perform an action or method that requires th
 Emitted when there is an issue with acquiring or using a media device, such as a camera or microphone. This could be due to permissions issues, device unavailability, or other related problems.
 
 <ParamField path="devices" type="array<'cam' | 'mic' | 'speaker'>" required>
-List of media devices, `'cam'`, `'mic'`, and/or `'speaker'`, that are unavailable or could not be accessed.
+  List of media devices, `'cam'`, `'mic'`, and/or `'speaker'`, that are
+  unavailable or could not be accessed.
 </ParamField>
 
 <ParamField path="type" type="string" required>
+
 The `type` field will indicate what type of device error occurred. Options include:
-  - `"in-use"`: A device is currently in use by another application and cannot be accessed. *windows only*
-  - `"permissions"`: The user has not granted permission to access the media device.
-  - `"undefined-mediadevices"`: `getUserMedia()` is not an available API on the current platform or browser.
-  - `"not-found"`: The specified media device could not be found.
-  - `"constraints"`: The media device could not be configured with the specified constraints.
-  - `"unknown"`: An unknown error occurred while accessing the media device.
+
+- `"in-use"`: A device is currently in use by another application and cannot be accessed. _windows only_
+- `"permissions"`: The user has not granted permission to access the media device.
+- `"undefined-mediadevices"`: `getUserMedia()` is not an available API on the current platform or browser.
+- `"not-found"`: The specified media device could not be found.
+- `"constraints"`: The media device could not be configured with the specified constraints.
+- `"unknown"`: An unknown error occurred while accessing the media device.
+
 </ParamField>
 
 <ParamField path="details" type="object">
-Additional details about the device error, if available.
+  Additional details about the device error, if available.
 </ParamField>
 
 ### UnsupportedFeatureError
@@ -71,5 +78,5 @@ Additional details about the device error, if available.
 Not all Transports are created equal, and some may not support certain features. This error is thrown when a feature is requested that the current Transport does not support.
 
 <ParamField path="feature" type="string" required>
-This custom field will contain the name of the unsupported feature.
+  This custom field will contain the name of the unsupported feature.
 </ParamField>

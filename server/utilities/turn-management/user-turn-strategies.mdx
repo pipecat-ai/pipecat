@@ -17,7 +17,6 @@ You can customize this behavior by providing your own strategies for more sophis
 ## How It Works
 
 1. **Turn Start Detection**: When any start strategy triggers, the user aggregator:
-
    - Marks the start of a user turn
    - Optionally emits `UserStartedSpeakingFrame`
    - Optionally emits an interruption frame (if the bot is speaking)
@@ -25,7 +24,6 @@ You can customize this behavior by providing your own strategies for more sophis
 2. **During User Turn**: The aggregator collects transcriptions and audio frames.
 
 3. **Turn Stop Detection**: When a stop strategy triggers, the user aggregator:
-
    - Marks the end of the user turn
    - Emits `UserStoppedSpeakingFrame`
    - Pushes the aggregated user message to the LLM context
@@ -226,7 +224,8 @@ Container for configuring user turn start and stop strategies.
   default="[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]"
 >
   List of strategies used to detect when the user stops speaking and expects a
-  response. Defaults to AI-powered turn detection using `LocalSmartTurnAnalyzerV3`.
+  response. Defaults to AI-powered turn detection using
+  `LocalSmartTurnAnalyzerV3`.
 </ParamField>
 
 ## ExternalUserTurnStrategies

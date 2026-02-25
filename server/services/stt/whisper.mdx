@@ -81,7 +81,9 @@ Before using Whisper STT services, you need:
 Uses Faster Whisper for efficient local transcription on CPU or CUDA devices.
 
 <ParamField path="model" type="str | Model" default="Model.DISTIL_MEDIUM_EN">
-  Whisper model to use. Can be a `Model` enum value or a string. Available models: `TINY`, `BASE`, `SMALL`, `MEDIUM`, `LARGE` (large-v3), `LARGE_V3_TURBO`, `DISTIL_LARGE_V2`, `DISTIL_MEDIUM_EN` (English-only).
+  Whisper model to use. Can be a `Model` enum value or a string. Available
+  models: `TINY`, `BASE`, `SMALL`, `MEDIUM`, `LARGE` (large-v3),
+  `LARGE_V3_TURBO`, `DISTIL_LARGE_V2`, `DISTIL_MEDIUM_EN` (English-only).
 </ParamField>
 
 <ParamField path="device" type="str" default="auto">
@@ -89,11 +91,13 @@ Uses Faster Whisper for efficient local transcription on CPU or CUDA devices.
 </ParamField>
 
 <ParamField path="compute_type" type="str" default="default">
-  Compute type for inference. Options include `"default"`, `"int8"`, `"int8_float16"`, `"float16"`, etc.
+  Compute type for inference. Options include `"default"`, `"int8"`,
+  `"int8_float16"`, `"float16"`, etc.
 </ParamField>
 
 <ParamField path="no_speech_prob" type="float" default="0.4">
-  Probability threshold for filtering out non-speech segments. Segments with a no-speech probability above this value are excluded.
+  Probability threshold for filtering out non-speech segments. Segments with a
+  no-speech probability above this value are excluded.
 </ParamField>
 
 <ParamField path="language" type="Language" default="Language.EN">
@@ -105,7 +109,9 @@ Uses Faster Whisper for efficient local transcription on CPU or CUDA devices.
 Optimized for Apple Silicon using MLX Whisper. Models are loaded on demand.
 
 <ParamField path="model" type="str | MLXModel" default="MLXModel.TINY">
-  MLX Whisper model to use. Can be an `MLXModel` enum value or a string. Available models: `TINY`, `MEDIUM`, `LARGE_V3`, `LARGE_V3_TURBO`, `DISTIL_LARGE_V3`, `LARGE_V3_TURBO_Q4` (quantized).
+  MLX Whisper model to use. Can be an `MLXModel` enum value or a string.
+  Available models: `TINY`, `MEDIUM`, `LARGE_V3`, `LARGE_V3_TURBO`,
+  `DISTIL_LARGE_V3`, `LARGE_V3_TURBO_Q4` (quantized).
 </ParamField>
 
 <ParamField path="no_speech_prob" type="float" default="0.6">

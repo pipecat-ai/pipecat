@@ -72,37 +72,50 @@ Before using AssemblyAI STT services, you need:
   Language code for transcription. AssemblyAI currently supports English.
 </ParamField>
 
-<ParamField path="api_endpoint_base_url" type="str" default="wss://streaming.assemblyai.com/v3/ws">
+<ParamField
+  path="api_endpoint_base_url"
+  type="str"
+  default="wss://streaming.assemblyai.com/v3/ws"
+>
   WebSocket endpoint URL. Override for custom or proxied deployments.
 </ParamField>
 
-<ParamField path="connection_params" type="AssemblyAIConnectionParams" default="AssemblyAIConnectionParams()">
-  Connection configuration parameters. See [AssemblyAIConnectionParams](#assemblyaiconnectionparams) below.
+<ParamField
+  path="connection_params"
+  type="AssemblyAIConnectionParams"
+  default="AssemblyAIConnectionParams()"
+>
+  Connection configuration parameters. See
+  [AssemblyAIConnectionParams](#assemblyaiconnectionparams) below.
 </ParamField>
 
 <ParamField path="vad_force_turn_endpoint" type="bool" default="True">
-  Whether to force turn endpoint on VAD stop. When `True`, disables AssemblyAI's model-based turn detection and relies on external VAD to trigger turn endpoints. Automatically sets `end_of_turn_confidence_threshold=1.0` and `max_turn_silence=2000` unless explicitly overridden.
+  Whether to force turn endpoint on VAD stop. When `True`, disables AssemblyAI's
+  model-based turn detection and relies on external VAD to trigger turn
+  endpoints. Automatically sets `end_of_turn_confidence_threshold=1.0` and
+  `max_turn_silence=2000` unless explicitly overridden.
 </ParamField>
 
 <ParamField path="ttfs_p99_latency" type="float" default="ASSEMBLYAI_TTFS_P99">
-  P99 latency from speech end to final transcript in seconds. Override for your deployment.
+  P99 latency from speech end to final transcript in seconds. Override for your
+  deployment.
 </ParamField>
 
 ### AssemblyAIConnectionParams
 
 Connection-level parameters passed via the `connection_params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `sample_rate` | `int` | `16000` | Audio sample rate in Hz. |
-| `encoding` | `Literal` | `"pcm_s16le"` | Audio encoding format. Options: `"pcm_s16le"`, `"pcm_mulaw"`. |
-| `formatted_finals` | `bool` | `True` | Whether to enable transcript formatting. |
-| `word_finalization_max_wait_time` | `int` | `None` | Maximum time to wait for word finalization in milliseconds. |
-| `end_of_turn_confidence_threshold` | `float` | `None` | Confidence threshold for end-of-turn detection. |
-| `min_end_of_turn_silence_when_confident` | `int` | `None` | Minimum silence duration (ms) when confident about end-of-turn. |
-| `max_turn_silence` | `int` | `None` | Maximum silence duration (ms) before forcing end-of-turn. |
-| `keyterms_prompt` | `List[str]` | `None` | List of key terms to guide transcription. |
-| `speech_model` | `Literal` | `"universal-streaming-english"` | Speech model. Options: `"universal-streaming-english"`, `"universal-streaming-multilingual"`. |
+| Parameter                                | Type        | Default                         | Description                                                                                   |
+| ---------------------------------------- | ----------- | ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `sample_rate`                            | `int`       | `16000`                         | Audio sample rate in Hz.                                                                      |
+| `encoding`                               | `Literal`   | `"pcm_s16le"`                   | Audio encoding format. Options: `"pcm_s16le"`, `"pcm_mulaw"`.                                 |
+| `formatted_finals`                       | `bool`      | `True`                          | Whether to enable transcript formatting.                                                      |
+| `word_finalization_max_wait_time`        | `int`       | `None`                          | Maximum time to wait for word finalization in milliseconds.                                   |
+| `end_of_turn_confidence_threshold`       | `float`     | `None`                          | Confidence threshold for end-of-turn detection.                                               |
+| `min_end_of_turn_silence_when_confident` | `int`       | `None`                          | Minimum silence duration (ms) when confident about end-of-turn.                               |
+| `max_turn_silence`                       | `int`       | `None`                          | Maximum silence duration (ms) before forcing end-of-turn.                                     |
+| `keyterms_prompt`                        | `List[str]` | `None`                          | List of key terms to guide transcription.                                                     |
+| `speech_model`                           | `Literal`   | `"universal-streaming-english"` | Speech model. Options: `"universal-streaming-english"`, `"universal-streaming-multilingual"`. |
 
 ## Usage
 
@@ -144,9 +157,9 @@ stt = AssemblyAISTTService(
 
 AssemblyAI STT supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to AssemblyAI WebSocket |
+| Event             | Description                            |
+| ----------------- | -------------------------------------- |
+| `on_connected`    | Connected to AssemblyAI WebSocket      |
 | `on_disconnected` | Disconnected from AssemblyAI WebSocket |
 
 ```python

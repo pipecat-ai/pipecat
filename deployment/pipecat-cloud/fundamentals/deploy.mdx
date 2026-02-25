@@ -127,7 +127,10 @@ This command will update the `my-first-agent` deployment to use the new image an
 To avoid interruption of any active sessions, any running agent instances will continue on the old image until the session concludes. Once those sessions end, the instances running the old image are discarded and will not be returned to the pool.
 
 <Note>
-  When there is no new deployment, instances are returned to the pool after a session ends and remain available to serve new sessions during a cooldown period. A new deployment changes this behavior: instances running the prior image are terminated once their sessions conclude, rather than being recycled.
+  When there is no new deployment, instances are returned to the pool after a
+  session ends and remain available to serve new sessions during a cooldown
+  period. A new deployment changes this behavior: instances running the prior
+  image are terminated once their sessions conclude, rather than being recycled.
 </Note>
 
 Idle agent instances in your agent pool will be replaced with the new configuration according to the Pipecat Cloud auto-scaling strategy.

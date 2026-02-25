@@ -97,11 +97,14 @@ Before using WhatsAppTransport, you need:
 </ParamField>
 
 <ParamField path="ice_servers" type="List[IceServer]" default="None">
-  List of ICE servers for WebRTC connections. If `None`, defaults to Google's public STUN server (`stun:stun.l.google.com:19302`).
+  List of ICE servers for WebRTC connections. If `None`, defaults to Google's
+  public STUN server (`stun:stun.l.google.com:19302`).
 </ParamField>
 
 <ParamField path="whatsapp_secret" type="str" default="None">
-  WhatsApp App Secret for validating that webhook requests came from WhatsApp. When set, all incoming webhooks are verified using HMAC SHA-256 signature validation.
+  WhatsApp App Secret for validating that webhook requests came from WhatsApp.
+  When set, all incoming webhooks are verified using HMAC SHA-256 signature
+  validation.
 </ParamField>
 
 ## Usage

@@ -76,16 +76,17 @@ Before using ExotelFrameSerializer, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for audio settings. See [InputParams](#inputparams) below.
+  Configuration parameters for audio settings. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `exotel_sample_rate` | `int` | `8000` | Sample rate used by Exotel (Hz). |
-| `sample_rate` | `int` | `None` | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
-| `ignore_rtvi_messages` | `bool` | `True` | Whether to ignore RTVI protocol messages during serialization. |
+| Parameter              | Type   | Default | Description                                                                                         |
+| ---------------------- | ------ | ------- | --------------------------------------------------------------------------------------------------- |
+| `exotel_sample_rate`   | `int`  | `8000`  | Sample rate used by Exotel (Hz).                                                                    |
+| `sample_rate`          | `int`  | `None`  | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
+| `ignore_rtvi_messages` | `bool` | `True`  | Whether to ignore RTVI protocol messages during serialization.                                      |
 
 ## Usage
 

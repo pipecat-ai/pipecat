@@ -89,7 +89,8 @@ Before using SmallWebRTCTransport, you need:
 ### SmallWebRTCTransport
 
 <ParamField path="webrtc_connection" type="SmallWebRTCConnection" required>
-  The underlying WebRTC connection handler that manages signaling and peer connections.
+  The underlying WebRTC connection handler that manages signaling and peer
+  connections.
 </ParamField>
 
 <ParamField path="params" type="TransportParams" required>
@@ -121,11 +122,11 @@ SmallWebRTCTransport provides event handlers for client connection lifecycle and
 
 ### Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Client WebRTC connection established |
-| `on_client_disconnected` | Client WebRTC connection closed |
-| `on_app_message` | App message received from client |
+| Event                    | Description                          |
+| ------------------------ | ------------------------------------ |
+| `on_client_connected`    | Client WebRTC connection established |
+| `on_client_disconnected` | Client WebRTC connection closed      |
+| `on_app_message`         | App message received from client     |
 
 ### Connection Lifecycle
 
@@ -141,9 +142,9 @@ async def on_client_connected(transport, webrtc_connection):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `SmallWebRTCTransport` | The transport instance |
+| Parameter           | Type                    | Description                  |
+| ------------------- | ----------------------- | ---------------------------- |
+| `transport`         | `SmallWebRTCTransport`  | The transport instance       |
 | `webrtc_connection` | `SmallWebRTCConnection` | The WebRTC connection object |
 
 #### on_client_disconnected
@@ -158,9 +159,9 @@ async def on_client_disconnected(transport, webrtc_connection):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `SmallWebRTCTransport` | The transport instance |
+| Parameter           | Type                    | Description                  |
+| ------------------- | ----------------------- | ---------------------------- |
+| `transport`         | `SmallWebRTCTransport`  | The transport instance       |
 | `webrtc_connection` | `SmallWebRTCConnection` | The WebRTC connection object |
 
 ### Messaging
@@ -177,11 +178,11 @@ async def on_app_message(transport, message, sender):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `SmallWebRTCTransport` | The transport instance |
-| `message` | `Any` | The message content |
-| `sender` | `str` | The sender's peer connection ID |
+| Parameter   | Type                   | Description                     |
+| ----------- | ---------------------- | ------------------------------- |
+| `transport` | `SmallWebRTCTransport` | The transport instance          |
+| `message`   | `Any`                  | The message content             |
+| `sender`    | `str`                  | The sender's peer connection ID |
 
 ## Additional Resources
 

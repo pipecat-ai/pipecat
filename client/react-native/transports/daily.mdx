@@ -18,7 +18,7 @@ import { PipecatClient } from "@pipecat-ai/client-js";
 let pipecatClient = new PipecatClient({
   transport: new RNDailyTransport(),
   enableMic: true,
-  enableCam: false
+  enableCam: false,
 });
 
 // Connect to your bot
@@ -41,7 +41,8 @@ The `DailyTransportConstructorOptions` extends the `DailyFactoryOptions` type th
   The Pipecat React Native SDK leverages the Pipecat JavaScript SDK for seamless integration with React Native applications.
   For detailed information, please reference to the [Javascript SDK docs](/client/js/transports/daily).
 
-  **Just ensure you use the appropriate transport layer for React Native.**
+**Just ensure you use the appropriate transport layer for React Native.**
+
 </Note>
 
 ## More Information

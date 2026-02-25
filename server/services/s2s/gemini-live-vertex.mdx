@@ -85,7 +85,8 @@ Before using Gemini Live Vertex AI services, you need:
 This service extends `GeminiLiveLLMService` with Vertex AI authentication. It accepts all the same parameters as the [Gemini Live](/server/services/s2s/gemini-live) service, with these differences:
 
 <ParamField path="credentials" type="str" default="None">
-  JSON string of Google service account credentials. If not provided, falls back to `credentials_path` or Application Default Credentials (ADC).
+  JSON string of Google service account credentials. If not provided, falls back
+  to `credentials_path` or Application Default Credentials (ADC).
 </ParamField>
 
 <ParamField path="credentials_path" type="str" default="None">
@@ -100,7 +101,11 @@ This service extends `GeminiLiveLLMService` with Vertex AI authentication. It ac
   Google Cloud project ID.
 </ParamField>
 
-<ParamField path="model" type="str" default="google/gemini-live-2.5-flash-native-audio">
+<ParamField
+  path="model"
+  type="str"
+  default="google/gemini-live-2.5-flash-native-audio"
+>
   Vertex AI model identifier to use.
 </ParamField>
 
@@ -113,11 +118,13 @@ This service extends `GeminiLiveLLMService` with Vertex AI authentication. It ac
 </ParamField>
 
 <ParamField path="tools" type="List[dict] | ToolsSchema" default="None">
-  Tools/functions available to the model. Can also be provided via the LLM context.
+  Tools/functions available to the model. Can also be provided via the LLM
+  context.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="InputParams()">
-  Runtime-configurable generation and session settings. See the [Gemini Live InputParams](/server/services/s2s/gemini-live#inputparams) for details.
+  Runtime-configurable generation and session settings. See the [Gemini Live
+  InputParams](/server/services/s2s/gemini-live#inputparams) for details.
 </ParamField>
 
 <ParamField path="start_audio_paused" type="bool" default="False">
@@ -128,8 +135,13 @@ This service extends `GeminiLiveLLMService` with Vertex AI authentication. It ac
   Whether to start with video input paused.
 </ParamField>
 
-<ParamField path="inference_on_context_initialization" type="bool" default="True">
-  Whether to generate a response when context is first set. Set to `False` to wait for user input before the model responds.
+<ParamField
+  path="inference_on_context_initialization"
+  type="bool"
+  default="True"
+>
+  Whether to generate a response when context is first set. Set to `False` to
+  wait for user input before the model responds.
 </ParamField>
 
 <ParamField path="http_options" type="HttpOptions" default="None">

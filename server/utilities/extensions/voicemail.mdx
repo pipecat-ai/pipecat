@@ -82,10 +82,10 @@ The system validates custom prompts and warns if they're missing required respon
 
 ## Event Handlers
 
-| Event | Description |
-| --- | --- |
+| Event                      | Description                                |
+| -------------------------- | ------------------------------------------ |
 | `on_conversation_detected` | Live conversation detected (not voicemail) |
-| `on_voicemail_detected` | Voicemail detected |
+| `on_voicemail_detected`    | Voicemail detected                         |
 
 ```python
 @voicemail_detector.event_handler("on_conversation_detected")

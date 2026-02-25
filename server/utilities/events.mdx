@@ -66,7 +66,9 @@ Events are either **synchronous** or **asynchronous**, depending on how the comp
 - **Asynchronous events** (default) run the handler in a background `asyncio.Task`. The caller continues immediately. These are used for events where you might do I/O, logging, or other work that shouldn't block the pipeline.
 
 <Note>
-You don't need to choose — the sync/async behavior is determined by the component, not by your handler. Your handler can be an `async def` or a regular `def` regardless.
+  You don't need to choose — the sync/async behavior is determined by the
+  component, not by your handler. Your handler can be an `async def` or a
+  regular `def` regardless.
 </Note>
 
 ## Events Reference
@@ -77,165 +79,165 @@ The table below lists all events available in Pipecat, grouped by component. Cli
 
 Events on [`PipelineTask`](/server/pipeline/pipeline-task#event-handlers).
 
-| Event | Description |
-| --- | --- |
-| `on_pipeline_started` | Pipeline has started processing |
-| `on_pipeline_finished` | Pipeline reached a terminal state (stopped, ended, or cancelled) |
-| `on_pipeline_error` | An error frame reached the pipeline task |
-| `on_frame_reached_upstream` | A filtered frame type reached the pipeline source |
-| `on_frame_reached_downstream` | A filtered frame type reached the pipeline sink |
-| `on_idle_timeout` | No activity detected within the idle timeout period |
+| Event                         | Description                                                      |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `on_pipeline_started`         | Pipeline has started processing                                  |
+| `on_pipeline_finished`        | Pipeline reached a terminal state (stopped, ended, or cancelled) |
+| `on_pipeline_error`           | An error frame reached the pipeline task                         |
+| `on_frame_reached_upstream`   | A filtered frame type reached the pipeline source                |
+| `on_frame_reached_downstream` | A filtered frame type reached the pipeline sink                  |
+| `on_idle_timeout`             | No activity detected within the idle timeout period              |
 
 ### Frame Processor
 
 Events on every [`FrameProcessor`](/server/utilities/frame-processor-events). Since all services, transports, and processors inherit from `FrameProcessor`, these events are available on any processor in your pipeline.
 
-| Event | Description |
-| --- | --- |
-| `on_error` | An error occurred in this processor |
-| `on_before_process_frame` | A frame is about to be processed |
-| `on_after_process_frame` | A frame has just been processed |
-| `on_before_push_frame` | A frame is about to be pushed to the next processor |
-| `on_after_push_frame` | A frame has just been pushed to the next processor |
+| Event                     | Description                                         |
+| ------------------------- | --------------------------------------------------- |
+| `on_error`                | An error occurred in this processor                 |
+| `on_before_process_frame` | A frame is about to be processed                    |
+| `on_after_process_frame`  | A frame has just been processed                     |
+| `on_before_push_frame`    | A frame is about to be pushed to the next processor |
+| `on_after_push_frame`     | A frame has just been pushed to the next processor  |
 
 ### Turn Management
 
 Events on context aggregators from [`LLMContextAggregatorPair`](/server/utilities/turn-management/turn-events).
 
-| Event | Emitter | Description |
-| --- | --- | --- |
-| `on_user_turn_started` | `user_aggregator` | User begins speaking |
-| `on_user_turn_stopped` | `user_aggregator` | User finishes speaking (includes transcript) |
-| `on_user_turn_stop_timeout` | `user_aggregator` | User turn ended due to timeout |
-| `on_user_turn_idle` | `user_aggregator` | User has been idle for configured timeout |
-| `on_user_mute_started` | `user_aggregator` | User input was muted |
-| `on_user_mute_stopped` | `user_aggregator` | User input was unmuted |
-| `on_assistant_turn_started` | `assistant_aggregator` | Assistant begins responding |
+| Event                       | Emitter                | Description                                         |
+| --------------------------- | ---------------------- | --------------------------------------------------- |
+| `on_user_turn_started`      | `user_aggregator`      | User begins speaking                                |
+| `on_user_turn_stopped`      | `user_aggregator`      | User finishes speaking (includes transcript)        |
+| `on_user_turn_stop_timeout` | `user_aggregator`      | User turn ended due to timeout                      |
+| `on_user_turn_idle`         | `user_aggregator`      | User has been idle for configured timeout           |
+| `on_user_mute_started`      | `user_aggregator`      | User input was muted                                |
+| `on_user_mute_stopped`      | `user_aggregator`      | User input was unmuted                              |
+| `on_assistant_turn_started` | `assistant_aggregator` | Assistant begins responding                         |
 | `on_assistant_turn_stopped` | `assistant_aggregator` | Assistant finishes responding (includes transcript) |
-| `on_assistant_thought` | `assistant_aggregator` | Assistant produced a thought (reasoning models) |
+| `on_assistant_thought`      | `assistant_aggregator` | Assistant produced a thought (reasoning models)     |
 
 ### STT Services
 
 Events on STT service instances. Available on all WebSocket-based STT services. See [Service Events](/server/utilities/service-events) for details.
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | WebSocket connection established |
-| `on_disconnected` | WebSocket connection closed |
+| Event                 | Description                         |
+| --------------------- | ----------------------------------- |
+| `on_connected`        | WebSocket connection established    |
+| `on_disconnected`     | WebSocket connection closed         |
 | `on_connection_error` | WebSocket connection error occurred |
 
 Some STT services have additional events:
 
 **Deepgram STT:**
 
-| Event | Description |
-| --- | --- |
+| Event               | Description                     |
+| ------------------- | ------------------------------- |
 | `on_speech_started` | Speech detected in audio stream |
-| `on_utterance_end` | End of utterance detected |
+| `on_utterance_end`  | End of utterance detected       |
 
 **Deepgram Flux STT:**
 
-| Event | Description |
-| --- | --- |
-| `on_start_of_turn` | Start of a new turn detected |
-| `on_turn_resumed` | A previously paused turn has resumed |
-| `on_end_of_turn` | End of turn detected |
-| `on_eager_end_of_turn` | Early end-of-turn prediction |
-| `on_update` | Transcript updated |
+| Event                  | Description                          |
+| ---------------------- | ------------------------------------ |
+| `on_start_of_turn`     | Start of a new turn detected         |
+| `on_turn_resumed`      | A previously paused turn has resumed |
+| `on_end_of_turn`       | End of turn detected                 |
+| `on_eager_end_of_turn` | Early end-of-turn prediction         |
+| `on_update`            | Transcript updated                   |
 
 **Speechmatics STT:**
 
-| Event | Description |
-| --- | --- |
+| Event                | Description                            |
+| -------------------- | -------------------------------------- |
 | `on_speakers_result` | Speaker identification result received |
 
 **Sarvam STT:**
 
-| Event | Description |
-| --- | --- |
-| `on_speech_started` | Speech detected |
-| `on_speech_stopped` | Speech stopped |
-| `on_utterance_end` | End of utterance detected |
+| Event               | Description               |
+| ------------------- | ------------------------- |
+| `on_speech_started` | Speech detected           |
+| `on_speech_stopped` | Speech stopped            |
+| `on_utterance_end`  | End of utterance detected |
 
 ### TTS Services
 
 Events on TTS service instances. Available on all WebSocket-based TTS services. See [Service Events](/server/utilities/service-events) for details.
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | WebSocket connection established |
-| `on_disconnected` | WebSocket connection closed |
-| `on_connection_error` | WebSocket connection error occurred |
-| `on_tts_request` | A TTS synthesis request is being sent |
+| Event                 | Description                           |
+| --------------------- | ------------------------------------- |
+| `on_connected`        | WebSocket connection established      |
+| `on_disconnected`     | WebSocket connection closed           |
+| `on_connection_error` | WebSocket connection error occurred   |
+| `on_tts_request`      | A TTS synthesis request is being sent |
 
 ### LLM Services
 
 Events on LLM service instances. See [Service Events](/server/utilities/service-events) for details.
 
-| Event | Description |
-| --- | --- |
+| Event                       | Description                                |
+| --------------------------- | ------------------------------------------ |
 | `on_function_calls_started` | LLM has started making function/tool calls |
-| `on_completion_timeout` | LLM response timed out |
+| `on_completion_timeout`     | LLM response timed out                     |
 
 **OpenAI Realtime / Grok Realtime:**
 
-| Event | Description |
-| --- | --- |
+| Event                          | Description                         |
+| ------------------------------ | ----------------------------------- |
 | `on_conversation_item_created` | A new conversation item was created |
-| `on_conversation_item_updated` | A conversation item was updated |
+| `on_conversation_item_updated` | A conversation item was updated     |
 
 ### Daily Transport
 
 Events on [`DailyTransport`](/server/services/transport/daily#event-handlers) instances.
 
-| Event | Description |
-| --- | --- |
-| `on_joined` | Bot joined the room |
-| `on_left` | Bot left the room |
-| `on_error` | Transport error occurred |
-| `on_call_state_updated` | Call state changed |
-| `on_client_connected` | A participant connected |
-| `on_client_disconnected` | A participant disconnected |
+| Event                         | Description                       |
+| ----------------------------- | --------------------------------- |
+| `on_joined`                   | Bot joined the room               |
+| `on_left`                     | Bot left the room                 |
+| `on_error`                    | Transport error occurred          |
+| `on_call_state_updated`       | Call state changed                |
+| `on_client_connected`         | A participant connected           |
+| `on_client_disconnected`      | A participant disconnected        |
 | `on_first_participant_joined` | First participant joined the room |
-| `on_participant_joined` | A participant joined |
-| `on_participant_left` | A participant left |
-| `on_participant_updated` | A participant's state was updated |
-| `on_active_speaker_changed` | Active speaker changed |
-| `on_app_message` | App message received |
-| `on_transcription_message` | Transcription message received |
-| `on_recording_started` | Recording started |
-| `on_recording_stopped` | Recording stopped |
-| `on_recording_error` | Recording error occurred |
-| `on_dialin_connected` | Dial-in call connected |
-| `on_dialin_ready` | Dial-in SIP endpoint ready |
-| `on_dialin_stopped` | Dial-in call stopped |
-| `on_dialin_error` | Dial-in error occurred |
-| `on_dialin_warning` | Dial-in warning |
-| `on_dialout_answered` | Dial-out call answered |
-| `on_dialout_connected` | Dial-out call connected |
-| `on_dialout_stopped` | Dial-out call stopped |
-| `on_dialout_error` | Dial-out error occurred |
-| `on_dialout_warning` | Dial-out warning |
-| `on_before_leave` | About to leave the room (sync) |
+| `on_participant_joined`       | A participant joined              |
+| `on_participant_left`         | A participant left                |
+| `on_participant_updated`      | A participant's state was updated |
+| `on_active_speaker_changed`   | Active speaker changed            |
+| `on_app_message`              | App message received              |
+| `on_transcription_message`    | Transcription message received    |
+| `on_recording_started`        | Recording started                 |
+| `on_recording_stopped`        | Recording stopped                 |
+| `on_recording_error`          | Recording error occurred          |
+| `on_dialin_connected`         | Dial-in call connected            |
+| `on_dialin_ready`             | Dial-in SIP endpoint ready        |
+| `on_dialin_stopped`           | Dial-in call stopped              |
+| `on_dialin_error`             | Dial-in error occurred            |
+| `on_dialin_warning`           | Dial-in warning                   |
+| `on_dialout_answered`         | Dial-out call answered            |
+| `on_dialout_connected`        | Dial-out call connected           |
+| `on_dialout_stopped`          | Dial-out call stopped             |
+| `on_dialout_error`            | Dial-out error occurred           |
+| `on_dialout_warning`          | Dial-out warning                  |
+| `on_before_leave`             | About to leave the room (sync)    |
 
 ### LiveKit Transport
 
 Events on [`LiveKitTransport`](/server/services/transport/livekit#event-handlers) instances.
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to the room |
-| `on_disconnected` | Disconnected from the room |
-| `on_participant_connected` | A participant connected |
+| Event                         | Description                |
+| ----------------------------- | -------------------------- |
+| `on_connected`                | Connected to the room      |
+| `on_disconnected`             | Disconnected from the room |
+| `on_participant_connected`    | A participant connected    |
 | `on_participant_disconnected` | A participant disconnected |
-| `on_first_participant_joined` | First participant joined |
-| `on_audio_track_subscribed` | Audio track subscribed |
-| `on_audio_track_unsubscribed` | Audio track unsubscribed |
-| `on_video_track_subscribed` | Video track subscribed |
-| `on_video_track_unsubscribed` | Video track unsubscribed |
-| `on_data_received` | Data message received |
-| `on_call_state_updated` | Call state changed |
-| `on_before_disconnect` | About to disconnect (sync) |
+| `on_first_participant_joined` | First participant joined   |
+| `on_audio_track_subscribed`   | Audio track subscribed     |
+| `on_audio_track_unsubscribed` | Audio track unsubscribed   |
+| `on_video_track_subscribed`   | Video track subscribed     |
+| `on_video_track_unsubscribed` | Video track unsubscribed   |
+| `on_data_received`            | Data message received      |
+| `on_call_state_updated`       | Call state changed         |
+| `on_before_disconnect`        | About to disconnect (sync) |
 
 ### WebSocket Transports
 
@@ -243,103 +245,103 @@ Events on WebSocket transport instances.
 
 **WebSocketServerTransport:**
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Client connected |
-| `on_client_disconnected` | Client disconnected |
-| `on_session_timeout` | Session timed out |
-| `on_websocket_ready` | WebSocket server is ready |
+| Event                    | Description               |
+| ------------------------ | ------------------------- |
+| `on_client_connected`    | Client connected          |
+| `on_client_disconnected` | Client disconnected       |
+| `on_session_timeout`     | Session timed out         |
+| `on_websocket_ready`     | WebSocket server is ready |
 
 **FastAPIWebsocketTransport:**
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Client connected |
+| Event                    | Description         |
+| ------------------------ | ------------------- |
+| `on_client_connected`    | Client connected    |
 | `on_client_disconnected` | Client disconnected |
-| `on_session_timeout` | Session timed out |
+| `on_session_timeout`     | Session timed out   |
 
 **WebSocketClientTransport:**
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to server |
+| Event             | Description              |
+| ----------------- | ------------------------ |
+| `on_connected`    | Connected to server      |
 | `on_disconnected` | Disconnected from server |
 
 ### Other Transports
 
 **SmallWebRTCTransport:**
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Client connected |
-| `on_client_disconnected` | Client disconnected |
-| `on_app_message` | App message received |
+| Event                    | Description          |
+| ------------------------ | -------------------- |
+| `on_client_connected`    | Client connected     |
+| `on_client_disconnected` | Client disconnected  |
+| `on_app_message`         | App message received |
 
 **HeyGenTransport / TavusTransport:**
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Client connected |
+| Event                    | Description         |
+| ------------------------ | ------------------- |
+| `on_client_connected`    | Client connected    |
 | `on_client_disconnected` | Client disconnected |
 
 ### Utilities
 
 **ServiceSwitcher:**
 
-| Event | Description |
-| --- | --- |
+| Event                 | Description                 |
+| --------------------- | --------------------------- |
 | `on_service_switched` | Active service was switched |
 
 **TranscriptProcessor:**
 
-| Event | Description |
-| --- | --- |
+| Event                  | Description            |
+| ---------------------- | ---------------------- |
 | `on_transcript_update` | Transcript was updated |
 
 **AudioBufferProcessor:**
 
-| Event | Description |
-| --- | --- |
-| `on_audio_data` | Audio data available |
-| `on_track_audio_data` | Per-track audio data available |
+| Event                     | Description                    |
+| ------------------------- | ------------------------------ |
+| `on_audio_data`           | Audio data available           |
+| `on_track_audio_data`     | Per-track audio data available |
 | `on_user_turn_audio_data` | User turn audio data available |
-| `on_bot_turn_audio_data` | Bot turn audio data available |
+| `on_bot_turn_audio_data`  | Bot turn audio data available  |
 
 **RTVIProcessor:**
 
-| Event | Description |
-| --- | --- |
-| `on_bot_started` | Bot started |
-| `on_client_ready` | Client is ready |
+| Event               | Description             |
+| ------------------- | ----------------------- |
+| `on_bot_started`    | Bot started             |
+| `on_client_ready`   | Client is ready         |
 | `on_client_message` | Client message received |
 
 ### Observers
 
 **TurnTrackingObserver:**
 
-| Event | Description |
-| --- | --- |
+| Event             | Description                 |
+| ----------------- | --------------------------- |
 | `on_turn_started` | A conversation turn started |
-| `on_turn_ended` | A conversation turn ended |
+| `on_turn_ended`   | A conversation turn ended   |
 
 **UserBotLatencyObserver:**
 
-| Event | Description |
-| --- | --- |
+| Event                 | Description                   |
+| --------------------- | ----------------------------- |
 | `on_latency_measured` | Latency measurement available |
 
 ### Extensions
 
 **VoicemailDetector:**
 
-| Event | Description |
-| --- | --- |
+| Event                      | Description                                |
+| -------------------------- | ------------------------------------------ |
 | `on_conversation_detected` | Live conversation detected (not voicemail) |
-| `on_voicemail_detected` | Voicemail detected |
+| `on_voicemail_detected`    | Voicemail detected                         |
 
 **IVRNavigator:**
 
-| Event | Description |
-| --- | --- |
-| `on_conversation_detected` | Live conversation detected |
-| `on_ivr_status_changed` | IVR navigation status changed |
+| Event                      | Description                   |
+| -------------------------- | ----------------------------- |
+| `on_conversation_detected` | Live conversation detected    |
+| `on_ivr_status_changed`    | IVR navigation status changed |

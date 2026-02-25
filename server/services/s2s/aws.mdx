@@ -88,19 +88,26 @@ Before using AWS Nova Sonic services, you need:
 </ParamField>
 
 <ParamField path="region" type="str" required>
-  AWS region where the service is hosted. Supported regions for Nova 2 Sonic (default): `"us-east-1"`, `"us-west-2"`, `"ap-northeast-1"`. Supported regions for Nova Sonic (older model): `"us-east-1"`, `"ap-northeast-1"`.
+  AWS region where the service is hosted. Supported regions for Nova 2 Sonic
+  (default): `"us-east-1"`, `"us-west-2"`, `"ap-northeast-1"`. Supported regions
+  for Nova Sonic (older model): `"us-east-1"`, `"ap-northeast-1"`.
 </ParamField>
 
 <ParamField path="model" type="str" default="amazon.nova-2-sonic-v1:0">
-  Model identifier. Use `"amazon.nova-2-sonic-v1:0"` for the latest model or `"amazon.nova-sonic-v1:0"` for the older model.
+  Model identifier. Use `"amazon.nova-2-sonic-v1:0"` for the latest model or
+  `"amazon.nova-sonic-v1:0"` for the older model.
 </ParamField>
 
 <ParamField path="voice_id" type="str" default="matthew">
-  Voice ID for speech synthesis. Some voices are designed for specific languages. See [AWS Nova 2 Sonic voice support](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html) for available voices.
+  Voice ID for speech synthesis. Some voices are designed for specific
+  languages. See [AWS Nova 2 Sonic voice
+  support](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-language-support.html)
+  for available voices.
 </ParamField>
 
 <ParamField path="params" type="Params" default="Params()">
-  Model parameters for audio configuration and inference. See [Params](#params) below.
+  Model parameters for audio configuration and inference. See [Params](#params)
+  below.
 </ParamField>
 
 <ParamField path="system_instruction" type="str" default="None">
@@ -115,18 +122,18 @@ Before using AWS Nova Sonic services, you need:
 
 Audio and inference parameters that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `input_sample_rate` | `int` | `16000` | Audio input sample rate in Hz. |
-| `input_sample_size` | `int` | `16` | Audio input sample size in bits. |
-| `input_channel_count` | `int` | `1` | Number of input audio channels. |
-| `output_sample_rate` | `int` | `24000` | Audio output sample rate in Hz. |
-| `output_sample_size` | `int` | `16` | Audio output sample size in bits. |
-| `output_channel_count` | `int` | `1` | Number of output audio channels. |
-| `max_tokens` | `int` | `1024` | Maximum number of tokens to generate. |
-| `top_p` | `float` | `0.9` | Nucleus sampling parameter. |
-| `temperature` | `float` | `0.7` | Sampling temperature for text generation. |
-| `endpointing_sensitivity` | `str` | `None` | Controls how quickly Nova Sonic decides the user has stopped speaking. Values: `"LOW"`, `"MEDIUM"`, or `"HIGH"`. Only supported with Nova 2 Sonic (the default model). |
+| Parameter                 | Type    | Default | Description                                                                                                                                                            |
+| ------------------------- | ------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `input_sample_rate`       | `int`   | `16000` | Audio input sample rate in Hz.                                                                                                                                         |
+| `input_sample_size`       | `int`   | `16`    | Audio input sample size in bits.                                                                                                                                       |
+| `input_channel_count`     | `int`   | `1`     | Number of input audio channels.                                                                                                                                        |
+| `output_sample_rate`      | `int`   | `24000` | Audio output sample rate in Hz.                                                                                                                                        |
+| `output_sample_size`      | `int`   | `16`    | Audio output sample size in bits.                                                                                                                                      |
+| `output_channel_count`    | `int`   | `1`     | Number of output audio channels.                                                                                                                                       |
+| `max_tokens`              | `int`   | `1024`  | Maximum number of tokens to generate.                                                                                                                                  |
+| `top_p`                   | `float` | `0.9`   | Nucleus sampling parameter.                                                                                                                                            |
+| `temperature`             | `float` | `0.7`   | Sampling temperature for text generation.                                                                                                                              |
+| `endpointing_sensitivity` | `str`   | `None`  | Controls how quickly Nova Sonic decides the user has stopped speaking. Values: `"LOW"`, `"MEDIUM"`, or `"HIGH"`. Only supported with Nova 2 Sonic (the default model). |
 
 ## Usage
 

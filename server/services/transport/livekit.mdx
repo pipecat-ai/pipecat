@@ -88,7 +88,8 @@ Before using LiveKitTransport, you need:
 </ParamField>
 
 <ParamField path="params" type="LiveKitParams" default="LiveKitParams()">
-  Transport configuration parameters. Inherits all parameters from [TransportParams](/server/services/transport/transport-params).
+  Transport configuration parameters. Inherits all parameters from
+  [TransportParams](/server/services/transport/transport-params).
 </ParamField>
 
 <ParamField path="input_name" type="str" default="None">
@@ -116,21 +117,21 @@ LiveKitTransport provides event handlers for room lifecycle, participant managem
 
 ### Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to the room |
-| `on_disconnected` | Disconnected from the room |
-| `on_before_disconnect` | About to disconnect (sync) |
-| `on_call_state_updated` | Call state changed |
-| `on_first_participant_joined` | First participant joined |
-| `on_participant_connected` | A participant connected |
+| Event                         | Description                |
+| ----------------------------- | -------------------------- |
+| `on_connected`                | Connected to the room      |
+| `on_disconnected`             | Disconnected from the room |
+| `on_before_disconnect`        | About to disconnect (sync) |
+| `on_call_state_updated`       | Call state changed         |
+| `on_first_participant_joined` | First participant joined   |
+| `on_participant_connected`    | A participant connected    |
 | `on_participant_disconnected` | A participant disconnected |
-| `on_participant_left` | A participant left |
-| `on_audio_track_subscribed` | Audio track subscribed |
-| `on_audio_track_unsubscribed` | Audio track unsubscribed |
-| `on_video_track_subscribed` | Video track subscribed |
-| `on_video_track_unsubscribed` | Video track unsubscribed |
-| `on_data_received` | Data message received |
+| `on_participant_left`         | A participant left         |
+| `on_audio_track_subscribed`   | Audio track subscribed     |
+| `on_audio_track_unsubscribed` | Audio track unsubscribed   |
+| `on_video_track_subscribed`   | Video track subscribed     |
+| `on_video_track_unsubscribed` | Video track unsubscribed   |
+| `on_data_received`            | Data message received      |
 
 ### Room Lifecycle
 
@@ -146,8 +147,8 @@ async def on_connected(transport):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type               | Description            |
+| ----------- | ------------------ | ---------------------- |
 | `transport` | `LiveKitTransport` | The transport instance |
 
 #### on_disconnected
@@ -162,8 +163,8 @@ async def on_disconnected(transport):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type               | Description            |
+| ----------- | ------------------ | ---------------------- |
 | `transport` | `LiveKitTransport` | The transport instance |
 
 #### on_before_disconnect
@@ -178,12 +179,13 @@ async def on_before_disconnect(transport):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type               | Description            |
+| ----------- | ------------------ | ---------------------- |
 | `transport` | `LiveKitTransport` | The transport instance |
 
 <Note>
-This is a **synchronous** event — the bot will not disconnect until all handlers complete. Keep handlers fast.
+  This is a **synchronous** event — the bot will not disconnect until all
+  handlers complete. Keep handlers fast.
 </Note>
 
 #### on_call_state_updated
@@ -198,10 +200,10 @@ async def on_call_state_updated(transport, state):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type               | Description            |
+| ----------- | ------------------ | ---------------------- |
 | `transport` | `LiveKitTransport` | The transport instance |
-| `state` | `str` | The new call state |
+| `state`     | `str`              | The new call state     |
 
 ### Participants
 
@@ -217,10 +219,10 @@ async def on_first_participant_joined(transport, participant_id):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `LiveKitTransport` | The transport instance |
-| `participant_id` | `str` | The participant's ID |
+| Parameter        | Type               | Description            |
+| ---------------- | ------------------ | ---------------------- |
+| `transport`      | `LiveKitTransport` | The transport instance |
+| `participant_id` | `str`              | The participant's ID   |
 
 #### on_participant_connected
 
@@ -234,10 +236,10 @@ async def on_participant_connected(transport, participant_id):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `LiveKitTransport` | The transport instance |
-| `participant_id` | `str` | The participant's ID |
+| Parameter        | Type               | Description            |
+| ---------------- | ------------------ | ---------------------- |
+| `transport`      | `LiveKitTransport` | The transport instance |
+| `participant_id` | `str`              | The participant's ID   |
 
 #### on_participant_disconnected
 
@@ -251,13 +253,15 @@ async def on_participant_disconnected(transport, participant_id):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `LiveKitTransport` | The transport instance |
-| `participant_id` | `str` | The participant's ID |
+| Parameter        | Type               | Description            |
+| ---------------- | ------------------ | ---------------------- |
+| `transport`      | `LiveKitTransport` | The transport instance |
+| `participant_id` | `str`              | The participant's ID   |
 
 <Note>
-When a participant disconnects, both `on_participant_disconnected` and `on_participant_left` fire. The `on_participant_left` event includes a `"disconnected"` reason for compatibility with other transports.
+  When a participant disconnects, both `on_participant_disconnected` and
+  `on_participant_left` fire. The `on_participant_left` event includes a
+  `"disconnected"` reason for compatibility with other transports.
 </Note>
 
 #### on_participant_left
@@ -272,21 +276,21 @@ async def on_participant_left(transport, participant_id, reason):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `LiveKitTransport` | The transport instance |
-| `participant_id` | `str` | The participant's ID |
-| `reason` | `str` | Reason for leaving (e.g., `"disconnected"`) |
+| Parameter        | Type               | Description                                 |
+| ---------------- | ------------------ | ------------------------------------------- |
+| `transport`      | `LiveKitTransport` | The transport instance                      |
+| `participant_id` | `str`              | The participant's ID                        |
+| `reason`         | `str`              | Reason for leaving (e.g., `"disconnected"`) |
 
 ### Media Tracks
 
 Track subscription events fire when audio or video tracks from participants are subscribed or unsubscribed. All receive `(transport, participant_id)`.
 
-| Event | Description |
-| --- | --- |
-| `on_audio_track_subscribed` | Audio track from a participant was subscribed |
+| Event                         | Description                                     |
+| ----------------------------- | ----------------------------------------------- |
+| `on_audio_track_subscribed`   | Audio track from a participant was subscribed   |
 | `on_audio_track_unsubscribed` | Audio track from a participant was unsubscribed |
-| `on_video_track_subscribed` | Video track from a participant was subscribed |
+| `on_video_track_subscribed`   | Video track from a participant was subscribed   |
 | `on_video_track_unsubscribed` | Video track from a participant was unsubscribed |
 
 ```python
@@ -309,11 +313,11 @@ async def on_data_received(transport, data, participant_id):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `LiveKitTransport` | The transport instance |
-| `data` | `bytes` | The raw data received |
-| `participant_id` | `str` | The sender's participant ID |
+| Parameter        | Type               | Description                 |
+| ---------------- | ------------------ | --------------------------- |
+| `transport`      | `LiveKitTransport` | The transport instance      |
+| `data`           | `bytes`            | The raw data received       |
+| `participant_id` | `str`              | The sender's participant ID |
 
 ## Additional Resources
 

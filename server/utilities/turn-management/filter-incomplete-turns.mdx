@@ -17,11 +17,11 @@ This creates more natural conversations by:
 
 When enabled, the LLM outputs a turn completion marker as the first character of every response:
 
-| Marker | Meaning | Bot Behavior |
-|--------|---------|--------------|
-| `✓` | **Complete** - User finished their thought | Respond normally |
-| `○` | **Incomplete Short** - User was cut off mid-sentence | Suppress response, wait 5s, then prompt |
-| `◐` | **Incomplete Long** - User needs time to think | Suppress response, wait 10s, then prompt |
+| Marker | Meaning                                              | Bot Behavior                             |
+| ------ | ---------------------------------------------------- | ---------------------------------------- |
+| `✓`    | **Complete** - User finished their thought           | Respond normally                         |
+| `○`    | **Incomplete Short** - User was cut off mid-sentence | Suppress response, wait 5s, then prompt  |
+| `◐`    | **Incomplete Long** - User needs time to think       | Suppress response, wait 10s, then prompt |
 
 The system automatically:
 
@@ -59,7 +59,11 @@ user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
   configures the LLM service to process turn markers.
 </ParamField>
 
-<ParamField path="user_turn_completion_config" type="UserTurnCompletionConfig" default="None">
+<ParamField
+  path="user_turn_completion_config"
+  type="UserTurnCompletionConfig"
+  default="None"
+>
   Optional configuration object for customizing turn completion behavior. If not
   provided, default values are used.
 </ParamField>

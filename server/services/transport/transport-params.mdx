@@ -34,7 +34,8 @@ transport = DailyTransport(
 </ParamField>
 
 <ParamField path="audio_out_sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the default rate from the TTS service.
+  Output audio sample rate in Hz. When `None`, uses the default rate from the
+  TTS service.
 </ParamField>
 
 <ParamField path="audio_out_channels" type="int" default="1">
@@ -46,15 +47,22 @@ transport = DailyTransport(
 </ParamField>
 
 <ParamField path="audio_out_10ms_chunks" type="int" default="4">
-  Number of 10ms chunks to buffer before sending output audio. Higher values increase latency but reduce overhead.
+  Number of 10ms chunks to buffer before sending output audio. Higher values
+  increase latency but reduce overhead.
 </ParamField>
 
-<ParamField path="audio_out_mixer" type="BaseAudioMixer | Mapping[str, BaseAudioMixer]" default="None">
-  Audio mixer instance for combining audio streams, or a mapping of destination names to mixer instances.
+<ParamField
+  path="audio_out_mixer"
+  type="BaseAudioMixer | Mapping[str, BaseAudioMixer]"
+  default="None"
+>
+  Audio mixer instance for combining audio streams, or a mapping of destination
+  names to mixer instances.
 </ParamField>
 
 <ParamField path="audio_out_destinations" type="List[str]" default="[]">
-  List of audio output destination identifiers for routing audio to specific participants or endpoints.
+  List of audio output destination identifiers for routing audio to specific
+  participants or endpoints.
 </ParamField>
 
 <ParamField path="audio_out_end_silence_secs" type="int" default="2">
@@ -80,11 +88,13 @@ transport = DailyTransport(
 </ParamField>
 
 <ParamField path="audio_in_stream_on_start" type="bool" default="True">
-  Start audio input streaming immediately when the transport starts. Set to `False` to manually control when audio input begins.
+  Start audio input streaming immediately when the transport starts. Set to
+  `False` to manually control when audio input begins.
 </ParamField>
 
 <ParamField path="audio_in_passthrough" type="bool" default="True">
-  Pass input audio frames downstream through the pipeline. When `False`, audio is consumed by VAD but not forwarded.
+  Pass input audio frames downstream through the pipeline. When `False`, audio
+  is consumed by VAD but not forwarded.
 </ParamField>
 
 ## Video Output
@@ -94,7 +104,8 @@ transport = DailyTransport(
 </ParamField>
 
 <ParamField path="video_out_is_live" type="bool" default="False">
-  Enable real-time video output. When `True`, frames are sent as they arrive rather than buffered.
+  Enable real-time video output. When `True`, frames are sent as they arrive
+  rather than buffered.
 </ParamField>
 
 <ParamField path="video_out_width" type="int" default="1024">
@@ -135,10 +146,10 @@ transport = DailyTransport(
 
 Each transport extends `TransportParams` with provider-specific fields:
 
-| Transport | Params Class | Additional Fields |
-| --- | --- | --- |
-| [DailyTransport](/server/services/transport/daily) | `DailyParams` | `api_key`, `api_url`, `dialin_settings`, `transcription_enabled`, `transcription_settings` |
-| [LiveKitTransport](/server/services/transport/livekit) | `LiveKitParams` | (no additional fields) |
-| [SmallWebRTCTransport](/server/services/transport/small-webrtc) | `TransportParams` | Uses base class directly |
-| [WebsocketServerTransport](/server/services/transport/websocket-server) | `WebsocketServerParams` | `add_wav_header`, `serializer`, `session_timeout` |
-| [FastAPIWebsocketTransport](/server/services/transport/fastapi-websocket) | `FastAPIWebsocketParams` | `serializer`, `session_timeout` |
+| Transport                                                                 | Params Class             | Additional Fields                                                                          |
+| ------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------ |
+| [DailyTransport](/server/services/transport/daily)                        | `DailyParams`            | `api_key`, `api_url`, `dialin_settings`, `transcription_enabled`, `transcription_settings` |
+| [LiveKitTransport](/server/services/transport/livekit)                    | `LiveKitParams`          | (no additional fields)                                                                     |
+| [SmallWebRTCTransport](/server/services/transport/small-webrtc)           | `TransportParams`        | Uses base class directly                                                                   |
+| [WebsocketServerTransport](/server/services/transport/websocket-server)   | `WebsocketServerParams`  | `add_wav_header`, `serializer`, `session_timeout`                                          |
+| [FastAPIWebsocketTransport](/server/services/transport/fastapi-websocket) | `FastAPIWebsocketParams` | `serializer`, `session_timeout`                                                            |

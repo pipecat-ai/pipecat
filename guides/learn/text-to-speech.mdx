@@ -32,7 +32,6 @@ pipeline = Pipeline([
 **TTS generates speech through two primary mechanisms:**
 
 1. **Streamed LLM tokens** via `LLMTextFrame`s:
-
    - TTS aggregates streaming tokens into complete sentences
    - Sentences are sent to TTS service for audio generation
    - Audio bytes stream back and play immediately

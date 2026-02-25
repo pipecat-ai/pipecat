@@ -73,13 +73,13 @@ user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
 
 **Configuration parameters:**
 
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `max_context_tokens` | 8000 | Maximum context size (in estimated tokens) before triggering summarization |
-| `target_context_tokens` | 6000 | Target token count for the generated summary |
-| `max_unsummarized_messages` | 20 | Maximum new messages before triggering summarization |
-| `min_messages_after_summary` | 4 | Number of recent messages to preserve uncompressed |
-| `summarization_prompt` | None | Custom prompt for summary generation (uses built-in default if None) |
+| Parameter                    | Default | Description                                                                |
+| ---------------------------- | ------- | -------------------------------------------------------------------------- |
+| `max_context_tokens`         | 8000    | Maximum context size (in estimated tokens) before triggering summarization |
+| `target_context_tokens`      | 6000    | Target token count for the generated summary                               |
+| `max_unsummarized_messages`  | 20      | Maximum new messages before triggering summarization                       |
+| `min_messages_after_summary` | 4       | Number of recent messages to preserve uncompressed                         |
+| `summarization_prompt`       | None    | Custom prompt for summary generation (uses built-in default if None)       |
 
 ## What Gets Preserved
 
@@ -104,7 +104,6 @@ config = LLMContextSummarizationConfig(
 ```
 
 When no custom prompt is provided, Pipecat uses a built-in prompt that instructs the LLM to create a concise summary preserving key information, user preferences, and conversation flow.
-
 
 ## Next Steps
 

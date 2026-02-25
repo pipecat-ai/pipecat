@@ -11,7 +11,9 @@ This aggregator is particularly useful for applications like voice switching, st
 
 <Tip>
   Want to see it in action? Check out the [voice switching
-  demo](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/35-pattern-pair-voice-switching.py) or the [bot output demo](https://github.com/pipecat-ai/pipecat-examples/blob/main/code-helper).
+  demo](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/35-pattern-pair-voice-switching.py)
+  or the [bot output
+  demo](https://github.com/pipecat-ai/pipecat-examples/blob/main/code-helper).
 </Tip>
 
 ## Constructor
@@ -38,13 +40,21 @@ pattern_aggregator.add_pattern(
 Registers a new pattern pair to detect in the text.
 
 <ParamField path="type" type="str" required>
-  Unique identifier for this pattern pair that should also represent what the text between the tags represents (e.g., "voice", "xml", "credit_card", etc.). This value will be returned as part of both PatternMatch provided to callbacks and the Aggregation object returned from `aggregate()`.
+  Unique identifier for this pattern pair that should also represent what the
+  text between the tags represents (e.g., "voice", "xml", "credit_card", etc.).
+  This value will be returned as part of both PatternMatch provided to callbacks
+  and the Aggregation object returned from `aggregate()`.
   <Warning>
-    This type may not be set to "sentence" or "word" as those are reserved for standard aggregations.
+    This type may not be set to "sentence" or "word" as those are reserved for
+    standard aggregations.
   </Warning>
   <Tip>
-    Choose descriptive and unique type names to avoid confusion when handling multiple patterns.
-    This type will also be referenced in the TTS for optionally skipping these types or providing custom text transformations before speaking these types. It's also optionally referenced in RTVI for similar purposes of not sending certain types or transforming them before sending to the client.
+    Choose descriptive and unique type names to avoid confusion when handling
+    multiple patterns. This type will also be referenced in the TTS for
+    optionally skipping these types or providing custom text transformations
+    before speaking these types. It's also optionally referenced in RTVI for
+    similar purposes of not sending certain types or transforming them before
+    sending to the client.
   </Tip>
 </ParamField>
 
@@ -57,19 +67,24 @@ Registers a new pattern pair to detect in the text.
 </ParamField>
 
 <ParamField path="action" type="MatchAction" default="MatchAction.REMOVE">
-  What to do with the matched pattern and its content:
-  - `MatchAction.REMOVE`: The text along with its delimiters will be removed from the streaming text. Sentence aggregation will continue on as if this text did not exist.
-  - `MatchAction.KEEP`: The delimiters will be removed, but the content between them will be kept. Sentence aggregation will continue on with the internal text included. This is helpful if you want to keep the content but be notified when it occurs via a callback.
-  - `MatchAction.AGGREGATE`: Aggregate the matched pattern and its content as a separate aggregation. The matched content will be returned in an `Aggregation` object with the specified type when the pattern is completed. When the start of this pattern is detected, any buffered text up to that point will be returned as a standard "sentence" aggregation.
+  What to do with the matched pattern and its content: - `MatchAction.REMOVE`:
+  The text along with its delimiters will be removed from the streaming text.
+  Sentence aggregation will continue on as if this text did not exist. -
+  `MatchAction.KEEP`: The delimiters will be removed, but the content between
+  them will be kept. Sentence aggregation will continue on with the internal
+  text included. This is helpful if you want to keep the content but be notified
+  when it occurs via a callback. - `MatchAction.AGGREGATE`: Aggregate the
+  matched pattern and its content as a separate aggregation. The matched content
+  will be returned in an `Aggregation` object with the specified type when the
+  pattern is completed. When the start of this pattern is detected, any buffered
+  text up to that point will be returned as a standard "sentence" aggregation.
 </ParamField>
 
 <ResponseField name="Returns">Self for method chaining</ResponseField>
 
 ### add_pattern_pair
 
-<Warning>
-  This method is deprecated. Use `add_pattern` instead.
-</Warning>
+<Warning>This method is deprecated. Use `add_pattern` instead.</Warning>
 
 ```python
 pattern_aggregator.add_pattern_pair(
@@ -92,7 +107,11 @@ Registers a handler function to be called when a specific pattern pair is matche
   The pattern pair type to listen for (as defined in `add_pattern`)
 </ParamField>
 
-<ParamField path="handler" type="Callable[[PatternMatch], Awaitable[None]]" required>
+<ParamField
+  path="handler"
+  type="Callable[[PatternMatch], Awaitable[None]]"
+  required
+>
   Function to call when the pattern is matched. The function should accept a
   PatternMatch object.
 </ParamField>
@@ -104,11 +123,13 @@ Registers a handler function to be called when a specific pattern pair is matche
 When a pattern is matched, the handler function receives a `PatternMatch` object which is a subclass of the `Aggregation` object. It contains the following fields:
 
 <ResponseField name="type" type="str">
-  The identifier and descriptor of the matched pattern pair. This field is part of the `Aggregation` base class.
+  The identifier and descriptor of the matched pattern pair. This field is part
+  of the `Aggregation` base class.
 </ResponseField>
 
 <ResponseField name="text" type="str">
-  The text content between the start and end patterns. This field is part of the `Aggregation` base class.
+  The text content between the start and end patterns. This field is part of the
+  `Aggregation` base class.
 </ResponseField>
 
 <ResponseField name="full_match" type="str">

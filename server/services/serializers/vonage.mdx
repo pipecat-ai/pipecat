@@ -78,16 +78,17 @@ Before using VonageFrameSerializer, you need:
 ## Configuration
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for audio settings. See [InputParams](#inputparams) below.
+  Configuration parameters for audio settings. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `vonage_sample_rate` | `int` | `16000` | Sample rate used by Vonage (Hz). Common values: 8000, 16000, 24000. |
-| `sample_rate` | `int` | `None` | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
-| `ignore_rtvi_messages` | `bool` | `True` | Whether to ignore RTVI protocol messages during serialization. |
+| Parameter              | Type   | Default | Description                                                                                         |
+| ---------------------- | ------ | ------- | --------------------------------------------------------------------------------------------------- |
+| `vonage_sample_rate`   | `int`  | `16000` | Sample rate used by Vonage (Hz). Common values: 8000, 16000, 24000.                                 |
+| `sample_rate`          | `int`  | `None`  | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
+| `ignore_rtvi_messages` | `bool` | `True`  | Whether to ignore RTVI protocol messages during serialization.                                      |
 
 ## Usage
 

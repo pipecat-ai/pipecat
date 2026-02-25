@@ -23,6 +23,7 @@ sudo apt-get install libcurl4-openssl-dev
 ```
 
     </Tab>
+
   <Tab title="macOS">
 
 On macOS `libcurl` is already included so there is nothing to install.
@@ -45,22 +46,25 @@ Clone the SDK:
 
 <Tabs>
   <Tab title="Linux/macOS/Windows">
+
     ```bash
     git clone https://github.com/pipecat-ai/pipecat-client-cxx
     cd pipecat-client-cxx
     ```
+
   </Tab>
 </Tabs>
-
 
 Build the SDK using CMake:
 
 <Tabs>
   <Tab title="Linux/macOS">
+
     ```bash
     cmake . -G Ninja -Bbuild -DCMAKE_BUILD_TYPE=Release
     ninja -C build
     ```
+
   </Tab>
   <Tab title="Windows">
 

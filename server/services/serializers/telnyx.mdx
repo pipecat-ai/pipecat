@@ -81,7 +81,8 @@ Before using TelnyxFrameSerializer, you need:
 </ParamField>
 
 <ParamField path="outbound_encoding" type="str" required>
-  The encoding type for outbound audio received from Telnyx (e.g., `"PCMU"`, `"PCMA"`).
+  The encoding type for outbound audio received from Telnyx (e.g., `"PCMU"`,
+  `"PCMA"`).
 </ParamField>
 
 <ParamField path="inbound_encoding" type="str" required>
@@ -97,18 +98,19 @@ Before using TelnyxFrameSerializer, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for audio and hang-up behavior. See [InputParams](#inputparams) below.
+  Configuration parameters for audio and hang-up behavior. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `telnyx_sample_rate` | `int` | `8000` | Sample rate used by Telnyx (Hz). |
-| `sample_rate` | `int` | `None` | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
-| `inbound_encoding` | `str` | `"PCMU"` | Audio encoding for data sent to Telnyx. |
-| `outbound_encoding` | `str` | `"PCMU"` | Audio encoding for data received from Telnyx. |
-| `auto_hang_up` | `bool` | `True` | Whether to automatically terminate the call on `EndFrame` or `CancelFrame`. |
+| Parameter            | Type   | Default  | Description                                                                                         |
+| -------------------- | ------ | -------- | --------------------------------------------------------------------------------------------------- |
+| `telnyx_sample_rate` | `int`  | `8000`   | Sample rate used by Telnyx (Hz).                                                                    |
+| `sample_rate`        | `int`  | `None`   | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
+| `inbound_encoding`   | `str`  | `"PCMU"` | Audio encoding for data sent to Telnyx.                                                             |
+| `outbound_encoding`  | `str`  | `"PCMU"` | Audio encoding for data received from Telnyx.                                                       |
+| `auto_hang_up`       | `bool` | `True`   | Whether to automatically terminate the call on `EndFrame` or `CancelFrame`.                         |
 
 ## Usage
 

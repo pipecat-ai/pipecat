@@ -68,7 +68,11 @@ Before using Groq TTS services, you need:
   Groq API key for authentication.
 </ParamField>
 
-<ParamField path="model_name" type="str" default="canopylabs/orpheus-v1-english">
+<ParamField
+  path="model_name"
+  type="str"
+  default="canopylabs/orpheus-v1-english"
+>
   TTS model to use.
 </ParamField>
 
@@ -92,10 +96,10 @@ Before using Groq TTS services, you need:
 
 Voice and generation settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
+| Parameter  | Type       | Default       | Description                    |
+| ---------- | ---------- | ------------- | ------------------------------ |
 | `language` | `Language` | `Language.EN` | Language for speech synthesis. |
-| `speed` | `float` | `1.0` | Speech speed multiplier. |
+| `speed`    | `float`    | `1.0`         | Speech speed multiplier.       |
 
 ## Usage
 

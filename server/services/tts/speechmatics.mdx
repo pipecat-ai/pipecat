@@ -68,7 +68,11 @@ Before using Speechmatics TTS services, you need:
   Speechmatics API key for authentication.
 </ParamField>
 
-<ParamField path="base_url" type="str" default="https://preview.tts.speechmatics.com">
+<ParamField
+  path="base_url"
+  type="str"
+  default="https://preview.tts.speechmatics.com"
+>
   Base URL for Speechmatics TTS API.
 </ParamField>
 
@@ -90,9 +94,9 @@ Before using Speechmatics TTS services, you need:
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `max_retries` | `int` | `5` | Maximum number of retries for TTS requests when receiving 503 responses. |
+| Parameter     | Type  | Default | Description                                                              |
+| ------------- | ----- | ------- | ------------------------------------------------------------------------ |
+| `max_retries` | `int` | `5`     | Maximum number of retries for TTS requests when receiving 503 responses. |
 
 ## Usage
 

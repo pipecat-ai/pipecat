@@ -78,19 +78,28 @@ Before using OpenAI Realtime services, you need:
 </ParamField>
 
 <ParamField path="model" type="str" default="gpt-realtime">
-  OpenAI Realtime model name. This is a connection-level parameter set via the WebSocket URL and cannot be changed during the session.
+  OpenAI Realtime model name. This is a connection-level parameter set via the
+  WebSocket URL and cannot be changed during the session.
 </ParamField>
 
-<ParamField path="base_url" type="str" default="wss://api.openai.com/v1/realtime">
-  WebSocket base URL for the Realtime API. Override for custom or proxied deployments.
+<ParamField
+  path="base_url"
+  type="str"
+  default="wss://api.openai.com/v1/realtime"
+>
+  WebSocket base URL for the Realtime API. Override for custom or proxied
+  deployments.
 </ParamField>
 
 <ParamField path="session_properties" type="SessionProperties" default="None">
-  Configuration properties for the realtime session. These are session-level settings that can be updated during the session (except for voice and model). See [SessionProperties](#sessionproperties) below.
+  Configuration properties for the realtime session. These are session-level
+  settings that can be updated during the session (except for voice and model).
+  See [SessionProperties](#sessionproperties) below.
 </ParamField>
 
 <ParamField path="start_audio_paused" type="bool" default="False">
-  Whether to start with audio input paused. Useful when you want to control when audio processing begins.
+  Whether to start with audio input paused. Useful when you want to control when
+  audio processing begins.
 </ParamField>
 
 <ParamField path="start_video_paused" type="bool" default="False">
@@ -98,22 +107,24 @@ Before using OpenAI Realtime services, you need:
 </ParamField>
 
 <ParamField path="video_frame_detail" type="str" default="auto">
-  Detail level for video processing. Can be `"auto"`, `"low"`, or `"high"`. `"auto"` lets the model decide, `"low"` is faster and uses fewer tokens, `"high"` provides more detail.
+  Detail level for video processing. Can be `"auto"`, `"low"`, or `"high"`.
+  `"auto"` lets the model decide, `"low"` is faster and uses fewer tokens,
+  `"high"` provides more detail.
 </ParamField>
 
 ### SessionProperties
 
 Session-level configuration passed via the `session_properties` constructor argument. These settings can be updated during the session using `LLMUpdateSettingsFrame`.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `output_modalities` | `List[Literal["text", "audio"]]` | `None` | Modalities the model can respond with. The API supports single modality responses: either `["text"]` or `["audio"]`. |
-| `instructions` | `str` | `None` | System instructions for the assistant. |
-| `audio` | `AudioConfiguration` | `None` | Configuration for input and output audio (format, transcription, turn detection, voice, speed). |
-| `tools` | `List[Dict]` | `None` | Available function tools for the assistant. |
-| `tool_choice` | `Literal["auto", "none", "required"]` | `None` | Tool usage strategy. |
-| `max_output_tokens` | `int \| Literal["inf"]` | `None` | Maximum tokens in response, or `"inf"` for unlimited. |
-| `tracing` | `Literal["auto"] \| Dict` | `None` | Configuration options for tracing. |
+| Parameter           | Type                                  | Default | Description                                                                                                          |
+| ------------------- | ------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `output_modalities` | `List[Literal["text", "audio"]]`      | `None`  | Modalities the model can respond with. The API supports single modality responses: either `["text"]` or `["audio"]`. |
+| `instructions`      | `str`                                 | `None`  | System instructions for the assistant.                                                                               |
+| `audio`             | `AudioConfiguration`                  | `None`  | Configuration for input and output audio (format, transcription, turn detection, voice, speed).                      |
+| `tools`             | `List[Dict]`                          | `None`  | Available function tools for the assistant.                                                                          |
+| `tool_choice`       | `Literal["auto", "none", "required"]` | `None`  | Tool usage strategy.                                                                                                 |
+| `max_output_tokens` | `int \| Literal["inf"]`               | `None`  | Maximum tokens in response, or `"inf"` for unlimited.                                                                |
+| `tracing`           | `Literal["auto"] \| Dict`             | `None`  | Configuration options for tracing.                                                                                   |
 
 ### AudioConfiguration
 
@@ -121,40 +132,40 @@ The `audio` field in `SessionProperties` accepts an `AudioConfiguration` with `i
 
 **AudioInput** (`audio.input`):
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `format` | `AudioFormat` | `None` | Input audio format (`PCMAudioFormat`, `PCMUAudioFormat`, or `PCMAAudioFormat`). |
-| `transcription` | `InputAudioTranscription` | `None` | Transcription settings: `model` (e.g. `"gpt-4o-transcribe"`), `language`, and `prompt`. |
-| `noise_reduction` | `InputAudioNoiseReduction` | `None` | Noise reduction type: `"near_field"` or `"far_field"`. |
-| `turn_detection` | `TurnDetection \| SemanticTurnDetection \| bool` | `None` | Turn detection config, or `False` to disable server-side turn detection. |
+| Parameter         | Type                                             | Default | Description                                                                             |
+| ----------------- | ------------------------------------------------ | ------- | --------------------------------------------------------------------------------------- |
+| `format`          | `AudioFormat`                                    | `None`  | Input audio format (`PCMAudioFormat`, `PCMUAudioFormat`, or `PCMAAudioFormat`).         |
+| `transcription`   | `InputAudioTranscription`                        | `None`  | Transcription settings: `model` (e.g. `"gpt-4o-transcribe"`), `language`, and `prompt`. |
+| `noise_reduction` | `InputAudioNoiseReduction`                       | `None`  | Noise reduction type: `"near_field"` or `"far_field"`.                                  |
+| `turn_detection`  | `TurnDetection \| SemanticTurnDetection \| bool` | `None`  | Turn detection config, or `False` to disable server-side turn detection.                |
 
 **AudioOutput** (`audio.output`):
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `format` | `AudioFormat` | `None` | Output audio format. |
-| `voice` | `str` | `None` | Voice the model uses to respond (e.g. `"alloy"`, `"echo"`, `"shimmer"`). |
-| `speed` | `float` | `None` | Speed of the model's spoken response. |
+| Parameter | Type          | Default | Description                                                              |
+| --------- | ------------- | ------- | ------------------------------------------------------------------------ |
+| `format`  | `AudioFormat` | `None`  | Output audio format.                                                     |
+| `voice`   | `str`         | `None`  | Voice the model uses to respond (e.g. `"alloy"`, `"echo"`, `"shimmer"`). |
+| `speed`   | `float`       | `None`  | Speed of the model's spoken response.                                    |
 
 ### TurnDetection
 
 Server-side VAD configuration via `TurnDetection`:
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `type` | `Literal["server_vad"]` | `"server_vad"` | Detection type. |
-| `threshold` | `float` | `0.5` | Voice activity detection threshold (0.0-1.0). |
-| `prefix_padding_ms` | `int` | `300` | Padding before speech starts in milliseconds. |
-| `silence_duration_ms` | `int` | `500` | Silence duration to detect speech end in milliseconds. |
+| Parameter             | Type                    | Default        | Description                                            |
+| --------------------- | ----------------------- | -------------- | ------------------------------------------------------ |
+| `type`                | `Literal["server_vad"]` | `"server_vad"` | Detection type.                                        |
+| `threshold`           | `float`                 | `0.5`          | Voice activity detection threshold (0.0-1.0).          |
+| `prefix_padding_ms`   | `int`                   | `300`          | Padding before speech starts in milliseconds.          |
+| `silence_duration_ms` | `int`                   | `500`          | Silence duration to detect speech end in milliseconds. |
 
 Alternatively, use `SemanticTurnDetection` for semantic-based detection:
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `type` | `Literal["semantic_vad"]` | `"semantic_vad"` | Detection type. |
-| `eagerness` | `Literal["low", "medium", "high", "auto"]` | `None` | Turn detection eagerness level. |
-| `create_response` | `bool` | `None` | Whether to automatically create responses on turn detection. |
-| `interrupt_response` | `bool` | `None` | Whether to interrupt ongoing responses on turn detection. |
+| Parameter            | Type                                       | Default          | Description                                                  |
+| -------------------- | ------------------------------------------ | ---------------- | ------------------------------------------------------------ |
+| `type`               | `Literal["semantic_vad"]`                  | `"semantic_vad"` | Detection type.                                              |
+| `eagerness`          | `Literal["low", "medium", "high", "auto"]` | `None`           | Turn detection eagerness level.                              |
+| `create_response`    | `bool`                                     | `None`           | Whether to automatically create responses on turn detection. |
+| `interrupt_response` | `bool`                                     | `None`           | Whether to interrupt ongoing responses on turn detection.    |
 
 ## Usage
 
@@ -249,10 +260,10 @@ await task.queue_frame(
 
 ## Event Handlers
 
-| Event | Description |
-| --- | --- |
+| Event                          | Description                                                   |
+| ------------------------------ | ------------------------------------------------------------- |
 | `on_conversation_item_created` | Called when a new conversation item is created in the session |
-| `on_conversation_item_updated` | Called when a conversation item is updated or completed |
+| `on_conversation_item_updated` | Called when a conversation item is updated or completed       |
 
 ```python
 @llm.event_handler("on_conversation_item_created")

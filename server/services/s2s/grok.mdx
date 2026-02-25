@@ -79,7 +79,9 @@ Before using Grok Realtime services, you need:
 </ParamField>
 
 <ParamField path="session_properties" type="SessionProperties" default="None">
-  Configuration properties for the realtime session. If `None`, uses default `SessionProperties` with voice `"Ara"` and server-side VAD enabled. See [SessionProperties](#sessionproperties) below.
+  Configuration properties for the realtime session. If `None`, uses default
+  `SessionProperties` with voice `"Ara"` and server-side VAD enabled. See
+  [SessionProperties](#sessionproperties) below.
 </ParamField>
 
 <ParamField path="start_audio_paused" type="bool" default="False">
@@ -90,13 +92,13 @@ Before using Grok Realtime services, you need:
 
 Session-level configuration passed via the `session_properties` constructor argument. These settings can be updated during the session using `LLMUpdateSettingsFrame`.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `instructions` | `str` | `None` | System instructions for the assistant. |
-| `voice` | `Literal["Ara", "Rex", "Sal", "Eve", "Leo"]` | `"Ara"` | Voice the model uses to respond. |
-| `turn_detection` | `TurnDetection` | `TurnDetection(type="server_vad")` | Turn detection configuration. Set to `None` for manual turn detection. |
-| `audio` | `AudioConfiguration` | `None` | Configuration for input and output audio formats. |
-| `tools` | `List[GrokTool]` | `None` | Available tools: `web_search`, `x_search`, `file_search`, or custom `function` tools. |
+| Parameter        | Type                                         | Default                            | Description                                                                           |
+| ---------------- | -------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
+| `instructions`   | `str`                                        | `None`                             | System instructions for the assistant.                                                |
+| `voice`          | `Literal["Ara", "Rex", "Sal", "Eve", "Leo"]` | `"Ara"`                            | Voice the model uses to respond.                                                      |
+| `turn_detection` | `TurnDetection`                              | `TurnDetection(type="server_vad")` | Turn detection configuration. Set to `None` for manual turn detection.                |
+| `audio`          | `AudioConfiguration`                         | `None`                             | Configuration for input and output audio formats.                                     |
+| `tools`          | `List[GrokTool]`                             | `None`                             | Available tools: `web_search`, `x_search`, `file_search`, or custom `function` tools. |
 
 ### AudioConfiguration
 
@@ -104,15 +106,15 @@ The `audio` field in `SessionProperties` accepts an `AudioConfiguration` with `i
 
 **AudioInput** (`audio.input`):
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `format` | `AudioFormat` | `None` | Input audio format. Supports `PCMAudioFormat` (configurable rate), `PCMUAudioFormat` (8kHz), or `PCMAAudioFormat` (8kHz). |
+| Parameter | Type          | Default | Description                                                                                                               |
+| --------- | ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `format`  | `AudioFormat` | `None`  | Input audio format. Supports `PCMAudioFormat` (configurable rate), `PCMUAudioFormat` (8kHz), or `PCMAAudioFormat` (8kHz). |
 
 **AudioOutput** (`audio.output`):
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `format` | `AudioFormat` | `None` | Output audio format. Same format options as input. |
+| Parameter | Type          | Default | Description                                        |
+| --------- | ------------- | ------- | -------------------------------------------------- |
+| `format`  | `AudioFormat` | `None`  | Output audio format. Same format options as input. |
 
 Grok PCM audio supports sample rates: 8000, 16000, 21050, 24000, 32000, 44100, and 48000 Hz.
 
@@ -120,11 +122,11 @@ Grok PCM audio supports sample rates: 8000, 16000, 21050, 24000, 32000, 44100, a
 
 Grok provides several built-in tools in addition to custom function tools:
 
-| Tool | Type | Description |
-| --- | --- | --- |
-| `WebSearchTool` | `web_search` | Search the web for current information |
-| `XSearchTool` | `x_search` | Search X (Twitter) for posts. Supports `allowed_x_handles` filter. |
-| `FileSearchTool` | `file_search` | Search uploaded document collections by `vector_store_ids` |
+| Tool             | Type          | Description                                                        |
+| ---------------- | ------------- | ------------------------------------------------------------------ |
+| `WebSearchTool`  | `web_search`  | Search the web for current information                             |
+| `XSearchTool`    | `x_search`    | Search X (Twitter) for posts. Supports `allowed_x_handles` filter. |
+| `FileSearchTool` | `file_search` | Search uploaded document collections by `vector_store_ids`         |
 
 ## Usage
 
@@ -217,10 +219,10 @@ await task.queue_frame(
 
 ## Event Handlers
 
-| Event | Description |
-| --- | --- |
+| Event                          | Description                                                   |
+| ------------------------------ | ------------------------------------------------------------- |
 | `on_conversation_item_created` | Called when a new conversation item is created in the session |
-| `on_conversation_item_updated` | Called when a conversation item is updated or completed |
+| `on_conversation_item_updated` | Called when a conversation item is updated or completed       |
 
 ```python
 @llm.event_handler("on_conversation_item_created")

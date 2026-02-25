@@ -8,10 +8,11 @@ description: "A processor for aggregating LLMTextFrames into logical units befor
 `LLMTextProcessor` is a processor designed to aggregate `LLMTextFrame`s into coherent text units before passing them to downstream services, such as TTS. By utilizing text aggregators, it ensures that text is properly segmented and structured, enhancing the quality of subsequent processing. This processor expects `LLMTextFrame`s as input and outputs `AggregatedTextFrame`s containing the aggregated text.
 
 <Note>
-    If an `LLMTextProcessor` is in use, the `text_aggregator` parameter of TTS services will be ignored, as text aggregation is handled upstream.
+  If an `LLMTextProcessor` is in use, the `text_aggregator` parameter of TTS
+  services will be ignored, as text aggregation is handled upstream.
 </Note>
 
-The benefit of pre-aggregating LLM text frames is that it allows for more controlled and meaningful text synthesis. Downstream services can operate on complete sentences or logical text blocks. For TTS services, this means being able to customize how certain types of text are spoken (e.g., spelling out phone numbers, stripping out url protocols, or inserting other tts-specific annotations) or even skipping over certain text segments entirely (e.g., code snippets or markup).  For other services, such as RTVI, it allows for sending these logical text units as separate `bot-output` messages, supporting custom client-side handling and rendering (e.g. collapsible code blocks, clickable links, etc.).
+The benefit of pre-aggregating LLM text frames is that it allows for more controlled and meaningful text synthesis. Downstream services can operate on complete sentences or logical text blocks. For TTS services, this means being able to customize how certain types of text are spoken (e.g., spelling out phone numbers, stripping out url protocols, or inserting other tts-specific annotations) or even skipping over certain text segments entirely (e.g., code snippets or markup). For other services, such as RTVI, it allows for sending these logical text units as separate `bot-output` messages, supporting custom client-side handling and rendering (e.g. collapsible code blocks, clickable links, etc.).
 
 <CardGroup cols={2}>
   <Card
@@ -33,8 +34,10 @@ The benefit of pre-aggregating LLM text frames is that it allows for more contro
 ## Constructor Parameters
 
 <ParamField path="text_aggregator" type="BaseTextAggregator" default="None">
-    An instance of a text aggregator (e.g., `PatternPairAggregator` or a custom aggregator type) used to aggregate incoming text from `LLMTextFrame`s.
-    If `None`, a `SimpleTextAggregator` will be used by default, aggregating text based on sentence boundaries.
+  An instance of a text aggregator (e.g., `PatternPairAggregator` or a custom
+  aggregator type) used to aggregate incoming text from `LLMTextFrame`s. If
+  `None`, a `SimpleTextAggregator` will be used by default, aggregating text
+  based on sentence boundaries.
 </ParamField>
 
 ## Usage
@@ -42,7 +45,8 @@ The benefit of pre-aggregating LLM text frames is that it allows for more contro
 The `LLMTextProcessor` should be integrated into your pipeline after the LLM service and before any services that consume text, such as TTS. It processes incoming `LLMTextFrame`s, aggregates their text content, and outputs `AggregatedTextFrame`s.
 
 <Tip>
-    For more usage examples, check out the docs for the [PatternPairAggregator](/server/utilities/text/pattern-pair-aggregator#usage-examples).
+  For more usage examples, check out the docs for the
+  [PatternPairAggregator](/server/utilities/text/pattern-pair-aggregator#usage-examples).
 </Tip>
 
 ```python

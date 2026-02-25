@@ -72,7 +72,8 @@ export ELEVENLABS_API_KEY=your_api_key
 </ParamField>
 
 <ParamField path="model" type="str" default="eleven_turbo_v2_5">
-  ElevenLabs model ID. Use a `multilingual` model variant (e.g. `eleven_multilingual_v2`) if you need non-English language support.
+  ElevenLabs model ID. Use a `multilingual` model variant (e.g.
+  `eleven_multilingual_v2`) if you need non-English language support.
 </ParamField>
 
 <ParamField path="url" type="str" default="wss://api.elevenlabs.io">
@@ -80,15 +81,19 @@ export ELEVENLABS_API_KEY=your_api_key
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="aggregate_sentences" type="bool" default="True">
-  Buffer text until sentence boundaries before sending to ElevenLabs. Produces more natural-sounding speech at the cost of a small latency increase (~15ms) for the first word of each sentence.
+  Buffer text until sentence boundaries before sending to ElevenLabs. Produces
+  more natural-sounding speech at the cost of a small latency increase (~15ms)
+  for the first word of each sentence.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams](#inputparams) below.
+  Runtime-configurable voice and generation settings. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### ElevenLabsHttpTTSService
@@ -96,7 +101,8 @@ export ELEVENLABS_API_KEY=your_api_key
 The HTTP service accepts the same parameters as the WebSocket service, with these differences:
 
 <ParamField path="aiohttp_session" type="aiohttp.ClientSession" required>
-  An aiohttp session for HTTP requests. You must create and manage this yourself.
+  An aiohttp session for HTTP requests. You must create and manage this
+  yourself.
 </ParamField>
 
 <ParamField path="base_url" type="str" default="https://api.elevenlabs.io">
@@ -106,27 +112,30 @@ The HTTP service accepts the same parameters as the WebSocket service, with thes
 The HTTP InputParams also includes:
 
 <ParamField path="optimize_streaming_latency" type="int" default="None">
-  Latency optimization level (0–4). Higher values reduce latency at the cost of quality.
+  Latency optimization level (0–4). Higher values reduce latency at the cost of
+  quality.
 </ParamField>
 
 ### InputParams
 
 Voice and generation settings that can be set at initialization via the `params` constructor argument, or changed at runtime via [`UpdateSettingsFrame`](/server/utilities/frame-processor-events#updatesettingsframe).
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `None` | Language code. Only effective with multilingual models. |
-| `stability` | `float` | `None` | Voice consistency (0.0–1.0). Lower values are more expressive, higher values are more consistent. |
-| `similarity_boost` | `float` | `None` | Voice clarity and similarity to the original (0.0–1.0). |
-| `style` | `float` | `None` | Style exaggeration (0.0–1.0). Higher values amplify the voice's style. |
-| `use_speaker_boost` | `bool` | `None` | Enhance clarity and target speaker similarity. |
-| `speed` | `float` | `None` | Speech rate. WebSocket: 0.7–1.2. HTTP: 0.25–4.0. |
-| `auto_mode` | `bool` | `True` | Automatic optimization mode. WebSocket only. |
-| `enable_ssml_parsing` | `bool` | `None` | Parse SSML tags in input text. WebSocket only. |
-| `apply_text_normalization` | `Literal` | `None` | Text normalization: `"auto"`, `"on"`, or `"off"`. |
+| Parameter                  | Type       | Default | Description                                                                                       |
+| -------------------------- | ---------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `language`                 | `Language` | `None`  | Language code. Only effective with multilingual models.                                           |
+| `stability`                | `float`    | `None`  | Voice consistency (0.0–1.0). Lower values are more expressive, higher values are more consistent. |
+| `similarity_boost`         | `float`    | `None`  | Voice clarity and similarity to the original (0.0–1.0).                                           |
+| `style`                    | `float`    | `None`  | Style exaggeration (0.0–1.0). Higher values amplify the voice's style.                            |
+| `use_speaker_boost`        | `bool`     | `None`  | Enhance clarity and target speaker similarity.                                                    |
+| `speed`                    | `float`    | `None`  | Speech rate. WebSocket: 0.7–1.2. HTTP: 0.25–4.0.                                                  |
+| `auto_mode`                | `bool`     | `True`  | Automatic optimization mode. WebSocket only.                                                      |
+| `enable_ssml_parsing`      | `bool`     | `None`  | Parse SSML tags in input text. WebSocket only.                                                    |
+| `apply_text_normalization` | `Literal`  | `None`  | Text normalization: `"auto"`, `"on"`, or `"off"`.                                                 |
 
 <Note>
-  `None` values use the ElevenLabs API defaults. See [ElevenLabs voice settings](https://elevenlabs.io/docs/api-reference/text-to-speech/v-1-text-to-speech-voice-id-multi-stream-input) for details on how these parameters interact.
+  `None` values use the ElevenLabs API defaults. See [ElevenLabs voice
+  settings](https://elevenlabs.io/docs/api-reference/text-to-speech/v-1-text-to-speech-voice-id-multi-stream-input)
+  for details on how these parameters interact.
 </Note>
 
 ## Usage
@@ -201,11 +210,11 @@ async with aiohttp.ClientSession() as session:
 
 ElevenLabs TTS supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to ElevenLabs WebSocket |
-| `on_disconnected` | Disconnected from ElevenLabs WebSocket |
-| `on_connection_error` | WebSocket connection error occurred |
+| Event                 | Description                            |
+| --------------------- | -------------------------------------- |
+| `on_connected`        | Connected to ElevenLabs WebSocket      |
+| `on_disconnected`     | Disconnected from ElevenLabs WebSocket |
+| `on_connection_error` | WebSocket connection error occurred    |
 
 ```python
 @tts.event_handler("on_connected")

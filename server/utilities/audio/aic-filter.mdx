@@ -10,7 +10,9 @@ description: "Speech enhancement using ai-coustics' SDK"
 To use AIC, you need a license key. Get started at [ai-coustics.com](https://ai-coustics.com/pipecat).
 
 <Note>
-  This documentation covers **aic-sdk v2.x**. If you're using aic-sdk v1.x, please see the [Migration Guide](#migration-guide-v1-to-v2) section below for upgrading instructions.
+  This documentation covers **aic-sdk v2.x**. If you're using aic-sdk v1.x,
+  please see the [Migration Guide](#migration-guide-v1-to-v2) section below for
+  upgrading instructions.
 </Note>
 
 ## Installation
@@ -24,7 +26,8 @@ pip install "pipecat-ai[aic]"
 ## Constructor Parameters
 
 <ParamField path="license_key" type="str" required>
-  ai-coustics license key for authentication. Get your key at [developers.ai-coustics.io](https://developers.ai-coustics.io).
+  ai-coustics license key for authentication. Get your key at
+  [developers.ai-coustics.io](https://developers.ai-coustics.io).
 </ParamField>
 
 <ParamField path="model_id" type="Optional[str]" default="None">
@@ -32,16 +35,18 @@ pip install "pipecat-ai[aic]"
   See [artifacts.ai-coustics.io](https://artifacts.ai-coustics.io/) for available models.
   See the [documentation](https://docs.ai-coustics.com/guides/models) for more detailed information about the models.
 
-  Examples: `"quail-vf-l-16khz"`, `"quail-s-16khz"`, `"quail-l-8khz"`
+Examples: `"quail-vf-l-16khz"`, `"quail-s-16khz"`, `"quail-l-8khz"`
+
 </ParamField>
 
 <ParamField path="model_path" type="Optional[str]" default="None">
-  Path to a local `.aicmodel` file. If provided, `model_id` is ignored and no download occurs.
-  Useful for offline deployments or custom models.
+  Path to a local `.aicmodel` file. If provided, `model_id` is ignored and no
+  download occurs. Useful for offline deployments or custom models.
 </ParamField>
 
 <ParamField path="model_download_dir" type="Optional[Path]" default="None">
-  Directory for downloading and caching models. Defaults to a cache directory in the user's home folder.
+  Directory for downloading and caching models. Defaults to a cache directory in
+  the user's home folder.
 </ParamField>
 
 ## Methods
@@ -60,19 +65,27 @@ def create_vad_analyzer(
 ```
 
 #### VAD Parameters
+
 <ParamField path="speech_hold_duration" type="Optional[float]" default="None">
-  Controls for how long the VAD continues to detect speech after the audio signal no longer contains speech (in seconds).
-  Range: `0.0` to `100x model window length`, Default (in SDK): `0.05s`
+  Controls for how long the VAD continues to detect speech after the audio
+  signal no longer contains speech (in seconds). Range: `0.0` to `100x model
+  window length`, Default (in SDK): `0.05s`
 </ParamField>
 
-<ParamField path="minimum_speech_duration" type="Optional[float]" default="None">
-  Controls for how long speech needs to be present in the audio signal before the VAD considers it speech (in seconds).
-  Range: `0.0` to `1.0`, Default (in SDK): `0.0s`
+<ParamField
+  path="minimum_speech_duration"
+  type="Optional[float]"
+  default="None"
+>
+  Controls for how long speech needs to be present in the audio signal before
+  the VAD considers it speech (in seconds). Range: `0.0` to `1.0`, Default (in
+  SDK): `0.0s`
 </ParamField>
 
 <ParamField path="sensitivity" type="Optional[float]" default="None">
-  Controls the sensitivity (energy threshold) of the VAD. This value is used by the VAD as the threshold a speech audio signal's energy has to exceed in order to be considered speech.
-  Formula: `Energy threshold = 10 ** (-sensitivity)`
+  Controls the sensitivity (energy threshold) of the VAD. This value is used by
+  the VAD as the threshold a speech audio signal's energy has to exceed in order
+  to be considered speech. Formula: `Energy threshold = 10 ** (-sensitivity)`
   Range: `1.0` to `15.0`, Default (in SDK): `6.0`
 </ParamField>
 
@@ -210,7 +223,9 @@ user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
 ```
 
 <Info>
-  See the [AIC filter example](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/07zd-interruptible-aicoustics.py) for a complete working example.
+  See the [AIC filter
+  example](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/07zd-interruptible-aicoustics.py)
+  for a complete working example.
 </Info>
 
 ## Models
@@ -231,7 +246,9 @@ The AIC filter enhances audio before it reaches the VAD and STT stages, improvin
 ## Migration Guide (v1 to v2)
 
 <Note>
-  For the complete aic-sdk migration guide including all API changes, see the official [Python 1.3 to 2.0 Migration Guide](https://docs.ai-coustics.com/guides/migrations/python-1-3-to-2-0#quick-migration-checklist).
+  For the complete aic-sdk migration guide including all API changes, see the
+  official [Python 1.3 to 2.0 Migration
+  Guide](https://docs.ai-coustics.com/guides/migrations/python-1-3-to-2-0#quick-migration-checklist).
 </Note>
 
 ### Migration Steps
@@ -244,12 +261,12 @@ The AIC filter enhances audio before it reaches the VAD and STT stages, improvin
 
 ### Breaking Changes
 
-| v1 Parameter | v2 Replacement |
-|--------------|----------------|
-| `model_type` | `model_id` (string-based model selection) |
-| `enhancement_level` | Removed (model-specific behavior) |
-| `voice_gain` | Removed |
-| `noise_gate_enable` | Removed |
+| v1 Parameter        | v2 Replacement                            |
+| ------------------- | ----------------------------------------- |
+| `model_type`        | `model_id` (string-based model selection) |
+| `enhancement_level` | Removed (model-specific behavior)         |
+| `voice_gain`        | Removed                                   |
+| `noise_gate_enable` | Removed                                   |
 
 ## Notes
 

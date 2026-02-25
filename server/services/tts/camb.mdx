@@ -22,11 +22,7 @@ description: "Text-to-speech service using Camb AI's MARS models for high-qualit
   >
     Complete example with interruption handling
   </Card>
-  <Card
-    title="Camb AI Documentation"
-    icon="book"
-    href="https://docs.camb.ai/"
-  >
+  <Card title="Camb AI Documentation" icon="book" href="https://docs.camb.ai/">
     Official Camb AI API documentation
   </Card>
   <Card
@@ -73,7 +69,8 @@ Before using Camb AI TTS services, you need:
 </ParamField>
 
 <ParamField path="model" type="str" default="mars-flash">
-  TTS model to use. Options: `"mars-flash"` (fast, 22.05kHz), `"mars-pro"` (high quality, 48kHz), `"mars-instruct"` (instruction-following, 22.05kHz).
+  TTS model to use. Options: `"mars-flash"` (fast, 22.05kHz), `"mars-pro"` (high
+  quality, 48kHz), `"mars-instruct"` (instruction-following, 22.05kHz).
 </ParamField>
 
 <ParamField path="timeout" type="float" default="60.0">
@@ -81,7 +78,8 @@ Before using Camb AI TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. If `None`, uses the model-specific default (22050 for mars-flash, 48000 for mars-pro).
+  Output audio sample rate in Hz. If `None`, uses the model-specific default
+  (22050 for mars-flash, 48000 for mars-pro).
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
@@ -92,10 +90,10 @@ Before using Camb AI TTS services, you need:
 
 Voice and generation settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Language for synthesis (BCP-47 format). |
-| `user_instructions` | `str` | `None` | Custom instructions for `mars-instruct` model only. Use to control tone, style, or pronunciation. Max 1000 characters. Ignored for other models. |
+| Parameter           | Type       | Default       | Description                                                                                                                                      |
+| ------------------- | ---------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `language`          | `Language` | `Language.EN` | Language for synthesis (BCP-47 format).                                                                                                          |
+| `user_instructions` | `str`      | `None`        | Custom instructions for `mars-instruct` model only. Use to control tone, style, or pronunciation. Max 1000 characters. Ignored for other models. |
 
 ## Usage
 
@@ -137,7 +135,11 @@ tts = CambTTSService(
 ## Notes
 
 <Tip>
-  Set the `audio_out_sample_rate` in `PipelineParams` to match the model's sample rate (22050 for `mars-flash`, 48000 for `mars-pro`) for optimal quality. See the [example implementation](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/07zg-interruptible-camb.py) for usage.
+  Set the `audio_out_sample_rate` in `PipelineParams` to match the model's
+  sample rate (22050 for `mars-flash`, 48000 for `mars-pro`) for optimal
+  quality. See the [example
+  implementation](https://github.com/pipecat-ai/pipecat/blob/main/examples/foundational/07zg-interruptible-camb.py)
+  for usage.
 </Tip>
 
 - **Model-specific sample rates**: Each model has a fixed output sample rate. Setting a mismatched `sample_rate` will produce a warning and may cause audio issues.

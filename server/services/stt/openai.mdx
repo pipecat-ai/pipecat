@@ -70,7 +70,8 @@ Before using OpenAI STT services, you need:
 Uses VAD-based audio segmentation with HTTP transcription requests. It records speech segments detected by local VAD and sends them to OpenAI's transcription API.
 
 <ParamField path="model" type="str" default="gpt-4o-transcribe">
-  Transcription model to use. Options include `"gpt-4o-transcribe"`, `"gpt-4o-mini-transcribe"`, and `"whisper-1"`.
+  Transcription model to use. Options include `"gpt-4o-transcribe"`,
+  `"gpt-4o-mini-transcribe"`, and `"whisper-1"`.
 </ParamField>
 
 <ParamField path="api_key" type="str" default="None">
@@ -90,7 +91,8 @@ Uses VAD-based audio segmentation with HTTP transcription requests. It records s
 </ParamField>
 
 <ParamField path="temperature" type="float" default="None">
-  Sampling temperature between 0 and 1. Lower values produce more deterministic results.
+  Sampling temperature between 0 and 1. Lower values produce more deterministic
+  results.
 </ParamField>
 
 ### OpenAIRealtimeSTTService
@@ -102,10 +104,15 @@ Provides real-time streaming speech-to-text using OpenAI's Realtime API WebSocke
 </ParamField>
 
 <ParamField path="model" type="str" default="gpt-4o-transcribe">
-  Transcription model. Supported values are `"gpt-4o-transcribe"` and `"gpt-4o-mini-transcribe"`.
+  Transcription model. Supported values are `"gpt-4o-transcribe"` and
+  `"gpt-4o-mini-transcribe"`.
 </ParamField>
 
-<ParamField path="base_url" type="str" default="wss://api.openai.com/v1/realtime">
+<ParamField
+  path="base_url"
+  type="str"
+  default="wss://api.openai.com/v1/realtime"
+>
   WebSocket base URL for the Realtime API.
 </ParamField>
 
@@ -122,11 +129,13 @@ Provides real-time streaming speech-to-text using OpenAI's Realtime API WebSocke
 </ParamField>
 
 <ParamField path="noise_reduction" type="str" default="None">
-  Noise reduction mode. `"near_field"` for close microphones, `"far_field"` for distant microphones, or `None` to disable.
+  Noise reduction mode. `"near_field"` for close microphones, `"far_field"` for
+  distant microphones, or `None` to disable.
 </ParamField>
 
 <ParamField path="should_interrupt" type="bool" default="True">
-  Whether to interrupt bot output when speech is detected by server-side VAD. Only applies when turn detection is enabled.
+  Whether to interrupt bot output when speech is detected by server-side VAD.
+  Only applies when turn detection is enabled.
 </ParamField>
 
 ## Usage
@@ -179,9 +188,9 @@ stt = OpenAIRealtimeSTTService(
 
 `OpenAIRealtimeSTTService` supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to OpenAI Realtime WebSocket |
+| Event             | Description                                 |
+| ----------------- | ------------------------------------------- |
+| `on_connected`    | Connected to OpenAI Realtime WebSocket      |
 | `on_disconnected` | Disconnected from OpenAI Realtime WebSocket |
 
 ```python
@@ -191,5 +200,6 @@ async def on_connected(service):
 ```
 
 <Note>
-  `OpenAISTTService` uses HTTP requests and does not have WebSocket connection events.
+  `OpenAISTTService` uses HTTP requests and does not have WebSocket connection
+  events.
 </Note>

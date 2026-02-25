@@ -11,7 +11,7 @@ script.setAttribute("data-project-color", "#4f46e5");
 script.setAttribute("data-project-logo", "https://docs.pipecat.ai/favicon.svg");
 script.setAttribute(
   "data-modal-disclaimer",
-  "This is a custom LLM trained on Pipecat's knowledge base to provide you with efficient access to Pipecat's capabilities and APIs. However, it may not always understand the entire context of your query to produce an accurate answer. When in doubt, please refer to our documentation or reach out on Discord."
+  "This is a custom LLM trained on Pipecat's knowledge base to provide you with efficient access to Pipecat's capabilities and APIs. However, it may not always understand the entire context of your query to produce an accurate answer. When in doubt, please refer to our documentation or reach out on Discord.",
 );
 script.setAttribute("data-button-image", buttonIcon);
 script.setAttribute("data-mcp-enabled", "true");

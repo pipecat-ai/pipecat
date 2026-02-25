@@ -6,7 +6,11 @@ description: "Create real-time voice AI agents using Google's Gemini Live API an
 Gemini Live is Google's speech-to-speech API that enables natural, real-time voice conversations with AI. With Pipecat, you can build production-ready voice agents that leverage Gemini Live for telephony, web, and mobile applications.
 
 <CardGroup cols={2}>
-  <Card title="API Reference" icon="book" href="/server/services/s2s/gemini-live">
+  <Card
+    title="API Reference"
+    icon="book"
+    href="/server/services/s2s/gemini-live"
+  >
     Gemini Live service documentation
   </Card>
   <Card title="Pipecat CLI" icon="terminal" href="/cli/overview">
@@ -20,7 +24,8 @@ Pipecat's Gemini Live integration supports multiple modalities and deployment ta
 
 <CardGroup cols={2}>
   <Card title="Voice" icon="microphone">
-    Real-time speech-to-speech conversations with natural turn-taking and voice activity detection
+    Real-time speech-to-speech conversations with natural turn-taking and voice
+    activity detection
   </Card>
   <Card title="Vision" icon="eye">
     Process video and screenshare alongside audio for multimodal interactions
@@ -54,13 +59,12 @@ pipecat init
 ```
 
 The CLI will guide you through selecting:
+
 - **Bot type**: Gemini Live (speech-to-speech)
 - **Transport**: Daily WebRTC, Twilio, or others
 - **Deployment target**: Local development or Pipecat Cloud
 
-<Tip>
-All CLI commands can use either `pipecat` or the shorter `pc` alias.
-</Tip>
+<Tip>All CLI commands can use either `pipecat` or the shorter `pc` alias.</Tip>
 
 ## Starter Projects
 
@@ -70,9 +74,9 @@ These complete examples demonstrate Gemini Live in production scenarios. Each in
 
 A telephone-based voice agent using Gemini Live with Twilio WebSockets. The demo plays "Two Truths and a Lie" to showcase natural conversation flow.
 
-<Card 
-  title="Phone Bot Starter" 
-  icon="phone" 
+<Card
+  title="Phone Bot Starter"
+  icon="phone"
   href="https://github.com/pipecat-ai/pipecat-examples/tree/main/gemini-live-starters/phone-bot"
 >
   Build a production phone agent with Twilio integration
@@ -81,6 +85,7 @@ A telephone-based voice agent using Gemini Live with Twilio WebSockets. The demo
 **Try it now**: Call **1-970-LIVE-API** (1-970-548-3274) to talk to a live demo.
 
 **What you'll learn**:
+
 - Twilio WebSocket transport configuration
 - Google STT/TTS integration alongside Gemini Live
 - TwiML setup for incoming calls
@@ -90,15 +95,16 @@ A telephone-based voice agent using Gemini Live with Twilio WebSockets. The demo
 
 A browser-based agent with screensharing and vision capabilities, built with the Pipecat Voice UI Kit and Daily WebRTC transport.
 
-<Card 
-  title="Web Bot Starter" 
-  icon="browser" 
+<Card
+  title="Web Bot Starter"
+  icon="browser"
   href="https://github.com/pipecat-ai/pipecat-examples/tree/main/gemini-live-starters/web-bot"
 >
   Build a web agent with vision and screensharing
 </Card>
 
 **What you'll learn**:
+
 - Daily WebRTC transport for web clients
 - Vision/screenshare processing with Gemini Live
 - Next.js client with Voice UI Kit components
@@ -121,9 +127,9 @@ pipecat cloud deploy
 
 Each starter includes a `pcc-deploy.toml` file with sensible defaults for agent configuration and scaling.
 
-<Card 
-  title="Pipecat Cloud Deployment" 
-  icon="cloud" 
+<Card
+  title="Pipecat Cloud Deployment"
+  icon="cloud"
   href="/deployment/pipecat-cloud/fundamentals/deploy"
 >
   Learn more about deploying to production
@@ -132,16 +138,28 @@ Each starter includes a `pcc-deploy.toml` file with sensible defaults for agent 
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Function Calling" icon="code" href="/guides/learn/function-calling">
+  <Card
+    title="Function Calling"
+    icon="code"
+    href="/guides/learn/function-calling"
+  >
     Add external integrations and dynamic responses
   </Card>
   <Card title="React Client SDK" icon="react" href="/client/react/introduction">
     Build custom web interfaces
   </Card>
-  <Card title="Telephony Guide" icon="phone-volume" href="/deployment/pipecat-cloud/guides/telephony/twilio-websocket">
+  <Card
+    title="Telephony Guide"
+    icon="phone-volume"
+    href="/deployment/pipecat-cloud/guides/telephony/twilio-websocket"
+  >
     Deep dive into phone integrations
   </Card>
-  <Card title="Core Concepts" icon="graduation-cap" href="/guides/learn/overview">
+  <Card
+    title="Core Concepts"
+    icon="graduation-cap"
+    href="/guides/learn/overview"
+  >
     Understand Pipecat pipelines and processors
   </Card>
 </CardGroup>

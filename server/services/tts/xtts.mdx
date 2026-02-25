@@ -89,11 +89,14 @@ Before using XTTSTTSService, you need:
 </ParamField>
 
 <ParamField path="language" type="Language" default="Language.EN">
-  Language for synthesis. Supports Czech, German, English, Spanish, French, Hindi, Hungarian, Italian, Japanese, Korean, Dutch, Polish, Portuguese, Russian, Turkish, and Chinese.
+  Language for synthesis. Supports Czech, German, English, Spanish, French,
+  Hindi, Hungarian, Italian, Japanese, Korean, Dutch, Polish, Portuguese,
+  Russian, Turkish, and Chinese.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate. Audio is automatically resampled from XTTS's native 24kHz output.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate. Audio is automatically resampled from XTTS's native 24kHz output.
 </ParamField>
 
 ## Usage

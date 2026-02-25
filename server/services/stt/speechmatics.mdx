@@ -84,15 +84,18 @@ Speechmatics STT supports the following endpoints (defaults to `EU2`):
 ### SpeechmaticsSTTService
 
 <ParamField path="api_key" type="str" default="None">
-  Speechmatics API key. Falls back to the `SPEECHMATICS_API_KEY` environment variable.
+  Speechmatics API key. Falls back to the `SPEECHMATICS_API_KEY` environment
+  variable.
 </ParamField>
 
 <ParamField path="base_url" type="str" default="None">
-  Base URL for the Speechmatics API. Falls back to `SPEECHMATICS_RT_URL` environment variable, then defaults to `wss://eu2.rt.speechmatics.com/v2`.
+  Base URL for the Speechmatics API. Falls back to `SPEECHMATICS_RT_URL`
+  environment variable, then defaults to `wss://eu2.rt.speechmatics.com/v2`.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
@@ -100,38 +103,40 @@ Speechmatics STT supports the following endpoints (defaults to `EU2`):
 </ParamField>
 
 <ParamField path="should_interrupt" type="bool" default="True">
-  Whether to interrupt bot output when Speechmatics detects user speech. Only applies when `turn_detection_mode` is set to detect speech (ADAPTIVE or SMART_TURN).
+  Whether to interrupt bot output when Speechmatics detects user speech. Only
+  applies when `turn_detection_mode` is set to detect speech (ADAPTIVE or
+  SMART_TURN).
 </ParamField>
 
 ### InputParams
 
 Settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `domain` | `str` | `None` | Domain for Speechmatics API (e.g. for bilingual transcription). |
-| `language` | `Language \| str` | `Language.EN` | Language code for transcription. |
-| `turn_detection_mode` | `TurnDetectionMode` | `EXTERNAL` | Endpoint handling mode. `EXTERNAL` (default) uses Pipecat's VAD, `ADAPTIVE` uses Speechmatics' VAD, `SMART_TURN` uses Speechmatics' ML-based turn detection. |
-| `speaker_active_format` | `str` | `None` | Formatter for active speaker output. Available attributes: `{speaker_id}`, `{text}`. Example: `"@{speaker_id}: {text}"`. |
-| `speaker_passive_format` | `str` | `None` | Formatter for passive/background speaker output. Same attributes as active format. |
-| `focus_speakers` | `list[str]` | `[]` | Speaker IDs to focus on. Only these speakers drive end of turn and conversation flow. |
-| `ignore_speakers` | `list[str]` | `[]` | Speaker IDs to exclude from transcription entirely. |
-| `focus_mode` | `SpeakerFocusMode` | `RETAIN` | `RETAIN` keeps words from non-focused speakers; `IGNORE` drops them. |
-| `known_speakers` | `list[SpeakerIdentifier]` | `[]` | Known speaker labels and identifiers for speaker attribution. |
-| `additional_vocab` | `list[AdditionalVocabEntry]` | `[]` | Additional vocabulary to boost recognition of specific words. |
-| `audio_encoding` | `AudioEncoding` | `PCM_S16LE` | Audio encoding format. |
-| `operating_point` | `OperatingPoint` | `None` | Transcription accuracy vs. latency tradeoff. `ENHANCED` recommended for most use cases. |
-| `max_delay` | `float` | `None` | Maximum delay in seconds for transcription. Lower values reduce latency but may impact accuracy. |
-| `end_of_utterance_silence_trigger` | `float` | `None` | Silence duration in seconds to trigger end of utterance. Must be lower than `max_delay`. |
-| `end_of_utterance_max_delay` | `float` | `None` | Maximum delay for end of utterance. Must be greater than `end_of_utterance_silence_trigger`. |
-| `punctuation_overrides` | `dict` | `None` | Custom punctuation overrides for the STT engine. |
-| `include_partials` | `bool` | `None` | Include partial word fragments in partial segment output. |
-| `split_sentences` | `bool` | `None` | Emit finalized sentences mid-turn as they are completed. |
-| `enable_diarization` | `bool` | `None` | Enable speaker diarization to attribute words to unique speakers. |
-| `speaker_sensitivity` | `float` | `None` | Diarization sensitivity. Higher values help distinguish similar voices. |
-| `max_speakers` | `int` | `None` | Maximum number of speakers to detect. Only use when the speaker count is known. |
-| `prefer_current_speaker` | `bool` | `None` | Give extra weight to grouping nearby words as the same speaker. |
-| `extra_params` | `dict` | `None` | Additional parameters passed to the STT engine. |
+| Parameter                          | Type                         | Default       | Description                                                                                                                                                  |
+| ---------------------------------- | ---------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `domain`                           | `str`                        | `None`        | Domain for Speechmatics API (e.g. for bilingual transcription).                                                                                              |
+| `language`                         | `Language \| str`            | `Language.EN` | Language code for transcription.                                                                                                                             |
+| `turn_detection_mode`              | `TurnDetectionMode`          | `EXTERNAL`    | Endpoint handling mode. `EXTERNAL` (default) uses Pipecat's VAD, `ADAPTIVE` uses Speechmatics' VAD, `SMART_TURN` uses Speechmatics' ML-based turn detection. |
+| `speaker_active_format`            | `str`                        | `None`        | Formatter for active speaker output. Available attributes: `{speaker_id}`, `{text}`. Example: `"@{speaker_id}: {text}"`.                                     |
+| `speaker_passive_format`           | `str`                        | `None`        | Formatter for passive/background speaker output. Same attributes as active format.                                                                           |
+| `focus_speakers`                   | `list[str]`                  | `[]`          | Speaker IDs to focus on. Only these speakers drive end of turn and conversation flow.                                                                        |
+| `ignore_speakers`                  | `list[str]`                  | `[]`          | Speaker IDs to exclude from transcription entirely.                                                                                                          |
+| `focus_mode`                       | `SpeakerFocusMode`           | `RETAIN`      | `RETAIN` keeps words from non-focused speakers; `IGNORE` drops them.                                                                                         |
+| `known_speakers`                   | `list[SpeakerIdentifier]`    | `[]`          | Known speaker labels and identifiers for speaker attribution.                                                                                                |
+| `additional_vocab`                 | `list[AdditionalVocabEntry]` | `[]`          | Additional vocabulary to boost recognition of specific words.                                                                                                |
+| `audio_encoding`                   | `AudioEncoding`              | `PCM_S16LE`   | Audio encoding format.                                                                                                                                       |
+| `operating_point`                  | `OperatingPoint`             | `None`        | Transcription accuracy vs. latency tradeoff. `ENHANCED` recommended for most use cases.                                                                      |
+| `max_delay`                        | `float`                      | `None`        | Maximum delay in seconds for transcription. Lower values reduce latency but may impact accuracy.                                                             |
+| `end_of_utterance_silence_trigger` | `float`                      | `None`        | Silence duration in seconds to trigger end of utterance. Must be lower than `max_delay`.                                                                     |
+| `end_of_utterance_max_delay`       | `float`                      | `None`        | Maximum delay for end of utterance. Must be greater than `end_of_utterance_silence_trigger`.                                                                 |
+| `punctuation_overrides`            | `dict`                       | `None`        | Custom punctuation overrides for the STT engine.                                                                                                             |
+| `include_partials`                 | `bool`                       | `None`        | Include partial word fragments in partial segment output.                                                                                                    |
+| `split_sentences`                  | `bool`                       | `None`        | Emit finalized sentences mid-turn as they are completed.                                                                                                     |
+| `enable_diarization`               | `bool`                       | `None`        | Enable speaker diarization to attribute words to unique speakers.                                                                                            |
+| `speaker_sensitivity`              | `float`                      | `None`        | Diarization sensitivity. Higher values help distinguish similar voices.                                                                                      |
+| `max_speakers`                     | `int`                        | `None`        | Maximum number of speakers to detect. Only use when the speaker count is known.                                                                              |
+| `prefer_current_speaker`           | `bool`                       | `None`        | Give extra weight to grouping nearby words as the same speaker.                                                                                              |
+| `extra_params`                     | `dict`                       | `None`        | Additional parameters passed to the STT engine.                                                                                                              |
 
 ## End of Turn detection
 
@@ -411,8 +416,8 @@ pipeline = Pipeline([
 
 In addition to the standard [service connection events](/server/utilities/service-events) (`on_connected`, `on_disconnected`, `on_connection_error`), Speechmatics provides:
 
-| Event | Description |
-| --- | --- |
+| Event                | Description                            |
+| -------------------- | -------------------------------------- |
 | `on_speakers_result` | Speaker identification result received |
 
 ```python

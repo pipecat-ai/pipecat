@@ -141,10 +141,12 @@ These events fire whenever the mute state changes, allowing you to keep your UI 
 When mute strategies activate or deactivate, the server automatically sends RTVI messages (`user-mute-started` and `user-mute-stopped`) to the client. You can listen for these in the JavaScript client to update your UI:
 
 <Note>
-  The client should continue sending audio normally during mute. These events are purely informational — muting happens server-side.
+  The client should continue sending audio normally during mute. These events
+  are purely informational — muting happens server-side.
 </Note>
 
 <CodeGroup>
+
 ```typescript JavaScript
 import { PipecatClient, RTVIEvent } from "@pipecat-ai/client-js";
 
@@ -168,6 +170,7 @@ pcClient.on(RTVIEvent.UserMuteStopped, () => {
   console.log("Server is listening to user audio again");
 });
 ```
+
 </CodeGroup>
 
 ## Best Practices

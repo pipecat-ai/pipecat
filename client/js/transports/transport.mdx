@@ -36,29 +36,46 @@ Your transport instance goes through a series of states during its lifecycle. Th
     Transport is idle and has not yet been initialized (default state).
   </Step>
   <Step title="Initializing">
-    Transport is being initialized. This occurs in response to a `pcClient.initDevices()` call, where the transport is being set up in order to enumerate local media devices. If you call `connect()` and bypass `initDevices()`, the transport will skip this state and go directly to `Connecting`.
+    Transport is being initialized. This occurs in response to a
+    `pcClient.initDevices()` call, where the transport is being set up in order
+    to enumerate local media devices. If you call `connect()` and bypass
+    `initDevices()`, the transport will skip this state and go directly to
+    `Connecting`.
   </Step>
   <Step title="Initialized">
-    Transport has been initialized and is ready to connect. This state is reached after a successful `pcClient.initDevices()` call and skipped if `initDevices()` is not used.
+    Transport has been initialized and is ready to connect. This state is
+    reached after a successful `pcClient.initDevices()` call and skipped if
+    `initDevices()` is not used.
   </Step>
   <Step title="Authenticating">
-    Your client has called `pcClient.startBot()` or `pcClient.startBotAndConnect()` and is waiting for a response from your server containing connection details for your transport (such as a session URL and token). Note: If you provide the `TransportConnectionParams` directly to `connect()` without calling either `startBot` methods, the transport will skip this state and go directly to `Connecting`.
+    Your client has called `pcClient.startBot()` or
+    `pcClient.startBotAndConnect()` and is waiting for a response from your
+    server containing connection details for your transport (such as a session
+    URL and token). Note: If you provide the `TransportConnectionParams`
+    directly to `connect()` without calling either `startBot` methods, the
+    transport will skip this state and go directly to `Connecting`.
   </Step>
   <Step title="Authenticated">
-    Your client has called `pcClient.startBot()` or `pcClient.startBotAndConnect()` and has successfully received a response. If using `startBotAndConnect()`, it will quickly move into the `Connecting` state. Note: If you provide the `TransportConnectionParams` directly to `connect()` without calling either `startBot` methods, the transport will skip this state and go directly to `Connecting`.
+    Your client has called `pcClient.startBot()` or
+    `pcClient.startBotAndConnect()` and has successfully received a response. If
+    using `startBotAndConnect()`, it will quickly move into the `Connecting`
+    state. Note: If you provide the `TransportConnectionParams` directly to
+    `connect()` without calling either `startBot` methods, the transport will
+    skip this state and go directly to `Connecting`.
   </Step>
-  <Step title="Connecting">
-    The transport is connecting to the server.
-  </Step>
+  <Step title="Connecting">The transport is connecting to the server.</Step>
   <Step title="Connected">
-    The transport has successfully connected to the session and is awaiting a client-ready signal (indicated audio and video tracks are ready to be sent and received).
+    The transport has successfully connected to the session and is awaiting a
+    client-ready signal (indicated audio and video tracks are ready to be sent
+    and received).
   </Step>
   <Step title="Ready">Transport is ready and the session can begin.</Step>
   <Step title="Disconnecting">
     Transport is disconnecting from the session.
   </Step>
   <Step title="Error">
-  An error occurred during the transport lifecycle. This indicates a fatal error and the transport should move quickly into the `Disconnected` state.
+    An error occurred during the transport lifecycle. This indicates a fatal
+    error and the transport should move quickly into the `Disconnected` state.
   </Step>
 </Steps>
 

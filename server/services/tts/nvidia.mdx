@@ -77,10 +77,15 @@ Before using Riva TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
-<ParamField path="model_function_map" type="dict" default='{"function_id": "877104f7-e885-42b9-8de8-f6e4c6303969", "model_name": "magpie-tts-multilingual"}'>
+<ParamField
+  path="model_function_map"
+  type="dict"
+  default='{"function_id": "877104f7-e885-42b9-8de8-f6e4c6303969", "model_name": "magpie-tts-multilingual"}'
+>
   Dictionary containing `function_id` and `model_name` for the TTS model.
 </ParamField>
 
@@ -89,15 +94,16 @@ Before using Riva TTS services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable synthesis settings. See [InputParams](#inputparams) below.
+  Runtime-configurable synthesis settings. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN_US` | Language code for synthesis. |
-| `quality` | `int` | `20` | Audio quality setting (0-100). |
+| Parameter  | Type       | Default          | Description                    |
+| ---------- | ---------- | ---------------- | ------------------------------ |
+| `language` | `Language` | `Language.EN_US` | Language code for synthesis.   |
+| `quality`  | `int`      | `20`             | Audio quality setting (0-100). |
 
 ## Usage
 

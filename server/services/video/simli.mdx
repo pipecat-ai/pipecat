@@ -65,15 +65,18 @@ Before using Simli video services, you need:
 </ParamField>
 
 <ParamField path="face_id" type="str" required>
-  Simli Face ID. For Trinity avatars, specify `"faceId/emotionId"` to use a different emotion than the default.
+  Simli Face ID. For Trinity avatars, specify `"faceId/emotionId"` to use a
+  different emotion than the default.
 </ParamField>
 
 <ParamField path="latency_interval" type="int" default="0">
-  Latency interval setting for sending health checks to check the latency to Simli servers.
+  Latency interval setting for sending health checks to check the latency to
+  Simli servers.
 </ParamField>
 
 <ParamField path="simli_url" type="str" default="https://api.simli.ai">
-  URL of the Simli servers. Can be changed for custom deployments by enterprise users.
+  URL of the Simli servers. Can be changed for custom deployments by enterprise
+  users.
 </ParamField>
 
 <ParamField path="is_trinity_avatar" type="bool" default="False">
@@ -81,16 +84,17 @@ Before using Simli video services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Additional input parameters for session configuration. See [InputParams](#inputparams) below.
+  Additional input parameters for session configuration. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enable_logging` | `bool` | `None` | Whether to enable Simli logging. |
-| `max_session_length` | `int` | `None` | Absolute maximum session duration in seconds. Avatar disconnects after this time even if speaking. |
-| `max_idle_time` | `int` | `None` | Maximum duration in seconds the avatar can be idle (not speaking) before disconnecting. |
+| Parameter            | Type   | Default | Description                                                                                        |
+| -------------------- | ------ | ------- | -------------------------------------------------------------------------------------------------- |
+| `enable_logging`     | `bool` | `None`  | Whether to enable Simli logging.                                                                   |
+| `max_session_length` | `int`  | `None`  | Absolute maximum session duration in seconds. Avatar disconnects after this time even if speaking. |
+| `max_idle_time`      | `int`  | `None`  | Maximum duration in seconds the avatar can be idle (not speaking) before disconnecting.            |
 
 ## Usage
 

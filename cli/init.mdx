@@ -26,7 +26,9 @@ pipecat init [OPTIONS]
 </ParamField>
 
 <ParamField path="--transport / -t" type="string">
-  Transport provider. Repeatable for multiple transports (e.g. `-t daily -t smallwebrtc`). Valid values: `daily`, `smallwebrtc`, `twilio`, `telnyx`, `plivo`, `exotel`, `daily_pstn`, `twilio_daily_sip`.
+  Transport provider. Repeatable for multiple transports (e.g. `-t daily -t
+  smallwebrtc`). Valid values: `daily`, `smallwebrtc`, `twilio`, `telnyx`,
+  `plivo`, `exotel`, `daily_pstn`, `twilio_daily_sip`.
 </ParamField>
 
 <ParamField path="--mode / -m" type="string">
@@ -46,11 +48,13 @@ pipecat init [OPTIONS]
 </ParamField>
 
 <ParamField path="--realtime" type="string">
-  Realtime service (realtime mode). e.g. `openai_realtime`, `gemini_live_realtime`.
+  Realtime service (realtime mode). e.g. `openai_realtime`,
+  `gemini_live_realtime`.
 </ParamField>
 
 <ParamField path="--video" type="string">
-  Video avatar service (web bots only). e.g. `heygen_video`, `tavus_video`, `simli_video`.
+  Video avatar service (web bots only). e.g. `heygen_video`, `tavus_video`,
+  `simli_video`.
 </ParamField>
 
 <ParamField path="--client-framework" type="string">
@@ -62,47 +66,75 @@ pipecat init [OPTIONS]
 </ParamField>
 
 <ParamField path="--daily-pstn-mode" type="string">
-  Daily PSTN mode (required when transport is `daily_pstn`): `dial-in` or `dial-out`.
+  Daily PSTN mode (required when transport is `daily_pstn`): `dial-in` or
+  `dial-out`.
 </ParamField>
 
 <ParamField path="--twilio-daily-sip-mode" type="string">
-  Twilio + Daily SIP mode (required when transport is `twilio_daily_sip`): `dial-in` or `dial-out`.
+  Twilio + Daily SIP mode (required when transport is `twilio_daily_sip`):
+  `dial-in` or `dial-out`.
 </ParamField>
 
 <ParamField path="--recording / --no-recording" type="boolean" default="false">
   Enable audio recording.
 </ParamField>
 
-<ParamField path="--transcription / --no-transcription" type="boolean" default="false">
+<ParamField
+  path="--transcription / --no-transcription"
+  type="boolean"
+  default="false"
+>
   Enable transcription logging.
 </ParamField>
 
 <ParamField path="--smart-turn / --no-smart-turn" type="boolean">
-  Enable smart turn-taking. Defaults to `true` for cascade mode, `false` for realtime.
+  Enable smart turn-taking. Defaults to `true` for cascade mode, `false` for
+  realtime.
 </ParamField>
 
-<ParamField path="--video-input / --no-video-input" type="boolean" default="false">
+<ParamField
+  path="--video-input / --no-video-input"
+  type="boolean"
+  default="false"
+>
   Enable video input (web bots only).
 </ParamField>
 
-<ParamField path="--video-output / --no-video-output" type="boolean" default="false">
+<ParamField
+  path="--video-output / --no-video-output"
+  type="boolean"
+  default="false"
+>
   Enable video output (web bots only).
 </ParamField>
 
-<ParamField path="--deploy-to-cloud / --no-deploy-to-cloud" type="boolean" default="true">
+<ParamField
+  path="--deploy-to-cloud / --no-deploy-to-cloud"
+  type="boolean"
+  default="true"
+>
   Generate Pipecat Cloud deployment files (Dockerfile, pcc-deploy.toml).
 </ParamField>
 
-<ParamField path="--enable-krisp / --no-enable-krisp" type="boolean" default="false">
+<ParamField
+  path="--enable-krisp / --no-enable-krisp"
+  type="boolean"
+  default="false"
+>
   Enable Krisp noise cancellation (requires cloud deployment).
 </ParamField>
 
-<ParamField path="--observability / --no-observability" type="boolean" default="false">
+<ParamField
+  path="--observability / --no-observability"
+  type="boolean"
+  default="false"
+>
   Enable observability.
 </ParamField>
 
 <ParamField path="--config / -c" type="string">
-  Path to a JSON config file. Triggers non-interactive mode. CLI flags override file values.
+  Path to a JSON config file. Triggers non-interactive mode. CLI flags override
+  file values.
 </ParamField>
 
 <ParamField path="--dry-run" type="boolean" default="false">
@@ -110,7 +142,8 @@ pipecat init [OPTIONS]
 </ParamField>
 
 <ParamField path="--list-options" type="boolean" default="false">
-  Print all available service options as JSON and exit. Useful for CI scripts and coding agents that need to discover valid values at runtime.
+  Print all available service options as JSON and exit. Useful for CI scripts
+  and coding agents that need to discover valid values at runtime.
 </ParamField>
 
 ## Interactive Setup

@@ -11,13 +11,16 @@ This guide covers migrating from RTVIClient to the new `PipecatClient` in a Java
 ### 1. Package and Class Names
 
 **Old**
+
 ```javascript
-import { RTVIClient } from '@pipecat-ai/client-js';
+import { RTVIClient } from "@pipecat-ai/client-js";
 ```
+
 **New**
+
 ```javascript
 // New
-import { PipecatClient } from '@pipecat-ai/client-js';
+import { PipecatClient } from "@pipecat-ai/client-js";
 ```
 
 ### 2. Client and Transport Configuration
@@ -25,19 +28,22 @@ import { PipecatClient } from '@pipecat-ai/client-js';
 The core difference here is that the client no longer accepts a `params` field. The configuration that used to be provided here is no longer supported and hitting a `/connect` endpoint is now an explicit step and provided directly to either the `startBot()` or `startBotAndConnect()` method.
 
 **Old**
+
 ```javascript
 const transport = new DailyTransport();
 const client = new RTVIClient({
   transport,
   params: {
-    baseUrl: 'http://localhost:7860',
+    baseUrl: "http://localhost:7860",
     endpoints: {
-      connect: '/connect'
-    }
-  }
+      connect: "/connect",
+    },
+  },
 });
 ```
+
 **New**
+
 ```javascript
 const client = new PipecatClient({
   transport: new DailyTransport(),
@@ -60,39 +66,42 @@ await client.connect();
 There are three options for connecting now. For migration purposes, you are likely to use option 3 (`startBotAndConnect()`):
 
 1. **Direct Connection**: Provide the connection details directly to `connect()`.
+
 ```javascript
 const cxnDetails = {
-  url: 'https://your-daily-room-url',
-  token: 'your-daily-token'
+  url: "https://your-daily-room-url",
+  token: "your-daily-token",
 };
 await client.connect(cxnDetails);
 ```
 
 2. **Using startBot()**: Fetch connection details from an API endpoint and pass them to `connect()`.
+
 ```javascript
 let cxnDetails = await client.startBot({
-  endpoint: 'http://localhost:7860/connect',
+  endpoint: "http://localhost:7860/connect",
   requestData: {
     // Any custom data your /connect endpoint requires
-    llm_provider: 'openai',
+    llm_provider: "openai",
     initial_prompt: "You are a pirate captain",
     // Any additional data
-  }
+  },
 });
 cxnDetails = modifyCxnDetails(cxnDetails); // Modify if needed
 await client.connect(cxnDetails);
 ```
 
 3. **Using startBotAndConnect()**: Fetch connection details and connect in one step.
+
 ```javascript
 await client.startBotAndConnect({
-  endpoint: 'http://localhost:7860/connect',
+  endpoint: "http://localhost:7860/connect",
   requestData: {
     // Any custom data your /connect endpoint requires
-    llm_provider: 'openai',
+    llm_provider: "openai",
     initial_prompt: "You are a pirate captain",
     // Any additional data
-  }
+  },
 });
 ```
 
@@ -101,16 +110,19 @@ await client.startBotAndConnect({
 Previously, you would use a helper class to handle function calls and provide a single callback to handle any/all function calls. Now, you can register a callback for each function call by name directly on the `PipecatClient` instance.
 
 **Old**
+
 ```javascript
 let llmHelper = new LLMHelper({});
 llmHelper.handleFunctionCall(async (data) => {
   return await this.handleFunctionCall(data.functionName, data.arguments);
 });
-client.registerHelper('openai', llmHelper);
+client.registerHelper("openai", llmHelper);
 ```
+
 **New**
+
 ```javascript
-client.registerFunctionCallHandler('functionName', async (data) => {
+client.registerFunctionCallHandler("functionName", async (data) => {
   // Handle function call
   return result;
 });
@@ -121,6 +133,7 @@ client.registerFunctionCallHandler('functionName', async (data) => {
 Previously, you could provide a pipeline configuration as part of the `RTVIClient` constructor and it was expected to be in a specific format. Now, if you would like to pass any initial pipeline configurations, you do so as `requestData` added to the endpoint you provide to `connect()`. In both cases, you would need server-side code to parse and apply these settings, but now you can define the structure and what pieces of configuration you want to send.
 
 **Old**
+
 ```javascript
 const pipelineConfig = [{
   "service": "llm",
@@ -155,6 +168,7 @@ const rtviClient = new RTVIClient({
 });
 rtviClient.connect();
 ```
+
 **New**
 
 Check out [this section of docs](./api-reference/messages#connection-time-configuration) for an example, complete with server-side code showing how to initialize the pipeline configuration at connection time.
@@ -162,11 +176,11 @@ Check out [this section of docs](./api-reference/messages#connection-time-config
 ```javascript
 try {
   pcClient.startBotAndConnect({
-    endpoint: 'https://your-server/connect',
+    endpoint: "https://your-server/connect",
     requestData: {
       initial_prompt: "You are a pirate captain",
-      preferred_language: 'en-US'
-    }
+      preferred_language: "en-US",
+    },
   });
 } catch (error) {
   console.error("Error connecting to server:", error);
@@ -178,6 +192,7 @@ try {
 Previously, the client supported updating the pipeline configuration using a specific method that took a configuration object in a generic format. Dynamic and predifined configuration updates, however, are a security concern, allowing clients to override settings and potentially abuse API keys. For this reason, it has been removed and most configuration updates need to be handled custom by your application. To do so, you should take advantage of the client-server messaging system, which allows you to send messages to the server and handle responses. This way, you can implement your own logic for updating configurations securely.
 
 **Old**
+
 ```javascript
 const updatedConfig = [{
   "service": "tts",
@@ -197,13 +212,14 @@ try {
   console.error("Failed to update config", e);
 }
 ```
+
 **New**
 
 Check out [this section of docs](./api-reference/messages#sending-custom-messages-to-the-server) for a more complete example, along with an example on making a request (`sendClientRequest()`) to wait for a response.
 
 ```javascript
 try {
-  pcClient.sendClientMessage('set-voice', { voice: 'Janice' });
+  pcClient.sendClientMessage("set-voice", { voice: "Janice" });
 } catch (error) {
   console.error("Error sending message to server:", error);
 }
@@ -214,9 +230,10 @@ try {
 Previously, you would use a helper class to update the context. This could be a security concern for the same reasons as mentioned above and should now be done using the [client-server messaging system](./api-reference/messages). However, in the case where you simply wish to add to the user's context, you can use the [`sendText()`](./api-reference/client-methods#sendtext) method on the `PipecatClient` instance. This allows for easy, built-in support for text-based context updates without needing to implement custom messaging.
 
 **Old**
+
 ```javascript
 let llmHelper = new LLMHelper({});
-client.registerHelper('llm', llmHelper);
+client.registerHelper("llm", llmHelper);
 await llmHelper.setContext(
   {
     messages: [
@@ -226,14 +243,15 @@ await llmHelper.setContext(
       },
     ],
   },
-  true
+  true,
 );
 ```
+
 **New**
+
 ```javascript
 client.sendText("Tell me a joke.");
 ```
-
 
 ## Breaking Changes
 

@@ -11,56 +11,62 @@ This guide covers migrating from RTVIClient to the new `PipecatClient` in a Reac
 ### 1. Package and Class Names
 
 **Old**
+
 ```javascript
-import { RTVIClient } from '@pipecat-ai/client-js';
+import { RTVIClient } from "@pipecat-ai/client-js";
 ```
 
 **New**
+
 ```javascript
-import { PipecatClient } from '@pipecat-ai/client-js';
+import { PipecatClient } from "@pipecat-ai/client-js";
 ```
 
 ### 2. React Components and Hooks
 
 **Old**
+
 ```javascript
-import { 
+import {
   RTVIClientProvider,
   RTVIClientAudio,
   RTVIClientVideo,
   useRTVIClient,
-  useRTVIClientTransportState
-} from '@pipecat-ai/client-react';
+  useRTVIClientTransportState,
+} from "@pipecat-ai/client-react";
 ```
 
 **New**
+
 ```javascript
 import {
   PipecatClientProvider,
   PipecatClientAudio,
   PipecatClientVideo,
   usePipecatClient,
-  usePipecatClientTransportState
-} from '@pipecat-ai/client-react';
+  usePipecatClientTransportState,
+} from "@pipecat-ai/client-react";
 ```
 
 ### 3. Client and Transport Configuration
 
 **Old**
+
 ```javascript
 const transport = new DailyTransport();
 const client = new RTVIClient({
   transport,
   params: {
-    baseUrl: 'http://localhost:7860',
+    baseUrl: "http://localhost:7860",
     endpoints: {
-      connect: '/connect'
-    }
-  }
+      connect: "/connect",
+    },
+  },
 });
 ```
 
 **New**
+
 ```javascript
 const client = new PipecatClient({
   transport: new DailyTransport(),
@@ -83,56 +89,61 @@ await client.connect();
 There are three options for connecting now. For migration purposes, you are likely to use option 3 (`startBotAndConnect()`):
 
 1. **Direct Connection**: Provide the connection details directly to `connect()`.
+
 ```javascript
 const cxnDetails = {
-  url: 'https://your-daily-room-url',
-  token: 'your-daily-token'
+  url: "https://your-daily-room-url",
+  token: "your-daily-token",
 };
 await client.connect(cxnDetails);
 ```
 
 2. **Using startBot()**: Fetch connection details from an API endpoint and pass them to `connect()`.
+
 ```javascript
 let cxnDetails = await client.startBot({
-  endpoint: 'http://localhost:7860/connect',
+  endpoint: "http://localhost:7860/connect",
   requestData: {
     // Any custom data your /connect endpoint requires
-    llm_provider: 'openai',
+    llm_provider: "openai",
     initial_prompt: "You are a pirate captain",
     // Any additional data
-  }
+  },
 });
 cxnDetails = modifyCxnDetails(cxnDetails); // Modify if needed
 await client.connect(cxnDetails);
 ```
 
 3. **Using startBotAndConnect()**: Fetch connection details and connect in one step.
+
 ```javascript
 await client.startBotAndConnect({
-  endpoint: 'http://localhost:7860/connect',
+  endpoint: "http://localhost:7860/connect",
   requestData: {
     // Any custom data your /connect endpoint requires
-    llm_provider: 'openai',
+    llm_provider: "openai",
     initial_prompt: "You are a pirate captain",
     // Any additional data
-  }
+  },
 });
 ```
 
 ### 5. Function Call Handling
 
 **Old**
+
 ```javascript
 let llmHelper = new LLMHelper({});
 llmHelper.handleFunctionCall(async (data) => {
   return await this.handleFunctionCall(data.functionName, data.arguments);
 });
-client.registerHelper('openai', llmHelper);
+client.registerHelper("openai", llmHelper);
 ```
 
 **New**
+
 ```javascript
-client.registerFunctionCallHandler('functionName', async (data) => {
+client.registerFunctionCallHandler("functionName", async (data) => {
   // Handle function call
   return result;
 });

@@ -98,11 +98,15 @@ Before using Deepgram STT services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the value from `live_options` or the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the value from `live_options` or
+  the pipeline's configured sample rate.
 </ParamField>
 
 <ParamField path="live_options" type="LiveOptions" default="None">
-  Deepgram `LiveOptions` for detailed configuration. When provided, these settings are merged with the defaults. See [Deepgram LiveOptions](https://developers.deepgram.com/docs/live-streaming-audio#live-streaming-options) for available options.
+  Deepgram `LiveOptions` for detailed configuration. When provided, these
+  settings are merged with the defaults. See [Deepgram
+  LiveOptions](https://developers.deepgram.com/docs/live-streaming-audio#live-streaming-options)
+  for available options.
 </ParamField>
 
 <ParamField path="addons" type="Dict" default="None">
@@ -110,22 +114,23 @@ Before using Deepgram STT services, you need:
 </ParamField>
 
 <ParamField path="ttfs_p99_latency" type="float" default="DEEPGRAM_TTFS_P99">
-  P99 latency from speech end to final transcript in seconds. Override for your deployment.
+  P99 latency from speech end to final transcript in seconds. Override for your
+  deployment.
 </ParamField>
 
 The default `LiveOptions` are:
 
-| Option | Default | Description |
-| --- | --- | --- |
-| `encoding` | `"linear16"` | Audio encoding format. |
-| `language` | `Language.EN` | Recognition language. |
-| `model` | `"nova-3-general"` | Deepgram model to use. |
-| `channels` | `1` | Number of audio channels. |
-| `interim_results` | `True` | Stream partial recognition results. |
-| `smart_format` | `False` | Apply smart formatting. |
-| `punctuate` | `True` | Add punctuation to transcripts. |
-| `profanity_filter` | `True` | Filter profanity from transcripts. |
-| `vad_events` | `False` | Enable Deepgram's built-in VAD events (deprecated). |
+| Option             | Default            | Description                                         |
+| ------------------ | ------------------ | --------------------------------------------------- |
+| `encoding`         | `"linear16"`       | Audio encoding format.                              |
+| `language`         | `Language.EN`      | Recognition language.                               |
+| `model`            | `"nova-3-general"` | Deepgram model to use.                              |
+| `channels`         | `1`                | Number of audio channels.                           |
+| `interim_results`  | `True`             | Stream partial recognition results.                 |
+| `smart_format`     | `False`            | Apply smart formatting.                             |
+| `punctuate`        | `True`             | Add punctuation to transcripts.                     |
+| `profanity_filter` | `True`             | Filter profanity from transcripts.                  |
+| `vad_events`       | `False`            | Enable Deepgram's built-in VAD events (deprecated). |
 
 ### DeepgramFluxSTTService
 
@@ -138,7 +143,8 @@ The default `LiveOptions` are:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="model" type="str" default="flux-general-en">
@@ -150,7 +156,8 @@ The default `LiveOptions` are:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for the Flux API. See [Flux InputParams](#flux-inputparams) below.
+  Configuration parameters for the Flux API. See [Flux
+  InputParams](#flux-inputparams) below.
 </ParamField>
 
 <ParamField path="should_interrupt" type="bool" default="True">
@@ -161,15 +168,15 @@ The default `LiveOptions` are:
 
 Parameters passed via the `params` constructor argument for `DeepgramFluxSTTService`.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `eager_eot_threshold` | `float` | `None` | EagerEndOfTurn threshold. Lower values trigger faster responses with more LLM calls; higher values are more conservative. `None` disables EagerEndOfTurn. |
-| `eot_threshold` | `float` | `None` | End-of-turn confidence threshold (default 0.7). Lower = faster turn endings. |
-| `eot_timeout_ms` | `int` | `None` | Time in ms after speech to finish a turn regardless of confidence (default 5000). |
-| `keyterm` | `list` | `[]` | Key terms to boost recognition accuracy for specialized terminology. |
-| `mip_opt_out` | `bool` | `None` | Opt out of Deepgram's Model Improvement Program. |
-| `tag` | `list` | `[]` | Tags for request identification during usage reporting. |
-| `min_confidence` | `float` | `None` | Minimum average confidence required to produce a `TranscriptionFrame`. |
+| Parameter             | Type    | Default | Description                                                                                                                                               |
+| --------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eager_eot_threshold` | `float` | `None`  | EagerEndOfTurn threshold. Lower values trigger faster responses with more LLM calls; higher values are more conservative. `None` disables EagerEndOfTurn. |
+| `eot_threshold`       | `float` | `None`  | End-of-turn confidence threshold (default 0.7). Lower = faster turn endings.                                                                              |
+| `eot_timeout_ms`      | `int`   | `None`  | Time in ms after speech to finish a turn regardless of confidence (default 5000).                                                                         |
+| `keyterm`             | `list`  | `[]`    | Key terms to boost recognition accuracy for specialized terminology.                                                                                      |
+| `mip_opt_out`         | `bool`  | `None`  | Opt out of Deepgram's Model Improvement Program.                                                                                                          |
+| `tag`                 | `list`  | `[]`    | Tags for request identification during usage reporting.                                                                                                   |
+| `min_confidence`      | `float` | `None`  | Minimum average confidence required to produce a `TranscriptionFrame`.                                                                                    |
 
 ## Usage
 
@@ -238,10 +245,10 @@ In addition to the standard [service connection events](/server/utilities/servic
 
 ### DeepgramSTTService
 
-| Event | Description |
-| --- | --- |
-| `on_speech_started` | Speech detected in the audio stream |
-| `on_utterance_end` | End of utterance detected by Deepgram |
+| Event               | Description                           |
+| ------------------- | ------------------------------------- |
+| `on_speech_started` | Speech detected in the audio stream   |
+| `on_utterance_end`  | End of utterance detected by Deepgram |
 
 ```python
 @stt.event_handler("on_speech_started")
@@ -257,13 +264,13 @@ async def on_utterance_end(service):
 
 Deepgram Flux provides turn-level events for more granular conversation tracking:
 
-| Event | Description |
-| --- | --- |
-| `on_start_of_turn` | Start of a new turn detected |
-| `on_turn_resumed` | A previously paused turn has resumed |
-| `on_end_of_turn` | End of turn detected |
-| `on_eager_end_of_turn` | Early end-of-turn prediction |
-| `on_update` | Transcript updated |
+| Event                  | Description                          |
+| ---------------------- | ------------------------------------ |
+| `on_start_of_turn`     | Start of a new turn detected         |
+| `on_turn_resumed`      | A previously paused turn has resumed |
+| `on_end_of_turn`       | End of turn detected                 |
+| `on_eager_end_of_turn` | Early end-of-turn prediction         |
+| `on_update`            | Transcript updated                   |
 
 ```python
 @stt.event_handler("on_start_of_turn")

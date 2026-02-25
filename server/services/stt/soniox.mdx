@@ -70,37 +70,45 @@ Before using Soniox STT services, you need:
   Soniox API key for authentication.
 </ParamField>
 
-<ParamField path="url" type="str" default="wss://stt-rt.soniox.com/transcribe-websocket">
+<ParamField
+  path="url"
+  type="str"
+  default="wss://stt-rt.soniox.com/transcribe-websocket"
+>
   Soniox WebSocket API URL.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="params" type="SonioxInputParams" default="None">
-  Configuration parameters for model, language, and features. See [SonioxInputParams](#sonioxinputparams) below.
+  Configuration parameters for model, language, and features. See
+  [SonioxInputParams](#sonioxinputparams) below.
 </ParamField>
 
 <ParamField path="vad_force_turn_endpoint" type="bool" default="True">
-  Listen to `VADUserStoppedSpeakingFrame` to send a finalize message to Soniox. When enabled, Pipecat's local VAD triggers transcript finalization. When disabled, Soniox detects the end of speech natively.
+  Listen to `VADUserStoppedSpeakingFrame` to send a finalize message to Soniox.
+  When enabled, Pipecat's local VAD triggers transcript finalization. When
+  disabled, Soniox detects the end of speech natively.
 </ParamField>
 
 ### SonioxInputParams
 
 Settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `model` | `str` | `"stt-rt-v4"` | Model to use for transcription. |
-| `audio_format` | `str` | `"pcm_s16le"` | Audio format for transcription. |
-| `num_channels` | `int` | `1` | Number of audio channels. |
-| `language_hints` | `list[Language]` | `None` | Language hints for transcription. Helps the model prioritize expected languages. |
-| `language_hints_strict` | `bool` | `None` | If true, strictly enforce language hints (only transcribe in provided languages). |
-| `context` | `SonioxContextObject \| str` | `None` | Customization for transcription. String for models with context_version 1, `SonioxContextObject` for context_version 2 (stt-rt-v3-preview and higher). |
-| `enable_speaker_diarization` | `bool` | `False` | Enable speaker diarization. Tokens are annotated with speaker IDs. |
-| `enable_language_identification` | `bool` | `False` | Enable language identification. Tokens are annotated with language IDs. |
-| `client_reference_id` | `str` | `None` | Client reference ID for transcription tracking. |
+| Parameter                        | Type                         | Default       | Description                                                                                                                                            |
+| -------------------------------- | ---------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `model`                          | `str`                        | `"stt-rt-v4"` | Model to use for transcription.                                                                                                                        |
+| `audio_format`                   | `str`                        | `"pcm_s16le"` | Audio format for transcription.                                                                                                                        |
+| `num_channels`                   | `int`                        | `1`           | Number of audio channels.                                                                                                                              |
+| `language_hints`                 | `list[Language]`             | `None`        | Language hints for transcription. Helps the model prioritize expected languages.                                                                       |
+| `language_hints_strict`          | `bool`                       | `None`        | If true, strictly enforce language hints (only transcribe in provided languages).                                                                      |
+| `context`                        | `SonioxContextObject \| str` | `None`        | Customization for transcription. String for models with context_version 1, `SonioxContextObject` for context_version 2 (stt-rt-v3-preview and higher). |
+| `enable_speaker_diarization`     | `bool`                       | `False`       | Enable speaker diarization. Tokens are annotated with speaker IDs.                                                                                     |
+| `enable_language_identification` | `bool`                       | `False`       | Enable language identification. Tokens are annotated with language IDs.                                                                                |
+| `client_reference_id`            | `str`                        | `None`        | Client reference ID for transcription tracking.                                                                                                        |
 
 ## Usage
 
@@ -176,9 +184,9 @@ stt = SonioxSTTService(
 
 Soniox STT supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Soniox WebSocket |
+| Event             | Description                        |
+| ----------------- | ---------------------------------- |
+| `on_connected`    | Connected to Soniox WebSocket      |
 | `on_disconnected` | Disconnected from Soniox WebSocket |
 
 ```python

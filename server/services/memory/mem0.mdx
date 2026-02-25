@@ -78,7 +78,8 @@ Before using Mem0 memory services, you need:
 </ParamField>
 
 <ParamField path="user_id" type="str" default="None">
-  The user ID to associate with memories in Mem0. At least one of `user_id`, `agent_id`, or `run_id` must be provided.
+  The user ID to associate with memories in Mem0. At least one of `user_id`,
+  `agent_id`, or `run_id` must be provided.
 </ParamField>
 
 <ParamField path="agent_id" type="str" default="None">
@@ -90,7 +91,8 @@ Before using Mem0 memory services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for memory retrieval and storage. See [InputParams](#inputparams) below.
+  Configuration parameters for memory retrieval and storage. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 <ParamField path="host" type="str" default="None">
@@ -99,14 +101,14 @@ Before using Mem0 memory services, you need:
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `search_limit` | `int` | `10` | Maximum number of memories to retrieve per query (min: 1). |
-| `search_threshold` | `float` | `0.1` | Minimum similarity threshold for memory retrieval (0.0-1.0). |
-| `api_version` | `str` | `"v2"` | API version to use for Mem0 client operations. |
-| `system_prompt` | `str` | `"Based on previous conversations, I recall: \n\n"` | Prefix text for memory context messages. |
-| `add_as_system_message` | `bool` | `True` | Whether to add memories as system messages. When `False`, adds as user messages. |
-| `position` | `int` | `1` | Position to insert memory messages in context. |
+| Parameter               | Type    | Default                                             | Description                                                                      |
+| ----------------------- | ------- | --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `search_limit`          | `int`   | `10`                                                | Maximum number of memories to retrieve per query (min: 1).                       |
+| `search_threshold`      | `float` | `0.1`                                               | Minimum similarity threshold for memory retrieval (0.0-1.0).                     |
+| `api_version`           | `str`   | `"v2"`                                              | API version to use for Mem0 client operations.                                   |
+| `system_prompt`         | `str`   | `"Based on previous conversations, I recall: \n\n"` | Prefix text for memory context messages.                                         |
+| `add_as_system_message` | `bool`  | `True`                                              | Whether to add memories as system messages. When `False`, adds as user messages. |
+| `position`              | `int`   | `1`                                                 | Position to insert memory messages in context.                                   |
 
 ## Usage
 

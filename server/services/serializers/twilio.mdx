@@ -93,25 +93,28 @@ Before using TwilioFrameSerializer, you need:
 </ParamField>
 
 <ParamField path="region" type="str" default="None">
-  Twilio region (e.g., `"au1"`, `"ie1"`). Must be specified together with `edge`.
+  Twilio region (e.g., `"au1"`, `"ie1"`). Must be specified together with
+  `edge`.
 </ParamField>
 
 <ParamField path="edge" type="str" default="None">
-  Twilio edge location (e.g., `"sydney"`, `"dublin"`). Must be specified together with `region`.
+  Twilio edge location (e.g., `"sydney"`, `"dublin"`). Must be specified
+  together with `region`.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for audio and hang-up behavior. See [InputParams](#inputparams) below.
+  Configuration parameters for audio and hang-up behavior. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `twilio_sample_rate` | `int` | `8000` | Sample rate used by Twilio (Hz). |
-| `sample_rate` | `int` | `None` | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
-| `auto_hang_up` | `bool` | `True` | Whether to automatically terminate the call on `EndFrame` or `CancelFrame`. |
-| `ignore_rtvi_messages` | `bool` | `True` | Whether to ignore RTVI protocol messages during serialization. |
+| Parameter              | Type   | Default | Description                                                                                         |
+| ---------------------- | ------ | ------- | --------------------------------------------------------------------------------------------------- |
+| `twilio_sample_rate`   | `int`  | `8000`  | Sample rate used by Twilio (Hz).                                                                    |
+| `sample_rate`          | `int`  | `None`  | Optional override for pipeline input sample rate. When `None`, uses the pipeline's configured rate. |
+| `auto_hang_up`         | `bool` | `True`  | Whether to automatically terminate the call on `EndFrame` or `CancelFrame`.                         |
+| `ignore_rtvi_messages` | `bool` | `True`  | Whether to ignore RTVI protocol messages during serialization.                                      |
 
 ## Usage
 

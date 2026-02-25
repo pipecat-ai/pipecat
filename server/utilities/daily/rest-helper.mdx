@@ -117,7 +117,14 @@ The class also includes a `sip_endpoint` property that returns the SIP endpoint 
 `enable_recording` also supports `cloud-audio-only`, which records the call server-side and produces an audio-only MPEG-4 file with `.m4a` file extension and content type as `audio/mp4`. This recording setting behaves like `cloud`, except the `layout` options do not apply because there are no video tracks. Note: you can retrieve the resulting `.m4a` recordings via the [Daily REST API](https://docs.daily.co/reference/rest-api/recordings), in the same way you fetch `cloud` recording assets.
 
 <Tip>
-If you're already using `enable_recording="cloud"` and want to switch to audio-only without changing your code, you can set `force_audio_only_recording: 1` on your Daily domain. This forces all cloud recordings to be audio-only (`.m4a` instead of `.mp4`) and skips recording video tracks even if they are present. This is useful when you want to transition to audio-only recordings immediately while avoiding an application redeploy. Switching `force_audio_only_recording: 0` will allow recording video tracks.
+  If you're already using `enable_recording="cloud"` and want to switch to
+  audio-only without changing your code, you can set
+  `force_audio_only_recording: 1` on your Daily domain. This forces all cloud
+  recordings to be audio-only (`.m4a` instead of `.mp4`) and skips recording
+  video tracks even if they are present. This is useful when you want to
+  transition to audio-only recordings immediately while avoiding an application
+  redeploy. Switching `force_audio_only_recording: 0` will allow recording video
+  tracks.
 </Tip>
 
 ```python
@@ -303,9 +310,9 @@ token_params = DailyMeetingTokenParams(
 ```
 
 <Warning>
-  Recording type: `cloud` will produce files with a `.mp4` extension, while `cloud-audio-only` will produce files with a `.m4a` extension.
+  Recording type: `cloud` will produce files with a `.mp4` extension, while
+  `cloud-audio-only` will produce files with a `.m4a` extension.
 </Warning>
-
 
 ## Initialize DailyRESTHelper
 

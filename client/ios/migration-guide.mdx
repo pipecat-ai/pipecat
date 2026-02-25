@@ -1,5 +1,4 @@
 ---
-
 title: "RTVIClient Migration Guide for IOS"
 sidebarTitle: "Migration Guide"
 description: "A Guide to migrating from RTVIClient to PipecatClient for iOS"
@@ -167,13 +166,12 @@ client.disconnect(completion: nil)
 2. **Helpers Removed**: RTVIClientHelper, LLMHelper are gone.
 3. **Configs Removed**: All configuration-related methods, events, and types have been removed: `getConfig()`, `updateConfig()`, `describeConfig()`, `onConfigUpdated`, `onConfigDescribed`, etc.
 4. **Actions Removed**: All actions-related methods, events, and types have been removed: `action()`, `describeActions()`, `onActionsAvailable`, etc.
-8. **New Messaging Methods**:
-
-   * `appendToContext()`
-   * `sendClientRequest()`
-   * `sendClientMessage()`
-   * `disconnectBot()`
-   * `registerFunctionCallHandler()` / `unregisterFunctionCallHandler()` / `unregisterAllFunctionCallHandlers()`
+5. **New Messaging Methods**:
+   - `appendToContext()`
+   - `sendClientRequest()`
+   - `sendClientMessage()`
+   - `disconnectBot()`
+   - `registerFunctionCallHandler()` / `unregisterFunctionCallHandler()` / `unregisterAllFunctionCallHandlers()`
 
 ## Migration Steps
 

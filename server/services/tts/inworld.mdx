@@ -78,12 +78,17 @@ WebSocket-based service for lowest latency streaming.
   ID of the model to use for synthesis.
 </ParamField>
 
-<ParamField path="url" type="str" default="wss://api.inworld.ai/tts/v1/voice:streamBidirectional">
+<ParamField
+  path="url"
+  type="str"
+  default="wss://api.inworld.ai/tts/v1/voice:streamBidirectional"
+>
   URL of the Inworld WebSocket API.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="encoding" type="str" default="LINEAR16">
@@ -99,20 +104,21 @@ WebSocket-based service for lowest latency streaming.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable synthesis settings. See [InworldTTSService InputParams](#inworldttsservice-inputparams) below.
+  Runtime-configurable synthesis settings. See [InworldTTSService
+  InputParams](#inworldttsservice-inputparams) below.
 </ParamField>
 
 #### InworldTTSService InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `temperature` | `float` | `None` | Temperature for speech synthesis. |
-| `speaking_rate` | `float` | `None` | Speaking rate for speech synthesis. |
-| `apply_text_normalization` | `str` | `None` | Whether to apply text normalization. |
-| `max_buffer_delay_ms` | `int` | `None` | Maximum buffer delay in milliseconds. Defaults to 3000 if not set. |
-| `buffer_char_threshold` | `int` | `None` | Buffer character threshold. Defaults to 250 if not set. |
-| `auto_mode` | `bool` | `True` | Server-controlled flushing for optimal latency and quality. Recommended when text is sent in full sentences/phrases. |
-| `timestamp_transport_strategy` | `Literal["ASYNC", "SYNC"]` | `None` | Strategy for timestamp transport. |
+| Parameter                      | Type                       | Default | Description                                                                                                          |
+| ------------------------------ | -------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `temperature`                  | `float`                    | `None`  | Temperature for speech synthesis.                                                                                    |
+| `speaking_rate`                | `float`                    | `None`  | Speaking rate for speech synthesis.                                                                                  |
+| `apply_text_normalization`     | `str`                      | `None`  | Whether to apply text normalization.                                                                                 |
+| `max_buffer_delay_ms`          | `int`                      | `None`  | Maximum buffer delay in milliseconds. Defaults to 3000 if not set.                                                   |
+| `buffer_char_threshold`        | `int`                      | `None`  | Buffer character threshold. Defaults to 250 if not set.                                                              |
+| `auto_mode`                    | `bool`                     | `True`  | Server-controlled flushing for optimal latency and quality. Recommended when text is sent in full sentences/phrases. |
+| `timestamp_transport_strategy` | `Literal["ASYNC", "SYNC"]` | `None`  | Strategy for timestamp transport.                                                                                    |
 
 ### InworldHttpTTSService
 
@@ -147,16 +153,17 @@ HTTP-based service supporting both streaming and non-streaming modes.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable synthesis settings. See [InworldHttpTTSService InputParams](#inworldhttpttsservice-inputparams) below.
+  Runtime-configurable synthesis settings. See [InworldHttpTTSService
+  InputParams](#inworldhttpttsservice-inputparams) below.
 </ParamField>
 
 #### InworldHttpTTSService InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `temperature` | `float` | `None` | Temperature for speech synthesis. |
-| `speaking_rate` | `float` | `None` | Speaking rate for speech synthesis. |
-| `timestamp_transport_strategy` | `Literal["ASYNC", "SYNC"]` | `None` | Strategy for timestamp transport. |
+| Parameter                      | Type                       | Default | Description                         |
+| ------------------------------ | -------------------------- | ------- | ----------------------------------- |
+| `temperature`                  | `float`                    | `None`  | Temperature for speech synthesis.   |
+| `speaking_rate`                | `float`                    | `None`  | Speaking rate for speech synthesis. |
+| `timestamp_transport_strategy` | `Literal["ASYNC", "SYNC"]` | `None`  | Strategy for timestamp transport.   |
 
 ## Usage
 
@@ -212,10 +219,10 @@ async with aiohttp.ClientSession() as session:
 
 Inworld TTS supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Inworld WebSocket |
-| `on_disconnected` | Disconnected from Inworld WebSocket |
+| Event                 | Description                         |
+| --------------------- | ----------------------------------- |
+| `on_connected`        | Connected to Inworld WebSocket      |
+| `on_disconnected`     | Disconnected from Inworld WebSocket |
 | `on_connection_error` | WebSocket connection error occurred |
 
 ```python

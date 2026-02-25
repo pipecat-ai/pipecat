@@ -2,7 +2,7 @@
 title: "Client Methods"
 ---
 
-import { methods, TransportTable } from '/snippets/js-transport-support.jsx';
+import { methods, TransportTable } from "/snippets/js-transport-support.jsx";
 
 The Pipecat JavaScript client provides a comprehensive set of methods for managing bot interactions and media handling. These core methods are documented below.
 
@@ -16,7 +16,7 @@ This method hits your server endpoint to start the bot and optionally obtain the
 
 <ParamField path="startBotParams" type="APIEndpoint" required>
 
-  The `APIEndpoint` object should have the following shape:
+The `APIEndpoint` object should have the following shape:
 
     <Expandable title="APIEndpoint" defaultOpen="true">
       <ParamField path="endpoint" type="string" required>
@@ -32,6 +32,7 @@ This method hits your server endpoint to start the bot and optionally obtain the
           Optional timeout in milliseconds for the request to the endpoint.
         </ParamField>
     </Expandable>
+
 </ParamField>
 
 During the `startBot()` process, the transport state will transition through the states: "authenticating" and "authenticated".
@@ -42,8 +43,8 @@ try {
     endpoint: "/api/start", // Your server endpoint to start the bot
     requestData: {
       initial_prompt: "You are a pirate captain",
-      llm_provider: "openai"
-    }
+      llm_provider: "openai",
+    },
   });
 } catch (error) {
   console.error("Error starting the bot:", error);
@@ -58,9 +59,9 @@ This method initiates the connection process, optionally passing parameters that
 
 <ParamField path="connectParams" type="TransportConnectionParams">
 
-  An object containing the `TransportConnectionParams` your Transport expects.
+An object containing the `TransportConnectionParams` your Transport expects.
 
-  Check your transport class documentation for the expected shape of `TransportConnectionParams`. For example, the DailyTransport expects a `url` and `token`.
+Check your transport class documentation for the expected shape of `TransportConnectionParams`. For example, the DailyTransport expects a `url` and `token`.
 
   <Warning>
     In 1.2.0 we deprecated support for passing a `ConnectionEndpoint` object directly to `connect()`. Instead, you should use the `startBot()` or `startBotAndConnect()` methods to fetch connection parameters from your server endpoint and then pass those parameters directly to `connect()`.
@@ -72,7 +73,7 @@ This method can be try / catched to handle errors at startup:
 ```typescript
 try {
   await pcClient.connect({
-    webrtcUrl: "http://my-server/api/offer"
+    webrtcUrl: "http://my-server/api/offer",
   });
 } catch (error) {
   console.error("Error connecting to the bot:", error);
@@ -82,11 +83,16 @@ try {
 During the connection process, the transport state will transition through the following states: "connecting", "connected", "ready".
 
 <Note>
-  Calling `connect()` asynchronously will resolve when the bot and client signal that they are ready. See [messages and events](./messages). If you want to call `connect()` without `await`, you can use the `onBotReady` callback or `BotReady` event to know when you can interact with the bot.
+  Calling `connect()` asynchronously will resolve when the bot and client signal
+  that they are ready. See [messages and events](./messages). If you want to
+  call `connect()` without `await`, you can use the `onBotReady` callback or
+  `BotReady` event to know when you can interact with the bot.
 </Note>
 
 <Warning>
-  Attempting to call `connect()` when the transport is already in a 'connected' or 'ready' state will throw an error. You should [disconnect](#disconnect) from a session first before attempting to connect again.
+  Attempting to call `connect()` when the transport is already in a 'connected'
+  or 'ready' state will throw an error. You should [disconnect](#disconnect)
+  from a session first before attempting to connect again.
 </Warning>
 
 ### startBotAndConnect()
@@ -101,8 +107,8 @@ try {
     endpoint: "/api/start", // Your server endpoint to start the bot
     requestData: {
       initial_prompt: "You are a pirate captain",
-      llm_provider: "openai"
-    }
+      llm_provider: "openai",
+    },
   });
 } catch (error) {
   console.error("Error starting up:", error);
@@ -110,7 +116,6 @@ try {
 ```
 
 It's equivalent to: `pcClient.startBot(...).then((resp) => pcClient.connect(resp))`.
-
 
 ### disconnect()
 
@@ -151,7 +156,8 @@ Sends a custom message to the bot and does not expect a response. This is useful
 </ParamField>
 
 <ParamField path="data" type="unknown">
-  Optional data to send with the message. This can be any JSON-serializable object.
+  Optional data to send with the message. This can be any JSON-serializable
+  object.
 </ParamField>
 
 ### sendClientRequest()
@@ -165,11 +171,14 @@ Sends a custom request to the bot and expects a response. This is useful for que
 </ParamField>
 
 <ParamField path="data" type="unknown">
-  Optional data to send with the message. This can be any JSON-serializable object.
+  Optional data to send with the message. This can be any JSON-serializable
+  object.
 </ParamField>
 
 <ParamField path="timeout" type="number" default="10000">
-  Optional timeout in milliseconds for the request. If the request does not receive a response within this time, it will reject with an RTVIMessage of type `'error-response'`.
+  Optional timeout in milliseconds for the request. If the request does not
+  receive a response within this time, it will reject with an RTVIMessage of
+  type `'error-response'`.
 </ParamField>
 
 ## Devices
@@ -293,7 +302,8 @@ pcClient.updateSpeaker(deviceId);
 Turn on or off (unmute or mute) the client mic input.
 
 <ParamField path="enable" type="boolean" required>
-  A boolean indicating whether to enable (`true`) or disable (`false`) the microphone.
+  A boolean indicating whether to enable (`true`) or disable (`false`) the
+  microphone.
 </ParamField>
 
 ```typescript
@@ -307,7 +317,8 @@ pcClient.enableMic(true);
 Turn on or off the client cam input.
 
 <ParamField path="enable" type="boolean" required>
-  A boolean indicating whether to enable (`true`) or disable (`false`) the camera.
+  A boolean indicating whether to enable (`true`) or disable (`false`) the
+  camera.
 </ParamField>
 
 ```typescript
@@ -321,7 +332,8 @@ pcClient.enableCam(true);
 Start a screen share from the client's device.
 
 <ParamField path="enable" type="boolean" required>
-  A boolean indicating whether to enable (`true`) or disable (`false`) screen sharing.
+  A boolean indicating whether to enable (`true`) or disable (`false`) screen
+  sharing.
 </ParamField>
 
 ```typescript
@@ -365,10 +377,11 @@ screen_sharing = pcClient.isSharingScreen;
 Returns a `Tracks` object with available `MediaStreamTrack` objects for both the client and the bot.
 
 ```typescript
-live_tracks_list = pcClient.tracks()
+live_tracks_list = pcClient.tracks();
 ```
 
 **Tracks Type**
+
 ```typescript
 {
   local: {
@@ -397,21 +410,26 @@ A method to append text to the user's context. This is useful for providing text
   An optional set of options for how the bot should handle the text input.
   <Expandable title="SendTextOptions" defaultOpen="true">
     <ParamField path="run_immediately" type="boolean" default="true">
-      Whether to immediately run the bot with the updated context. If `false`, the context will be updated but the bot will not be run until the next message or action that triggers the bot to run (like the user speaking).
+      Whether to immediately run the bot with the updated context. If `false`,
+      the context will be updated but the bot will not be run until the next
+      message or action that triggers the bot to run (like the user speaking).
     </ParamField>
     <ParamField path="audio_response" type="boolean" default="true">
-      Whether the bot should respond with audio. If `true`, the bot's response will be processed by TTS and be spoken. If `false`, the bot will bypass the TTS and respond with text only.
+      Whether the bot should respond with audio. If `true`, the bot's response
+      will be processed by TTS and be spoken. If `false`, the bot will bypass
+      the TTS and respond with text only.
     </ParamField>
   </Expandable>
 </ParamField>
-
 
 ### appendToContext()
 
 `async appendToContext(context: LLMContextMessage): boolean`
 
 <Warning>
-  In 0.0.4, we deprecated `appendToContext` in favor of `send-text` to close a security vulnerability as well as lay the groundwork for proper support of passing other types of context, like images and files.
+  In 0.0.4, we deprecated `appendToContext` in favor of `send-text` to close a
+  security vulnerability as well as lay the groundwork for proper support of
+  passing other types of context, like images and files.
 </Warning>
 
 A method to append data to the bot's context. This is useful for providing additional information or context to the bot during the conversation.
@@ -420,13 +438,17 @@ A method to append data to the bot's context. This is useful for providing addit
   The context to append. This should be an object with the following shape:
   <Expandable title="LLMContextMessage" defaultOpen="true">
     <ParamField path="role" type="string" required>
-      The role to append the context to. Currently only "user" or "assistant" are supported.
+      The role to append the context to. Currently only "user" or "assistant"
+      are supported.
     </ParamField>
     <ParamField path="content" type="unknown" required>
-      The content to append to the context. This can be any JSON-serializable object.
+      The content to append to the context. This can be any JSON-serializable
+      object.
     </ParamField>
     <ParamField path="run_immediately" type="boolean" default="false">
-      Whether to immediately run the bot with the updated context. If `false`, the context will be updated but the bot will not be run until the next message or action that triggers the bot to run (like the user speaking).
+      Whether to immediately run the bot with the updated context. If `false`,
+      the context will be updated but the bot will not be run until the next
+      message or action that triggers the bot to run (like the user speaking).
     </ParamField>
   </Expandable>
 </ParamField>
@@ -443,18 +465,21 @@ Registers a function call handler that will be called when the bot requests a fu
 <ParamField path="callback" type="FunctionCallCallback" required>
   `type FunctionCallCallback = (fn: FunctionCallParams) => Promise<LLMFunctionCallResult | void>`
 
-  The callback function to call when the bot sends a function call request. This function should accept the following parameters:
+The callback function to call when the bot sends a function call request. This function should accept the following parameters:
 
-  <Expandable title="FunctionCallParams" defaultOpen="true">
-    <ParamField path="functionName" type="string" required>
-      The name of the function being called. It should always match the name you registered the handler under.
-    </ParamField>
-    <ParamField path="arguments" type="Record<string, unknown>" required>
-      The arguments passed to the function call. This is a key-value object where the keys are the argument names and the values are the argument values.
-    </ParamField>
-  </Expandable>
+<Expandable title="FunctionCallParams" defaultOpen="true">
+  <ParamField path="functionName" type="string" required>
+    The name of the function being called. It should always match the name you
+    registered the handler under.
+  </ParamField>
+  <ParamField path="arguments" type="Record<string, unknown>" required>
+    The arguments passed to the function call. This is a key-value object where
+    the keys are the argument names and the values are the argument values.
+  </ParamField>
+</Expandable>
 
-  The callback should return a Promise that resolves with the result of the function call or void if no result is needed. If returning a result, it should be a `string` or `Record<string, unknown>`.
+The callback should return a Promise that resolves with the result of the function call or void if no result is needed. If returning a result, it should be a `string` or `Record<string, unknown>`.
+
 </ParamField>
 
 ## Other

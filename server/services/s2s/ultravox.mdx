@@ -74,12 +74,19 @@ Before using Ultravox Realtime services, you need:
 
 ### UltravoxRealtimeLLMService
 
-<ParamField path="params" type="AgentInputParams | OneShotInputParams | JoinUrlInputParams" required>
-  Configuration parameters for connecting to Ultravox. One of three input parameter types must be provided. See [Input Parameter Types](#input-parameter-types) below.
+<ParamField
+  path="params"
+  type="AgentInputParams | OneShotInputParams | JoinUrlInputParams"
+  required
+>
+  Configuration parameters for connecting to Ultravox. One of three input
+  parameter types must be provided. See [Input Parameter
+  Types](#input-parameter-types) below.
 </ParamField>
 
 <ParamField path="one_shot_selected_tools" type="ToolsSchema" default="None">
-  Tools to use with a one-shot call. May only be set when using `OneShotInputParams`.
+  Tools to use with a one-shot call. May only be set when using
+  `OneShotInputParams`.
 </ParamField>
 
 ### Input Parameter Types
@@ -90,36 +97,36 @@ Ultravox supports three different ways to create or join a call:
 
 Use a pre-configured Ultravox Agent to handle calls consistently.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `api_key` | `str` | required | Ultravox API key for authentication. |
-| `agent_id` | `UUID` | required | The ID of the Ultravox agent. Create and edit agents in the [Ultravox Console](https://app.ultravox.ai/agents). |
-| `template_context` | `Dict[str, Any]` | `{}` | Context variables for agent template instantiation. |
-| `metadata` | `Dict[str, str]` | `{}` | Metadata to attach to the call. |
-| `max_duration` | `timedelta` | `None` | Maximum call duration (10s to 1h). `None` uses the agent's default. |
-| `extra` | `Dict[str, Any]` | `{}` | Extra parameters for the [agent call creation request](https://docs.ultravox.ai/api-reference/agents/agents-calls-post). |
+| Parameter          | Type             | Default  | Description                                                                                                              |
+| ------------------ | ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `api_key`          | `str`            | required | Ultravox API key for authentication.                                                                                     |
+| `agent_id`         | `UUID`           | required | The ID of the Ultravox agent. Create and edit agents in the [Ultravox Console](https://app.ultravox.ai/agents).          |
+| `template_context` | `Dict[str, Any]` | `{}`     | Context variables for agent template instantiation.                                                                      |
+| `metadata`         | `Dict[str, str]` | `{}`     | Metadata to attach to the call.                                                                                          |
+| `max_duration`     | `timedelta`      | `None`   | Maximum call duration (10s to 1h). `None` uses the agent's default.                                                      |
+| `extra`            | `Dict[str, Any]` | `{}`     | Extra parameters for the [agent call creation request](https://docs.ultravox.ai/api-reference/agents/agents-calls-post). |
 
 #### OneShotInputParams
 
 Create a one-off call with inline configuration.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `api_key` | `str` | required | Ultravox API key for authentication. |
-| `system_prompt` | `str` | `None` | System prompt to guide the model's behavior. |
-| `temperature` | `float` | `0.0` | Sampling temperature for response generation (0.0-1.0). |
-| `model` | `str` | `None` | Model identifier to use (e.g., `"fixie-ai/ultravox"`). |
-| `voice` | `UUID` | `None` | Voice identifier for speech generation. |
-| `metadata` | `Dict[str, str]` | `{}` | Metadata to attach to the call. |
-| `max_duration` | `timedelta` | `1 hour` | Maximum call duration (10s to 1h). |
-| `extra` | `Dict[str, Any]` | `{}` | Extra parameters for the [call creation request](https://docs.ultravox.ai/api-reference/calls/calls-post). |
+| Parameter       | Type             | Default  | Description                                                                                                |
+| --------------- | ---------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `api_key`       | `str`            | required | Ultravox API key for authentication.                                                                       |
+| `system_prompt` | `str`            | `None`   | System prompt to guide the model's behavior.                                                               |
+| `temperature`   | `float`          | `0.0`    | Sampling temperature for response generation (0.0-1.0).                                                    |
+| `model`         | `str`            | `None`   | Model identifier to use (e.g., `"fixie-ai/ultravox"`).                                                     |
+| `voice`         | `UUID`           | `None`   | Voice identifier for speech generation.                                                                    |
+| `metadata`      | `Dict[str, str]` | `{}`     | Metadata to attach to the call.                                                                            |
+| `max_duration`  | `timedelta`      | `1 hour` | Maximum call duration (10s to 1h).                                                                         |
+| `extra`         | `Dict[str, Any]` | `{}`     | Extra parameters for the [call creation request](https://docs.ultravox.ai/api-reference/calls/calls-post). |
 
 #### JoinUrlInputParams
 
 Join an existing Ultravox call using a join URL.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
+| Parameter  | Type  | Default  | Description                                           |
+| ---------- | ----- | -------- | ----------------------------------------------------- |
 | `join_url` | `str` | required | The join URL for the existing Ultravox Realtime call. |
 
 ## Usage

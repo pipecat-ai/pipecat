@@ -89,19 +89,21 @@ Streaming service optimized for Chirp 3 HD and Journey voices.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="InputParams()">
-  Language and speaking rate configuration. See [GoogleTTSService InputParams](#googlettsservice-inputparams) below.
+  Language and speaking rate configuration. See [GoogleTTSService
+  InputParams](#googlettsservice-inputparams) below.
 </ParamField>
 
 #### GoogleTTSService InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Language for synthesis. |
-| `speaking_rate` | `float` | `None` | Speaking rate in the range [0.25, 2.0]. |
+| Parameter       | Type       | Default       | Description                             |
+| --------------- | ---------- | ------------- | --------------------------------------- |
+| `language`      | `Language` | `Language.EN` | Language for synthesis.                 |
+| `speaking_rate` | `float`    | `None`        | Speaking rate in the range [0.25, 2.0]. |
 
 ### GoogleHttpTTSService
 
@@ -128,28 +130,30 @@ HTTP service with full SSML support for all voice types.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Voice customization parameters. See [GoogleHttpTTSService InputParams](#googlehttpttsservice-inputparams) below.
+  Voice customization parameters. See [GoogleHttpTTSService
+  InputParams](#googlehttpttsservice-inputparams) below.
 </ParamField>
 
 #### GoogleHttpTTSService InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `pitch` | `str` | `None` | Voice pitch adjustment (e.g., `"+2st"`, `"-50%"`). |
-| `rate` | `str` | `None` | Speaking rate for SSML prosody (non-Chirp voices, e.g., `"slow"`, `"fast"`, `"125%"`). |
-| `speaking_rate` | `float` | `None` | Speaking rate for AudioConfig (Chirp/Journey voices). Range [0.25, 2.0]. |
-| `volume` | `str` | `None` | Volume adjustment (e.g., `"loud"`, `"soft"`, `"+6dB"`). |
-| `emphasis` | `Literal` | `None` | Emphasis level: `"strong"`, `"moderate"`, `"reduced"`, `"none"`. |
-| `language` | `Language` | `Language.EN` | Language for synthesis. |
-| `gender` | `Literal` | `None` | Voice gender preference: `"male"`, `"female"`, `"neutral"`. |
-| `google_style` | `Literal` | `None` | Google-specific voice style: `"apologetic"`, `"calm"`, `"empathetic"`, `"firm"`, `"lively"`. |
+| Parameter       | Type       | Default       | Description                                                                                  |
+| --------------- | ---------- | ------------- | -------------------------------------------------------------------------------------------- |
+| `pitch`         | `str`      | `None`        | Voice pitch adjustment (e.g., `"+2st"`, `"-50%"`).                                           |
+| `rate`          | `str`      | `None`        | Speaking rate for SSML prosody (non-Chirp voices, e.g., `"slow"`, `"fast"`, `"125%"`).       |
+| `speaking_rate` | `float`    | `None`        | Speaking rate for AudioConfig (Chirp/Journey voices). Range [0.25, 2.0].                     |
+| `volume`        | `str`      | `None`        | Volume adjustment (e.g., `"loud"`, `"soft"`, `"+6dB"`).                                      |
+| `emphasis`      | `Literal`  | `None`        | Emphasis level: `"strong"`, `"moderate"`, `"reduced"`, `"none"`.                             |
+| `language`      | `Language` | `Language.EN` | Language for synthesis.                                                                      |
+| `gender`        | `Literal`  | `None`        | Voice gender preference: `"male"`, `"female"`, `"neutral"`.                                  |
+| `google_style`  | `Literal`  | `None`        | Google-specific voice style: `"apologetic"`, `"calm"`, `"empathetic"`, `"firm"`, `"lively"`. |
 
 ### GeminiTTSService
 
 Streaming service using Gemini's TTS-specific models with natural voice control, prompts for style instructions, and multi-speaker support.
 
 <ParamField path="model" type="str" default="gemini-2.5-flash-tts">
-  Gemini TTS model to use. Options: `"gemini-2.5-flash-tts"`, `"gemini-2.5-pro-tts"`.
+  Gemini TTS model to use. Options: `"gemini-2.5-flash-tts"`,
+  `"gemini-2.5-pro-tts"`.
 </ParamField>
 
 <ParamField path="credentials" type="str" default="None">
@@ -165,25 +169,28 @@ Streaming service using Gemini's TTS-specific models with natural voice control,
 </ParamField>
 
 <ParamField path="voice_id" type="str" default="Kore">
-  Voice name from available Gemini voices (e.g., `"Kore"`, `"Charon"`, `"Puck"`, `"Zephyr"`).
+  Voice name from available Gemini voices (e.g., `"Kore"`, `"Charon"`, `"Puck"`,
+  `"Zephyr"`).
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. Google TTS outputs at 24kHz; mismatched rates will produce a warning.
+  Output audio sample rate in Hz. Google TTS outputs at 24kHz; mismatched rates
+  will produce a warning.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  TTS configuration parameters. See [GeminiTTSService InputParams](#geminittsservice-inputparams) below.
+  TTS configuration parameters. See [GeminiTTSService
+  InputParams](#geminittsservice-inputparams) below.
 </ParamField>
 
 #### GeminiTTSService InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Language for synthesis. |
-| `prompt` | `str` | `None` | Style instructions for how to synthesize the content. |
-| `multi_speaker` | `bool` | `False` | Enable multi-speaker support. |
-| `speaker_configs` | `list[dict]` | `None` | Speaker configurations for multi-speaker mode. Each dict should have `speaker_alias` and optionally `speaker_id`. |
+| Parameter         | Type         | Default       | Description                                                                                                       |
+| ----------------- | ------------ | ------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `language`        | `Language`   | `Language.EN` | Language for synthesis.                                                                                           |
+| `prompt`          | `str`        | `None`        | Style instructions for how to synthesize the content.                                                             |
+| `multi_speaker`   | `bool`       | `False`       | Enable multi-speaker support.                                                                                     |
+| `speaker_configs` | `list[dict]` | `None`        | Speaker configurations for multi-speaker mode. Each dict should have `speaker_alias` and optionally `speaker_id`. |
 
 ## Usage
 

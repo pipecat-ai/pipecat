@@ -69,7 +69,9 @@ Before using Sarvam STT services, you need:
 </ParamField>
 
 <ParamField path="model" type="str" default="saarika:v2.5">
-  Sarvam model to use. Allowed values: `"saarika:v2.5"` (standard STT), `"saaras:v2.5"` (STT-Translate, auto-detects language), `"saaras:v3"` (advanced, supports mode and prompts).
+  Sarvam model to use. Allowed values: `"saarika:v2.5"` (standard STT),
+  `"saaras:v2.5"` (STT-Translate, auto-detects language), `"saaras:v3"`
+  (advanced, supports mode and prompts).
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
@@ -85,7 +87,8 @@ Before using Sarvam STT services, you need:
 </ParamField>
 
 <ParamField path="keepalive_timeout" type="float" default="None">
-  Seconds of no audio before sending silence to keep the connection alive. `None` disables keepalive.
+  Seconds of no audio before sending silence to keep the connection alive.
+  `None` disables keepalive.
 </ParamField>
 
 <ParamField path="keepalive_interval" type="float" default="5.0">
@@ -94,13 +97,13 @@ Before using Sarvam STT services, you need:
 
 ### InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `None` | Target language for transcription. Behavior varies by model: `saarika:v2.5` defaults to "unknown" (auto-detect), `saaras:v2.5` ignores this (auto-detects), `saaras:v3` defaults to "en-IN". |
-| `prompt` | `str` | `None` | Optional prompt to guide transcription/translation style. Only applicable to saaras models (v2.5 and v3). |
-| `mode` | `str` | `None` | Mode of operation for `saaras:v3` only. Options: `"transcribe"`, `"translate"`, `"verbatim"`, `"translit"`, `"codemix"`. Defaults to `"transcribe"` for saaras:v3. |
-| `vad_signals` | `bool` | `None` | Enable VAD signals in responses. When enabled, the service broadcasts `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` from the server. |
-| `high_vad_sensitivity` | `bool` | `None` | Enable high VAD sensitivity for more responsive speech detection. |
+| Parameter              | Type       | Default | Description                                                                                                                                                                                  |
+| ---------------------- | ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `language`             | `Language` | `None`  | Target language for transcription. Behavior varies by model: `saarika:v2.5` defaults to "unknown" (auto-detect), `saaras:v2.5` ignores this (auto-detects), `saaras:v3` defaults to "en-IN". |
+| `prompt`               | `str`      | `None`  | Optional prompt to guide transcription/translation style. Only applicable to saaras models (v2.5 and v3).                                                                                    |
+| `mode`                 | `str`      | `None`  | Mode of operation for `saaras:v3` only. Options: `"transcribe"`, `"translate"`, `"verbatim"`, `"translit"`, `"codemix"`. Defaults to `"transcribe"` for saaras:v3.                           |
+| `vad_signals`          | `bool`     | `None`  | Enable VAD signals in responses. When enabled, the service broadcasts `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` from the server.                                             |
+| `high_vad_sensitivity` | `bool`     | `None`  | Enable high VAD sensitivity for more responsive speech detection.                                                                                                                            |
 
 ## Usage
 
@@ -156,11 +159,11 @@ stt = SarvamSTTService(
 
 In addition to the standard [service connection events](/server/utilities/service-events) (`on_connected`, `on_disconnected`, `on_connection_error`), Sarvam STT provides:
 
-| Event | Description |
-| --- | --- |
+| Event               | Description                         |
+| ------------------- | ----------------------------------- |
 | `on_speech_started` | Speech detected in the audio stream |
-| `on_speech_stopped` | Speech stopped |
-| `on_utterance_end` | End of utterance detected |
+| `on_speech_stopped` | Speech stopped                      |
+| `on_utterance_end`  | End of utterance detected           |
 
 ```python
 @stt.event_handler("on_speech_started")

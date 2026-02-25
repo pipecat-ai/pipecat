@@ -69,11 +69,13 @@ Before using AWS Polly TTS services, you need:
 ### AWSPollyTTSService
 
 <ParamField path="api_key" type="str" default="None">
-  AWS secret access key. If `None`, uses the `AWS_SECRET_ACCESS_KEY` environment variable.
+  AWS secret access key. If `None`, uses the `AWS_SECRET_ACCESS_KEY` environment
+  variable.
 </ParamField>
 
 <ParamField path="aws_access_key_id" type="str" default="None">
-  AWS access key ID. If `None`, uses the `AWS_ACCESS_KEY_ID` environment variable.
+  AWS access key ID. If `None`, uses the `AWS_ACCESS_KEY_ID` environment
+  variable.
 </ParamField>
 
 <ParamField path="aws_session_token" type="str" default="None">
@@ -81,7 +83,8 @@ Before using AWS Polly TTS services, you need:
 </ParamField>
 
 <ParamField path="region" type="str" default="None">
-  AWS region for Polly service. Defaults to `us-east-1` if not set via environment variable.
+  AWS region for Polly service. Defaults to `us-east-1` if not set via
+  environment variable.
 </ParamField>
 
 <ParamField path="voice_id" type="str" default="Joanna">
@@ -89,25 +92,28 @@ Before using AWS Polly TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate. AWS Polly internally synthesizes at 16kHz and resamples to the target rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate. AWS Polly internally synthesizes at 16kHz and resamples to the
+  target rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams](#inputparams) below.
+  Runtime-configurable voice and generation settings. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### InputParams
 
 Voice and generation settings that can be set at initialization via the `params` constructor argument, or changed at runtime via [`UpdateSettingsFrame`](/server/utilities/frame-processor-events#updatesettingsframe).
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `engine` | `str` | `None` | TTS engine to use (`"standard"`, `"neural"`, `"generative"`, etc.). |
-| `language` | `Language` | `Language.EN` | Language for synthesis. |
-| `pitch` | `str` | `None` | Voice pitch adjustment (for standard engine only, e.g. `"+10%"`). |
-| `rate` | `str` | `None` | Speech rate adjustment (e.g. `"slow"`, `"fast"`, `"120%"`). |
-| `volume` | `str` | `None` | Voice volume adjustment (e.g. `"loud"`, `"soft"`, `"+6dB"`). |
-| `lexicon_names` | `list[str]` | `None` | List of pronunciation lexicon names to apply. |
+| Parameter       | Type        | Default       | Description                                                         |
+| --------------- | ----------- | ------------- | ------------------------------------------------------------------- |
+| `engine`        | `str`       | `None`        | TTS engine to use (`"standard"`, `"neural"`, `"generative"`, etc.). |
+| `language`      | `Language`  | `Language.EN` | Language for synthesis.                                             |
+| `pitch`         | `str`       | `None`        | Voice pitch adjustment (for standard engine only, e.g. `"+10%"`).   |
+| `rate`          | `str`       | `None`        | Speech rate adjustment (e.g. `"slow"`, `"fast"`, `"120%"`).         |
+| `volume`        | `str`       | `None`        | Voice volume adjustment (e.g. `"loud"`, `"soft"`, `"+6dB"`).        |
+| `lexicon_names` | `list[str]` | `None`        | List of pronunciation lexicon names to apply.                       |
 
 ## Usage
 

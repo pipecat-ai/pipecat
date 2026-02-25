@@ -9,13 +9,13 @@ Every frame processor in Pipecat — including all services, transports, and cus
 
 ## Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_error` | An error occurred in this processor |
-| `on_before_process_frame` | A frame is about to be processed |
-| `on_after_process_frame` | A frame has just been processed |
-| `on_before_push_frame` | A frame is about to be pushed to the next processor |
-| `on_after_push_frame` | A frame has just been pushed to the next processor |
+| Event                     | Description                                         |
+| ------------------------- | --------------------------------------------------- |
+| `on_error`                | An error occurred in this processor                 |
+| `on_before_process_frame` | A frame is about to be processed                    |
+| `on_after_process_frame`  | A frame has just been processed                     |
+| `on_before_push_frame`    | A frame is about to be pushed to the next processor |
+| `on_after_push_frame`     | A frame has just been pushed to the next processor  |
 
 ## Error Handling
 
@@ -35,10 +35,10 @@ async def on_tts_error(processor, error):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `processor` | `FrameProcessor` | The processor where the error occurred |
-| `error` | `ErrorFrame` | The error frame containing error details |
+| Parameter   | Type             | Description                              |
+| ----------- | ---------------- | ---------------------------------------- |
+| `processor` | `FrameProcessor` | The processor where the error occurred   |
+| `error`     | `ErrorFrame`     | The error frame containing error details |
 
 The `ErrorFrame` provides:
 
@@ -48,8 +48,9 @@ The `ErrorFrame` provides:
 - `processor` (Optional[FrameProcessor]): The processor that originated the error
 
 <Note>
-  Since `on_error` is synchronous, the handler runs before the error frame propagates upstream.
-  Keep your handler fast — use it for logging or setting flags, not for I/O operations.
+  Since `on_error` is synchronous, the handler runs before the error frame
+  propagates upstream. Keep your handler fast — use it for logging or setting
+  flags, not for I/O operations.
 </Note>
 
 ### Example: Error handling across multiple processors
@@ -81,10 +82,10 @@ async def on_before_process(processor, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type             | Description                              |
+| ----------- | ---------------- | ---------------------------------------- |
 | `processor` | `FrameProcessor` | The processor about to process the frame |
-| `frame` | `Frame` | The frame about to be processed |
+| `frame`     | `Frame`          | The frame about to be processed          |
 
 ### on_after_process_frame
 
@@ -98,10 +99,10 @@ async def on_after_process(processor, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type             | Description                            |
+| ----------- | ---------------- | -------------------------------------- |
 | `processor` | `FrameProcessor` | The processor that processed the frame |
-| `frame` | `Frame` | The frame that was processed |
+| `frame`     | `Frame`          | The frame that was processed           |
 
 ### on_before_push_frame
 
@@ -115,10 +116,10 @@ async def on_before_push(processor, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type             | Description                     |
+| ----------- | ---------------- | ------------------------------- |
 | `processor` | `FrameProcessor` | The processor pushing the frame |
-| `frame` | `Frame` | The frame about to be pushed |
+| `frame`     | `Frame`          | The frame about to be pushed    |
 
 ### on_after_push_frame
 
@@ -132,13 +133,16 @@ async def on_after_push(processor, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type             | Description                         |
+| ----------- | ---------------- | ----------------------------------- |
 | `processor` | `FrameProcessor` | The processor that pushed the frame |
-| `frame` | `Frame` | The frame that was pushed |
+| `frame`     | `Frame`          | The frame that was pushed           |
 
 <Warning>
-  All frame processing events are **synchronous** — handlers block the pipeline until they complete. Avoid any I/O, `await` calls to external services, or other slow operations in these handlers. Use them only for fast operations like logging, counting, or setting flags.
+  All frame processing events are **synchronous** — handlers block the pipeline
+  until they complete. Avoid any I/O, `await` calls to external services, or
+  other slow operations in these handlers. Use them only for fast operations
+  like logging, counting, or setting flags.
 </Warning>
 
 ## Related

@@ -74,16 +74,22 @@ Real-time streaming transcription using NVIDIA Riva's Parakeet models. Supports 
   NVIDIA Riva server address.
 </ParamField>
 
-<ParamField path="model_function_map" type="Mapping[str, str]" default='{"function_id": "1598d209-5e27-4d3c-8079-4751568b1081", "model_name": "parakeet-ctc-1.1b-asr"}'>
+<ParamField
+  path="model_function_map"
+  type="Mapping[str, str]"
+  default='{"function_id": "1598d209-5e27-4d3c-8079-4751568b1081", "model_name": "parakeet-ctc-1.1b-asr"}'
+>
   Mapping containing `function_id` and `model_name` for the ASR model.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters. See [NvidiaSTTService InputParams](#nvidiasttservice-inputparams) below.
+  Configuration parameters. See [NvidiaSTTService
+  InputParams](#nvidiasttservice-inputparams) below.
 </ParamField>
 
 <ParamField path="use_ssl" type="bool" default="True">
@@ -92,8 +98,8 @@ Real-time streaming transcription using NVIDIA Riva's Parakeet models. Supports 
 
 #### NvidiaSTTService InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
+| Parameter  | Type       | Default          | Description                        |
+| ---------- | ---------- | ---------------- | ---------------------------------- |
 | `language` | `Language` | `Language.EN_US` | Target language for transcription. |
 
 ### NvidiaSegmentedSTTService
@@ -108,16 +114,22 @@ Batch/segmented transcription using NVIDIA Riva's Canary models. Processes compl
   NVIDIA Riva server address.
 </ParamField>
 
-<ParamField path="model_function_map" type="Mapping[str, str]" default='{"function_id": "ee8dc628-76de-4acc-8595-1836e7e857bd", "model_name": "canary-1b-asr"}'>
+<ParamField
+  path="model_function_map"
+  type="Mapping[str, str]"
+  default='{"function_id": "ee8dc628-76de-4acc-8595-1836e7e857bd", "model_name": "canary-1b-asr"}'
+>
   Mapping containing `function_id` and `model_name` for the ASR model.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters. See [NvidiaSegmentedSTTService InputParams](#nvidasegmentedsttservice-inputparams) below.
+  Configuration parameters. See [NvidiaSegmentedSTTService
+  InputParams](#nvidasegmentedsttservice-inputparams) below.
 </ParamField>
 
 <ParamField path="use_ssl" type="bool" default="True">
@@ -126,14 +138,14 @@ Batch/segmented transcription using NVIDIA Riva's Canary models. Processes compl
 
 #### NvidiaSegmentedSTTService InputParams
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN_US` | Target language for transcription. |
-| `profanity_filter` | `bool` | `False` | Whether to filter profanity from results. |
-| `automatic_punctuation` | `bool` | `True` | Whether to add automatic punctuation. |
-| `verbatim_transcripts` | `bool` | `False` | Whether to return verbatim transcripts. |
-| `boosted_lm_words` | `list[str]` | `None` | List of words to boost in the language model. |
-| `boosted_lm_score` | `float` | `4.0` | Score boost for specified words. |
+| Parameter               | Type        | Default          | Description                                   |
+| ----------------------- | ----------- | ---------------- | --------------------------------------------- |
+| `language`              | `Language`  | `Language.EN_US` | Target language for transcription.            |
+| `profanity_filter`      | `bool`      | `False`          | Whether to filter profanity from results.     |
+| `automatic_punctuation` | `bool`      | `True`           | Whether to add automatic punctuation.         |
+| `verbatim_transcripts`  | `bool`      | `False`          | Whether to return verbatim transcripts.       |
+| `boosted_lm_words`      | `list[str]` | `None`           | List of words to boost in the language model. |
+| `boosted_lm_score`      | `float`     | `4.0`            | Score boost for specified words.              |
 
 ## Usage
 

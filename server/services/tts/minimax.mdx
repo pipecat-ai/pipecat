@@ -78,11 +78,17 @@ Before using MiniMax TTS services, you need:
 </ParamField>
 
 <ParamField path="model" type="str" default="speech-02-turbo">
-  TTS model name. Options include `speech-2.6-hd`, `speech-2.6-turbo`, `speech-02-hd`, `speech-02-turbo`, `speech-01-hd`, `speech-01-turbo`.
+  TTS model name. Options include `speech-2.6-hd`, `speech-2.6-turbo`,
+  `speech-02-hd`, `speech-02-turbo`, `speech-01-hd`, `speech-01-turbo`.
 </ParamField>
 
-<ParamField path="base_url" type="str" default="https://api.minimax.io/v1/t2a_v2">
-  API base URL. Use `https://api.minimaxi.chat/v1/t2a_v2` for mainland China or `https://api-uw.minimax.io/v1/t2a_v2` for western United States.
+<ParamField
+  path="base_url"
+  type="str"
+  default="https://api.minimax.io/v1/t2a_v2"
+>
+  API base URL. Use `https://api.minimaxi.chat/v1/t2a_v2` for mainland China or
+  `https://api-uw.minimax.io/v1/t2a_v2` for western United States.
 </ParamField>
 
 <ParamField path="aiohttp_session" type="aiohttp.ClientSession" required>
@@ -90,28 +96,30 @@ Before using MiniMax TTS services, you need:
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams](#inputparams) below.
+  Runtime-configurable voice and generation settings. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### InputParams
 
 Voice and generation settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Language for TTS generation. Supports 40+ languages. Filipino, Tamil, and Persian require `speech-2.6-*` models. |
-| `speed` | `float` | `1.0` | Speech speed (0.5 to 2.0). |
-| `volume` | `float` | `1.0` | Speech volume (0 to 10). |
-| `pitch` | `int` | `0` | Pitch adjustment (-12 to 12). |
-| `emotion` | `str` | `None` | Emotional tone: `"happy"`, `"sad"`, `"angry"`, `"fearful"`, `"disgusted"`, `"surprised"`, `"calm"`, or `"fluent"`. |
-| `english_normalization` | `bool` | `None` | Deprecated. Use `text_normalization` instead. |
-| `text_normalization` | `bool` | `None` | Enable text normalization (Chinese/English). |
-| `latex_read` | `bool` | `None` | Enable LaTeX formula reading. |
-| `exclude_aggregated_audio` | `bool` | `None` | Whether to exclude aggregated audio in final chunk. |
+| Parameter                  | Type       | Default       | Description                                                                                                        |
+| -------------------------- | ---------- | ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `language`                 | `Language` | `Language.EN` | Language for TTS generation. Supports 40+ languages. Filipino, Tamil, and Persian require `speech-2.6-*` models.   |
+| `speed`                    | `float`    | `1.0`         | Speech speed (0.5 to 2.0).                                                                                         |
+| `volume`                   | `float`    | `1.0`         | Speech volume (0 to 10).                                                                                           |
+| `pitch`                    | `int`      | `0`           | Pitch adjustment (-12 to 12).                                                                                      |
+| `emotion`                  | `str`      | `None`        | Emotional tone: `"happy"`, `"sad"`, `"angry"`, `"fearful"`, `"disgusted"`, `"surprised"`, `"calm"`, or `"fluent"`. |
+| `english_normalization`    | `bool`     | `None`        | Deprecated. Use `text_normalization` instead.                                                                      |
+| `text_normalization`       | `bool`     | `None`        | Enable text normalization (Chinese/English).                                                                       |
+| `latex_read`               | `bool`     | `None`        | Enable LaTeX formula reading.                                                                                      |
+| `exclude_aggregated_audio` | `bool`     | `None`        | Whether to exclude aggregated audio in final chunk.                                                                |
 
 ## Usage
 

@@ -72,12 +72,17 @@ Before using Async TTS services, you need:
   Async API version.
 </ParamField>
 
-<ParamField path="url" type="str" default="wss://api.async.com/text_to_speech/websocket/ws">
+<ParamField
+  path="url"
+  type="str"
+  default="wss://api.async.com/text_to_speech/websocket/ws"
+>
   WebSocket endpoint URL.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Output audio sample rate in Hz. When `None`, uses the pipeline's configured
+  sample rate.
 </ParamField>
 
 <ParamField path="encoding" type="str" default="pcm_s16le">
@@ -101,7 +106,8 @@ Before using Async TTS services, you need:
 The HTTP service accepts similar parameters to the WebSocket service, with these differences:
 
 <ParamField path="aiohttp_session" type="aiohttp.ClientSession" required>
-  An aiohttp session for HTTP requests. You must create and manage this yourself.
+  An aiohttp session for HTTP requests. You must create and manage this
+  yourself.
 </ParamField>
 
 <ParamField path="url" type="str" default="https://api.async.com">
@@ -112,9 +118,9 @@ The HTTP service accepts similar parameters to the WebSocket service, with these
 
 Voice and generation settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `None` | Language code for synthesis. |
+| Parameter  | Type       | Default | Description                  |
+| ---------- | ---------- | ------- | ---------------------------- |
+| `language` | `Language` | `None`  | Language code for synthesis. |
 
 ## Usage
 
@@ -162,10 +168,10 @@ async with aiohttp.ClientSession() as session:
 
 Async TTS supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Async WebSocket |
-| `on_disconnected` | Disconnected from Async WebSocket |
+| Event                 | Description                         |
+| --------------------- | ----------------------------------- |
+| `on_connected`        | Connected to Async WebSocket        |
+| `on_disconnected`     | Disconnected from Async WebSocket   |
 | `on_connection_error` | WebSocket connection error occurred |
 
 ```python

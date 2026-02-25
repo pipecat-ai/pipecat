@@ -79,7 +79,8 @@ Before using DailyTransport, you need:
 </ParamField>
 
 <ParamField path="token" type="str" default="None">
-  Authentication token for the room. Required for private rooms or when specific permissions are needed.
+  Authentication token for the room. Required for private rooms or when specific
+  permissions are needed.
 </ParamField>
 
 <ParamField path="bot_name" type="str" required>
@@ -87,7 +88,9 @@ Before using DailyTransport, you need:
 </ParamField>
 
 <ParamField path="params" type="DailyParams" default="DailyParams()">
-  Transport configuration parameters. See [DailyParams](#dailyparams) below and [TransportParams](/server/services/transport/transport-params) for inherited base parameters.
+  Transport configuration parameters. See [DailyParams](#dailyparams) below and
+  [TransportParams](/server/services/transport/transport-params) for inherited
+  base parameters.
 </ParamField>
 
 <ParamField path="input_name" type="str" default="None">
@@ -115,7 +118,8 @@ Inherits all parameters from [TransportParams](/server/services/transport/transp
 </ParamField>
 
 <ParamField path="dialin_settings" type="DailyDialinSettings" default="None">
-  Settings for dial-in functionality. See [DailyDialinSettings](#dailydialinsettings) below.
+  Settings for dial-in functionality. See
+  [DailyDialinSettings](#dailydialinsettings) below.
 </ParamField>
 
 <ParamField path="camera_out_enabled" type="bool" default="True">
@@ -130,8 +134,13 @@ Inherits all parameters from [TransportParams](/server/services/transport/transp
   Whether to enable Daily's built-in speech transcription (powered by Deepgram).
 </ParamField>
 
-<ParamField path="transcription_settings" type="DailyTranscriptionSettings" default="DailyTranscriptionSettings()">
-  Configuration for the transcription service. See [DailyTranscriptionSettings](#dailytranscriptionsettings) below.
+<ParamField
+  path="transcription_settings"
+  type="DailyTranscriptionSettings"
+  default="DailyTranscriptionSettings()"
+>
+  Configuration for the transcription service. See
+  [DailyTranscriptionSettings](#dailytranscriptionsettings) below.
 </ParamField>
 
 ### DailyDialinSettings
@@ -178,7 +187,11 @@ Configuration for Daily's built-in transcription service (Deepgram).
   Whether to include raw response data from Deepgram.
 </ParamField>
 
-<ParamField path="extra" type="Mapping[str, Any]" default='{"interim_results": True}'>
+<ParamField
+  path="extra"
+  type="Mapping[str, Any]"
+  default='{"interim_results": True}'
+>
   Additional parameters passed to the Deepgram transcription service.
 </ParamField>
 
@@ -201,35 +214,35 @@ DailyTransport provides event handlers for room lifecycle, participant managemen
 
 ### Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_joined` | Bot joined the room |
-| `on_left` | Bot left the room |
-| `on_before_leave` | About to leave the room (sync) |
-| `on_error` | Transport error occurred |
-| `on_call_state_updated` | Call state changed |
+| Event                         | Description                       |
+| ----------------------------- | --------------------------------- |
+| `on_joined`                   | Bot joined the room               |
+| `on_left`                     | Bot left the room                 |
+| `on_before_leave`             | About to leave the room (sync)    |
+| `on_error`                    | Transport error occurred          |
+| `on_call_state_updated`       | Call state changed                |
 | `on_first_participant_joined` | First participant joined the room |
-| `on_participant_joined` | A participant joined |
-| `on_participant_left` | A participant left |
-| `on_participant_updated` | A participant's state updated |
-| `on_client_connected` | A participant connected |
-| `on_client_disconnected` | A participant disconnected |
-| `on_active_speaker_changed` | Active speaker changed |
-| `on_app_message` | App message received |
-| `on_transcription_message` | Transcription message received |
-| `on_recording_started` | Recording started |
-| `on_recording_stopped` | Recording stopped |
-| `on_recording_error` | Recording error occurred |
-| `on_dialin_connected` | Dial-in call connected |
-| `on_dialin_ready` | Dial-in SIP endpoint ready |
-| `on_dialin_stopped` | Dial-in call stopped |
-| `on_dialin_error` | Dial-in error |
-| `on_dialin_warning` | Dial-in warning |
-| `on_dialout_answered` | Dial-out call answered |
-| `on_dialout_connected` | Dial-out call connected |
-| `on_dialout_stopped` | Dial-out call stopped |
-| `on_dialout_error` | Dial-out error |
-| `on_dialout_warning` | Dial-out warning |
+| `on_participant_joined`       | A participant joined              |
+| `on_participant_left`         | A participant left                |
+| `on_participant_updated`      | A participant's state updated     |
+| `on_client_connected`         | A participant connected           |
+| `on_client_disconnected`      | A participant disconnected        |
+| `on_active_speaker_changed`   | Active speaker changed            |
+| `on_app_message`              | App message received              |
+| `on_transcription_message`    | Transcription message received    |
+| `on_recording_started`        | Recording started                 |
+| `on_recording_stopped`        | Recording stopped                 |
+| `on_recording_error`          | Recording error occurred          |
+| `on_dialin_connected`         | Dial-in call connected            |
+| `on_dialin_ready`             | Dial-in SIP endpoint ready        |
+| `on_dialin_stopped`           | Dial-in call stopped              |
+| `on_dialin_error`             | Dial-in error                     |
+| `on_dialin_warning`           | Dial-in warning                   |
+| `on_dialout_answered`         | Dial-out call answered            |
+| `on_dialout_connected`        | Dial-out call connected           |
+| `on_dialout_stopped`          | Dial-out call stopped             |
+| `on_dialout_error`            | Dial-out error                    |
+| `on_dialout_warning`          | Dial-out warning                  |
 
 ### Room Lifecycle
 
@@ -245,10 +258,10 @@ async def on_joined(transport, data):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `data` | `dict` | Join event data from Daily |
+| Parameter   | Type             | Description                |
+| ----------- | ---------------- | -------------------------- |
+| `transport` | `DailyTransport` | The transport instance     |
+| `data`      | `dict`           | Join event data from Daily |
 
 #### on_left
 
@@ -262,8 +275,8 @@ async def on_left(transport):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type             | Description            |
+| ----------- | ---------------- | ---------------------- |
 | `transport` | `DailyTransport` | The transport instance |
 
 #### on_before_leave
@@ -278,12 +291,13 @@ async def on_before_leave(transport):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type             | Description            |
+| ----------- | ---------------- | ---------------------- |
 | `transport` | `DailyTransport` | The transport instance |
 
 <Note>
-This is a **synchronous** event — the bot will not leave the room until all handlers complete. Keep handlers fast.
+  This is a **synchronous** event — the bot will not leave the room until all
+  handlers complete. Keep handlers fast.
 </Note>
 
 #### on_error
@@ -298,10 +312,10 @@ async def on_error(transport, error):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type             | Description            |
+| ----------- | ---------------- | ---------------------- |
 | `transport` | `DailyTransport` | The transport instance |
-| `error` | `str` | Error message |
+| `error`     | `str`            | Error message          |
 
 #### on_call_state_updated
 
@@ -315,10 +329,10 @@ async def on_call_state_updated(transport, state):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Parameter   | Type             | Description            |
+| ----------- | ---------------- | ---------------------- |
 | `transport` | `DailyTransport` | The transport instance |
-| `state` | `str` | The new call state |
+| `state`     | `str`            | The new call state     |
 
 ### Participants
 
@@ -334,10 +348,10 @@ async def on_first_participant_joined(transport, participant):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `participant` | `dict` | Participant data from Daily |
+| Parameter     | Type             | Description                 |
+| ------------- | ---------------- | --------------------------- |
+| `transport`   | `DailyTransport` | The transport instance      |
+| `participant` | `dict`           | Participant data from Daily |
 
 #### on_participant_joined
 
@@ -351,13 +365,15 @@ async def on_participant_joined(transport, participant):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `participant` | `dict` | Participant data from Daily |
+| Parameter     | Type             | Description                 |
+| ------------- | ---------------- | --------------------------- |
+| `transport`   | `DailyTransport` | The transport instance      |
+| `participant` | `dict`           | Participant data from Daily |
 
 <Note>
-When a participant joins, both `on_participant_joined` and `on_client_connected` fire. Use `on_first_participant_joined` if you only need to react to the first participant.
+  When a participant joins, both `on_participant_joined` and
+  `on_client_connected` fire. Use `on_first_participant_joined` if you only need
+  to react to the first participant.
 </Note>
 
 #### on_participant_left
@@ -372,11 +388,11 @@ async def on_participant_left(transport, participant, reason):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `participant` | `dict` | Participant data from Daily |
-| `reason` | `str` | Reason the participant left |
+| Parameter     | Type             | Description                 |
+| ------------- | ---------------- | --------------------------- |
+| `transport`   | `DailyTransport` | The transport instance      |
+| `participant` | `dict`           | Participant data from Daily |
+| `reason`      | `str`            | Reason the participant left |
 
 #### on_participant_updated
 
@@ -390,10 +406,10 @@ async def on_participant_updated(transport, participant):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `participant` | `dict` | Updated participant data from Daily |
+| Parameter     | Type             | Description                         |
+| ------------- | ---------------- | ----------------------------------- |
+| `transport`   | `DailyTransport` | The transport instance              |
+| `participant` | `dict`           | Updated participant data from Daily |
 
 #### on_client_connected / on_client_disconnected
 
@@ -417,10 +433,10 @@ async def on_active_speaker_changed(transport, participant):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `participant` | `dict` | Active speaker participant data |
+| Parameter     | Type             | Description                     |
+| ------------- | ---------------- | ------------------------------- |
+| `transport`   | `DailyTransport` | The transport instance          |
+| `participant` | `dict`           | Active speaker participant data |
 
 ### Messaging
 
@@ -436,11 +452,11 @@ async def on_app_message(transport, message, sender):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `message` | `Any` | The message content |
-| `sender` | `str` | The sender's participant ID |
+| Parameter   | Type             | Description                 |
+| ----------- | ---------------- | --------------------------- |
+| `transport` | `DailyTransport` | The transport instance      |
+| `message`   | `Any`            | The message content         |
+| `sender`    | `str`            | The sender's participant ID |
 
 #### on_transcription_message
 
@@ -454,10 +470,10 @@ async def on_transcription_message(transport, message):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `message` | `dict` | Transcription message with `text`, `participantId`, `timestamp`, and `rawResponse` fields |
+| Parameter   | Type             | Description                                                                               |
+| ----------- | ---------------- | ----------------------------------------------------------------------------------------- |
+| `transport` | `DailyTransport` | The transport instance                                                                    |
+| `message`   | `dict`           | Transcription message with `text`, `participantId`, `timestamp`, and `rawResponse` fields |
 
 ### Recording
 
@@ -477,11 +493,11 @@ async def on_recording_error(transport, stream_id, message):
 
 **Parameters:**
 
-| Event | Parameters |
-| --- | --- |
-| `on_recording_started` | `transport`, `status` (str) |
-| `on_recording_stopped` | `transport`, `stream_id` (str) |
-| `on_recording_error` | `transport`, `stream_id` (str), `message` (str) |
+| Event                  | Parameters                                      |
+| ---------------------- | ----------------------------------------------- |
+| `on_recording_started` | `transport`, `status` (str)                     |
+| `on_recording_stopped` | `transport`, `stream_id` (str)                  |
+| `on_recording_error`   | `transport`, `stream_id` (str), `message` (str) |
 
 ### Telephony: Dial-in
 
@@ -499,10 +515,10 @@ async def on_dialin_ready(transport, sip_endpoint):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `DailyTransport` | The transport instance |
-| `sip_endpoint` | `str` | The SIP endpoint URI |
+| Parameter      | Type             | Description            |
+| -------------- | ---------------- | ---------------------- |
+| `transport`    | `DailyTransport` | The transport instance |
+| `sip_endpoint` | `str`            | The SIP endpoint URI   |
 
 #### on_dialin_connected / on_dialin_stopped / on_dialin_error / on_dialin_warning
 
@@ -522,13 +538,13 @@ async def on_dialin_error(transport, data):
 
 Events for monitoring outgoing phone calls. All receive `(transport, data)` where `data` is a `dict` with event details.
 
-| Event | Description |
-| --- | --- |
-| `on_dialout_answered` | Dial-out call was answered |
-| `on_dialout_connected` | Dial-out call connected |
-| `on_dialout_stopped` | Dial-out call stopped |
-| `on_dialout_error` | Dial-out error occurred |
-| `on_dialout_warning` | Dial-out warning |
+| Event                  | Description                |
+| ---------------------- | -------------------------- |
+| `on_dialout_answered`  | Dial-out call was answered |
+| `on_dialout_connected` | Dial-out call connected    |
+| `on_dialout_stopped`   | Dial-out call stopped      |
+| `on_dialout_error`     | Dial-out error occurred    |
+| `on_dialout_warning`   | Dial-out warning           |
 
 ```python
 @transport.event_handler("on_dialout_answered")

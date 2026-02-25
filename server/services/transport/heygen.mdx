@@ -31,7 +31,11 @@ When used, the Pipecat bot connects to a LiveKit room alongside the HeyGen avata
   >
     Official HeyGen API documentation and guides
   </Card>
-  <Card title="HeyGen Platform" icon="microphone" href="https://www.liveavatar.com/">
+  <Card
+    title="HeyGen Platform"
+    icon="microphone"
+    href="https://www.liveavatar.com/"
+  >
     Access interactive avatars and API keys
   </Card>
 </CardGroup>
@@ -83,7 +87,11 @@ Before using HeyGen video services, you need:
   Optional name for the output transport processor.
 </ParamField>
 
-<ParamField path="session_request" type="LiveAvatarNewSessionRequest | NewSessionRequest" default="None">
+<ParamField
+  path="session_request"
+  type="LiveAvatarNewSessionRequest | NewSessionRequest"
+  default="None"
+>
   Configuration for the HeyGen session, including avatar selection and settings.
 </ParamField>
 
@@ -120,13 +128,14 @@ HeyGenTransport provides event handlers for participant connection lifecycle. Re
 
 ### Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Participant (non-avatar) connected to the session |
+| Event                    | Description                                            |
+| ------------------------ | ------------------------------------------------------ |
+| `on_client_connected`    | Participant (non-avatar) connected to the session      |
 | `on_client_disconnected` | Participant (non-avatar) disconnected from the session |
 
 <Note>
-The HeyGen avatar participant is automatically filtered out from these events. Only human participant connections trigger the event handlers.
+  The HeyGen avatar participant is automatically filtered out from these events.
+  Only human participant connections trigger the event handlers.
 </Note>
 
 ### Connection Lifecycle
@@ -143,10 +152,10 @@ async def on_client_connected(transport, participant):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `HeyGenTransport` | The transport instance |
-| `participant` | `str` | The participant identifier |
+| Parameter     | Type              | Description                |
+| ------------- | ----------------- | -------------------------- |
+| `transport`   | `HeyGenTransport` | The transport instance     |
+| `participant` | `str`             | The participant identifier |
 
 #### on_client_disconnected
 
@@ -160,10 +169,10 @@ async def on_client_disconnected(transport, participant):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `HeyGenTransport` | The transport instance |
-| `participant` | `str` | The participant identifier |
+| Parameter     | Type              | Description                |
+| ------------- | ----------------- | -------------------------- |
+| `transport`   | `HeyGenTransport` | The transport instance     |
+| `participant` | `str`             | The participant identifier |
 
 ## Additional Resources
 

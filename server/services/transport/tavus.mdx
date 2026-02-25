@@ -98,7 +98,8 @@ Before using TavusTransport, you need:
 </ParamField>
 
 <ParamField path="persona_id" type="str" default="pipecat-stream">
-  ID of the Tavus persona. Defaults to `"pipecat-stream"`, which signals Tavus to use the Pipecat bot's TTS voice instead of a Tavus persona voice.
+  ID of the Tavus persona. Defaults to `"pipecat-stream"`, which signals Tavus
+  to use the Pipecat bot's TTS voice instead of a Tavus persona voice.
 </ParamField>
 
 <ParamField path="params" type="TavusParams" default="TavusParams()">
@@ -146,13 +147,16 @@ TavusTransport provides event handlers for participant connection lifecycle. Reg
 
 ### Events Summary
 
-| Event | Description |
-| --- | --- |
-| `on_client_connected` | Participant (non-avatar) connected to the session |
+| Event                    | Description                                            |
+| ------------------------ | ------------------------------------------------------ |
+| `on_client_connected`    | Participant (non-avatar) connected to the session      |
 | `on_client_disconnected` | Participant (non-avatar) disconnected from the session |
 
 <Note>
-The Tavus replica participant is automatically filtered out from these events. Only human participant connections trigger the event handlers. The transport also automatically unsubscribes from the Tavus replica's microphone to prevent audio feedback.
+  The Tavus replica participant is automatically filtered out from these events.
+  Only human participant connections trigger the event handlers. The transport
+  also automatically unsubscribes from the Tavus replica's microphone to prevent
+  audio feedback.
 </Note>
 
 ### Connection Lifecycle
@@ -169,10 +173,10 @@ async def on_client_connected(transport, participant):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `TavusTransport` | The transport instance |
-| `participant` | `dict` | Participant data from Daily (includes `id`, `info` with `userName`, etc.) |
+| Parameter     | Type             | Description                                                               |
+| ------------- | ---------------- | ------------------------------------------------------------------------- |
+| `transport`   | `TavusTransport` | The transport instance                                                    |
+| `participant` | `dict`           | Participant data from Daily (includes `id`, `info` with `userName`, etc.) |
 
 #### on_client_disconnected
 
@@ -186,10 +190,10 @@ async def on_client_disconnected(transport, participant):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `transport` | `TavusTransport` | The transport instance |
-| `participant` | `dict` | Participant data from Daily |
+| Parameter     | Type             | Description                 |
+| ------------- | ---------------- | --------------------------- |
+| `transport`   | `TavusTransport` | The transport instance      |
+| `participant` | `dict`           | Participant data from Daily |
 
 ## Additional Resources
 

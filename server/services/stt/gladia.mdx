@@ -74,11 +74,13 @@ Before using Gladia STT services, you need:
 </ParamField>
 
 <ParamField path="confidence" type="float" default="None">
-  Minimum confidence threshold for transcriptions (0.0-1.0). Deprecated -- no confidence threshold is applied.
+  Minimum confidence threshold for transcriptions (0.0-1.0). Deprecated -- no
+  confidence threshold is applied.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="model" type="str" default="solaria-1">
@@ -86,7 +88,8 @@ Before using Gladia STT services, you need:
 </ParamField>
 
 <ParamField path="params" type="GladiaInputParams" default="None">
-  Additional configuration parameters for the Gladia service. See [GladiaInputParams](#gladiainputparams) below.
+  Additional configuration parameters for the Gladia service. See
+  [GladiaInputParams](#gladiainputparams) below.
 </ParamField>
 
 <ParamField path="max_buffer_size" type="int" default="20971520">
@@ -98,7 +101,8 @@ Before using Gladia STT services, you need:
 </ParamField>
 
 <ParamField path="ttfs_p99_latency" type="float" default="GLADIA_TTFS_P99">
-  P99 latency from speech end to final transcript in seconds. Override for your deployment.
+  P99 latency from speech end to final transcript in seconds. Override for your
+  deployment.
 </ParamField>
 
 ### GladiaInputParams
@@ -109,20 +113,20 @@ Parameters passed via the `params` constructor argument. Import directly:
 from pipecat.services.gladia.config import GladiaInputParams
 ```
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `encoding` | `str` | `"wav/pcm"` | Audio encoding format. |
-| `bit_depth` | `int` | `16` | Audio bit depth. |
-| `channels` | `int` | `1` | Number of audio channels. |
-| `custom_metadata` | `Dict[str, Any]` | `None` | Additional metadata to include with requests. |
-| `endpointing` | `float` | `None` | Silence duration in seconds to mark end of speech. |
-| `maximum_duration_without_endpointing` | `int` | `5` | Maximum utterance duration (seconds) without silence. |
-| `language` | `Language` | `None` | Language code for transcription. Deprecated -- use `language_config` instead. |
-| `language_config` | `LanguageConfig` | `None` | Detailed language configuration with code switching support. |
-| `pre_processing` | `PreProcessingConfig` | `None` | Audio pre-processing options (audio enhancer, speech threshold). |
-| `realtime_processing` | `RealtimeProcessingConfig` | `None` | Real-time processing features (custom vocabulary, translation, NER, sentiment). |
-| `messages_config` | `MessagesConfig` | `None` | WebSocket message filtering options. |
-| `enable_vad` | `bool` | `False` | Enable Gladia VAD for end-of-utterance detection. Use without other VAD in the agent. |
+| Parameter                              | Type                       | Default     | Description                                                                           |
+| -------------------------------------- | -------------------------- | ----------- | ------------------------------------------------------------------------------------- |
+| `encoding`                             | `str`                      | `"wav/pcm"` | Audio encoding format.                                                                |
+| `bit_depth`                            | `int`                      | `16`        | Audio bit depth.                                                                      |
+| `channels`                             | `int`                      | `1`         | Number of audio channels.                                                             |
+| `custom_metadata`                      | `Dict[str, Any]`           | `None`      | Additional metadata to include with requests.                                         |
+| `endpointing`                          | `float`                    | `None`      | Silence duration in seconds to mark end of speech.                                    |
+| `maximum_duration_without_endpointing` | `int`                      | `5`         | Maximum utterance duration (seconds) without silence.                                 |
+| `language`                             | `Language`                 | `None`      | Language code for transcription. Deprecated -- use `language_config` instead.         |
+| `language_config`                      | `LanguageConfig`           | `None`      | Detailed language configuration with code switching support.                          |
+| `pre_processing`                       | `PreProcessingConfig`      | `None`      | Audio pre-processing options (audio enhancer, speech threshold).                      |
+| `realtime_processing`                  | `RealtimeProcessingConfig` | `None`      | Real-time processing features (custom vocabulary, translation, NER, sentiment).       |
+| `messages_config`                      | `MessagesConfig`           | `None`      | WebSocket message filtering options.                                                  |
+| `enable_vad`                           | `bool`                     | `False`     | Enable Gladia VAD for end-of-utterance detection. Use without other VAD in the agent. |
 
 ## Usage
 
@@ -200,9 +204,9 @@ stt = GladiaSTTService(
 
 Gladia STT supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Gladia WebSocket |
+| Event             | Description                        |
+| ----------------- | ---------------------------------- |
+| `on_connected`    | Connected to Gladia WebSocket      |
 | `on_disconnected` | Disconnected from Gladia WebSocket |
 
 ```python

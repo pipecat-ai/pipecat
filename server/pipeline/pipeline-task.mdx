@@ -172,14 +172,14 @@ await task.queue_frames(frames)
 
 PipelineTask provides event handlers for monitoring pipeline lifecycle and frame flow. Register handlers using the `@event_handler` decorator.
 
-| Event | Description |
-| --- | --- |
-| `on_pipeline_started` | Pipeline has started processing |
-| `on_pipeline_finished` | Pipeline reached a terminal state |
-| `on_pipeline_error` | An error frame reached the pipeline task |
-| `on_frame_reached_upstream` | A filtered frame type reached the pipeline source |
-| `on_frame_reached_downstream` | A filtered frame type reached the pipeline sink |
-| `on_idle_timeout` | No activity detected within the idle timeout period |
+| Event                         | Description                                         |
+| ----------------------------- | --------------------------------------------------- |
+| `on_pipeline_started`         | Pipeline has started processing                     |
+| `on_pipeline_finished`        | Pipeline reached a terminal state                   |
+| `on_pipeline_error`           | An error frame reached the pipeline task            |
+| `on_frame_reached_upstream`   | A filtered frame type reached the pipeline source   |
+| `on_frame_reached_downstream` | A filtered frame type reached the pipeline sink     |
+| `on_idle_timeout`             | No activity detected within the idle timeout period |
 
 ### on_pipeline_started
 
@@ -193,10 +193,10 @@ async def on_pipeline_started(task, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `task` | `PipelineTask` | The pipeline task instance |
-| `frame` | `StartFrame` | The start frame that was processed |
+| Parameter | Type           | Description                        |
+| --------- | -------------- | ---------------------------------- |
+| `task`    | `PipelineTask` | The pipeline task instance         |
+| `frame`   | `StartFrame`   | The start frame that was processed |
 
 ### on_pipeline_finished
 
@@ -215,13 +215,16 @@ async def on_pipeline_finished(task, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `task` | `PipelineTask` | The pipeline task instance |
-| `frame` | `Frame` | The terminal frame (`EndFrame`, `StopFrame`, or `CancelFrame`) |
+| Parameter | Type           | Description                                                    |
+| --------- | -------------- | -------------------------------------------------------------- |
+| `task`    | `PipelineTask` | The pipeline task instance                                     |
+| `frame`   | `Frame`        | The terminal frame (`EndFrame`, `StopFrame`, or `CancelFrame`) |
 
 <Note>
-  The deprecated events `on_pipeline_ended`, `on_pipeline_stopped`, and `on_pipeline_cancelled` still work but will emit a deprecation warning. Use `on_pipeline_finished` and inspect the frame type if you need to distinguish between terminal states.
+  The deprecated events `on_pipeline_ended`, `on_pipeline_stopped`, and
+  `on_pipeline_cancelled` still work but will emit a deprecation warning. Use
+  `on_pipeline_finished` and inspect the frame type if you need to distinguish
+  between terminal states.
 </Note>
 
 ### on_pipeline_error
@@ -238,10 +241,10 @@ async def on_pipeline_error(task, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `task` | `PipelineTask` | The pipeline task instance |
-| `frame` | `ErrorFrame` | The error frame with error details |
+| Parameter | Type           | Description                        |
+| --------- | -------------- | ---------------------------------- |
+| `task`    | `PipelineTask` | The pipeline task instance         |
+| `frame`   | `ErrorFrame`   | The error frame with error details |
 
 ### on_frame_reached_upstream
 
@@ -260,13 +263,15 @@ async def on_frame_reached_upstream(task, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `task` | `PipelineTask` | The pipeline task instance |
-| `frame` | `Frame` | The frame that reached the pipeline source |
+| Parameter | Type           | Description                                |
+| --------- | -------------- | ------------------------------------------ |
+| `task`    | `PipelineTask` | The pipeline task instance                 |
+| `frame`   | `Frame`        | The frame that reached the pipeline source |
 
 <Note>
-  This event only fires for frame types you've explicitly registered. By default, no frame types are monitored. This is for efficiency — checking every frame would be wasteful when you typically only care about specific types.
+  This event only fires for frame types you've explicitly registered. By
+  default, no frame types are monitored. This is for efficiency — checking every
+  frame would be wasteful when you typically only care about specific types.
 </Note>
 
 ### on_frame_reached_downstream
@@ -286,10 +291,10 @@ async def on_frame_reached_downstream(task, frame):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `task` | `PipelineTask` | The pipeline task instance |
-| `frame` | `Frame` | The frame that reached the pipeline sink |
+| Parameter | Type           | Description                              |
+| --------- | -------------- | ---------------------------------------- |
+| `task`    | `PipelineTask` | The pipeline task instance               |
+| `frame`   | `Frame`        | The frame that reached the pipeline sink |
 
 ### on_idle_timeout
 
@@ -304,10 +309,12 @@ async def on_idle_timeout(task):
 
 **Parameters:**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `task` | `PipelineTask` | The pipeline task instance |
+| Parameter | Type           | Description                |
+| --------- | -------------- | -------------------------- |
+| `task`    | `PipelineTask` | The pipeline task instance |
 
 <Note>
-  If `cancel_on_idle_timeout` is `True` (the default), the pipeline will be automatically cancelled after this handler runs. Set it to `False` if you want to handle idle timeouts yourself.
+  If `cancel_on_idle_timeout` is `True` (the default), the pipeline will be
+  automatically cancelled after this handler runs. Set it to `False` if you want
+  to handle idle timeouts yourself.
 </Note>

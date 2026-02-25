@@ -59,7 +59,8 @@ You can find available specifiers [here](https://models.hathora.dev/)
 ### HathoraTTSService
 
 <ParamField path="model" type="str" required>
-  Model to use. Find available models at [models.hathora.dev](https://models.hathora.dev/).
+  Model to use. Find available models at
+  [models.hathora.dev](https://models.hathora.dev/).
 </ParamField>
 
 <ParamField path="voice_id" type="str" default="None">
@@ -67,14 +68,20 @@ You can find available specifiers [here](https://models.hathora.dev/)
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Output sample rate for generated audio. When `None`, uses the pipeline's configured sample rate.
+  Output sample rate for generated audio. When `None`, uses the pipeline's
+  configured sample rate.
 </ParamField>
 
 <ParamField path="api_key" type="str" default="None">
-  API key for authentication. If `None`, uses the `HATHORA_API_KEY` environment variable.
+  API key for authentication. If `None`, uses the `HATHORA_API_KEY` environment
+  variable.
 </ParamField>
 
-<ParamField path="base_url" type="str" default="https://api.models.hathora.dev/inference/v1/tts">
+<ParamField
+  path="base_url"
+  type="str"
+  default="https://api.models.hathora.dev/inference/v1/tts"
+>
   Base API URL for the Hathora TTS service.
 </ParamField>
 
@@ -86,10 +93,10 @@ You can find available specifiers [here](https://models.hathora.dev/)
 
 Configuration settings that can be set at initialization via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `speed` | `float` | `None` | Speech speed multiplier (if supported by model). |
-| `config` | `list[ConfigOption]` | `None` | Additional model-specific configuration options. Each `ConfigOption` has `name` and `value` fields. Refer to [Hathora docs](https://models.hathora.dev) for supported options per model. |
+| Parameter | Type                 | Default | Description                                                                                                                                                                              |
+| --------- | -------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `speed`   | `float`              | `None`  | Speech speed multiplier (if supported by model).                                                                                                                                         |
+| `config`  | `list[ConfigOption]` | `None`  | Additional model-specific configuration options. Each `ConfigOption` has `name` and `value` fields. Refer to [Hathora docs](https://models.hathora.dev) for supported options per model. |
 
 ## Usage
 

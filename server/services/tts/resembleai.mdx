@@ -29,11 +29,7 @@ description: "Text-to-speech service using Resemble AI's WebSocket streaming API
   >
     Official Resemble AI API documentation
   </Card>
-  <Card
-    title="Sign up"
-    icon="user"
-    href="https://app.resemble.ai/"
-  >
+  <Card title="Sign up" icon="user" href="https://app.resemble.ai/">
     Sign up for a Resemble AI account
   </Card>
 </CardGroup>
@@ -72,7 +68,11 @@ Before using Resemble AI TTS services, you need:
   Voice UUID to use for synthesis.
 </ParamField>
 
-<ParamField path="url" type="str" default="wss://websocket.cluster.resemble.ai/stream">
+<ParamField
+  path="url"
+  type="str"
+  default="wss://websocket.cluster.resemble.ai/stream"
+>
   WebSocket URL for Resemble AI TTS API.
 </ParamField>
 
@@ -126,11 +126,11 @@ tts = ResembleAITTSService(
 
 Resemble AI TTS supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Resemble AI WebSocket |
-| `on_disconnected` | Disconnected from Resemble AI WebSocket |
-| `on_connection_error` | WebSocket connection error occurred |
+| Event                 | Description                             |
+| --------------------- | --------------------------------------- |
+| `on_connected`        | Connected to Resemble AI WebSocket      |
+| `on_disconnected`     | Disconnected from Resemble AI WebSocket |
+| `on_connection_error` | WebSocket connection error occurred     |
 
 ```python
 @tts.event_handler("on_connected")

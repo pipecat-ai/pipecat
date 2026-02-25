@@ -77,18 +77,19 @@ Before using Hume TTS services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable synthesis controls. See [InputParams](#inputparams) below.
+  Runtime-configurable synthesis controls. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 ### InputParams
 
 Synthesis parameters that can be set at initialization via the `params` constructor argument, or changed at runtime via `UpdateSettingsFrame`.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `description` | `str` | `None` | Natural-language acting directions (up to 100 characters). |
-| `speed` | `float` | `None` | Speaking-rate multiplier (0.5-2.0). |
-| `trailing_silence` | `float` | `None` | Seconds of silence to append at the end (0-5). |
+| Parameter          | Type    | Default | Description                                                |
+| ------------------ | ------- | ------- | ---------------------------------------------------------- |
+| `description`      | `str`   | `None`  | Natural-language acting directions (up to 100 characters). |
+| `speed`            | `float` | `None`  | Speaking-rate multiplier (0.5-2.0).                        |
+| `trailing_silence` | `float` | `None`  | Seconds of silence to append at the end (0-5).             |
 
 ## Usage
 

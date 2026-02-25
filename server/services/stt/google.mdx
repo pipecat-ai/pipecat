@@ -75,42 +75,48 @@ Before using Google Cloud STT services, you need:
 </ParamField>
 
 <ParamField path="location" type="str" default="global">
-  Google Cloud location (e.g., `"global"`, `"us-central1"`). Non-global locations use regional endpoints.
+  Google Cloud location (e.g., `"global"`, `"us-central1"`). Non-global
+  locations use regional endpoints.
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample rate.
+  Audio sample rate in Hz. When `None`, uses the pipeline's configured sample
+  rate.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Configuration parameters for the STT service. See [InputParams](#inputparams) below.
+  Configuration parameters for the STT service. See [InputParams](#inputparams)
+  below.
 </ParamField>
 
 <ParamField path="ttfs_p99_latency" type="float" default="GOOGLE_TTFS_P99">
-  P99 latency from speech end to final transcript in seconds. Override for your deployment.
+  P99 latency from speech end to final transcript in seconds. Override for your
+  deployment.
 </ParamField>
 
 <Note>
-  You must provide either `credentials` (JSON string), `credentials_path` (file path), or have Application Default Credentials configured. At least one authentication method is required.
+  You must provide either `credentials` (JSON string), `credentials_path` (file
+  path), or have Application Default Credentials configured. At least one
+  authentication method is required.
 </Note>
 
 ### InputParams
 
 Parameters passed via the `params` constructor argument.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `languages` | `Language \| List[Language]` | `[Language.EN_US]` | Single language or list of recognition languages. First language is primary. |
-| `model` | `str` | `"latest_long"` | Speech recognition model to use. |
-| `use_separate_recognition_per_channel` | `bool` | `False` | Process each audio channel separately. |
-| `enable_automatic_punctuation` | `bool` | `True` | Add punctuation to transcripts. |
-| `enable_spoken_punctuation` | `bool` | `False` | Include spoken punctuation in transcript. |
-| `enable_spoken_emojis` | `bool` | `False` | Include spoken emojis in transcript. |
-| `profanity_filter` | `bool` | `False` | Filter profanity from transcript. |
-| `enable_word_time_offsets` | `bool` | `False` | Include timing information for each word. |
-| `enable_word_confidence` | `bool` | `False` | Include confidence scores for each word. |
-| `enable_interim_results` | `bool` | `True` | Stream partial recognition results. |
-| `enable_voice_activity_events` | `bool` | `False` | Detect voice activity in audio. |
+| Parameter                              | Type                         | Default            | Description                                                                  |
+| -------------------------------------- | ---------------------------- | ------------------ | ---------------------------------------------------------------------------- |
+| `languages`                            | `Language \| List[Language]` | `[Language.EN_US]` | Single language or list of recognition languages. First language is primary. |
+| `model`                                | `str`                        | `"latest_long"`    | Speech recognition model to use.                                             |
+| `use_separate_recognition_per_channel` | `bool`                       | `False`            | Process each audio channel separately.                                       |
+| `enable_automatic_punctuation`         | `bool`                       | `True`             | Add punctuation to transcripts.                                              |
+| `enable_spoken_punctuation`            | `bool`                       | `False`            | Include spoken punctuation in transcript.                                    |
+| `enable_spoken_emojis`                 | `bool`                       | `False`            | Include spoken emojis in transcript.                                         |
+| `profanity_filter`                     | `bool`                       | `False`            | Filter profanity from transcript.                                            |
+| `enable_word_time_offsets`             | `bool`                       | `False`            | Include timing information for each word.                                    |
+| `enable_word_confidence`               | `bool`                       | `False`            | Include confidence scores for each word.                                     |
+| `enable_interim_results`               | `bool`                       | `True`             | Stream partial recognition results.                                          |
+| `enable_voice_activity_events`         | `bool`                       | `False`            | Detect voice activity in audio.                                              |
 
 ## Usage
 
@@ -178,9 +184,9 @@ await stt.update_options(
 
 Google STT supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Google Cloud Speech-to-Text |
+| Event             | Description                                   |
+| ----------------- | --------------------------------------------- |
+| `on_connected`    | Connected to Google Cloud Speech-to-Text      |
 | `on_disconnected` | Disconnected from Google Cloud Speech-to-Text |
 
 ```python

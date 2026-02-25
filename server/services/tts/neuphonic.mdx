@@ -89,7 +89,8 @@ Before using Neuphonic TTS services, you need:
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams](#inputparams) below.
+  Runtime-configurable voice and generation settings. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### NeuphonicHttpTTSService
@@ -121,17 +122,18 @@ The HTTP service uses SSE (server-sent events) for streaming audio.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams](#inputparams) below.
+  Runtime-configurable voice and generation settings. See
+  [InputParams](#inputparams) below.
 </ParamField>
 
 ### InputParams
 
 Both WebSocket and HTTP services share the same `InputParams` structure.
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Language for synthesis. |
-| `speed` | `float` | `1.0` | Speech speed multiplier. |
+| Parameter  | Type       | Default       | Description              |
+| ---------- | ---------- | ------------- | ------------------------ |
+| `language` | `Language` | `Language.EN` | Language for synthesis.  |
+| `speed`    | `float`    | `1.0`         | Speech speed multiplier. |
 
 ## Usage
 
@@ -187,11 +189,11 @@ async with aiohttp.ClientSession() as session:
 
 Neuphonic WebSocket TTS supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Neuphonic WebSocket |
-| `on_disconnected` | Disconnected from Neuphonic WebSocket |
-| `on_connection_error` | WebSocket connection error occurred |
+| Event                 | Description                           |
+| --------------------- | ------------------------------------- |
+| `on_connected`        | Connected to Neuphonic WebSocket      |
+| `on_disconnected`     | Disconnected from Neuphonic WebSocket |
+| `on_connection_error` | WebSocket connection error occurred   |
 
 ```python
 @tts.event_handler("on_connected")

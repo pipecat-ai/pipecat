@@ -67,7 +67,8 @@ Before using Anthropic LLM services, you need:
 </ParamField>
 
 <ParamField path="model" type="str" default="claude-sonnet-4-5-20250929">
-  Claude model name to use (e.g., `"claude-sonnet-4-5-20250929"`, `"claude-opus-4-6-20250929"`).
+  Claude model name to use (e.g., `"claude-sonnet-4-5-20250929"`,
+  `"claude-opus-4-6-20250929"`).
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
@@ -75,43 +76,47 @@ Before using Anthropic LLM services, you need:
 </ParamField>
 
 <ParamField path="client" type="AsyncAnthropic" default="None">
-  Optional custom Anthropic client instance. Useful for custom clients like `AsyncAnthropicBedrock` or `AsyncAnthropicVertex`.
+  Optional custom Anthropic client instance. Useful for custom clients like
+  `AsyncAnthropicBedrock` or `AsyncAnthropicVertex`.
 </ParamField>
 
 <ParamField path="retry_timeout_secs" type="float" default="5.0">
-  Request timeout in seconds. Used when `retry_on_timeout` is enabled to determine when to retry.
+  Request timeout in seconds. Used when `retry_on_timeout` is enabled to
+  determine when to retry.
 </ParamField>
 
 <ParamField path="retry_on_timeout" type="bool" default="False">
-  Whether to retry the request once if it times out. The retry attempt has no timeout limit.
+  Whether to retry the request once if it times out. The retry attempt has no
+  timeout limit.
 </ParamField>
 
 ### InputParams
 
 Model inference settings that can be set at initialization via the `params` constructor argument, or changed at runtime via [`UpdateSettingsFrame`](/server/utilities/frame-processor-events#updatesettingsframe).
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enable_prompt_caching` | `bool` | `None` | Whether to enable Anthropic's prompt caching feature. Reduces costs for repeated context. |
-| `max_tokens` | `int` | `4096` | Maximum tokens to generate. Must be at least 1. |
-| `temperature` | `float` | `NOT_GIVEN` | Sampling temperature (0.0 to 1.0). Lower values are more focused, higher values are more creative. |
-| `top_k` | `int` | `NOT_GIVEN` | Top-k sampling parameter. Limits tokens to the top k most likely. |
-| `top_p` | `float` | `NOT_GIVEN` | Top-p (nucleus) sampling (0.0 to 1.0). Controls diversity of output. |
-| `thinking` | `ThinkingConfig` | `NOT_GIVEN` | Extended thinking configuration. See [ThinkingConfig](#thinkingconfig) below. |
-| `extra` | `dict` | `{}` | Additional parameters passed directly to the API. |
+| Parameter               | Type             | Default     | Description                                                                                        |
+| ----------------------- | ---------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `enable_prompt_caching` | `bool`           | `None`      | Whether to enable Anthropic's prompt caching feature. Reduces costs for repeated context.          |
+| `max_tokens`            | `int`            | `4096`      | Maximum tokens to generate. Must be at least 1.                                                    |
+| `temperature`           | `float`          | `NOT_GIVEN` | Sampling temperature (0.0 to 1.0). Lower values are more focused, higher values are more creative. |
+| `top_k`                 | `int`            | `NOT_GIVEN` | Top-k sampling parameter. Limits tokens to the top k most likely.                                  |
+| `top_p`                 | `float`          | `NOT_GIVEN` | Top-p (nucleus) sampling (0.0 to 1.0). Controls diversity of output.                               |
+| `thinking`              | `ThinkingConfig` | `NOT_GIVEN` | Extended thinking configuration. See [ThinkingConfig](#thinkingconfig) below.                      |
+| `extra`                 | `dict`           | `{}`        | Additional parameters passed directly to the API.                                                  |
 
 <Note>
-  `NOT_GIVEN` values are omitted from the API request entirely, letting the Anthropic API use its own defaults.
+  `NOT_GIVEN` values are omitted from the API request entirely, letting the
+  Anthropic API use its own defaults.
 </Note>
 
 ### ThinkingConfig
 
 Configuration for Anthropic's extended thinking feature, which causes the model to spend more time reasoning before responding.
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `type` | `"enabled"` or `"disabled"` | Whether extended thinking is enabled. |
-| `budget_tokens` | `int` | Maximum number of tokens for thinking. Minimum 1024 with current models. |
+| Parameter       | Type                        | Description                                                              |
+| --------------- | --------------------------- | ------------------------------------------------------------------------ |
+| `type`          | `"enabled"` or `"disabled"` | Whether extended thinking is enabled.                                    |
+| `budget_tokens` | `int`                       | Maximum number of tokens for thinking. Minimum 1024 with current models. |
 
 When extended thinking is enabled, the service emits `LLMThoughtStartFrame`, `LLMThoughtTextFrame`, and `LLMThoughtEndFrame` during response generation.
 
@@ -190,9 +195,9 @@ await task.queue_frame(
 
 `AnthropicLLMService` supports the following event handlers, inherited from [LLMService](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_completion_timeout` | Called when an LLM completion request times out |
+| Event                       | Description                                                             |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `on_completion_timeout`     | Called when an LLM completion request times out                         |
 | `on_function_calls_started` | Called when function calls are received and execution is about to start |
 
 ```python

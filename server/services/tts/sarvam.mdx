@@ -71,10 +71,15 @@ Sarvam offers two service implementations: `SarvamTTSService` (WebSocket) for re
 </ParamField>
 
 <ParamField path="voice_id" type="str" default="None">
-  Speaker voice ID. If `None`, uses the model-appropriate default (`anushka` for v2, `shubh` for v3).
+  Speaker voice ID. If `None`, uses the model-appropriate default (`anushka` for
+  v2, `shubh` for v3).
 </ParamField>
 
-<ParamField path="url" type="str" default="wss://api.sarvam.ai/text-to-speech/ws">
+<ParamField
+  path="url"
+  type="str"
+  default="wss://api.sarvam.ai/text-to-speech/ws"
+>
   WebSocket URL for the TTS backend.
 </ParamField>
 
@@ -83,11 +88,13 @@ Sarvam offers two service implementations: `SarvamTTSService` (WebSocket) for re
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz (8000, 16000, 22050, 24000). If `None`, uses model-specific default (22050 for v2, 24000 for v3).
+  Audio sample rate in Hz (8000, 16000, 22050, 24000). If `None`, uses
+  model-specific default (22050 for v2, 24000 for v3).
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams (WebSocket)](#inputparams-websocket) below.
+  Runtime-configurable voice and generation settings. See [InputParams
+  (WebSocket)](#inputparams-websocket) below.
 </ParamField>
 
 ### SarvamHttpTTSService
@@ -113,38 +120,40 @@ Sarvam offers two service implementations: `SarvamTTSService` (WebSocket) for re
 </ParamField>
 
 <ParamField path="sample_rate" type="int" default="None">
-  Audio sample rate in Hz (8000, 16000, 22050, 24000). If `None`, uses model-specific default.
+  Audio sample rate in Hz (8000, 16000, 22050, 24000). If `None`, uses
+  model-specific default.
 </ParamField>
 
 <ParamField path="params" type="InputParams" default="None">
-  Runtime-configurable voice and generation settings. See [InputParams (HTTP)](#inputparams-http) below.
+  Runtime-configurable voice and generation settings. See [InputParams
+  (HTTP)](#inputparams-http) below.
 </ParamField>
 
 ### InputParams (WebSocket)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Target language for synthesis. Supports Bengali, English, Gujarati, Hindi, Kannada, Malayalam, Marathi, Odia, Punjabi, Tamil, Telugu. |
-| `pitch` | `float` | `0.0` | Voice pitch adjustment (-0.75 to 0.75). Only for `bulbul:v2`. |
-| `pace` | `float` | `1.0` | Speech pace multiplier. v2: 0.3-3.0, v3: 0.5-2.0. |
-| `loudness` | `float` | `1.0` | Volume multiplier (0.3 to 3.0). Only for `bulbul:v2`. |
-| `enable_preprocessing` | `bool` | `False` | Enable text preprocessing. Always enabled for v3 models. |
-| `min_buffer_size` | `int` | `50` | Minimum characters to buffer before TTS processing. |
-| `max_chunk_length` | `int` | `150` | Maximum characters processed in a single chunk. |
-| `output_audio_codec` | `str` | `"linear16"` | Audio codec: `linear16`, `mulaw`, `alaw`, `opus`, `flac`, `aac`, `wav`, `mp3`. |
-| `output_audio_bitrate` | `str` | `"128k"` | Audio bitrate: `32k`, `64k`, `96k`, `128k`, `192k`. |
-| `temperature` | `float` | `0.6` | Output randomness for v3 models (0.01-1.0). Ignored for v2. |
+| Parameter              | Type       | Default       | Description                                                                                                                           |
+| ---------------------- | ---------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `language`             | `Language` | `Language.EN` | Target language for synthesis. Supports Bengali, English, Gujarati, Hindi, Kannada, Malayalam, Marathi, Odia, Punjabi, Tamil, Telugu. |
+| `pitch`                | `float`    | `0.0`         | Voice pitch adjustment (-0.75 to 0.75). Only for `bulbul:v2`.                                                                         |
+| `pace`                 | `float`    | `1.0`         | Speech pace multiplier. v2: 0.3-3.0, v3: 0.5-2.0.                                                                                     |
+| `loudness`             | `float`    | `1.0`         | Volume multiplier (0.3 to 3.0). Only for `bulbul:v2`.                                                                                 |
+| `enable_preprocessing` | `bool`     | `False`       | Enable text preprocessing. Always enabled for v3 models.                                                                              |
+| `min_buffer_size`      | `int`      | `50`          | Minimum characters to buffer before TTS processing.                                                                                   |
+| `max_chunk_length`     | `int`      | `150`         | Maximum characters processed in a single chunk.                                                                                       |
+| `output_audio_codec`   | `str`      | `"linear16"`  | Audio codec: `linear16`, `mulaw`, `alaw`, `opus`, `flac`, `aac`, `wav`, `mp3`.                                                        |
+| `output_audio_bitrate` | `str`      | `"128k"`      | Audio bitrate: `32k`, `64k`, `96k`, `128k`, `192k`.                                                                                   |
+| `temperature`          | `float`    | `0.6`         | Output randomness for v3 models (0.01-1.0). Ignored for v2.                                                                           |
 
 ### InputParams (HTTP)
 
-| Parameter | Type | Default | Description |
-| --- | --- | --- | --- |
-| `language` | `Language` | `Language.EN` | Target language for synthesis. |
-| `pitch` | `float` | `0.0` | Voice pitch adjustment (-0.75 to 0.75). Only for `bulbul:v2`. |
-| `pace` | `float` | `1.0` | Speech pace multiplier. v2: 0.3-3.0, v3: 0.5-2.0. |
-| `loudness` | `float` | `1.0` | Volume multiplier (0.3 to 3.0). Only for `bulbul:v2`. |
-| `enable_preprocessing` | `bool` | `False` | Enable text preprocessing. Always enabled for v3 models. |
-| `temperature` | `float` | `0.6` | Output randomness for v3 models (0.01-1.0). Ignored for v2. |
+| Parameter              | Type       | Default       | Description                                                   |
+| ---------------------- | ---------- | ------------- | ------------------------------------------------------------- |
+| `language`             | `Language` | `Language.EN` | Target language for synthesis.                                |
+| `pitch`                | `float`    | `0.0`         | Voice pitch adjustment (-0.75 to 0.75). Only for `bulbul:v2`. |
+| `pace`                 | `float`    | `1.0`         | Speech pace multiplier. v2: 0.3-3.0, v3: 0.5-2.0.             |
+| `loudness`             | `float`    | `1.0`         | Volume multiplier (0.3 to 3.0). Only for `bulbul:v2`.         |
+| `enable_preprocessing` | `bool`     | `False`       | Enable text preprocessing. Always enabled for v3 models.      |
+| `temperature`          | `float`    | `0.6`         | Output randomness for v3 models (0.01-1.0). Ignored for v2.   |
 
 ## Usage
 
@@ -214,10 +223,10 @@ async with aiohttp.ClientSession() as session:
 
 Sarvam WebSocket TTS supports the standard [service connection events](/server/utilities/service-events):
 
-| Event | Description |
-| --- | --- |
-| `on_connected` | Connected to Sarvam WebSocket |
-| `on_disconnected` | Disconnected from Sarvam WebSocket |
+| Event                 | Description                         |
+| --------------------- | ----------------------------------- |
+| `on_connected`        | Connected to Sarvam WebSocket       |
+| `on_disconnected`     | Disconnected from Sarvam WebSocket  |
 | `on_connection_error` | WebSocket connection error occurred |
 
 ```python
