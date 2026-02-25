@@ -356,9 +356,9 @@ class RimeTTSService(WebsocketTTSService):
 
         return changed
 
-    def _build_msg(self, text: str = "", context_id: Optional[str] = None) -> dict:
+    def _build_msg(self, text: str = "", context_id: str = "") -> dict:
         """Build JSON message for Rime API."""
-        msg = {"text": text, "contextId": context_id or self.get_active_audio_context_id()}
+        msg = {"text": text, "contextId": context_id}
         if self._extra_msg_fields:
             msg |= self._extra_msg_fields
             self._extra_msg_fields = {}
