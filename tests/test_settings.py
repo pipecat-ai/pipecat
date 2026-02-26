@@ -7,9 +7,8 @@
 """Tests for the typed settings infrastructure in pipecat.services.settings."""
 
 import pytest
-from deepgram import LiveOptions
 
-from pipecat.services.deepgram.stt import DeepgramSTTSettings
+from pipecat.services.deepgram.stt import DeepgramSTTSettings, LiveOptions
 from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTSettings
 from pipecat.services.settings import (
     NOT_GIVEN,
