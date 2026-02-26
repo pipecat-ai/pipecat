@@ -544,7 +544,6 @@ class BaseOpenAILLMService(LLMService):
         if context:
             try:
                 await self.push_frame(LLMFullResponseStartFrame())
-                await self.start_processing_metrics()
                 await self._process_context(context)
             except httpx.TimeoutException as e:
                 await self._call_event_handler("on_completion_timeout")
@@ -552,5 +551,4 @@ class BaseOpenAILLMService(LLMService):
             except Exception as e:
                 await self.push_error(error_msg=f"Error during completion: {e}", exception=e)
             finally:
-                await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())

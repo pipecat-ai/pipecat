@@ -751,7 +751,6 @@ class OpenAIRealtimeLLMService(LLMService):
             cache_read_input_tokens=cached_tokens,
         )
         await self.start_llm_usage_metrics(tokens)
-        await self.stop_processing_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         self._current_assistant_response = None
         # error handling
@@ -840,7 +839,6 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _handle_evt_speech_stopped(self, evt):
         await self.start_ttfb_metrics()
-        await self.start_processing_metrics()
         await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
@@ -917,7 +915,6 @@ class OpenAIRealtimeLLMService(LLMService):
         logger.debug("Creating response")
 
         await self.push_frame(LLMFullResponseStartFrame())
-        await self.start_processing_metrics()
         await self.start_ttfb_metrics()
         await self.send_client_event(
             events.ResponseCreateEvent(

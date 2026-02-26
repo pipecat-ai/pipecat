@@ -129,8 +129,6 @@ class HathoraSTTService(SegmentedSTTService):
             Frame: Frames containing transcription results (typically TextFrame).
         """
         try:
-            await self.start_processing_metrics()
-
             url = f"{self._base_url}"
 
             payload = {
@@ -169,8 +167,6 @@ class HathoraSTTService(SegmentedSTTService):
                         Language(response_language),
                         result=response,
                     )
-
-            await self.stop_processing_metrics()
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")

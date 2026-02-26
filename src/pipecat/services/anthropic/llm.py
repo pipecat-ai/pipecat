@@ -427,7 +427,6 @@ class AnthropicLLMService(LLMService):
 
         try:
             await self.push_frame(LLMFullResponseStartFrame())
-            await self.start_processing_metrics()
 
             params_from_context = self._get_llm_invocation_params(context)
 
@@ -579,7 +578,6 @@ class AnthropicLLMService(LLMService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
             comp_tokens = (
                 completion_tokens

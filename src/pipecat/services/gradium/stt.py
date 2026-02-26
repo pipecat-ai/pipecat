@@ -233,9 +233,7 @@ class GradiumSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self.start_processing_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._flush_transcription()
 
     async def _flush_transcription(self):
@@ -420,4 +418,3 @@ class GradiumSTTService(WebsocketSTTService):
             )
         )
         await self._trace_transcription(text, is_final=True, language=None)
-        await self.stop_processing_metrics()

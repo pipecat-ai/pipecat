@@ -74,8 +74,6 @@ class VisionService(AIService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserImageRawFrame) and frame.text:
-            await self.start_processing_metrics()
             await self.process_generator(self.run_vision(frame))
-            await self.stop_processing_metrics()
         else:
             await self.push_frame(frame, direction)

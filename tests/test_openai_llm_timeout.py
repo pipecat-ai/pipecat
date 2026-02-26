@@ -61,8 +61,6 @@ async def test_openai_llm_emits_error_frame_on_timeout():
         )
 
         # Mock metrics methods
-        service.start_processing_metrics = AsyncMock()
-        service.stop_processing_metrics = AsyncMock()
         service.start_ttfb_metrics = AsyncMock()
 
         # Create a context frame to process
@@ -108,8 +106,6 @@ async def test_openai_llm_timeout_still_pushes_end_frame():
         service.push_error = AsyncMock()
         service._call_event_handler = AsyncMock()
         service._process_context = AsyncMock(side_effect=httpx.TimeoutException("Timeout"))
-        service.start_processing_metrics = AsyncMock()
-        service.stop_processing_metrics = AsyncMock()
 
         context = LLMContext(
             messages=[{"role": "user", "content": "Hello"}],
@@ -122,9 +118,6 @@ async def test_openai_llm_timeout_still_pushes_end_frame():
         frame_types = [type(f) for f in pushed_frames]
         assert LLMFullResponseStartFrame in frame_types
         assert LLMFullResponseEndFrame in frame_types
-
-        # Verify metrics were stopped
-        service.stop_processing_metrics.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -208,8 +201,6 @@ async def test_openai_llm_emits_error_frame_on_exception():
         service.push_error = mock_push_error
         service._call_event_handler = AsyncMock()
         service._process_context = AsyncMock(side_effect=RuntimeError("API Error"))
-        service.start_processing_metrics = AsyncMock()
-        service.stop_processing_metrics = AsyncMock()
 
         context = LLMContext(
             messages=[{"role": "user", "content": "Hello"}],

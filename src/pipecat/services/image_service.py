@@ -73,8 +73,6 @@ class ImageGenService(AIService):
 
         if isinstance(frame, TextFrame):
             await self.push_frame(frame, direction)
-            await self.start_processing_metrics()
             await self.process_generator(self.run_image_gen(frame.text))
-            await self.stop_processing_metrics()
         else:
             await self.push_frame(frame, direction)

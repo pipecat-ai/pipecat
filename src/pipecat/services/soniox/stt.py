@@ -465,7 +465,6 @@ class SonioxSTTService(WebsocketSTTService):
                     )
                 )
                 await self._handle_transcription(text, is_final=True)
-                await self.stop_processing_metrics()
                 self._final_transcription_buffer = []
 
         async for message in self._get_websocket():
@@ -492,8 +491,6 @@ class SonioxSTTService(WebsocketSTTService):
                             # the rest will be sent as interim tokens (even final tokens).
                             await send_endpoint_transcript()
                         else:
-                            if not self._final_transcription_buffer:
-                                await self.start_processing_metrics()
                             self._final_transcription_buffer.append(token)
                     else:
                         non_final_transcription.append(token)

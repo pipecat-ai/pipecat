@@ -229,11 +229,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
                   or an ErrorFrame if transcription fails.
         """
         try:
-            await self.start_processing_metrics()
-
             response = await self._transcribe(audio)
-
-            await self.stop_processing_metrics()
 
             text = response.text.strip()
 

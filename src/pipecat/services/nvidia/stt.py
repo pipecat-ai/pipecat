@@ -342,7 +342,6 @@ class NvidiaSTTService(STTService):
             transcript = result.alternatives[0].transcript
             if transcript and len(transcript) > 0:
                 if result.is_final:
-                    await self.stop_processing_metrics()
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
@@ -377,7 +376,6 @@ class NvidiaSTTService(STTService):
         Yields:
             None - transcription results are pushed to the pipeline via frames.
         """
-        await self.start_processing_metrics()
         await self._queue.put(audio)
         yield None
 
@@ -620,12 +618,8 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
             assert self._asr_service is not None, "ASR service not initialized"
             assert self._config is not None, "Recognition config not created"
 
-            await self.start_processing_metrics()
-
             # Process audio with NVIDIA Riva ASR - explicitly request non-future response
             raw_response = self._asr_service.offline_recognize(audio, self._config, future=False)
-
-            await self.stop_processing_metrics()
 
             # Process the response - handle different possible return types
             # If it's a future-like object, get the result

@@ -661,7 +661,6 @@ class GrokRealtimeLLMService(LLMService):
             )
             await self.start_llm_usage_metrics(tokens)
 
-        await self.stop_processing_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         self._current_assistant_response = None
 
@@ -736,7 +735,6 @@ class GrokRealtimeLLMService(LLMService):
     async def _handle_evt_speech_stopped(self, evt):
         """Handle speech stopped event from VAD."""
         await self.start_ttfb_metrics()
-        await self.start_processing_metrics()
         await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     async def _handle_evt_error(self, evt):
@@ -785,7 +783,6 @@ class GrokRealtimeLLMService(LLMService):
         logger.debug("Creating Grok response")
 
         await self.push_frame(LLMFullResponseStartFrame())
-        await self.start_processing_metrics()
         await self.start_ttfb_metrics()
 
         await self.send_client_event(

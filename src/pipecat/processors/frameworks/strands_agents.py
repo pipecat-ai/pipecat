@@ -90,7 +90,6 @@ class StrandsAgentsProcessor(FrameProcessor):
         ttfb_tracking = True
         try:
             await self.push_frame(LLMFullResponseStartFrame())
-            await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
             if self.graph:
@@ -148,7 +147,6 @@ class StrandsAgentsProcessor(FrameProcessor):
             if ttfb_tracking:
                 await self.stop_ttfb_metrics()
                 ttfb_tracking = False
-            await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
 
     def can_generate_metrics(self) -> bool:

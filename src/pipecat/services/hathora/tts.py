@@ -143,7 +143,6 @@ class HathoraTTSService(TTSService):
             Frame: Audio frames containing the synthesized speech.
         """
         try:
-            await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
             url = f"{self._base_url}"
@@ -187,5 +186,4 @@ class HathoraTTSService(TTSService):
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
         finally:
             await self.stop_ttfb_metrics()
-            await self.stop_processing_metrics()
             yield TTSStoppedFrame(context_id=context_id)

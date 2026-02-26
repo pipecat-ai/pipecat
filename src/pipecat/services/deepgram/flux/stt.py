@@ -497,7 +497,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         # both the "user started speaking" event and the first transcript simultaneously,
         # making this timing measurement meaningless in this context.
         # await self.start_ttfb_metrics()
-        await self.start_processing_metrics()
+        pass
 
     @traced_stt
     async def _handle_transcription(
@@ -753,7 +753,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             )
 
         await self._handle_transcription(transcript, True, self._settings.language)
-        await self.stop_processing_metrics()
         await self.broadcast_frame(UserStoppedSpeakingFrame)
         await self._call_event_handler("on_end_of_turn", transcript)
 

@@ -39,7 +39,6 @@ class SentryMetrics(FrameProcessorMetrics):
         """
         super().__init__()
         self._ttfb_metrics_tx = None
-        self._processing_metrics_tx = None
         self._sentry_available = sentry_sdk.is_initialized()
         if not self._sentry_available:
             logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
@@ -104,35 +103,6 @@ class SentryMetrics(FrameProcessorMetrics):
         if self._sentry_available and self._ttfb_metrics_tx:
             await self._sentry_queue.put(self._ttfb_metrics_tx)
             self._ttfb_metrics_tx = None
-
-    async def start_processing_metrics(self, *, start_time: Optional[float] = None):
-        """Start tracking frame processing metrics.
-
-        Args:
-            start_time: Optional start timestamp override.
-        """
-        await super().start_processing_metrics(start_time=start_time)
-
-        if self._sentry_available:
-            self._processing_metrics_tx = sentry_sdk.start_transaction(
-                op="processing",
-                name=f"Processing for {self._processor_name()}",
-            )
-            logger.debug(
-                f"{self} Sentry transaction started (ID: {self._processing_metrics_tx.span_id} Name: {self._processing_metrics_tx.name})"
-            )
-
-    async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
-        """Stop tracking frame processing metrics.
-
-        Args:
-            end_time: Optional end timestamp override.
-        """
-        await super().stop_processing_metrics(end_time=end_time)
-
-        if self._sentry_available and self._processing_metrics_tx:
-            await self._sentry_queue.put(self._processing_metrics_tx)
-            self._processing_metrics_tx = None
 
     async def _sentry_task_handler(self):
         """Background task handler for completing Sentry transactions."""

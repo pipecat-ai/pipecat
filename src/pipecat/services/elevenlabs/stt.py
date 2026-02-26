@@ -31,7 +31,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -342,7 +341,7 @@ class ElevenLabsSTTService(SegmentedSTTService):
         self, transcript: str, is_final: bool, language: Optional[str] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_processing_metrics()
+        pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribe an audio segment using ElevenLabs' STT API.
@@ -358,8 +357,6 @@ class ElevenLabsSTTService(SegmentedSTTService):
             Only non-empty transcriptions are yielded.
         """
         try:
-            await self.start_processing_metrics()
-
             # Upload audio and get transcription result directly
             result = await self._transcribe_audio(audio)
 
@@ -563,10 +560,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def _start_metrics(self):
-        """Start performance metrics collection for transcription processing."""
-        await self.start_processing_metrics()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle speech events.
 
@@ -576,10 +569,7 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            # Start metrics when user starts speaking
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send commit when user stops speaking (manual commit mode)
             if self._settings.commit_strategy == CommitStrategy.MANUAL:
                 if self._websocket and self._websocket.state is State.OPEN:
@@ -852,8 +842,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         if not text:
             return
 
-        await self.stop_processing_metrics()
-
         # Get language if provided
         language = data.get("language_code")
 
@@ -892,8 +880,6 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         text = data.get("text", "").strip()
         if not text:
             return
-
-        await self.stop_processing_metrics()
 
         # Get language if provided
         language = data.get("language_code")

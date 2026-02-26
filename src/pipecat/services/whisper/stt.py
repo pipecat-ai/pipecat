@@ -314,8 +314,6 @@ class WhisperSTTService(SegmentedSTTService):
             yield ErrorFrame("Whisper model not available")
             return
 
-        await self.start_processing_metrics()
-
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -326,8 +324,6 @@ class WhisperSTTService(SegmentedSTTService):
         for segment in segments:
             if segment.no_speech_prob < self._no_speech_prob:
                 text += f"{segment.text} "
-
-        await self.stop_processing_metrics()
 
         if text:
             await self._handle_transcription(text, True, self._settings.language)
@@ -414,8 +410,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         try:
             import mlx_whisper
 
-            await self.start_processing_metrics()
-
             # Divide by 32768 because we have signed 16-bit data.
             audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -437,8 +431,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
             if len(text.strip()) == 0:
                 text = None
-
-            await self.stop_processing_metrics()
 
             if text:
                 await self._handle_transcription(text, True, self._settings.language)

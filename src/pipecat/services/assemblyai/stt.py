@@ -284,7 +284,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                 and self._websocket.state is State.OPEN
             ):
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
-            await self.start_processing_metrics()
 
     @traced_stt
     async def _trace_transcription(self, transcript: str, is_final: bool, language: Language):
@@ -482,7 +481,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
             )
             await self._trace_transcription(message.transcript, True, self._settings.language)
-            await self.stop_processing_metrics()
         else:
             await self.push_frame(
                 InterimTranscriptionFrame(

@@ -1044,7 +1044,6 @@ class AWSBedrockLLMService(LLMService):
 
         try:
             await self.push_frame(LLMFullResponseStartFrame())
-            await self.start_processing_metrics()
 
             await self.start_ttfb_metrics()
 
@@ -1200,7 +1199,6 @@ class AWSBedrockLLMService(LLMService):
         except Exception as e:
             await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
         finally:
-            await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
             comp_tokens = (
                 completion_tokens

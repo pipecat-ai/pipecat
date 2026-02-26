@@ -24,7 +24,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -241,10 +240,6 @@ class CartesiaSTTService(WebsocketSTTService):
         await super().cancel(frame)
         await self._disconnect()
 
-    async def _start_metrics(self):
-        """Start performance metrics collection for transcription processing."""
-        await self.start_processing_metrics()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and handle speech events.
 
@@ -254,9 +249,7 @@ class CartesiaSTTService(WebsocketSTTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame):
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # Send finalize command to flush the transcription session
             if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send("finalize")
@@ -404,7 +397,6 @@ class CartesiaSTTService(WebsocketSTTService):
                     )
                 )
                 await self._handle_transcription(transcript, is_final, language)
-                await self.stop_processing_metrics()
             else:
                 # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(

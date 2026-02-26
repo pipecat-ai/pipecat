@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -452,10 +451,6 @@ class DeepgramSTTService(STTService):
             # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
             await self._connection.finish()
 
-    async def _start_metrics(self):
-        """Start processing metrics collection for this utterance."""
-        await self.start_processing_metrics()
-
     async def _on_error(self, *args, **kwargs):
         error: ErrorResponse = kwargs["error"]
         logger.warning(f"{self} connection error, will retry: {error}")
@@ -467,7 +462,6 @@ class DeepgramSTTService(STTService):
         await self._connect()
 
     async def _on_speech_started(self, *args, **kwargs):
-        await self._start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
@@ -511,7 +505,6 @@ class DeepgramSTTService(STTService):
                     )
                 )
                 await self._handle_transcription(transcript, is_final, language)
-                await self.stop_processing_metrics()
             else:
                 # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(
@@ -533,10 +526,7 @@ class DeepgramSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VADUserStartedSpeakingFrame) and not self.vad_enabled:
-            # Start metrics if Deepgram VAD is disabled & pipeline VAD has detected speech
-            await self._start_metrics()
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             # Mark that we're awaiting a from_finalize response
             self.request_finalize()

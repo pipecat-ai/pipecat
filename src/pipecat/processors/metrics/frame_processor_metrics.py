@@ -16,7 +16,6 @@ from pipecat.metrics.metrics import (
     LLMTokenUsage,
     LLMUsageMetricsData,
     MetricsData,
-    ProcessingMetricsData,
     TextAggregationMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
@@ -43,7 +42,6 @@ class FrameProcessorMetrics(BaseObject):
         super().__init__()
         self._task_manager = None
         self._start_ttfb_time = 0
-        self._start_processing_time = 0
         self._start_text_aggregation_time = 0
         self._last_ttfb_time = 0
         self._should_report_ttfb = True
@@ -146,38 +144,6 @@ class FrameProcessorMetrics(BaseObject):
         )
         self._start_ttfb_time = 0
         return MetricsFrame(data=[ttfb])
-
-    async def start_processing_metrics(self, *, start_time: Optional[float] = None):
-        """Start measuring processing time.
-
-        Args:
-            start_time: Optional timestamp to use as the start time. If None,
-                uses the current time.
-        """
-        self._start_processing_time = start_time or time.time()
-
-    async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
-        """Stop processing time measurement and generate metrics frame.
-
-        Args:
-            end_time: Optional timestamp to use as the end time. If None, uses
-                the current time.
-
-        Returns:
-            MetricsFrame containing processing duration data, or None if not measuring.
-        """
-        if self._start_processing_time == 0:
-            return None
-
-        end_time = end_time or time.time()
-
-        value = end_time - self._start_processing_time
-        logger.debug(f"{self._processor_name()} processing time: {value:.3f}s")
-        processing = ProcessingMetricsData(
-            processor=self._processor_name(), value=value, model=self._model_name()
-        )
-        self._start_processing_time = 0
-        return MetricsFrame(data=[processing])
 
     async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
         """Record LLM token usage metrics.

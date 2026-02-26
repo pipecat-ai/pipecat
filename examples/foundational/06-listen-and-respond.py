@@ -13,7 +13,6 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, LLMRunFrame, MetricsFrame
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
-    ProcessingMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -46,8 +45,6 @@ class MetricsLogger(FrameProcessor):
             for d in frame.data:
                 if isinstance(d, TTFBMetricsData):
                     print(f"!!! MetricsFrame: {frame}, ttfb: {d.value}")
-                elif isinstance(d, ProcessingMetricsData):
-                    print(f"!!! MetricsFrame: {frame}, processing: {d.value}")
                 elif isinstance(d, LLMUsageMetricsData):
                     tokens = d.value
                     print(

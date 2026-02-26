@@ -173,7 +173,6 @@ class AzureSTTService(STTService):
             Frame: Either None for successful processing or ErrorFrame on failure.
         """
         try:
-            await self.start_processing_metrics()
             if self._audio_stream:
                 self._audio_stream.write(audio)
             yield None
@@ -248,7 +247,7 @@ class AzureSTTService(STTService):
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_processing_metrics()
+        pass
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:

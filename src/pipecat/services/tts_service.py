@@ -836,20 +836,12 @@ class TTSService(AIService):
         if self._is_streaming_tokens:
             self._streamed_text += text
 
-        # Skip per-token processing metrics when streaming. The per-token
-        # processing time is just websocket send overhead (~0.1ms) and not
-        # meaningful. TTFB captures the important timing for streaming TTS.
-        if not self._is_streaming_tokens:
-            await self.start_processing_metrics()
-
         # Process all filters.
         for filter in self._text_filters:
             await filter.reset_interruption()
             text = await filter.filter(text)
 
         if not text.strip():
-            if not self._is_streaming_tokens:
-                await self.stop_processing_metrics()
             return
 
         # Create context ID and store metadata
@@ -886,9 +878,6 @@ class TTSService(AIService):
         await self._call_event_handler("on_tts_request", context_id, prepared_text)
 
         await self.process_generator(self.run_tts(prepared_text, context_id))
-
-        if not self._is_streaming_tokens:
-            await self.stop_processing_metrics()
 
         if self._push_text_frames:
             # In TTS services that support word timestamps, the TTSTextFrames

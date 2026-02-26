@@ -38,16 +38,6 @@ class TTFBMetricsData(MetricsData):
     value: float
 
 
-class ProcessingMetricsData(MetricsData):
-    """General processing time metrics data.
-
-    Parameters:
-        value: Processing time measurement in seconds.
-    """
-
-    value: float
-
-
 class LLMTokenUsage(BaseModel):
     """Token usage statistics for LLM operations.
 

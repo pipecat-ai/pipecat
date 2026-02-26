@@ -257,7 +257,7 @@ class FalSTTService(SegmentedSTTService):
         self, transcript: str, is_final: bool, language: Optional[str] = None
     ):
         """Handle a transcription result with tracing."""
-        await self.stop_processing_metrics()
+        pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes an audio segment using Fal's Wizper API.
@@ -273,8 +273,6 @@ class FalSTTService(SegmentedSTTService):
             Only non-empty transcriptions are yielded.
         """
         try:
-            await self.start_processing_metrics()
-
             # Send to Fal directly (audio is already in WAV format from base class)
             data_uri = fal_client.encode(audio, "audio/x-wav")
             response = await self._fal_client.run(

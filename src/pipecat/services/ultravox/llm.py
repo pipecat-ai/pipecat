@@ -551,7 +551,6 @@ class UltravoxRealtimeLLMService(LLMService):
         if not audio:
             return
         if not self._bot_responding:
-            await self.start_processing_metrics()
             await self.stop_ttfb_metrics()
             await self.push_frame(LLMFullResponseStartFrame())
             await self.push_frame(TTSStartedFrame())
@@ -559,7 +558,6 @@ class UltravoxRealtimeLLMService(LLMService):
         await self.push_frame(TTSAudioRawFrame(audio, self._sample_rate, 1))
 
     async def _handle_response_end(self):
-        await self.stop_processing_metrics()
         if self._bot_responding == "voice":
             await self.push_frame(TTSStoppedFrame())
         await self.push_frame(LLMFullResponseEndFrame())
@@ -606,12 +604,10 @@ class UltravoxRealtimeLLMService(LLMService):
                 await self.push_frame(tts_frame)
         elif medium == "text":
             if final:
-                await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
                 self._bot_responding = None
             elif text or delta:
                 if not self._bot_responding:
-                    await self.start_processing_metrics()
                     await self.stop_ttfb_metrics()
                     await self.push_frame(LLMFullResponseStartFrame())
                     self._bot_responding = "text"

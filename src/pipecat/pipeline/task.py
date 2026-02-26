@@ -40,7 +40,7 @@ from pipecat.frames.frames import (
     StopTaskFrame,
     UserSpeakingFrame,
 )
-from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
+from pipecat.metrics.metrics import TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.observers.user_bot_latency_observer import UserBotLatencyObserver
@@ -715,7 +715,6 @@ class PipelineTask(BasePipelineTask):
         data = []
         for p in processors:
             data.append(TTFBMetricsData(processor=p.name, value=0.0))
-            data.append(ProcessingMetricsData(processor=p.name, value=0.0))
         return MetricsFrame(data=data)
 
     async def _wait_for_pipeline_start(self, frame: Frame):

@@ -441,28 +441,6 @@ class FrameProcessor(BaseObject):
             if frame:
                 await self.push_frame(frame)
 
-    async def start_processing_metrics(self, *, start_time: Optional[float] = None):
-        """Start processing metrics collection.
-
-        Args:
-            start_time: Optional timestamp to use as the start time. If None,
-                uses the current time.
-        """
-        if self.can_generate_metrics() and self.metrics_enabled:
-            await self._metrics.start_processing_metrics(start_time=start_time)
-
-    async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
-        """Stop processing metrics collection and push results.
-
-        Args:
-            end_time: Optional timestamp to use as the end time. If None, uses
-                the current time.
-        """
-        if self.can_generate_metrics() and self.metrics_enabled:
-            frame = await self._metrics.stop_processing_metrics(end_time=end_time)
-            if frame:
-                await self.push_frame(frame)
-
     async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
         """Start LLM usage metrics collection.
 
@@ -500,7 +478,6 @@ class FrameProcessor(BaseObject):
     async def stop_all_metrics(self):
         """Stop all active metrics collection."""
         await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
         await self.stop_text_aggregation_metrics()
 
     def create_task(self, coroutine: Coroutine, name: Optional[str] = None) -> asyncio.Task:

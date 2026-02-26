@@ -20,7 +20,6 @@ from pipecat.metrics.metrics import (
     LLMTokenUsage,
     LLMUsageMetricsData,
     MetricsData,
-    ProcessingMetricsData,
     SmartTurnMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
@@ -35,7 +34,6 @@ class MetricsLogObserver(BaseObserver):
     Monitors and logs all MetricsFrame instances, including:
 
     - TTFBMetricsData (Time To First Byte)
-    - ProcessingMetricsData (General processing time)
     - LLMUsageMetricsData (Token usage statistics)
     - TTSUsageMetricsData (Text-to-Speech character counts)
     - TurnMetricsData (Turn prediction metrics)
@@ -145,10 +143,6 @@ class MetricsLogObserver(BaseObserver):
         if isinstance(metrics_data, TTFBMetricsData):
             logger.debug(
                 f"📊 {processor_info} TTFB{model_info}: {metrics_data.value}s at {time_sec:.3f}s"
-            )
-        elif isinstance(metrics_data, ProcessingMetricsData):
-            logger.debug(
-                f"📊 {processor_info} PROCESSING TIME{model_info}: {metrics_data.value}s at {time_sec:.3f}s"
             )
         elif isinstance(metrics_data, LLMUsageMetricsData):
             self._log_llm_usage(metrics_data, processor_info, model_info, time_sec)
