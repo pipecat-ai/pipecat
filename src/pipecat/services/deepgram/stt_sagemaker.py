@@ -40,7 +40,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
-    from deepgram import LiveOptions
+    from pipecat.services.deepgram.stt import LiveOptions
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(

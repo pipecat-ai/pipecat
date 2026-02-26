@@ -6,6 +6,7 @@
 
 """Deepgram speech-to-text service implementation."""
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, Optional
 
@@ -32,14 +33,12 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
-    from deepgram import (
-        AsyncListenWebSocketClient,
-        DeepgramClient,
-        DeepgramClientOptions,
-        ErrorResponse,
-        LiveOptions,
-        LiveResultResponse,
-        LiveTranscriptionEvents,
+    from deepgram import AsyncDeepgramClient
+    from deepgram.core.events import EventType
+    from deepgram.listen.v1.types import (
+        ListenV1Results,
+        ListenV1SpeechStarted,
+        ListenV1UtteranceEnd,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -47,12 +46,82 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+class LiveOptions:
+    """Deepgram live transcription options.
+
+    Compatibility wrapper that mirrors the ``LiveOptions`` class removed in
+    deepgram-sdk v6. Pass this to :class:`DeepgramSTTService` via the
+    ``live_options`` constructor argument.
+
+    Args:
+        encoding: Audio encoding (e.g. ``"linear16"``).
+        language: BCP-47 language tag (e.g. ``"en-US"``).
+        model: Deepgram model name (e.g. ``"nova-3-general"``).
+        channels: Number of audio channels.
+        sample_rate: Audio sample rate in Hz.
+        interim_results: Whether to emit interim transcriptions.
+        smart_format: Apply smart formatting to transcripts.
+        punctuate: Add punctuation to transcripts.
+        profanity_filter: Filter profanity from transcripts.
+        vad_events: Enable Deepgram VAD speech-started / utterance-end events.
+        **kwargs: Any additional Deepgram query parameters.
+    """
+
+    def __init__(
+        self,
+        *,
+        encoding: Optional[str] = None,
+        language: Optional[str] = None,
+        model: Optional[str] = None,
+        channels: Optional[int] = None,
+        sample_rate: Optional[int] = None,
+        interim_results: Optional[bool] = None,
+        smart_format: Optional[bool] = None,
+        punctuate: Optional[bool] = None,
+        profanity_filter: Optional[bool] = None,
+        vad_events: Optional[bool] = None,
+        **kwargs,
+    ):
+        self.encoding = encoding
+        self.language = language
+        self.model = model
+        self.channels = channels
+        self.sample_rate = sample_rate
+        self.interim_results = interim_results
+        self.smart_format = smart_format
+        self.punctuate = punctuate
+        self.profanity_filter = profanity_filter
+        self.vad_events = vad_events
+        self._extra = kwargs
+
+    def to_dict(self) -> dict:
+        """Return a dict of all non-None options."""
+        result = {}
+        for key in [
+            "encoding",
+            "language",
+            "model",
+            "channels",
+            "sample_rate",
+            "interim_results",
+            "smart_format",
+            "punctuate",
+            "profanity_filter",
+            "vad_events",
+        ]:
+            value = getattr(self, key)
+            if value is not None:
+                result[key] = value
+        result.update({k: v for k, v in self._extra.items() if v is not None})
+        return result
+
+
 @dataclass
 class DeepgramSTTSettings(STTSettings):
     """Settings for the Deepgram STT service.
 
     Parameters:
-        live_options: Deepgram ``LiveOptions`` for detailed configuration.
+        live_options: :class:`LiveOptions` for detailed configuration.
     """
 
     live_options: LiveOptions | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -102,7 +171,7 @@ class DeepgramSTTService(STTService):
 
             base_url: Custom Deepgram API base URL.
             sample_rate: Audio sample rate. If None, uses default or live_options value.
-            live_options: Deepgram LiveOptions for detailed configuration.
+            live_options: :class:`LiveOptions` for detailed configuration.
             addons: Additional Deepgram features to enable.
             should_interrupt: Determine whether the bot should be interrupted when Deepgram VAD events are enabled and the system detects that the user is speaking.
 
@@ -145,7 +214,7 @@ class DeepgramSTTService(STTService):
         if live_options:
             default_model = default_options.model
             merged_options.update(live_options.to_dict())
-            # NOTE(aleix): Fixes an in deepgram-sdk where `model` is initialized
+            # NOTE(aleix): Fixes a bug in deepgram-sdk where `model` is initialized
             # to the string "None" instead of the value `None`.
             if "model" in merged_options and merged_options["model"] == "None":
                 merged_options["model"] = default_model
@@ -180,13 +249,33 @@ class DeepgramSTTService(STTService):
                     stacklevel=2,
                 )
 
-        self._client = DeepgramClient(
-            api_key,
-            config=DeepgramClientOptions(
-                url=base_url,
-                options={"keepalive": "true"},  # verbose=logging.DEBUG
-            ),
-        )
+        # Build client - support optional custom base URL via DeepgramClientEnvironment
+        if base_url:
+            try:
+                from deepgram import DeepgramClientEnvironment
+
+                ws_url = base_url if base_url.startswith("wss://") else f"wss://{base_url}"
+                http_url = (
+                    base_url if base_url.startswith("https://") else f"https://{base_url}"
+                )
+                environment = DeepgramClientEnvironment(
+                    base=http_url,
+                    production=ws_url,
+                    agent=ws_url,
+                )
+                self._client = AsyncDeepgramClient(api_key=api_key, environment=environment)
+            except Exception:
+                logger.warning(
+                    f"{self}: Custom base_url configuration failed, falling back to default"
+                )
+                self._client = AsyncDeepgramClient(api_key=api_key)
+        else:
+            self._client = AsyncDeepgramClient(api_key=api_key)
+
+        self._connection = None
+        self._connection_cm = None
+        self._listening_task = None
+        self._keepalive_task = None
 
         if self.vad_enabled:
             self._register_event_handler("on_speech_started")
@@ -289,77 +378,136 @@ class DeepgramSTTService(STTService):
         Yields:
             Frame: None (transcription results come via WebSocket callbacks).
         """
-        await self._connection.send(audio)
+        if self._connection:
+            await self._connection.send_media(audio)
         yield None
+
+    def _build_connect_kwargs(self) -> dict:
+        """Build keyword arguments for ``client.listen.v1.connect()`` from current settings."""
+        kwargs = {}
+        for key, value in self._settings.live_options.to_dict().items():
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                kwargs[key] = str(value).lower()
+            else:
+                kwargs[key] = str(value)
+
+        if self._addons:
+            for key, value in self._addons.items():
+                kwargs[key] = str(value)
+
+        return kwargs
 
     async def _connect(self):
         logger.debug("Connecting to Deepgram")
 
-        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
+        connect_kwargs = self._build_connect_kwargs()
 
-        self._connection.on(
-            LiveTranscriptionEvents(LiveTranscriptionEvents.Transcript), self._on_message
-        )
-        self._connection.on(LiveTranscriptionEvents(LiveTranscriptionEvents.Error), self._on_error)
+        # Manually enter the async context manager so the connection persists
+        # across pipecat's start/run_stt/stop lifecycle.
+        self._connection_cm = self._client.listen.v1.connect(**connect_kwargs)
+        self._connection = await self._connection_cm.__aenter__()
 
-        if self.vad_enabled:
-            self._connection.on(
-                LiveTranscriptionEvents(LiveTranscriptionEvents.SpeechStarted),
-                self._on_speech_started,
-            )
-            self._connection.on(
-                LiveTranscriptionEvents(LiveTranscriptionEvents.UtteranceEnd),
-                self._on_utterance_end,
-            )
+        self._connection.on(EventType.MESSAGE, self._on_message)
+        self._connection.on(EventType.ERROR, self._on_error)
 
-        if not await self._connection.start(
-            options=self._settings.live_options, addons=self._addons
-        ):
-            await self.push_error(error_msg=f"Unable to connect to Deepgram")
-        else:
+        try:
             headers = {
                 k: v
-                for k, v in self._connection._socket.response.headers.items()
+                for k, v in self._connection._websocket.response.headers.items()
                 if k.startswith("dg-")
             }
             logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
+        except Exception:
+            logger.debug(f"{self}: Websocket connection initialized")
+
+        # start_listening() runs the receive loop; run it as a background task.
+        self._listening_task = self.create_task(
+            self._connection.start_listening(), f"{self}::listening"
+        )
+        # Send periodic keepalive frames to prevent the server from timing out.
+        self._keepalive_task = self.create_task(
+            self._keepalive_handler(), f"{self}::keepalive"
+        )
 
     async def _disconnect(self):
-        if await self._connection.is_connected():
-            logger.debug("Disconnecting from Deepgram")
-            # Deepgram swallows asyncio.CancelledError internally which prevents
-            # proper cancellation propagation. This issue was found with
-            # parallel pipelines where `CancelFrame` was not awaited for to
-            # finish in all branches and it was pushed downstream reaching the
-            # end of the pipeline, which caused `cleanup()` to be called while
-            # Deepgram disconnection was still finishing and therefore
-            # preventing the task cancellation that occurs during `cleanup()`.
-            # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
-            await self._connection.finish()
+        if not self._connection:
+            return
+
+        logger.debug("Disconnecting from Deepgram")
+
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
+        try:
+            await self._connection.send_close_stream()
+        except Exception:
+            pass
+
+        if self._listening_task:
+            await self.cancel_task(self._listening_task)
+            self._listening_task = None
+
+        # Deepgram swallows asyncio.CancelledError internally which prevents
+        # proper cancellation propagation. This issue was found with
+        # parallel pipelines where `CancelFrame` was not awaited for to
+        # finish in all branches and it was pushed downstream reaching the
+        # end of the pipeline, which caused `cleanup()` to be called while
+        # Deepgram disconnection was still finishing and therefore
+        # preventing the task cancellation that occurs during `cleanup()`.
+        # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
+        try:
+            await self._connection_cm.__aexit__(None, None, None)
+        except Exception:
+            pass
+
+        self._connection = None
+        self._connection_cm = None
+
+    async def _keepalive_handler(self):
+        """Periodically send KeepAlive frames to prevent server-side timeout."""
+        while True:
+            await asyncio.sleep(8)
+            if self._connection:
+                try:
+                    await self._connection.send_keep_alive()
+                    logger.trace(f"{self}: Sent keepalive")
+                except Exception as e:
+                    logger.warning(f"{self}: Keepalive failed: {e}")
 
     async def _start_metrics(self):
         """Start processing metrics collection for this utterance."""
         await self.start_processing_metrics()
 
-    async def _on_error(self, *args, **kwargs):
-        error: ErrorResponse = kwargs["error"]
+    async def _on_error(self, error):
         logger.warning(f"{self} connection error, will retry: {error}")
         await self.push_error(error_msg=f"{error}")
         await self.stop_all_metrics()
-        # NOTE(aleix): we don't disconnect (i.e. call finish on the connection)
+        # NOTE(aleix): we don't disconnect (i.e. exit the context manager)
         # because this triggers more errors internally in the Deepgram SDK. So,
-        # we just forget about the previous connection and create a new one.
+        # we just cancel our tasks, forget about the previous connection, and
+        # create a new one.
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+        if self._listening_task:
+            await self.cancel_task(self._listening_task)
+            self._listening_task = None
+        self._connection = None
+        self._connection_cm = None
         await self._connect()
 
-    async def _on_speech_started(self, *args, **kwargs):
+    async def _on_speech_started(self, message):
         await self._start_metrics()
-        await self._call_event_handler("on_speech_started", *args, **kwargs)
+        await self._call_event_handler("on_speech_started", message)
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
             await self.push_interruption_task_frame_and_wait()
 
-    async def _on_utterance_end(self, *args, **kwargs):
-        await self._call_event_handler("on_utterance_end", *args, **kwargs)
+    async def _on_utterance_end(self, message):
+        await self._call_event_handler("on_utterance_end", message)
         await self.broadcast_frame(UserStoppedSpeakingFrame)
 
     @traced_stt
@@ -369,45 +517,51 @@ class DeepgramSTTService(STTService):
         """Handle a transcription result with tracing."""
         pass
 
-    async def _on_message(self, *args, **kwargs):
-        result: LiveResultResponse = kwargs["result"]
-        if len(result.channel.alternatives) == 0:
-            return
-        is_final = result.is_final
-        transcript = result.channel.alternatives[0].transcript
-        language = None
-        if result.channel.alternatives[0].languages:
-            language = result.channel.alternatives[0].languages[0]
-            language = Language(language)
-        if len(transcript) > 0:
-            if is_final:
-                # Check if this response is from a finalize() call.
-                # Only mark as finalized when both we requested it AND Deepgram confirms it.
-                from_finalize = getattr(result, "from_finalize", False)
-                if from_finalize:
-                    self.confirm_finalize()
-                await self.push_frame(
-                    TranscriptionFrame(
-                        transcript,
-                        self._user_id,
-                        time_now_iso8601(),
-                        language,
-                        result=result,
+    async def _on_message(self, message):
+        if isinstance(message, ListenV1SpeechStarted):
+            if self.vad_enabled:
+                await self._on_speech_started(message)
+        elif isinstance(message, ListenV1UtteranceEnd):
+            if self.vad_enabled:
+                await self._on_utterance_end(message)
+        elif isinstance(message, ListenV1Results):
+            if not message.channel or len(message.channel.alternatives) == 0:
+                return
+            is_final = message.is_final
+            transcript = message.channel.alternatives[0].transcript
+            language = None
+            if message.channel.alternatives[0].languages:
+                language = message.channel.alternatives[0].languages[0]
+                language = Language(language)
+            if len(transcript) > 0:
+                if is_final:
+                    # Check if this response is from a finalize() call.
+                    # Only mark as finalized when both we requested it AND Deepgram confirms it.
+                    from_finalize = getattr(message, "from_finalize", False) or False
+                    if from_finalize:
+                        self.confirm_finalize()
+                    await self.push_frame(
+                        TranscriptionFrame(
+                            transcript,
+                            self._user_id,
+                            time_now_iso8601(),
+                            language,
+                            result=message,
+                        )
                     )
-                )
-                await self._handle_transcription(transcript, is_final, language)
-                await self.stop_processing_metrics()
-            else:
-                # For interim transcriptions, just push the frame without tracing
-                await self.push_frame(
-                    InterimTranscriptionFrame(
-                        transcript,
-                        self._user_id,
-                        time_now_iso8601(),
-                        language,
-                        result=result,
+                    await self._handle_transcription(transcript, is_final, language)
+                    await self.stop_processing_metrics()
+                else:
+                    # For interim transcriptions, just push the frame without tracing
+                    await self.push_frame(
+                        InterimTranscriptionFrame(
+                            transcript,
+                            self._user_id,
+                            time_now_iso8601(),
+                            language,
+                            result=message,
+                        )
                     )
-                )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames with Deepgram-specific handling.
@@ -424,6 +578,7 @@ class DeepgramSTTService(STTService):
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             # Mark that we're awaiting a from_finalize response
-            self.request_finalize()
-            await self._connection.finalize()
-            logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
+            if self._connection:
+                self.request_finalize()
+                await self._connection.send_finalize()
+                logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
