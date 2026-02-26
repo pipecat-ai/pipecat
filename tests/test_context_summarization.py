@@ -462,6 +462,157 @@ class TestFunctionCallHandling(unittest.TestCase):
         self.assertEqual(result.last_summarized_index, 4)
 
 
+class TestToolCallBoundarySafety(unittest.TestCase):
+    """Tests for tool-call/response boundary safety in summarization.
+
+    Verifies that the summary boundary never splits a complete tool-call /
+    tool-response group, which would leave orphaned tool responses that the
+    OpenAI API rejects with a 400 error.
+    """
+
+    def test_boundary_on_assistant_tool_call_moves_back(self):
+        """Boundary landing on an assistant tool_calls message moves back."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message({"role": "assistant", "content": "Hi"})  # idx 2
+        context.add_message({"role": "user", "content": "Call a tool"})  # idx 3
+        context.add_message(  # idx 4: assistant with tool_calls
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "fn", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_1", "content": "result"}
+        )  # idx 5
+        context.add_message({"role": "assistant", "content": "Done"})  # idx 6
+        context.add_message({"role": "user", "content": "Latest"})  # idx 7 (kept)
+
+        # Naive boundary: summary_end=5, last_summarized=idx 4 (assistant with tool_calls).
+        # Its tool response at idx 5 would be orphaned → boundary must move to idx 3.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 3)
+        self.assertEqual(result.last_summarized_index, 3)
+        self.assertEqual(result.messages[-1]["content"], "Call a tool")
+
+    def test_boundary_on_tool_response_moves_back(self):
+        """Boundary landing on a tool response message moves back past the full group."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message(  # idx 2: assistant with tool_calls
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "fn", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_1", "content": "result"}
+        )  # idx 3
+        context.add_message({"role": "assistant", "content": "Done"})  # idx 4
+        context.add_message({"role": "user", "content": "Latest"})  # idx 5 (kept)
+
+        # Naive boundary: summary_end=4, last_summarized=idx 3 (tool response).
+        # Walk back through idx 3 (tool) and idx 2 (assistant+tool_calls) → boundary=idx 1.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+        self.assertEqual(result.last_summarized_index, 1)
+        self.assertEqual(result.messages[-1]["content"], "Hello")
+
+    def test_boundary_on_multiple_tool_responses_moves_back(self):
+        """Boundary with multiple consecutive tool responses moves back past all of them."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message({"role": "user", "content": "Hello"})  # idx 1
+        context.add_message({"role": "assistant", "content": "Hi"})  # idx 2
+        context.add_message({"role": "user", "content": "Get time and date"})  # idx 3
+        context.add_message(  # idx 4: assistant with two tool_calls
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_t",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_d",
+                        "type": "function",
+                        "function": {"name": "get_date", "arguments": "{}"},
+                    },
+                ],
+            }
+        )
+        context.add_message({"role": "tool", "tool_call_id": "call_t", "content": "10:30"})  # idx 5
+        context.add_message({"role": "tool", "tool_call_id": "call_d", "content": "Jan 1"})  # idx 6
+        context.add_message({"role": "assistant", "content": "It's 10:30 on Jan 1"})  # idx 7
+        context.add_message({"role": "user", "content": "Thanks"})  # idx 8 (kept)
+
+        # Naive boundary: summary_end=7, last_summarized=idx 6 (tool).
+        # Walk back: idx 6 (tool) → idx 5 (tool) → idx 4 (assistant+tool_calls) → idx 3 (user).
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+        self.assertEqual(result.last_summarized_index, 3)
+        self.assertEqual(result.messages[-1]["content"], "Get time and date")
+
+    def test_boundary_safe_when_no_tool_messages(self):
+        """Boundary is unchanged when no tool messages are near the boundary."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})
+        context.add_message({"role": "user", "content": "Hello"})
+        context.add_message({"role": "assistant", "content": "Hi"})
+        context.add_message({"role": "user", "content": "How are you?"})
+        context.add_message({"role": "assistant", "content": "Good"})
+        context.add_message({"role": "user", "content": "Latest"})
+
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+        self.assertEqual(result.last_summarized_index, 3)
+        self.assertEqual(len(result.messages), 3)
+
+    def test_boundary_returns_empty_when_all_messages_are_tool_related(self):
+        """Returns empty result when boundary adjustment leaves no messages to summarize."""
+        context = LLMContext()
+        context.add_message({"role": "system", "content": "System prompt"})  # idx 0
+        context.add_message(  # idx 1: assistant with tool_calls
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "fn", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        context.add_message(
+            {"role": "tool", "tool_call_id": "call_1", "content": "result"}
+        )  # idx 2
+        context.add_message({"role": "assistant", "content": "Done"})  # idx 3 (kept)
+        context.add_message({"role": "user", "content": "Thanks"})  # idx 4 (kept)
+
+        # Naive boundary: summary_end=3, last_summarized=idx 2 (tool).
+        # Walk back: idx 2 (tool) → idx 1 (assistant+tool_calls) → idx 0 (system, stop).
+        # summary_end=1, summary_start=1 → nothing to summarize.
+        result = LLMContextSummarizationUtil.get_messages_to_summarize(context, 2)
+        self.assertEqual(len(result.messages), 0)
+        self.assertEqual(result.last_summarized_index, -1)
+
+
 class TestSummaryGenerationExceptions(unittest.IsolatedAsyncioTestCase):
     """Tests for summary generation exception handling."""
 

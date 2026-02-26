@@ -15,7 +15,7 @@ from typing import List, Optional
 
 from loguru import logger
 
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage
 
 # Token estimation constants
 CHARS_PER_TOKEN = 4  # Industry-standard heuristic: 1 token ≈ 4 characters
@@ -273,6 +273,42 @@ class LLMContextSummarizationUtil:
         return -1
 
     @staticmethod
+    def _find_safe_summary_boundary(messages: List[dict], summary_end: int) -> int:
+        """Adjust the summary boundary to avoid splitting tool-call/tool-response pairs.
+
+        When the boundary falls on an assistant message with ``tool_calls`` or
+        on a ``tool`` response, the kept messages would contain orphaned tool
+        responses without their corresponding tool call. The OpenAI API (and
+        compatible APIs) rejects such a context with a 400 error.
+
+        This method walks the boundary backward until it no longer sits on a
+        tool-related message, ensuring complete groups are either fully
+        summarized or fully preserved.
+
+        Args:
+            messages: The full list of context messages.
+            summary_end: The proposed exclusive end index (messages before this
+                index will be summarized).
+
+        Returns:
+            A safe exclusive end index that does not split tool-call sequences.
+        """
+        while summary_end > 0:
+            last_summarized = messages[summary_end - 1]
+            if isinstance(last_summarized, LLMSpecificMessage):
+                break
+            role = last_summarized.get("role")
+            if role == "assistant" and last_summarized.get("tool_calls"):
+                # Tool responses for this call would be orphaned in the kept portion.
+                summary_end -= 1
+            elif role == "tool":
+                # Walk back past all tool responses to include the full group.
+                summary_end -= 1
+            else:
+                break
+        return summary_end
+
+    @staticmethod
     def get_messages_to_summarize(
         context: LLMContext, min_messages_to_keep: int
     ) -> LLMMessagesToSummarize:
@@ -282,6 +318,7 @@ class LLMContextSummarizationUtil:
         - The first system message (defines assistant behavior)
         - The last N messages (maintains immediate conversation context)
         - Incomplete function call sequences (preserves tool interaction integrity)
+        - Complete tool-call/response groups (avoids orphaned tool responses)
 
         Args:
             context: The LLM context containing all messages.
@@ -332,6 +369,18 @@ class LLMContextSummarizationUtil:
                     f"ContextSummarization: Skipping {skipped_messages} messages with "
                     f"function calls in progress (will summarize after results are available)"
                 )
+
+        if summary_start >= summary_end:
+            return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
+
+        # Ensure the boundary doesn't split a tool-call/tool-response group.
+        safe_end = LLMContextSummarizationUtil._find_safe_summary_boundary(messages, summary_end)
+        if safe_end != summary_end:
+            logger.debug(
+                f"ContextSummarization: Adjusted summary boundary from {summary_end} to "
+                f"{safe_end} to avoid splitting tool-call/response pairs"
+            )
+            summary_end = safe_end
 
         if summary_start >= summary_end:
             return LLMMessagesToSummarize(messages=[], last_summarized_index=-1)
