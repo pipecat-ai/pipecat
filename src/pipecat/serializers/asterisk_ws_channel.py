@@ -86,6 +86,7 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             "MEDIA_XOFF": self._handle_media_xoff,
             "MEDIA_XON": self._handle_media_xon,
             "DTMF_END": self._handle_dtmf_end,
+            "QUEUE_DRAINED": self._handle_queue_drained,
         }
 
         async def raw_media_passthrough(data, in_sr, out_sr, resampler):
@@ -248,6 +249,10 @@ class AsteriskWsFrameSerializer(FrameSerializer):
         if isinstance(frame, AudioRawFrame):
             data = frame.audio
 
+            if not data or len(data) == 0:
+                logger.info("AudioRawFrame contains no audio data to serialize.")
+                return None
+
             encoding = self._params.encoding.strip().lower()
 
             try:
@@ -255,6 +260,12 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             except KeyError as e:
                 raise ValueError(f"Unsupported encoding: {self._params.encoding}") from e
 
+            if encoding == "slin" and self._params.asterisk_sample_rate == frame.sample_rate:
+                logger.trace("Bypassing resampling for slin encoding with matching sample rates.")
+                return data
+
+            logger.trace(f"Serializing AudioRawFrame to Asterisk with encoding: {encoding}, asterisk_sample_rate: {self._params.asterisk_sample_rate} frame sample_rate: {frame.sample_rate}")
+            
             serialized_data = await encoder(
                 data,
                 frame.sample_rate,
@@ -265,37 +276,7 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             if serialized_data is None or len(serialized_data) == 0:
                 return None
 
-            # Asterisk media WebSocket channels require "START_MEDIA_BUFFERING" to enable audio buffering before sending it to Asterisk core.
-            # When media buffering is enabled, we can send raw binary audio in messages of arbitrary sizes, and Asterisk will frame them properly
-            # and it will generate silence to the channel if the buffer is empty and there is no audio to send.
-            # For our use case, it is crucial, as we can send audio frames of arbitrary sizes from Pipecat to Asterisk without worrying about framing/timing.
-            # Without media buffering enabled, Asterisk expects audio frames of specific sizes and timings, which complicates the implementation a lot,
-            # and probably not a good idea in general for TCP-based transports such as websockets.
-            # Therefore, we always send the "START_MEDIA_BUFFERING" command on before the first audio frame we send to Asterisk.
-
-            if not self._media_buffering_started:
-                self._media_buffering_started = True
-                command = (
-                    "START_MEDIA_BUFFERING"
-                    if self._asterisk_command_format == "plain-text"
-                    else '{"command": "START_MEDIA_BUFFERING"}'
-                )
-                return (command, serialized_data)
-
             return serialized_data
-
-        elif isinstance(frame, InterruptionFrame):
-            return (
-                "FLUSH_MEDIA"
-                if self._asterisk_command_format == "plain-text"
-                else '{"command": "FLUSH_MEDIA"}'
-            )
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            return (
-                "HANGUP"
-                if self._asterisk_command_format == "plain-text"
-                else '{"command": "HANGUP"}'
-            )
 
         # Return None for unhandled frames
         return None
@@ -367,3 +348,19 @@ class AsteriskWsFrameSerializer(FrameSerializer):
             else:
                 # we don't have a handler for this type of event
                 return None
+
+    def _handle_queue_drained(self, message: dict):
+        """QUEUE_DRAINED event handler.
+
+        Handles QUEUE_DRAINED events from Asterisk. This event indicates that Asterisk has processed all the queued media.
+        We will only receive this event if we requested it by sending "REPORT_QUEUE_DRAINED", and only once per "REPORT_QUEUE_DRAINED".
+        Effectively, this means that Asterisk stopped playing audio to the channel. 
+        It's might be useful when you want to know when Asterisk finished playing all the TTS audio (bot stopped speaking from the remote user's perspective). 
+        As we use media buffering both in pipecat transport and in Asterisk it's not possible to know exactly 
+        when Asterisk finished playing all the buffered audio unless we get this event.
+
+        Args:
+            message: The dictionary representing of the QUEUE_DRAINED event message from Asterisk.
+        """
+        logger.info(f"Received QUEUE_DRAINED event from Asterisk: {message}. Asterisk has processed all the queued media.")
+        return InputTransportMessageFrame(message=message)
