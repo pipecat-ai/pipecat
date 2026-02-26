@@ -90,6 +90,7 @@ class VideoFrame:
     audio_bytes: bytes
     is_final: bool
     volume: int
+    is_first_speech_frame: bool = False
 
     def is_silence(self) -> bool:
         return self.frame_idx == 0
@@ -180,8 +181,7 @@ class OjinVideoService(FrameProcessor):
         self._first_tts_received_at: Optional[float] = None
         self._turn = 0
         self._last_frame_idx = -1
-        self._new_speech_pending_playback = False
-        self._first_speech_frame_received_at: Optional[float] = None
+        self._waiting_for_first_real_speech_frame = False
         self._latency_start_ts: Optional[float] = None
         self._latency: Optional[float] = None
         self._tts_empty_since: Optional[float] = None
@@ -342,10 +342,16 @@ class OjinVideoService(FrameProcessor):
             if frame_idx != self._last_frame_idx:
                 self._turn += 1
                 self._last_frame_idx = frame_idx
-                self._new_speech_pending_playback = not video_frame.is_silence()
+                if not video_frame.is_silence():
+                    self._waiting_for_first_real_speech_frame = True
 
-            if frame_idx >= 1 and self._first_speech_frame_received_at is None:
-                self._first_speech_frame_received_at = time.perf_counter()
+            if (
+                self._waiting_for_first_real_speech_frame
+                and not video_frame.is_silence()
+                and video_frame.volume > 0
+            ):
+                self._waiting_for_first_real_speech_frame = False
+                video_frame.is_first_speech_frame = True
 
             self._video_frames.append(video_frame)
             if self._settings.frame_debugging_enabled:
@@ -416,8 +422,7 @@ class OjinVideoService(FrameProcessor):
                 is_silence = video_frame.is_silence()
                 self._is_speaking = not is_silence
 
-                if self._new_speech_pending_playback and video_frame.volume > 0:
-                    self._new_speech_pending_playback = False
+                if video_frame.is_first_speech_frame:
                     await self._start_audio_playback()
 
                 if self._settings.frame_debugging_enabled:
@@ -472,7 +477,6 @@ class OjinVideoService(FrameProcessor):
                     )
                     # Report Ojin TTFB via standard pipecat metrics system
                     await self.stop_ttfb_metrics()
-                    self._first_speech_frame_received_at = None
                     self._first_tts_received_at = None
 
                 # audio_frame = OutputAudioRawFrame(
