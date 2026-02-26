@@ -399,7 +399,7 @@ class DeepgramSTTService(STTService):
 
     async def _connect(self):
         logger.debug("Connecting to Deepgram")
-        self._connection_task = self.create_task(self._connection_handler(), f"{self}::connection")
+        self._connection_task = self.create_task(self._connection_handler())
 
     async def _disconnect(self):
         if not self._connection_task:
