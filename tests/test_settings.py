@@ -440,10 +440,10 @@ class TestDeepgramSTTSettingsApplyUpdate:
 class TestDeepgramSTTSettingsFromMapping:
     def test_routes_live_options_kwargs(self):
         """LiveOptions-valid keys should be collected into live_options."""
-        delta = DeepgramSTTSettings.from_mapping({"punctuate": False, "filler_words": True})
+        delta = DeepgramSTTSettings.from_mapping({"punctuate": False, "diarize": True})
         assert is_given(delta.live_options)
         assert delta.live_options.punctuate is False
-        assert delta.live_options.filler_words is True
+        assert delta.live_options.diarize is True
 
     def test_routes_model_and_language_to_top_level(self):
         """model and language should be top-level fields, not in live_options."""
@@ -482,12 +482,12 @@ class TestDeepgramSTTSettingsFromMapping:
             ),
         )
 
-        raw = {"punctuate": False, "filler_words": True}
+        raw = {"punctuate": False, "diarize": True}
         delta = DeepgramSTTSettings.from_mapping(raw)
         changed = current.apply_update(delta)
 
         assert current.live_options.punctuate is False
-        assert current.live_options.filler_words is True
+        assert current.live_options.diarize is True
         # Unchanged fields stay put
         assert current.live_options.encoding == "linear16"
         assert current.model == "nova-3-general"
