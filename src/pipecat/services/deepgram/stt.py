@@ -7,9 +7,8 @@
 """Deepgram speech-to-text service implementation."""
 
 import asyncio
-import inspect
-from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Mapping, Optional, Type
+from dataclasses import dataclass, field, fields
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from loguru import logger
 
@@ -168,165 +167,66 @@ class LiveOptions:
 
 
 @dataclass
-class _DeepgramSTTSettingsBase(STTSettings):
-    """Base settings for Deepgram STT services that use ``LiveOptions``.
+class DeepgramSTTSettings(STTSettings):
+    """Settings for Deepgram STT services.
 
-    Shared by ``DeepgramSTTSettings`` and ``DeepgramSageMakerSTTSettings``.
-    Not intended for other Deepgram services that don't use ``LiveOptions``.
-
-    Wraps the Deepgram SDK's ``LiveOptions`` in a single ``live_options``
-    field and provides delta-merge semantics: when used as a delta (e.g.
-    via ``STTUpdateSettingsFrame``), only the non-None fields of
-    ``live_options`` are merged into the stored options rather than
-    replacing them wholesale.
-
-    ``model`` and ``language`` are kept in sync bidirectionally between
-    the top-level settings fields and the nested ``live_options``.
+    All Deepgram live-transcription parameters are direct fields.
+    ``model`` and ``language`` are inherited from ``STTSettings`` /
+    ``ServiceSettings``.  ``extra`` (also inherited) catches unknown
+    ``from_mapping`` keys and is forwarded as additional connection query
+    params.
 
     Parameters:
-        live_options: class ``LiveOptions`` for STT configuration.
-            In delta mode only its non-None fields are merged into the
-            stored options.
+        callback: Callback URL for async transcription delivery.
+        callback_method: HTTP method for the callback (``"GET"`` or ``"POST"``).
+        channels: Number of audio channels.
+        detect_entities: Enable named entity detection.
+        diarize: Enable speaker diarization.
+        dictation: Enable dictation mode.
+        encoding: Audio encoding (e.g. ``"linear16"``).
+        endpointing: Endpointing sensitivity in ms, or ``False`` to disable.
+        interim_results: Whether to emit interim transcriptions.
+        keyterm: Keyterms to boost (str or list of str).
+        keywords: Keywords to boost (str or list of str).
+        mip_opt_out: Opt out of model improvement program.
+        multichannel: Enable per-channel transcription for multi-channel audio.
+        numerals: Convert spoken numbers to numerals.
+        profanity_filter: Filter profanity from transcripts.
+        punctuate: Add punctuation to transcripts.
+        redact: Redact sensitive information (str or list).
+        replace: Word replacement rules (str or list).
+        search: Search terms to highlight (str or list of str).
+        smart_format: Apply smart formatting to transcripts.
+        tag: Custom billing tag (str or list of str).
+        utterance_end_ms: Silence duration in ms before an utterance-end event.
+        vad_events: Enable Deepgram VAD speech-started / utterance-end events.
+        version: Model version (e.g. ``"latest"``).
     """
 
-    live_options: LiveOptions | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-
-    # Valid LiveOptions __init__ parameter names (cached at class level).
-    _live_options_params: set[str] | None = field(default=None, init=False, repr=False)
-
-    @classmethod
-    def _get_live_options_params(cls) -> set[str]:
-        """Return the set of valid ``LiveOptions.__init__`` parameter names."""
-        if cls._live_options_params is None:
-            cls._live_options_params = set(inspect.signature(LiveOptions.__init__).parameters) - {
-                "self"
-            }
-        return cls._live_options_params
-
-    def _merge_live_options_delta(self, delta: LiveOptions) -> Dict[str, Any]:
-        """Merge a ``LiveOptions`` delta into the stored ``live_options``.
-
-        Non-None fields from *delta* overwrite corresponding fields in the
-        stored ``LiveOptions``.  ``model`` and ``language`` are synced to
-        the top-level settings fields when they change.
-
-        Args:
-            delta: A ``LiveOptions`` whose non-None fields are the desired
-                overrides.
-
-        Returns:
-            Dict mapping each changed key to its **previous** value (same
-            contract as ``apply_update``).
-        """
-        old_dict = self.live_options.to_dict()  # type: ignore[union-attr]
-        delta_dict = delta.to_dict()
-
-        # Deepgram SDK bug: model initialised to the *string* "None".
-        if delta_dict.get("model") == "None":
-            del delta_dict["model"]
-
-        if not delta_dict:
-            return {}
-
-        merged = {**old_dict, **delta_dict}
-        self.live_options = LiveOptions(**merged)
-
-        # Track what changed.
-        changed: Dict[str, Any] = {}
-        for key in delta_dict:
-            old_val = old_dict.get(key, NOT_GIVEN)
-            if old_val != delta_dict[key]:
-                changed[key] = old_val
-
-        # Sync model/language from live_options delta to top-level fields.
-        if "model" in delta_dict and delta_dict["model"] != self.model:
-            changed.setdefault("model", self.model)
-            self.model = delta_dict["model"]
-        if "language" in delta_dict and delta_dict["language"] != self.language:
-            changed.setdefault("language", self.language)
-            self.language = delta_dict["language"]
-
-        return changed
-
-    def apply_update(self: _S, delta: _S) -> Dict[str, Any]:
-        """Merge a delta into this store, with delta-merge for ``live_options``.
-
-        ``live_options`` is merged field-by-field via
-        ``_merge_live_options_delta`` rather than being replaced wholesale.
-
-        ``model`` and ``language`` are kept in sync bidirectionally between
-        the top-level settings fields and ``live_options``.
-        """
-        # Pull live_options out of the delta so super() doesn't replace it.
-        delta_lo = getattr(delta, "live_options", NOT_GIVEN)
-        if is_given(delta_lo):
-            delta.live_options = NOT_GIVEN  # type: ignore[assignment]
-
-        # Let the base class handle model, language, extra.
-        changed = super().apply_update(delta)
-
-        # Sync top-level model/language changes into stored live_options.
-        if "model" in changed:
-            self.live_options.model = self.model  # type: ignore[union-attr]
-        if "language" in changed:
-            self.live_options.language = self.language  # type: ignore[union-attr]
-
-        # Merge live_options delta.  Top-level model/language take precedence
-        # over conflicting values in live_options, so write them into the
-        # delta before merging.
-        if is_given(delta_lo):
-            if "model" in changed:
-                delta_lo.model = self.model
-            if "language" in changed:
-                delta_lo.language = self.language
-
-            for key, old_val in self._merge_live_options_delta(delta_lo).items():
-                changed.setdefault(key, old_val)
-
-        return changed
-
-    @classmethod
-    def from_mapping(cls: Type[_S], settings: Mapping[str, Any]) -> _S:
-        """Build a delta from a plain dict, routing LiveOptions keys correctly.
-
-        Keys that are valid ``LiveOptions.__init__`` parameters (and not
-        top-level ``STTSettings`` fields like ``model`` / ``language``) are
-        collected into a ``LiveOptions`` object.  ``model`` and ``language``
-        are routed to the top-level settings fields.  Truly unknown keys go
-        to ``extra``.
-        """
-        lo_params = cls._get_live_options_params()
-        stt_field_names = {"model", "language"}
-
-        kwargs: Dict[str, Any] = {}
-        lo_kwargs: Dict[str, Any] = {}
-        extra: Dict[str, Any] = {}
-
-        for key, value in settings.items():
-            canonical = cls._aliases.get(key, key)
-            if canonical in stt_field_names:
-                kwargs[canonical] = value
-            elif canonical in lo_params:
-                lo_kwargs[canonical] = value
-            else:
-                extra[key] = value
-
-        if lo_kwargs:
-            kwargs["live_options"] = LiveOptions(**lo_kwargs)
-
-        instance = cls(**kwargs)
-        instance.extra = extra
-        return instance
-
-
-@dataclass
-class DeepgramSTTSettings(_DeepgramSTTSettingsBase):
-    """Settings for the Deepgram STT service.
-
-    See ``_DeepgramSTTSettingsBase`` for full documentation.
-    """
-
-    pass
+    callback: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    callback_method: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    channels: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    detect_entities: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    dictation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    endpointing: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keyterm: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    keywords: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    mip_opt_out: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    multichannel: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    numerals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    punctuate: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    redact: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    replace: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    search: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    smart_format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    tag: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    utterance_end_ms: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    vad_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+    version: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramSTTService(STTService):
@@ -402,10 +302,10 @@ class DeepgramSTTService(STTService):
                 )
             base_url = url
 
-        default_options = LiveOptions(
-            encoding="linear16",
-            language=Language.EN,
+        settings = DeepgramSTTSettings(
             model="nova-3-general",
+            language=Language.EN,
+            encoding="linear16",
             channels=1,
             interim_results=True,
             smart_format=False,
@@ -414,13 +314,12 @@ class DeepgramSTTService(STTService):
             vad_events=False,
         )
 
-        settings = DeepgramSTTSettings(
-            model=default_options.model,
-            language=default_options.language,
-            live_options=default_options,
-        )
         if live_options:
-            settings._merge_live_options_delta(live_options)
+            lo_dict = live_options.to_dict()
+            delta = DeepgramSTTSettings.from_mapping(
+                {k: v for k, v in lo_dict.items() if k != "sample_rate"}
+            )
+            settings.apply_update(delta)
 
         super().__init__(
             sample_rate=sample_rate,
@@ -432,7 +331,7 @@ class DeepgramSTTService(STTService):
         self._addons = addons
         self._should_interrupt = should_interrupt
 
-        if self._settings.live_options.vad_events:
+        if self._settings.vad_events:
             import warnings
 
             with warnings.catch_warnings():
@@ -479,7 +378,7 @@ class DeepgramSTTService(STTService):
         Returns:
             True if VAD events are enabled in the current settings.
         """
-        return self._settings.live_options.vad_events
+        return self._settings.vad_events
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -544,16 +443,30 @@ class DeepgramSTTService(STTService):
     def _build_connect_kwargs(self) -> dict:
         """Build keyword arguments for ``client.listen.v1.connect()`` from current settings."""
         kwargs = {}
-        live_options = LiveOptions(
-            **{**self._settings.live_options.to_dict(), "sample_rate": self.sample_rate}
-        )
-        for key, value in live_options.to_dict().items():
-            if value is None:
+        s = self._settings
+
+        # Iterate all declared Deepgram-specific fields; handle model/language separately.
+        for f in fields(s):
+            if f.name in ("model", "language", "extra") or f.name.startswith("_"):
                 continue
-            if isinstance(value, bool):
-                kwargs[key] = str(value).lower()
-            else:
-                kwargs[key] = str(value)
+            value = getattr(s, f.name)
+            if not is_given(value) or value is None:
+                continue
+            kwargs[f.name] = str(value).lower() if isinstance(value, bool) else str(value)
+
+        # model and language
+        if is_given(s.model) and s.model is not None:
+            kwargs["model"] = str(s.model)
+        if is_given(s.language) and s.language is not None:
+            kwargs["language"] = str(s.language)
+
+        # Always inject sample_rate from service level.
+        kwargs["sample_rate"] = str(self.sample_rate)
+
+        # extra from settings — forwarded as additional connection query params.
+        for key, value in s.extra.items():
+            if value is not None:
+                kwargs[key] = str(value).lower() if isinstance(value, bool) else str(value)
 
         if self._addons:
             for key, value in self._addons.items():
