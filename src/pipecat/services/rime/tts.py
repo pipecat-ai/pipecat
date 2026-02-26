@@ -35,6 +35,7 @@ from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import (
     AudioContextTTSService,
     InterruptibleTTSService,
+    TextAggregationMode,
     TTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
@@ -181,7 +182,8 @@ class RimeTTSService(AudioContextTTSService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
-        aggregate_sentences: Optional[bool] = True,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        aggregate_sentences: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize Rime TTS service.
@@ -198,13 +200,19 @@ class RimeTTSService(AudioContextTTSService):
                 .. deprecated:: 0.0.95
                     Use an LLMTextProcessor before the TTSService for custom text aggregation.
 
-            aggregate_sentences: Whether to aggregate sentences within the TTSService.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
             **kwargs: Additional arguments passed to parent class.
         """
         # Initialize with parent class settings for proper frame handling
         params = params or RimeTTSService.InputParams()
 
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
@@ -243,7 +251,9 @@ class RimeTTSService(AudioContextTTSService):
             #    The preferred way of taking advantage of Rime spelling is
             #    to use an LLMTextProcessor and/or a text_transformer to identify
             #    and insert these tags for the purpose of the TTS service alone.
-            self._text_aggregator = SkipTagsAggregator([("spell(", ")")])
+            self._text_aggregator = SkipTagsAggregator(
+                [("spell(", ")")], aggregation_type=self._text_aggregation_mode
+            )
 
         # Store service configuration
         self._api_key = api_key
@@ -826,7 +836,8 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
         audio_format: str = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        aggregate_sentences: Optional[bool] = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
     ):
         """Initialize Rime Non-JSON WebSocket TTS service.
@@ -839,13 +850,21 @@ class RimeNonJsonTTSService(InterruptibleTTSService):
             audio_format: Audio format to use.
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
-            aggregate_sentences: Whether to aggregate sentences within the TTSService.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead. Set to ``TextAggregationMode.SENTENCE``
+                    to aggregate text into sentences before synthesis, or
+                    ``TextAggregationMode.TOKEN`` to stream tokens directly for lower latency.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent class.
         """
         params = params or RimeNonJsonTTSService.InputParams()
         super().__init__(
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             push_stop_frames=True,
             pause_frame_processing=True,
             append_trailing_space=True,

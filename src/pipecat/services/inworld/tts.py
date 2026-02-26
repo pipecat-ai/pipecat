@@ -51,7 +51,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextTTSService, TTSService
+from pipecat.services.tts_service import AudioContextTTSService, TextAggregationMode, TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
@@ -509,7 +509,8 @@ class InworldTTSService(AudioContextTTSService):
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
         params: InputParams = None,
-        aggregate_sentences: bool = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         append_trailing_space: bool = True,
         **kwargs: Any,
     ):
@@ -523,7 +524,12 @@ class InworldTTSService(AudioContextTTSService):
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
             params: Input parameters for Inworld WebSocket TTS configuration.
-            aggregate_sentences: Whether to aggregate sentences before synthesis.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
@@ -536,6 +542,7 @@ class InworldTTSService(AudioContextTTSService):
             supports_word_timestamps=True,
             sample_rate=sample_rate,
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             append_trailing_space=append_trailing_space,
             settings=InworldTTSSettings(
                 model=model,

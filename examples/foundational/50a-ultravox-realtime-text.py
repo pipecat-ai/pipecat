@@ -26,6 +26,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.inworld.tts import InworldTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.ultravox.llm import OneShotInputParams, UltravoxRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -171,11 +172,19 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             system_prompt=system_prompt,
             temperature=0.3,
             max_duration=datetime.timedelta(minutes=3),
+            output_medium="text",
         ),
         one_shot_selected_tools=ToolsSchema(standard_tools=[secret_menu_function]),
     )
 
     llm.register_function("get_secret_menu", get_secret_menu)
+
+    tts = InworldTTSService(
+        api_key=os.getenv("INWORLD_API_KEY", ""),
+        voice_id="Ashley",
+        model="inworld-tts-1",
+        temperature=1.1,
+    )
 
     context = LLMContext([])
 
@@ -187,9 +196,8 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             user_turn_strategies=UserTurnStrategies(
                 stop=[SpeechTimeoutUserTurnStopStrategy()],
             ),
-            # Set the VAD analyzer to create reliable TTFB measurements and
-            # user stop events.
-            vad_analyzer=SileroVADAnalyzer(),
+            # Set the VAD analyzer to emulate timing of the model.
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
         ),
     )
 
@@ -199,6 +207,7 @@ There is also a secret menu that changes daily. If the user asks about it, use t
             transport.input(),
             user_aggregator,
             llm,
+            tts,
             transport.output(),
             assistant_aggregator,
         ]

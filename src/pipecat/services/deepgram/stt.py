@@ -7,8 +7,9 @@
 """Deepgram speech-to-text service implementation."""
 
 import asyncio
+import inspect
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Mapping, Optional, Type
 
 from loguru import logger
 
@@ -25,7 +26,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.services.settings import _S, NOT_GIVEN, STTSettings, _NotGiven, is_given
 from pipecat.services.stt_latency import DEEPGRAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -119,14 +120,165 @@ class LiveOptions:
 
 
 @dataclass
-class DeepgramSTTSettings(STTSettings):
-    """Settings for the Deepgram STT service.
+class _DeepgramSTTSettingsBase(STTSettings):
+    """Base settings for Deepgram STT services that use ``LiveOptions``.
+
+    Shared by ``DeepgramSTTSettings`` and ``DeepgramSageMakerSTTSettings``.
+    Not intended for other Deepgram services that don't use ``LiveOptions``.
+
+    Wraps the Deepgram SDK's ``LiveOptions`` in a single ``live_options``
+    field and provides delta-merge semantics: when used as a delta (e.g.
+    via ``STTUpdateSettingsFrame``), only the non-None fields of
+    ``live_options`` are merged into the stored options rather than
+    replacing them wholesale.
+
+    ``model`` and ``language`` are kept in sync bidirectionally between
+    the top-level settings fields and the nested ``live_options``.
 
     Parameters:
-        live_options: :class:`LiveOptions` for detailed configuration.
+        live_options: class ``LiveOptions`` for STT configuration.
+            In delta mode only its non-None fields are merged into the
+            stored options.
     """
 
     live_options: LiveOptions | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
+
+    # Valid LiveOptions __init__ parameter names (cached at class level).
+    _live_options_params: set[str] | None = field(default=None, init=False, repr=False)
+
+    @classmethod
+    def _get_live_options_params(cls) -> set[str]:
+        """Return the set of valid ``LiveOptions.__init__`` parameter names."""
+        if cls._live_options_params is None:
+            cls._live_options_params = set(inspect.signature(LiveOptions.__init__).parameters) - {
+                "self"
+            }
+        return cls._live_options_params
+
+    def _merge_live_options_delta(self, delta: LiveOptions) -> Dict[str, Any]:
+        """Merge a ``LiveOptions`` delta into the stored ``live_options``.
+
+        Non-None fields from *delta* overwrite corresponding fields in the
+        stored ``LiveOptions``.  ``model`` and ``language`` are synced to
+        the top-level settings fields when they change.
+
+        Args:
+            delta: A ``LiveOptions`` whose non-None fields are the desired
+                overrides.
+
+        Returns:
+            Dict mapping each changed key to its **previous** value (same
+            contract as ``apply_update``).
+        """
+        old_dict = self.live_options.to_dict()  # type: ignore[union-attr]
+        delta_dict = delta.to_dict()
+
+        # Deepgram SDK bug: model initialised to the *string* "None".
+        if delta_dict.get("model") == "None":
+            del delta_dict["model"]
+
+        if not delta_dict:
+            return {}
+
+        merged = {**old_dict, **delta_dict}
+        self.live_options = LiveOptions(**merged)
+
+        # Track what changed.
+        changed: Dict[str, Any] = {}
+        for key in delta_dict:
+            old_val = old_dict.get(key, NOT_GIVEN)
+            if old_val != delta_dict[key]:
+                changed[key] = old_val
+
+        # Sync model/language from live_options delta to top-level fields.
+        if "model" in delta_dict and delta_dict["model"] != self.model:
+            changed.setdefault("model", self.model)
+            self.model = delta_dict["model"]
+        if "language" in delta_dict and delta_dict["language"] != self.language:
+            changed.setdefault("language", self.language)
+            self.language = delta_dict["language"]
+
+        return changed
+
+    def apply_update(self: _S, delta: _S) -> Dict[str, Any]:
+        """Merge a delta into this store, with delta-merge for ``live_options``.
+
+        ``live_options`` is merged field-by-field via
+        ``_merge_live_options_delta`` rather than being replaced wholesale.
+
+        ``model`` and ``language`` are kept in sync bidirectionally between
+        the top-level settings fields and ``live_options``.
+        """
+        # Pull live_options out of the delta so super() doesn't replace it.
+        delta_lo = getattr(delta, "live_options", NOT_GIVEN)
+        if is_given(delta_lo):
+            delta.live_options = NOT_GIVEN  # type: ignore[assignment]
+
+        # Let the base class handle model, language, extra.
+        changed = super().apply_update(delta)
+
+        # Sync top-level model/language changes into stored live_options.
+        if "model" in changed:
+            self.live_options.model = self.model  # type: ignore[union-attr]
+        if "language" in changed:
+            self.live_options.language = self.language  # type: ignore[union-attr]
+
+        # Merge live_options delta.  Top-level model/language take precedence
+        # over conflicting values in live_options, so write them into the
+        # delta before merging.
+        if is_given(delta_lo):
+            if "model" in changed:
+                delta_lo.model = self.model
+            if "language" in changed:
+                delta_lo.language = self.language
+
+            for key, old_val in self._merge_live_options_delta(delta_lo).items():
+                changed.setdefault(key, old_val)
+
+        return changed
+
+    @classmethod
+    def from_mapping(cls: Type[_S], settings: Mapping[str, Any]) -> _S:
+        """Build a delta from a plain dict, routing LiveOptions keys correctly.
+
+        Keys that are valid ``LiveOptions.__init__`` parameters (and not
+        top-level ``STTSettings`` fields like ``model`` / ``language``) are
+        collected into a ``LiveOptions`` object.  ``model`` and ``language``
+        are routed to the top-level settings fields.  Truly unknown keys go
+        to ``extra``.
+        """
+        lo_params = cls._get_live_options_params()
+        stt_field_names = {"model", "language"}
+
+        kwargs: Dict[str, Any] = {}
+        lo_kwargs: Dict[str, Any] = {}
+        extra: Dict[str, Any] = {}
+
+        for key, value in settings.items():
+            canonical = cls._aliases.get(key, key)
+            if canonical in stt_field_names:
+                kwargs[canonical] = value
+            elif canonical in lo_params:
+                lo_kwargs[canonical] = value
+            else:
+                extra[key] = value
+
+        if lo_kwargs:
+            kwargs["live_options"] = LiveOptions(**lo_kwargs)
+
+        instance = cls(**kwargs)
+        instance.extra = extra
+        return instance
+
+
+@dataclass
+class DeepgramSTTSettings(_DeepgramSTTSettingsBase):
+    """Settings for the Deepgram STT service.
+
+    See ``_DeepgramSTTSettingsBase`` for full documentation.
+    """
+
+    pass
 
 
 class DeepgramSTTService(STTService):
@@ -173,7 +325,9 @@ class DeepgramSTTService(STTService):
 
             base_url: Custom Deepgram API base URL.
             sample_rate: Audio sample rate. If None, uses default or live_options value.
-            live_options: :class:`LiveOptions` for detailed configuration.
+            live_options: :class: LiveOptions configuration. Treated as a
+                delta from a set of sensible defaults — only the fields you
+                set are overridden; all others keep their default values.
             addons: Additional Deepgram features to enable.
             should_interrupt: Determine whether the bot should be interrupted when Deepgram VAD events are enabled and the system detects that the user is speaking.
 
@@ -212,34 +366,25 @@ class DeepgramSTTService(STTService):
             vad_events=False,
         )
 
-        merged_options = default_options.to_dict()
+        settings = DeepgramSTTSettings(
+            model=default_options.model,
+            language=default_options.language,
+            live_options=default_options,
+        )
         if live_options:
-            default_model = default_options.model
-            merged_options.update(live_options.to_dict())
-            # NOTE(aleix): Fixes an in deepgram-sdk where `model` is initialized
-            # to the string "None" instead of the value `None`.
-            if "model" in merged_options and merged_options["model"] == "None":
-                merged_options["model"] = default_model
+            settings._merge_live_options_delta(live_options)
 
-        if "language" in merged_options and isinstance(merged_options["language"], Language):
-            merged_options["language"] = merged_options["language"].value
-
-        merged_live_options = LiveOptions(**merged_options)
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=DeepgramSTTSettings(
-                model=merged_options.get("model"),
-                language=merged_options.get("language"),
-                live_options=merged_live_options,
-            ),
+            settings=settings,
             **kwargs,
         )
 
         self._addons = addons
         self._should_interrupt = should_interrupt
 
-        if merged_live_options.vad_events:
+        if self._settings.live_options.vad_events:
             import warnings
 
             with warnings.catch_warnings():
@@ -297,42 +442,11 @@ class DeepgramSTTService(STTService):
         return True
 
     async def _update_settings(self, delta: STTSettings) -> dict[str, Any]:
-        """Apply a settings delta, keeping ``live_options`` in sync.
-
-        Top-level ``model`` and ``language`` are the source of truth.  When
-        they are given in *delta* their values are propagated into
-        ``live_options``.  When only ``live_options`` is given, its ``model``
-        and ``language`` are propagated *up* to the top-level fields.
-
-        Any change triggers a WebSocket reconnect.
-        """
-        # Determine which top-level fields are explicitly provided.
-        model_given = isinstance(delta, DeepgramSTTSettings) and is_given(
-            getattr(delta, "model", NOT_GIVEN)
-        )
-        language_given = isinstance(delta, DeepgramSTTSettings) and is_given(
-            getattr(delta, "language", NOT_GIVEN)
-        )
-
+        """Apply a settings delta and reconnect if anything changed."""
         changed = await super()._update_settings(delta)
 
         if not changed:
             return changed
-
-        # --- Sync model --------------------------------------------------
-        if model_given:
-            # Top-level model wins → push into live_options.
-            self._settings.live_options.model = self._settings.model
-        elif "live_options" in changed and self._settings.live_options.model is not None:
-            # Only live_options was given → pull model up.
-            self._settings.model = self._settings.live_options.model
-            self._sync_model_name_to_metrics()
-
-        # --- Sync language -----------------------------------------------
-        if language_given:
-            self._settings.live_options.language = self._settings.language
-        elif "live_options" in changed and self._settings.live_options.language is not None:
-            self._settings.language = self._settings.live_options.language
 
         await self._disconnect()
         await self._connect()
@@ -346,7 +460,6 @@ class DeepgramSTTService(STTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._settings.live_options.sample_rate = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):

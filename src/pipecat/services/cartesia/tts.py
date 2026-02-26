@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-from pipecat.services.tts_service import AudioContextTTSService, TTSService
+from pipecat.services.tts_service import AudioContextTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -272,7 +272,8 @@ class CartesiaTTSService(AudioContextTTSService):
         container: str = "raw",
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
-        aggregate_sentences: Optional[bool] = True,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        aggregate_sentences: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize the Cartesia TTS service.
@@ -292,13 +293,21 @@ class CartesiaTTSService(AudioContextTTSService):
                 .. deprecated:: 0.0.95
                     Use an LLMTextProcessor before the TTSService for custom text aggregation.
 
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
             **kwargs: Additional arguments passed to the parent service.
         """
-        # Aggregating sentences still gives cleaner-sounding results and fewer
-        # artifacts than streaming one word at a time. On average, waiting for a
-        # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
-        # 3 model, and it's worth it for the better audio quality.
+        # By default, we aggregate sentences before sending to TTS. This adds
+        # ~200-300ms of latency per sentence (waiting for the sentence-ending
+        # punctuation token from the LLM). Setting
+        # text_aggregation_mode=TextAggregationMode.TOKEN streams tokens
+        # directly, which reduces latency. Streaming quality is good but less
+        # tested than sentence aggregation.
+        # TODO: Consider making TOKEN the default for Cartesia in 1.0.
         #
         # We also don't want to automatically push LLM response text frames,
         # because the context aggregators will add them to the LLM context even
@@ -308,6 +317,7 @@ class CartesiaTTSService(AudioContextTTSService):
         params = params or CartesiaTTSService.InputParams()
 
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             pause_frame_processing=True,
@@ -337,7 +347,9 @@ class CartesiaTTSService(AudioContextTTSService):
             #    The preferred way of taking advantage of Cartesia SSML Tags is
             #    to use an LLMTextProcessor and/or a text_transformer to identify
             #    and insert these tags for the purpose of the TTS service alone.
-            self._text_aggregator = SkipTagsAggregator([("<spell>", "</spell>")])
+            self._text_aggregator = SkipTagsAggregator(
+                [("<spell>", "</spell>")], aggregation_type=self._text_aggregation_mode
+            )
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
@@ -639,7 +651,10 @@ class CartesiaTTSService(AudioContextTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
+        if not self._is_streaming_tokens:
+            logger.debug(f"{self}: Generating TTS [{text}]")
+        else:
+            logger.trace(f"{self}: Generating TTS [{text}]")
 
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
