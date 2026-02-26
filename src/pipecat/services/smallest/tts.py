@@ -278,7 +278,7 @@ class SmallestTTSService(AudioContextWordTTSService):
         context_id = self.get_active_audio_context_id()
         if not context_id or not self._websocket:
             return
-        logger.warning(f"{self}: flushing audio")
+        logger.debug(f"{self}: flushing audio")
         self.reset_active_audio_context()
         cancel_msg = json.dumps({"flush": True, "request_id": context_id})
         await self._websocket.send(cancel_msg)
