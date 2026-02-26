@@ -126,6 +126,9 @@ class Frame:
         id: Unique identifier for the frame instance.
         name: Human-readable name combining class name and instance count (lazy).
         pts: Presentation timestamp in nanoseconds.
+        broadcast_sibling_id: ID of the paired frame when this frame was
+            broadcast in both directions. Set automatically by
+            ``broadcast_frame()`` and ``broadcast_frame_instance()``.
         metadata: Dictionary for arbitrary frame metadata (lazy-allocated).
         transport_source: Name of the transport source that created this frame.
         transport_destination: Name of the transport destination for this frame.
@@ -135,6 +138,7 @@ class Frame:
 
     id: int = field(init=False)
     pts: Optional[int] = field(init=False)
+    broadcast_sibling_id: Optional[int] = field(init=False)
     transport_source: Optional[str] = field(init=False)
     transport_destination: Optional[str] = field(init=False)
 
@@ -142,6 +146,7 @@ class Frame:
         self.id: int = obj_id()
         self._name: Optional[str] = None
         self.pts: Optional[int] = None
+        self.broadcast_sibling_id: Optional[int] = None
         self._metadata: Optional[Dict[str, Any]] = None
         self.transport_source: Optional[str] = None
         self.transport_destination: Optional[str] = None
