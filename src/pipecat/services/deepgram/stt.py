@@ -273,9 +273,7 @@ class DeepgramSTTService(STTService):
             self._client = AsyncDeepgramClient(api_key=api_key)
 
         self._connection = None
-        self._connection_cm = None
-        self._listening_task = None
-        self._keepalive_task = None
+        self._connection_task = None
 
         if self.vad_enabled:
             self._register_event_handler("on_speech_started")
@@ -401,70 +399,66 @@ class DeepgramSTTService(STTService):
 
     async def _connect(self):
         logger.debug("Connecting to Deepgram")
-
-        connect_kwargs = self._build_connect_kwargs()
-
-        # Manually enter the async context manager so the connection persists
-        # across pipecat's start/run_stt/stop lifecycle.
-        self._connection_cm = self._client.listen.v1.connect(**connect_kwargs)
-        self._connection = await self._connection_cm.__aenter__()
-
-        self._connection.on(EventType.MESSAGE, self._on_message)
-        self._connection.on(EventType.ERROR, self._on_error)
-
-        try:
-            headers = {
-                k: v
-                for k, v in self._connection._websocket.response.headers.items()
-                if k.startswith("dg-")
-            }
-            logger.debug(f'{self}: Websocket connection initialized: {{"headers": {headers}}}')
-        except Exception:
-            logger.debug(f"{self}: Websocket connection initialized")
-
-        # start_listening() runs the receive loop; run it as a background task.
-        self._listening_task = self.create_task(
-            self._connection.start_listening(), f"{self}::listening"
-        )
-        # Send periodic keepalive frames to prevent the server from timing out.
-        self._keepalive_task = self.create_task(
-            self._keepalive_handler(), f"{self}::keepalive"
+        self._connection_task = self.create_task(
+            self._connection_handler(), f"{self}::connection"
         )
 
     async def _disconnect(self):
-        if not self._connection:
+        if not self._connection_task:
             return
 
         logger.debug("Disconnecting from Deepgram")
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+        # Ask Deepgram to close the stream gracefully before cancelling the task.
+        if self._connection:
+            try:
+                await self._connection.send_close_stream()
+            except Exception:
+                pass
 
-        try:
-            await self._connection.send_close_stream()
-        except Exception:
-            pass
-
-        if self._listening_task:
-            await self.cancel_task(self._listening_task)
-            self._listening_task = None
-
-        # Deepgram swallows asyncio.CancelledError internally which prevents
-        # proper cancellation propagation. This issue was found with
-        # parallel pipelines where `CancelFrame` was not awaited for to
-        # finish in all branches and it was pushed downstream reaching the
-        # end of the pipeline, which caused `cleanup()` to be called while
-        # Deepgram disconnection was still finishing and therefore
-        # preventing the task cancellation that occurs during `cleanup()`.
-        # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
-        try:
-            await self._connection_cm.__aexit__(None, None, None)
-        except Exception:
-            pass
-
+        await self.cancel_task(self._connection_task)
+        self._connection_task = None
         self._connection = None
-        self._connection_cm = None
+
+    async def _connection_handler(self):
+        """Manages the full WebSocket lifecycle inside a single async with block.
+
+        Reconnects automatically after transient errors. Exits cleanly when
+        the task is cancelled (i.e. on stop/cancel).
+        """
+        while True:
+            connect_kwargs = self._build_connect_kwargs()
+            try:
+                async with self._client.listen.v1.connect(**connect_kwargs) as connection:
+                    self._connection = connection
+                    connection.on(EventType.MESSAGE, self._on_message)
+                    connection.on(EventType.ERROR, self._on_error)
+
+                    try:
+                        headers = {
+                            k: v
+                            for k, v in connection._websocket.response.headers.items()
+                            if k.startswith("dg-")
+                        }
+                        logger.debug(
+                            f'{self}: Websocket connection initialized: {{"headers": {headers}}}'
+                        )
+                    except Exception:
+                        logger.debug(f"{self}: Websocket connection initialized")
+
+                    keepalive_task = self.create_task(
+                        self._keepalive_handler(), f"{self}::keepalive"
+                    )
+                    try:
+                        await connection.start_listening()
+                    finally:
+                        await self.cancel_task(keepalive_task)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(f"{self}: Connection lost, will retry: {e}")
+            finally:
+                self._connection = None
 
     async def _keepalive_handler(self):
         """Periodically send KeepAlive frames to prevent server-side timeout."""
@@ -485,19 +479,8 @@ class DeepgramSTTService(STTService):
         logger.warning(f"{self} connection error, will retry: {error}")
         await self.push_error(error_msg=f"{error}")
         await self.stop_all_metrics()
-        # NOTE(aleix): we don't disconnect (i.e. exit the context manager)
-        # because this triggers more errors internally in the Deepgram SDK. So,
-        # we just cancel our tasks, forget about the previous connection, and
-        # create a new one.
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
-        if self._listening_task:
-            await self.cancel_task(self._listening_task)
-            self._listening_task = None
-        self._connection = None
-        self._connection_cm = None
-        await self._connect()
+        # Reconnection is handled automatically by the retry loop in
+        # _connection_handler once start_listening() exits after the error.
 
     async def _on_speech_started(self, message):
         await self._start_metrics()
