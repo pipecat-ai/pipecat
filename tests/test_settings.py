@@ -6,9 +6,11 @@
 
 """Tests for the typed settings infrastructure in pipecat.services.settings."""
 
+from unittest.mock import patch
+
 import pytest
 
-from pipecat.services.deepgram.stt import DeepgramSTTSettings
+from pipecat.services.deepgram.stt import DeepgramSTTService, DeepgramSTTSettings
 from pipecat.services.deepgram.stt_sagemaker import DeepgramSageMakerSTTSettings
 from pipecat.services.settings import (
     NOT_GIVEN,
@@ -482,3 +484,66 @@ class TestDeepgramSageMakerSTTSettings:
         assert store.punctuate is False
         assert store.encoding == "linear16"
         assert "punctuate" in changed
+
+
+# ---------------------------------------------------------------------------
+# DeepgramSTTService: _build_connect_kwargs precedence
+# ---------------------------------------------------------------------------
+
+
+class TestDeepgramConnectKwargsPrecedence:
+    """Declared settings fields must take precedence over extra when building
+    connection kwargs, so callers cannot accidentally override typed fields
+    via the extra dict."""
+
+    def _make_service(self, **kwargs):
+        with patch("pipecat.services.deepgram.stt.AsyncDeepgramClient"):
+            return DeepgramSTTService(api_key="test-key", sample_rate=16000, **kwargs)
+
+    def test_declared_field_beats_extra_same_key(self):
+        """settings.diarize takes precedence over settings.extra['diarize']."""
+        svc = self._make_service()
+        svc._settings.diarize = True
+        svc._settings.extra["diarize"] = False
+        kwargs = svc._build_connect_kwargs()
+        assert kwargs["diarize"] == "true"
+
+    def test_declared_bool_false_beats_extra_true(self):
+        """A declared field explicitly set to False should still win."""
+        svc = self._make_service()
+        svc._settings.punctuate = False
+        svc._settings.extra["punctuate"] = True
+        kwargs = svc._build_connect_kwargs()
+        assert kwargs["punctuate"] == "false"
+
+    def test_model_beats_extra(self):
+        """settings.model takes precedence over settings.extra['model']."""
+        svc = self._make_service()
+        svc._settings.model = "nova-3-general"
+        svc._settings.extra["model"] = "nova-2"
+        kwargs = svc._build_connect_kwargs()
+        assert kwargs["model"] == "nova-3-general"
+
+    def test_language_beats_extra(self):
+        """settings.language takes precedence over settings.extra['language']."""
+        svc = self._make_service()
+        svc._settings.language = "en"
+        svc._settings.extra["language"] = "es"
+        kwargs = svc._build_connect_kwargs()
+        assert kwargs["language"] == "en"
+
+    def test_extra_used_for_undeclared_param(self):
+        """A key only in extra (no matching declared field) is still forwarded."""
+        svc = self._make_service()
+        svc._settings.extra["numerals"] = True
+        kwargs = svc._build_connect_kwargs()
+        assert kwargs["numerals"] == "true"
+
+    def test_sample_rate_always_from_service(self):
+        """sample_rate is always taken from the service, not from extra."""
+        svc = self._make_service()
+        svc._settings.extra["sample_rate"] = "8000"
+        kwargs = svc._build_connect_kwargs()
+        # The service-level sample_rate must win; extra["sample_rate"] is ignored.
+        assert kwargs["sample_rate"] == str(svc.sample_rate)
+        assert kwargs["sample_rate"] != "8000"

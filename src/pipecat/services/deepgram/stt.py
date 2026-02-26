@@ -416,7 +416,12 @@ class DeepgramSTTService(STTService):
         kwargs = {}
         s = self._settings
 
-        # Iterate all declared Deepgram-specific fields; handle model/language separately.
+        # extra has lowest precedence — written first so declared fields can override.
+        for key, value in s.extra.items():
+            if value is not None:
+                kwargs[key] = str(value).lower() if isinstance(value, bool) else str(value)
+
+        # Declared Deepgram-specific fields — take precedence over extra.
         for f in fields(s):
             if f.name in ("model", "language", "extra") or f.name.startswith("_"):
                 continue
@@ -425,7 +430,7 @@ class DeepgramSTTService(STTService):
                 continue
             kwargs[f.name] = str(value).lower() if isinstance(value, bool) else str(value)
 
-        # model and language
+        # model and language take precedence over extra too.
         if is_given(s.model) and s.model is not None:
             kwargs["model"] = str(s.model)
         if is_given(s.language) and s.language is not None:
@@ -433,11 +438,6 @@ class DeepgramSTTService(STTService):
 
         # Always inject sample_rate from service level.
         kwargs["sample_rate"] = str(self.sample_rate)
-
-        # extra from settings — forwarded as additional connection query params.
-        for key, value in s.extra.items():
-            if value is not None:
-                kwargs[key] = str(value).lower() if isinstance(value, bool) else str(value)
 
         if self._addons:
             for key, value in self._addons.items():
