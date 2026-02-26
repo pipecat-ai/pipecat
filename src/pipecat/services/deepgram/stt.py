@@ -445,9 +445,13 @@ class DeepgramSTTService(STTService):
                 self._connection = None
 
     async def _keepalive_handler(self):
-        """Periodically send KeepAlive frames to prevent server-side timeout."""
+        """Periodically send KeepAlive frames to prevent server-side timeout.
+
+        Deepgram closes inactive connections after 10 seconds (NET-0001 error).
+        Sending every 5 seconds stays within the recommended 3-5 second interval.
+        """
         while True:
-            await asyncio.sleep(8)
+            await asyncio.sleep(5)
             if self._connection:
                 try:
                     await self._connection.send_keep_alive()
