@@ -279,11 +279,6 @@ class SmallestSTTService(WebsocketSTTService):
         self._websocket: ClientConnection | None = None
         self._receive_task = None
 
-        # Register event handlers
-        self._register_event_handler("on_connected")
-        self._register_event_handler("on_disconnected")
-        self._register_event_handler("on_connection_error")
-
     # -------------------------------------------------------------------------
     # Properties
     # -------------------------------------------------------------------------
