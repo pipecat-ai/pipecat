@@ -99,6 +99,21 @@ class BaseObject(ABC):
             logger.debug(f"{self}: waiting on event handlers to finish {list(event_names)}...")
             await asyncio.wait(tasks)
 
+    def _has_handlers(self, event_name: str) -> bool:
+        """Check if any handlers are registered for the specified event.
+
+        This is a fast non-async check used to avoid coroutine creation
+        overhead when no handlers are attached.
+
+        Args:
+            event_name: The name of the event to check.
+
+        Returns:
+            True if at least one handler is registered for this event.
+        """
+        eh = self._event_handlers.get(event_name)
+        return bool(eh and eh.handlers)
+
     def event_handler(self, event_name: str):
         """Decorator for registering event handlers.
 

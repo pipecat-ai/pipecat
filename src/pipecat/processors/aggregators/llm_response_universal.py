@@ -23,6 +23,7 @@ from loguru import logger
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.audio.vad.vad_controller import VADController
+from pipecat.frames.frame_types import FrameType
 from pipecat.frames.frames import (
     AssistantImageRawFrame,
     CancelFrame,
@@ -82,6 +83,32 @@ from pipecat.utils.context.llm_context_summarization import LLMContextSummarizat
 from pipecat.utils.string import TextPartForConcatenation, concatenate_aggregated_text
 from pipecat.utils.time import time_now_iso8601
 
+# ---------------------------------------------------------------------------
+# Module-level frozenset: frame type_ids that UserIdleController cares about.
+# All other frames skip the idle controller call — saves one async call per frame.
+# Source: user_idle_controller.py::process_frame — handles exactly these frames:
+#   UserIdleTimeoutUpdateFrame → update timeout
+#   BotStoppedSpeakingFrame    → start idle timer
+#   BotStartedSpeakingFrame    → cancel idle timer
+#   UserStartedSpeakingFrame   → set user_turn_in_progress, cancel idle timer
+#   UserStoppedSpeakingFrame   → clear user_turn_in_progress
+#   FunctionCallsStartedFrame  → increment counter, cancel idle timer
+#   FunctionCallResultFrame    → decrement counter
+#   FunctionCallCancelFrame    → decrement counter
+# ---------------------------------------------------------------------------
+_IDLE_CONTROLLER_FRAME_TYPES: frozenset = frozenset(
+    {
+        FrameType.SYS_USER_IDLE_TIMEOUT_UPDATE,  # UserIdleTimeoutUpdateFrame
+        FrameType.BOT_STOPPED_SPEAKING,  # BotStoppedSpeakingFrame — starts idle timer
+        FrameType.BOT_STARTED_SPEAKING,  # BotStartedSpeakingFrame — cancels idle timer
+        FrameType.USER_STARTED_SPEAKING,  # UserStartedSpeakingFrame
+        FrameType.USER_STOPPED_SPEAKING,  # UserStoppedSpeakingFrame
+        FrameType.FUNC_CALLS_STARTED,  # FunctionCallsStartedFrame
+        FrameType.FUNC_CALL_RESULT,  # FunctionCallResultFrame
+        FrameType.FUNC_CALL_CANCEL,  # FunctionCallCancelFrame
+    }
+)
+
 
 @dataclass
 class LLMUserAggregatorParams:
@@ -92,9 +119,9 @@ class LLMUserAggregatorParams:
         user_mute_strategies: List of user mute strategies.
         user_turn_stop_timeout: Time in seconds to wait before considering the
             user's turn finished.
-        user_idle_timeout: Timeout in seconds for detecting user idle state.
-            The aggregator will emit an `on_user_turn_idle` event when the user
-            has been idle (not speaking) for this duration. Set to 0 to disable
+        user_idle_timeout: Optional timeout in seconds for detecting user idle state.
+            If set, the aggregator will emit an `on_user_turn_idle` event when the user
+            has been idle (not speaking) for this duration. Set to None to disable
             idle detection.
         vad_analyzer: Voice Activity Detection analyzer instance.
         filter_incomplete_user_turns: Whether to filter out incomplete user turns.
@@ -109,7 +136,7 @@ class LLMUserAggregatorParams:
     user_turn_strategies: Optional[UserTurnStrategies] = None
     user_mute_strategies: List[BaseUserMuteStrategy] = field(default_factory=list)
     user_turn_stop_timeout: float = 5.0
-    user_idle_timeout: float = 0
+    user_idle_timeout: Optional[float] = None
     vad_analyzer: Optional[VADAnalyzer] = None
     filter_incomplete_user_turns: bool = False
     user_turn_completion_config: Optional[UserTurnCompletionConfig] = None
@@ -404,10 +431,15 @@ class LLMUserAggregator(LLMContextAggregator):
             "on_user_turn_stop_timeout", self._on_user_turn_stop_timeout
         )
 
-        self._user_idle_controller = UserIdleController(
-            user_idle_timeout=self._params.user_idle_timeout
-        )
-        self._user_idle_controller.add_event_handler("on_user_turn_idle", self._on_user_turn_idle)
+        # Optional user idle controller
+        self._user_idle_controller: Optional[UserIdleController] = None
+        if self._params.user_idle_timeout:
+            self._user_idle_controller = UserIdleController(
+                user_idle_timeout=self._params.user_idle_timeout
+            )
+            self._user_idle_controller.add_event_handler(
+                "on_user_turn_idle", self._on_user_turn_idle
+            )
 
         # VAD controller
         self._vad_controller: Optional[VADController] = None
@@ -426,10 +458,75 @@ class LLMUserAggregator(LLMContextAggregator):
         # pushed by strategies.
         self._self_queued_frames = set()
 
+        # O(1) dispatch table for process_frame. Keys are frame.type_id ints.
+        # Frames not in this dict fall through to push_frame (the else branch).
+        self._current_direction: FrameDirection = FrameDirection.DOWNSTREAM
+        self._dispatch: Dict[int, Any] = {
+            FrameType.CTRL_START: self._user_dispatch_start,
+            FrameType.CTRL_END: self._user_dispatch_end,
+            FrameType.CTRL_CANCEL: self._user_dispatch_cancel,
+            FrameType.TEXT_TRANSCRIPTION: self._handle_transcription,
+            # Interim transcriptions and translations are consumed here (not pushed
+            # downstream), matching the original isinstance guard behavior.
+            FrameType.TEXT_INTERIM_TRANS: self._user_dispatch_noop,
+            FrameType.TEXT_TRANSLATION: self._user_dispatch_noop,
+            FrameType.LLM_RUN: self._handle_llm_run,
+            FrameType.LLM_MESSAGES_APPEND: self._handle_llm_messages_append,
+            FrameType.LLM_MESSAGES_UPDATE: self._handle_llm_messages_update,
+            FrameType.LLM_SET_TOOLS: self._user_dispatch_set_tools,
+            FrameType.LLM_SET_TOOL_CHOICE: self._user_dispatch_set_tool_choice,
+            FrameType.AUDIO_SPEECH_CTRL: self._handle_speech_control_params,
+        }
+
     async def cleanup(self):
         """Clean up processor resources."""
         await super().cleanup()
         await self._cleanup()
+
+    # ------------------------------------------------------------------
+    # Dispatch shim methods — encode push semantics for the O(1) table.
+    # Named with _user_ prefix to avoid collision with base class methods.
+    # ------------------------------------------------------------------
+
+    async def _user_dispatch_noop(self, frame: Frame) -> None:
+        """Drop frame with no push.
+
+        Preserves behavior for InterimTranscriptionFrame and TranslationFrame
+        which are consumed (not pushed downstream) in the user aggregator.
+        """
+
+    async def _user_dispatch_start(self, frame: StartFrame) -> None:
+        """Push StartFrame BEFORE _start() so every downstream processor sees it first."""
+        await self.push_frame(frame, self._current_direction)
+        await self._start(frame)
+
+    async def _user_dispatch_end(self, frame: EndFrame) -> None:
+        """Push EndFrame BEFORE _stop().
+
+        _stop() waits on the task, which finishes when EndFrame is processed by
+        downstream processors.
+        """
+        await self.push_frame(frame, self._current_direction)
+        await self._stop(frame)
+
+    async def _user_dispatch_cancel(self, frame: CancelFrame) -> None:
+        """Cancel internal state, then push downstream."""
+        await self._cancel(frame)
+        await self.push_frame(frame, self._current_direction)
+
+    async def _user_dispatch_set_tools(self, frame: LLMSetToolsFrame) -> None:
+        """Update tools and push downstream — speech-to-speech LLMs observe tool changes live."""
+        self.set_tools(frame.tools)
+        # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
+        # services (like OpenAI Realtime) may need to know about tool
+        # changes; unlike text-based LLM services they won't just "pick up
+        # the change" on the next LLM run, as the LLM is continuously
+        # running.
+        await self.push_frame(frame, self._current_direction)
+
+    async def _user_dispatch_set_tool_choice(self, frame: LLMSetToolChoiceFrame) -> None:
+        """Update tool choice — no push (picked up at next LLM run)."""
+        self.set_tool_choice(frame.tool_choice)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for user speech aggregation and context management.
@@ -446,49 +543,23 @@ class LLMUserAggregator(LLMContextAggregator):
         if self._vad_controller:
             await self._vad_controller.process_frame(frame)
 
-        if isinstance(frame, StartFrame):
-            # Push StartFrame before start(), because we want StartFrame to be
-            # processed by every processor before any other frame is processed.
-            await self.push_frame(frame, direction)
-            await self._start(frame)
-        elif isinstance(frame, EndFrame):
-            # Push EndFrame before stop(), because stop() waits on the task to
-            # finish and the task finishes when EndFrame is processed.
-            await self.push_frame(frame, direction)
-            await self._stop(frame)
-        elif isinstance(frame, CancelFrame):
-            await self._cancel(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, TranscriptionFrame):
-            await self._handle_transcription(frame)
-        elif isinstance(frame, (InterimTranscriptionFrame, TranslationFrame)):
-            # Interim transcriptions and translations are consumed here
-            # and not pushed downstream, same as final TranscriptionFrame.
-            pass
-        elif isinstance(frame, LLMRunFrame):
-            await self._handle_llm_run(frame)
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            await self._handle_llm_messages_append(frame)
-        elif isinstance(frame, LLMMessagesUpdateFrame):
-            await self._handle_llm_messages_update(frame)
-        elif isinstance(frame, LLMSetToolsFrame):
-            self.set_tools(frame.tools)
-            # Push the LLMSetToolsFrame as well, since speech-to-speech LLM
-            # services (like OpenAI Realtime) may need to know about tool
-            # changes; unlike text-based LLM services they won't just "pick up
-            # the change" on the next LLM run, as the LLM is continuously
-            # running.
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, LLMSetToolChoiceFrame):
-            self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, SpeechControlParamsFrame):
-            await self._handle_speech_control_params(frame)
+        # Store direction so dispatch shim methods can access it.
+        # Safe: asyncio is single-threaded and no await points exist between
+        # setting _current_direction and the handler call below.
+        self._current_direction = direction
+
+        handler = self._dispatch.get(frame.type_id)
+        if handler is not None:
+            await handler(frame)
         else:
             await self.push_frame(frame, direction)
 
         await self._user_turn_controller.process_frame(frame)
 
-        await self._user_idle_controller.process_frame(frame)
+        # Fast-path guard: only invoke idle controller for frames it cares about.
+        # Skips the async call for high-frequency audio frames (50+ fps per call).
+        if self._user_idle_controller and frame.type_id in _IDLE_CONTROLLER_FRAME_TYPES:
+            await self._user_idle_controller.process_frame(frame)
 
     async def push_aggregation(self) -> str:
         """Push the current aggregation."""
@@ -505,7 +576,8 @@ class LLMUserAggregator(LLMContextAggregator):
     async def _start(self, frame: StartFrame):
         await self._user_turn_controller.setup(self.task_manager)
 
-        await self._user_idle_controller.setup(self.task_manager)
+        if self._user_idle_controller:
+            await self._user_idle_controller.setup(self.task_manager)
 
         for s in self._params.user_mute_strategies:
             await s.setup(self.task_manager)
@@ -538,16 +610,20 @@ class LLMUserAggregator(LLMContextAggregator):
 
     async def _cleanup(self):
         await self._user_turn_controller.cleanup()
-        await self._user_idle_controller.cleanup()
+
+        if self._user_idle_controller:
+            await self._user_idle_controller.cleanup()
 
         for s in self._params.user_mute_strategies:
             await s.cleanup()
 
     async def _maybe_mute_frame(self, frame: Frame):
-        # Lifecycle frames should never be muted and should not trigger mute
-        # state changes. Evaluating mute strategies on StartFrame would
-        # broadcast UserMuteStartedFrame before StartFrame reaches downstream
-        # processors.
+        # Control frames must flow unconditionally — never feed them to mute
+        # strategies.  Without this guard, strategies like
+        # MuteUntilFirstBotCompleteUserMuteStrategy fire on_user_mute_started
+        # and broadcast UserMuteStartedFrame before StartFrame is pushed
+        # downstream, causing downstream processors to receive frames before
+        # StartFrame and log errors.
         if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
             return False
 
@@ -691,8 +767,6 @@ class LLMUserAggregator(LLMContextAggregator):
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStartedSpeakingFrame)
 
-        await self._user_idle_controller.process_frame(UserStartedSpeakingFrame())
-
         if params.enable_interruptions and self._allow_interruptions:
             await self.push_interruption_task_frame_and_wait()
 
@@ -708,8 +782,6 @@ class LLMUserAggregator(LLMContextAggregator):
 
         if params.enable_user_speaking_frames:
             await self.broadcast_frame(UserStoppedSpeakingFrame)
-
-        await self._user_idle_controller.process_frame(UserStoppedSpeakingFrame())
 
         await self._maybe_emit_user_turn_stopped(strategy)
 
@@ -816,6 +888,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._function_calls_image_results: Dict[str, UserImageRawFrame] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
+        # O(1) tool-message lookup: maps tool_call_id → the live dict object added to context.
+        # Python dict identity means mutating this object mutates the context entry directly,
+        # enabling O(1) _update_function_call_result instead of an O(N) context scan.
+        self._tool_messages: Dict[str, dict] = {}
 
         self._assistant_turn_start_timestamp = ""
 
@@ -839,6 +915,51 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._register_event_handler("on_assistant_turn_stopped")
         self._register_event_handler("on_assistant_thought")
 
+        # O(1) dispatch table: frame.type_id → bound handler coroutine.
+        # Frames not in this dict fall through to push_frame (the else branch).
+        # Stored at init time so dict-lookup is the only per-frame overhead.
+        self._current_direction: FrameDirection = FrameDirection.DOWNSTREAM
+        self._dispatch: Dict[int, Any] = {
+            FrameType.CTRL_START: self._asst_dispatch_start,
+            FrameType.CTRL_INTERRUPT: self._asst_dispatch_interruption,
+            FrameType.CTRL_END: self._asst_dispatch_end_or_cancel,
+            FrameType.CTRL_CANCEL: self._asst_dispatch_end_or_cancel,
+            FrameType.LLM_RESPONSE_START: self._handle_llm_start,
+            FrameType.LLM_RESPONSE_END: self._handle_llm_end,
+            # TextFrame and all subclasses that accumulate into the assistant context.
+            # These have distinct type_ids but all share _handle_text's aggregation logic.
+            # IMPORTANT: keep this list in sync with all TextFrame subclasses in frames.py.
+            FrameType.TEXT_PLAIN: self._handle_text,
+            FrameType.TEXT_LLM: self._handle_text,
+            FrameType.TEXT_AGGREGATED: self._handle_text,
+            FrameType.TEXT_TTS: self._handle_text,
+            FrameType.VISION_TEXT: self._handle_text,
+            FrameType.TEXT_INPUT_RAW: self._handle_text,  # InputTextRawFrame(SystemFrame, TextFrame)
+            # These TextFrame subclasses are rejected by _handle_text's isinstance guard
+            # and returned without pushing — preserve that drop behavior explicitly.
+            FrameType.TEXT_TRANSCRIPTION: self._asst_dispatch_noop,
+            FrameType.TEXT_INTERIM_TRANS: self._asst_dispatch_noop,
+            FrameType.TEXT_TRANSLATION: self._asst_dispatch_noop,
+            # LLM thought frames
+            FrameType.LLM_THOUGHT_START: self._handle_thought_start,
+            FrameType.LLM_THOUGHT_TEXT: self._handle_thought_text,
+            FrameType.LLM_THOUGHT_END: self._handle_thought_end,
+            # LLM context management
+            FrameType.LLM_RUN: self._handle_llm_run,
+            FrameType.LLM_MESSAGES_APPEND: self._handle_llm_messages_append,
+            FrameType.LLM_MESSAGES_UPDATE: self._handle_llm_messages_update,
+            FrameType.LLM_SET_TOOLS: self._asst_dispatch_set_tools,
+            FrameType.LLM_SET_TOOL_CHOICE: self._asst_dispatch_set_tool_choice,
+            # Function call lifecycle
+            FrameType.FUNC_CALLS_STARTED: self._handle_function_calls_started,
+            FrameType.FUNC_CALL_PROGRESS: self._handle_function_call_in_progress,
+            FrameType.FUNC_CALL_RESULT: self._handle_function_call_result,
+            FrameType.FUNC_CALL_CANCEL: self._handle_function_call_cancel,
+            # Image frames
+            FrameType.IMAGE_USER: self._handle_user_image_frame,
+            FrameType.IMAGE_ASSISTANT: self._handle_assistant_image_frame,
+        }
+
     @property
     def has_function_calls_in_progress(self) -> bool:
         """Check if there are any function calls currently in progress.
@@ -859,6 +980,43 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._thought_llm = ""
         self._thought_aggregation = []
 
+    # ------------------------------------------------------------------
+    # Dispatch shim methods — encode push semantics for the O(1) table.
+    # Named with _asst_ prefix to avoid collision with any base class methods.
+    # ------------------------------------------------------------------
+
+    async def _asst_dispatch_noop(self, frame: Frame) -> None:
+        """Drop frame with no push.
+
+        Preserves behavior for TextFrame subclasses (TranscriptionFrame,
+        InterimTranscriptionFrame, TranslationFrame) that _handle_text rejects
+        via its isinstance guard without pushing.
+        """
+        pass
+
+    async def _asst_dispatch_start(self, frame: StartFrame) -> None:
+        """Push StartFrame BEFORE _start() so every downstream processor sees it first."""
+        await self.push_frame(frame, self._current_direction)
+        await self._start(frame)
+
+    async def _asst_dispatch_interruption(self, frame: InterruptionFrame) -> None:
+        """Handle interruption state, then push downstream."""
+        await self._handle_interruptions(frame)
+        await self.push_frame(frame, self._current_direction)
+
+    async def _asst_dispatch_end_or_cancel(self, frame: Frame) -> None:
+        """Handle end/cancel cleanup, then push downstream."""
+        await self._handle_end_or_cancel(frame)
+        await self.push_frame(frame, self._current_direction)
+
+    async def _asst_dispatch_set_tools(self, frame: LLMSetToolsFrame) -> None:
+        """Update tools context — no push (assistant aggregator does not re-broadcast)."""
+        self.set_tools(frame.tools)
+
+    async def _asst_dispatch_set_tool_choice(self, frame: LLMSetToolChoiceFrame) -> None:
+        """Update tool choice context — no push."""
+        self.set_tool_choice(frame.tool_choice)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for assistant response aggregation and function call management.
 
@@ -868,51 +1026,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            # Push StartFrame before start(), because we want StartFrame to be
-            # processed by every processor before any other frame is processed.
-            await self.push_frame(frame, direction)
-            await self._start(frame)
-        elif isinstance(frame, InterruptionFrame):
-            await self._handle_interruptions(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            await self._handle_end_or_cancel(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, LLMFullResponseStartFrame):
-            await self._handle_llm_start(frame)
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            await self._handle_llm_end(frame)
-        elif isinstance(frame, TextFrame):
-            await self._handle_text(frame)
-        elif isinstance(frame, LLMThoughtStartFrame):
-            await self._handle_thought_start(frame)
-        elif isinstance(frame, LLMThoughtTextFrame):
-            await self._handle_thought_text(frame)
-        elif isinstance(frame, LLMThoughtEndFrame):
-            await self._handle_thought_end(frame)
-        elif isinstance(frame, LLMRunFrame):
-            await self._handle_llm_run(frame)
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            await self._handle_llm_messages_append(frame)
-        elif isinstance(frame, LLMMessagesUpdateFrame):
-            await self._handle_llm_messages_update(frame)
-        elif isinstance(frame, LLMSetToolsFrame):
-            self.set_tools(frame.tools)
-        elif isinstance(frame, LLMSetToolChoiceFrame):
-            self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, FunctionCallsStartedFrame):
-            await self._handle_function_calls_started(frame)
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            await self._handle_function_call_in_progress(frame)
-        elif isinstance(frame, FunctionCallResultFrame):
-            await self._handle_function_call_result(frame)
-        elif isinstance(frame, FunctionCallCancelFrame):
-            await self._handle_function_call_cancel(frame)
-        elif isinstance(frame, UserImageRawFrame):
-            await self._handle_user_image_frame(frame)
-        elif isinstance(frame, AssistantImageRawFrame):
-            await self._handle_assistant_image_frame(frame)
+        # Store direction so dispatch shim methods can access it.
+        # Safe: asyncio is single-threaded and no await points exist between
+        # setting _current_direction and the handler call below.
+        self._current_direction = direction
+
+        handler = self._dispatch.get(frame.type_id)
+        if handler is not None:
+            await handler(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -992,13 +1113,17 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 ],
             }
         )
-        self._context.add_message(
-            {
-                "role": "tool",
-                "content": "IN_PROGRESS",
-                "tool_call_id": frame.tool_call_id,
-            }
-        )
+        # Build the tool message separately so we can capture a reference to
+        # the same Python dict object that the context will store.  Mutating
+        # this dict later (in _update_function_call_result) propagates directly
+        # into the context without any O(N) scan.
+        tool_message: dict = {
+            "role": "tool",
+            "content": "IN_PROGRESS",
+            "tool_call_id": frame.tool_call_id,
+        }
+        self._context.add_message(tool_message)
+        self._tool_messages[frame.tool_call_id] = tool_message
 
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
@@ -1016,12 +1141,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
         properties = frame.properties
 
-        # Update context with the function call result
+        # Update context with the function call result (O(1) via _tool_messages reference).
         if frame.result:
             result = json.dumps(frame.result, ensure_ascii=False)
             self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
         else:
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "COMPLETED")
+
+        # Release the O(1) reference now that the result is written.
+        self._tool_messages.pop(frame.tool_call_id, None)
 
         run_llm = False
 
@@ -1067,6 +1195,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             # Update context with the function call cancellation
             self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
             del self._function_calls_in_progress[frame.tool_call_id]
+            self._tool_messages.pop(frame.tool_call_id, None)  # Release O(1) reference
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
         image_appended = False
@@ -1114,10 +1243,6 @@ class LLMAssistantAggregator(LLMContextAggregator):
         await self._trigger_assistant_turn_stopped()
 
     async def _handle_text(self, frame: TextFrame):
-        # Skip TextFrame types not intended to build the assistant context
-        if isinstance(frame, (TranscriptionFrame, TranslationFrame, InterimTranscriptionFrame)):
-            return
-
         if not frame.append_to_context:
             return
 
@@ -1186,6 +1311,14 @@ class LLMAssistantAggregator(LLMContextAggregator):
         return True
 
     def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
+        # O(1) fast path: mutate the dict object in-place via the captured reference.
+        # The context holds the exact same Python dict, so this propagates immediately.
+        tool_message = self._tool_messages.get(tool_call_id)
+        if tool_message is not None:
+            tool_message["content"] = result
+            return
+
+        # O(N) fallback: handles edges cases (cancel path, backward compat, external callers).
         for message in self._context.get_messages():
             if (
                 not isinstance(message, LLMSpecificMessage)
@@ -1261,8 +1394,8 @@ class LLMContextAggregatorPair:
         self,
         context: LLMContext,
         *,
-        user_params: Optional[LLMUserAggregatorParams] = None,
-        assistant_params: Optional[LLMAssistantAggregatorParams] = None,
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ):
         """Initialize the LLM context aggregator pair.
 
@@ -1271,8 +1404,6 @@ class LLMContextAggregatorPair:
             user_params: Parameters for the user context aggregator.
             assistant_params: Parameters for the assistant context aggregator.
         """
-        user_params = user_params or LLMUserAggregatorParams()
-        assistant_params = assistant_params or LLMAssistantAggregatorParams()
         self._user = LLMUserAggregator(context, params=user_params)
         self._assistant = LLMAssistantAggregator(context, params=assistant_params)
 

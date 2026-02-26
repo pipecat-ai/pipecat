@@ -20,6 +20,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    ClassVar,
     Dict,
     List,
     Literal,
@@ -34,6 +35,7 @@ from pipecat.audio.dtmf.types import KeypadEntry as NewKeypadEntry
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frame_types import FrameCategory, FrameType  # noqa: F401
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import nanoseconds_to_str
@@ -122,32 +124,49 @@ class Frame:
 
     Parameters:
         id: Unique identifier for the frame instance.
-        name: Human-readable name combining class name and instance count.
+        name: Human-readable name combining class name and instance count (lazy).
         pts: Presentation timestamp in nanoseconds.
-        broadcast_sibling_id: ID of the paired frame when this frame was
-            broadcast in both directions. Set automatically by
-            ``broadcast_frame()`` and ``broadcast_frame_instance()``.
-        metadata: Dictionary for arbitrary frame metadata.
+        metadata: Dictionary for arbitrary frame metadata (lazy-allocated).
         transport_source: Name of the transport source that created this frame.
         transport_destination: Name of the transport destination for this frame.
     """
 
+    type_id: ClassVar[int] = FrameType.FRAME
+
     id: int = field(init=False)
-    name: str = field(init=False)
     pts: Optional[int] = field(init=False)
-    broadcast_sibling_id: Optional[int] = field(init=False)
-    metadata: Dict[str, Any] = field(init=False)
     transport_source: Optional[str] = field(init=False)
     transport_destination: Optional[str] = field(init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
-        self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
+        self._name: Optional[str] = None
         self.pts: Optional[int] = None
-        self.broadcast_sibling_id: Optional[int] = None
-        self.metadata: Dict[str, Any] = {}
+        self._metadata: Optional[Dict[str, Any]] = None
         self.transport_source: Optional[str] = None
         self.transport_destination: Optional[str] = None
+
+    @property
+    def name(self) -> str:
+        """Human-readable name, lazily generated on first access."""
+        if self._name is None:
+            self._name = f"{self.__class__.__name__}#{obj_count(self)}"
+        return self._name
+
+    @name.setter
+    def name(self, value: str):
+        self._name = value
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Frame metadata dict, lazily allocated on first access."""
+        if self._metadata is None:
+            self._metadata = {}
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: Dict[str, Any]):
+        self._metadata = value
 
     def __str__(self):
         return self.name
@@ -161,7 +180,7 @@ class SystemFrame(Frame):
     handled in order and are not affected by user interruptions.
     """
 
-    pass
+    type_id = FrameType.SYSTEM_FRAME
 
 
 @dataclass
@@ -173,7 +192,7 @@ class DataFrame(Frame):
     interruptions.
     """
 
-    pass
+    type_id = FrameType.DATA_FRAME
 
 
 @dataclass
@@ -187,7 +206,7 @@ class ControlFrame(Frame):
 
     """
 
-    pass
+    type_id = FrameType.CONTROL_FRAME
 
 
 #
@@ -195,7 +214,6 @@ class ControlFrame(Frame):
 #
 
 
-@dataclass
 class UninterruptibleFrame:
     """A marker for data or control frames that must not be interrupted.
 
@@ -206,7 +224,7 @@ class UninterruptibleFrame:
 
     """
 
-    pass
+    __slots__ = ()
 
 
 @dataclass
@@ -258,6 +276,8 @@ class OutputAudioRawFrame(DataFrame, AudioRawFrame):
     the destination name can be specified in transport_destination.
     """
 
+    type_id = FrameType.AUDIO_RAW_OUTPUT
+
     def __post_init__(self):
         super().__post_init__()
         self.num_frames = int(len(self.audio) / (self.num_channels * 2))
@@ -276,6 +296,8 @@ class OutputImageRawFrame(DataFrame, ImageRawFrame):
     name can be specified in transport_destination.
     """
 
+    type_id = FrameType.IMAGE_OUTPUT
+
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, destination: {self.transport_destination}, size: {self.size}, format: {self.format})"
@@ -291,6 +313,8 @@ class TTSAudioRawFrame(OutputAudioRawFrame):
         context_id: Unique identifier for the TTS context that generated this audio.
     """
 
+    type_id = FrameType.AUDIO_TTS
+
     context_id: Optional[str] = None
 
 
@@ -303,7 +327,7 @@ class SpeechOutputAudioRawFrame(OutputAudioRawFrame):
     between speech and silence might be needed.
     """
 
-    pass
+    type_id = FrameType.AUDIO_SPEECH
 
 
 @dataclass
@@ -316,6 +340,8 @@ class URLImageRawFrame(OutputImageRawFrame):
     Parameters:
         url: URL where the image can be downloaded from.
     """
+
+    type_id = FrameType.IMAGE_URL
 
     url: Optional[str] = None
 
@@ -335,6 +361,8 @@ class SpriteFrame(DataFrame):
     Parameters:
         images: List of image frames that make up the sprite animation.
     """
+
+    type_id = FrameType.IMAGE_SPRITE
 
     images: List[OutputImageRawFrame]
 
@@ -359,6 +387,8 @@ class TextFrame(DataFrame):
         append_to_context: Whether this text should be appended to the LLM context.
             Defaults to True.
     """
+
+    type_id = FrameType.TEXT_PLAIN
 
     text: str
     skip_tts: Optional[bool] = field(init=False)
@@ -386,6 +416,8 @@ class TextFrame(DataFrame):
 @dataclass
 class LLMTextFrame(TextFrame):
     """Text frame generated by LLM services."""
+
+    type_id = FrameType.TEXT_LLM
 
     def __post_init__(self):
         super().__post_init__()
@@ -415,6 +447,8 @@ class AggregatedTextFrame(TextFrame):
         context_id: Unique identifier for the TTS context that generated this text.
     """
 
+    type_id = FrameType.TEXT_AGGREGATED
+
     aggregated_by: AggregationType | str
     context_id: Optional[str] = None
 
@@ -423,7 +457,7 @@ class AggregatedTextFrame(TextFrame):
 class VisionTextFrame(LLMTextFrame):
     """Text frame generated by vision services."""
 
-    pass
+    type_id = FrameType.VISION_TEXT
 
 
 @dataclass
@@ -433,6 +467,8 @@ class TTSTextFrame(AggregatedTextFrame):
     Parameters:
         context_id: Unique identifier for the TTS context that generated this text.
     """
+
+    type_id = FrameType.TEXT_TTS
 
     context_id: Optional[str] = None
 
@@ -452,6 +488,8 @@ class TranscriptionFrame(TextFrame):
         finalized: Whether this is the final transcription for an utterance.
             Set by STT services that support commit/finalize signals.
     """
+
+    type_id = FrameType.TEXT_TRANSCRIPTION
 
     user_id: str
     timestamp: str
@@ -478,6 +516,8 @@ class InterimTranscriptionFrame(TextFrame):
         result: Raw result from the STT service.
     """
 
+    type_id = FrameType.TEXT_INTERIM_TRANS
+
     text: str
     user_id: str
     timestamp: str
@@ -501,6 +541,8 @@ class TranslationFrame(TextFrame):
         language: Target language of the translation.
     """
 
+    type_id = FrameType.TEXT_TRANSLATION
+
     user_id: str
     timestamp: str
     language: Optional[Language] = None
@@ -521,6 +563,8 @@ class OpenAILLMContextAssistantTimestampFrame(DataFrame):
     Parameters:
         timestamp: Timestamp when the assistant message was created.
     """
+
+    type_id = FrameType.LLM_CTX_ASST_TS_OPENAI
 
     timestamp: str
 
@@ -546,6 +590,8 @@ class LLMContextAssistantTimestampFrame(DataFrame):
     Parameters:
         timestamp: Timestamp when the assistant message was created.
     """
+
+    type_id = FrameType.LLM_CTX_ASST_TIMESTAMP
 
     timestamp: str
 
@@ -660,6 +706,8 @@ class TranscriptionUpdateFrame(DataFrame):
         Use `LLMUserAggregator`'s and `LLMAssistantAggregator`'s new events instead.
     """
 
+    type_id = FrameType.STT_TRANSCRIPTION_UPDATE
+
     messages: List[TranscriptionMessage | ThoughtTranscriptionMessage]
 
     def __post_init__(self):
@@ -692,6 +740,8 @@ class LLMContextFrame(Frame):
         context: The LLM context containing messages, tools, and configuration.
     """
 
+    type_id = FrameType.LLM_CONTEXT
+
     context: "LLMContext"
 
 
@@ -707,6 +757,8 @@ class LLMThoughtStartFrame(ControlFrame):
             Only required if `append_to_context` is True, as the thought is
             appended to context as an `LLMSpecificMessage`.
     """
+
+    type_id = FrameType.LLM_THOUGHT_START
 
     append_to_context: bool = False
     llm: Optional[str] = None
@@ -734,6 +786,8 @@ class LLMThoughtTextFrame(DataFrame):
         text: The text (or text chunk) of the thought.
     """
 
+    type_id = FrameType.LLM_THOUGHT_TEXT
+
     text: str
     includes_inter_frame_spaces: bool = field(init=False)
 
@@ -756,6 +810,8 @@ class LLMThoughtEndFrame(ControlFrame):
             This is used by Anthropic, which includes a signature at the end of
             each thought.
     """
+
+    type_id = FrameType.LLM_THOUGHT_END
 
     signature: Any = None
 
@@ -784,6 +840,8 @@ class LLMMessagesFrame(DataFrame):
         messages: List of message dictionaries in LLM format.
     """
 
+    type_id = FrameType.LLM_MESSAGES
+
     messages: List[dict]
 
     def __post_init__(self):
@@ -810,7 +868,7 @@ class LLMRunFrame(DataFrame):
     generate a response.
     """
 
-    pass
+    type_id = FrameType.LLM_RUN
 
 
 @dataclass
@@ -824,6 +882,8 @@ class LLMMessagesAppendFrame(DataFrame):
         messages: List of message dictionaries to append.
         run_llm: Whether the context update should be sent to the LLM.
     """
+
+    type_id = FrameType.LLM_MESSAGES_APPEND
 
     messages: List[dict]
     run_llm: Optional[bool] = None
@@ -841,6 +901,8 @@ class LLMMessagesUpdateFrame(DataFrame):
         run_llm: Whether the context update should be sent to the LLM.
     """
 
+    type_id = FrameType.LLM_MESSAGES_UPDATE
+
     messages: List[dict]
     run_llm: Optional[bool] = None
 
@@ -857,6 +919,8 @@ class LLMSetToolsFrame(DataFrame):
         tools: List of tool/function definitions for the LLM.
     """
 
+    type_id = FrameType.LLM_SET_TOOLS
+
     tools: List[dict] | ToolsSchema | "NotGiven"
 
 
@@ -868,6 +932,8 @@ class LLMSetToolChoiceFrame(DataFrame):
         tool_choice: Tool choice setting - 'none', 'auto', 'required', or specific tool dict.
     """
 
+    type_id = FrameType.LLM_SET_TOOL_CHOICE
+
     tool_choice: Literal["none", "auto", "required"] | dict
 
 
@@ -878,6 +944,8 @@ class LLMEnablePromptCachingFrame(DataFrame):
     Parameters:
         enable: Whether to enable prompt caching.
     """
+
+    type_id = FrameType.LLM_ENABLE_CACHING
 
     enable: bool
 
@@ -893,6 +961,8 @@ class LLMConfigureOutputFrame(DataFrame):
     Parameters:
         skip_tts: Whether LLM tokens should skip the TTS service (if any).
     """
+
+    type_id = FrameType.LLM_CONFIGURE_OUTPUT
 
     skip_tts: bool
 
@@ -927,6 +997,8 @@ class FunctionCallResultFrame(DataFrame, UninterruptibleFrame):
 
     """
 
+    type_id = FrameType.FUNC_CALL_RESULT
+
     function_name: str
     tool_call_id: str
     arguments: Any
@@ -947,6 +1019,8 @@ class TTSSpeakFrame(DataFrame):
         append_to_context: Whether to append the text to the context.
     """
 
+    type_id = FrameType.TTS_SPEAK
+
     text: str
     append_to_context: Optional[bool] = None
 
@@ -958,6 +1032,8 @@ class OutputTransportMessageFrame(DataFrame):
     Parameters:
         message: The transport message payload.
     """
+
+    type_id = FrameType.TRANSPORT_MSG_OUT
 
     message: Any
 
@@ -976,6 +1052,8 @@ class TransportMessageFrame(OutputTransportMessageFrame):
     Parameters:
         message: The transport message payload.
     """
+
+    type_id = FrameType.TRANSPORT_MSG_BIDIR
 
     def __post_init__(self):
         super().__post_init__()
@@ -1011,7 +1089,7 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
     specify where the DTMF keypress should be sent.
     """
 
-    pass
+    type_id = FrameType.DTMF_OUTPUT
 
 
 #
@@ -1046,6 +1124,8 @@ class StartFrame(SystemFrame):
         tracing_context: Pipeline-scoped tracing context for span hierarchy.
     """
 
+    type_id = FrameType.CTRL_START
+
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
@@ -1068,6 +1148,8 @@ class CancelFrame(SystemFrame):
         reason: Optional reason for pushing a cancel frame.
     """
 
+    type_id = FrameType.CTRL_CANCEL
+
     reason: Optional[Any] = None
 
     def __str__(self):
@@ -1089,6 +1171,8 @@ class ErrorFrame(SystemFrame):
         exception: The exception that occurred.
     """
 
+    type_id = FrameType.ERROR_GENERAL
+
     error: str
     fatal: bool = False
     processor: Optional["FrameProcessor"] = None
@@ -1109,6 +1193,8 @@ class FatalErrorFrame(ErrorFrame):
         fatal: Always True for fatal errors.
     """
 
+    type_id = FrameType.ERROR_FATAL
+
     fatal: bool = field(default=True, init=False)
 
 
@@ -1125,6 +1211,8 @@ class FrameProcessorPauseUrgentFrame(SystemFrame):
         processor: The frame processor to pause.
     """
 
+    type_id = FrameType.CTRL_PAUSE_URGENT
+
     processor: "FrameProcessor"
 
 
@@ -1139,6 +1227,8 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
     Parameters:
         processor: The frame processor to resume.
     """
+
+    type_id = FrameType.CTRL_RESUME_URGENT
 
     processor: "FrameProcessor"
 
@@ -1156,6 +1246,8 @@ class InterruptionFrame(SystemFrame):
             pipeline.
 
     """
+
+    type_id = FrameType.CTRL_INTERRUPT
 
     event: Optional[asyncio.Event] = None
 
@@ -1183,6 +1275,8 @@ class StartInterruptionFrame(InterruptionFrame):
     UserStartedSpeakingFrame except that it should be pushed concurrently
     with other frames (so the order is not guaranteed).
     """
+
+    type_id = FrameType.CTRL_START_INTERRUPT
 
     def __post_init__(self):
         super().__post_init__()
@@ -1213,6 +1307,8 @@ class UserStartedSpeakingFrame(SystemFrame):
 
     """
 
+    type_id = FrameType.USER_STARTED_SPEAKING
+
     emulated: bool = False
 
 
@@ -1231,6 +1327,8 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
     """
 
+    type_id = FrameType.USER_STOPPED_SPEAKING
+
     emulated: bool = False
 
 
@@ -1242,7 +1340,7 @@ class UserMuteStartedFrame(SystemFrame):
     transcription, interruption) from propagating through the pipeline.
     """
 
-    pass
+    type_id = FrameType.USER_MUTE_STARTED
 
 
 @dataclass
@@ -1253,7 +1351,7 @@ class UserMuteStoppedFrame(SystemFrame):
     propagate through the pipeline again.
     """
 
-    pass
+    type_id = FrameType.USER_MUTE_STOPPED
 
 
 @dataclass
@@ -1263,7 +1361,7 @@ class UserSpeakingFrame(SystemFrame):
     Emitted by VAD to indicate the user is speaking.
     """
 
-    pass
+    type_id = FrameType.USER_SPEAKING
 
 
 @dataclass
@@ -1276,6 +1374,8 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
     .. deprecated:: 0.0.99
         This frame is deprecated and will be removed in a future version.
     """
+
+    type_id = FrameType.USER_EMULATE_STARTED
 
     def __post_init__(self):
         super().__post_init__()
@@ -1302,6 +1402,8 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
         This frame is deprecated and will be removed in a future version.
     """
 
+    type_id = FrameType.USER_EMULATE_STOPPED
+
     def __post_init__(self):
         super().__post_init__()
 
@@ -1327,6 +1429,8 @@ class VADUserStartedSpeakingFrame(SystemFrame):
         timestamp: Wall-clock time when the VAD made its determination.
     """
 
+    type_id = FrameType.USER_VAD_STARTED
+
     start_secs: float = 0.0
     timestamp: float = field(default_factory=time.time)
 
@@ -1342,6 +1446,8 @@ class VADUserStoppedSpeakingFrame(SystemFrame):
         timestamp: Wall-clock time when the VAD made its determination.
     """
 
+    type_id = FrameType.USER_VAD_STOPPED
+
     stop_secs: float = 0.0
     timestamp: float = field(default_factory=time.time)
 
@@ -1354,7 +1460,7 @@ class BotStartedSpeakingFrame(SystemFrame):
     bot started speaking.
     """
 
-    pass
+    type_id = FrameType.BOT_STARTED_SPEAKING
 
 
 @dataclass
@@ -1365,7 +1471,7 @@ class BotStoppedSpeakingFrame(SystemFrame):
     bot stopped speaking.
     """
 
-    pass
+    type_id = FrameType.BOT_STOPPED_SPEAKING
 
 
 @dataclass
@@ -1378,7 +1484,7 @@ class BotSpeakingFrame(SystemFrame):
     idle timeout since the user might be listening.
     """
 
-    pass
+    type_id = FrameType.BOT_SPEAKING
 
 
 @dataclass
@@ -1390,6 +1496,8 @@ class MetricsFrame(SystemFrame):
     Parameters:
         data: List of metrics data collected by the processor.
     """
+
+    type_id = FrameType.SYS_METRICS
 
     data: List[MetricsData]
 
@@ -1424,6 +1532,8 @@ class FunctionCallsStartedFrame(SystemFrame):
         function_calls: Sequence of function calls that will be executed.
     """
 
+    type_id = FrameType.FUNC_CALLS_STARTED
+
     function_calls: Sequence[FunctionCallFromLLM]
 
 
@@ -1435,6 +1545,8 @@ class FunctionCallCancelFrame(SystemFrame):
         function_name: Name of the function that was cancelled.
         tool_call_id: Unique identifier for the cancelled function call.
     """
+
+    type_id = FrameType.FUNC_CALL_CANCEL
 
     function_name: str
     tool_call_id: str
@@ -1448,6 +1560,8 @@ class STTMuteFrame(SystemFrame):
         mute: Whether to mute (True) or unmute (False) the STT service.
     """
 
+    type_id = FrameType.STT_MUTE
+
     mute: bool
 
 
@@ -1458,6 +1572,8 @@ class InputTransportMessageFrame(SystemFrame):
     Parameters:
         message: The urgent transport message payload.
     """
+
+    type_id = FrameType.TRANSPORT_MSG_IN
 
     message: Any
 
@@ -1476,6 +1592,8 @@ class InputTransportMessageUrgentFrame(InputTransportMessageFrame):
     Parameters:
         message: The urgent transport message payload.
     """
+
+    type_id = FrameType.TRANSPORT_MSG_IN_URGENT
 
     def __post_init__(self):
         super().__post_init__()
@@ -1499,6 +1617,8 @@ class OutputTransportMessageUrgentFrame(SystemFrame):
         message: The urgent transport message payload.
     """
 
+    type_id = FrameType.TRANSPORT_MSG_OUT_URGENT
+
     message: Any
 
     def __str__(self):
@@ -1516,6 +1636,8 @@ class TransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
     Parameters:
         message: The urgent transport message payload.
     """
+
+    type_id = FrameType.TRANSPORT_MSG_BIDIR_URGENT
 
     def __post_init__(self):
         super().__post_init__()
@@ -1548,6 +1670,8 @@ class UserImageRequestFrame(SystemFrame):
         result_callback: Optional callback to invoke when the image is retrieved.
         context: [DEPRECATED] Optional context for the image request.
     """
+
+    type_id = FrameType.USER_IMAGE_REQUEST
 
     user_id: str
     text: Optional[str] = None
@@ -1585,6 +1709,8 @@ class InputAudioRawFrame(SystemFrame, AudioRawFrame):
     will be specified in transport_source.
     """
 
+    type_id = FrameType.AUDIO_RAW_INPUT
+
     def __post_init__(self):
         super().__post_init__()
         self.num_frames = int(len(self.audio) / (self.num_channels * 2))
@@ -1603,6 +1729,8 @@ class InputImageRawFrame(SystemFrame, ImageRawFrame):
     will be specified in transport_source.
     """
 
+    type_id = FrameType.IMAGE_INPUT
+
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, source: {self.transport_source}, size: {self.size}, format: {self.format})"
@@ -1616,6 +1744,8 @@ class InputTextRawFrame(SystemFrame, TextFrame):
     that should be sent to LLM services as input, similar to how InputAudioRawFrame
     and InputImageRawFrame represent user audio and video input.
     """
+
+    type_id = FrameType.TEXT_INPUT_RAW
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -1631,6 +1761,8 @@ class UserAudioRawFrame(InputAudioRawFrame):
     Parameters:
         user_id: Identifier of the user who provided this audio.
     """
+
+    type_id = FrameType.AUDIO_USER
 
     user_id: str = ""
 
@@ -1651,6 +1783,8 @@ class UserImageRawFrame(InputImageRawFrame):
         append_to_context: Whether the requested image should be appended to the LLM context.
         request: The original image request frame if this is a response.
     """
+
+    type_id = FrameType.IMAGE_USER
 
     user_id: str = ""
     text: Optional[str] = None
@@ -1675,6 +1809,8 @@ class AssistantImageRawFrame(OutputImageRawFrame):
         original_mime_type: The MIME type of the original image data.
     """
 
+    type_id = FrameType.IMAGE_ASSISTANT
+
     original_data: Optional[bytes] = None
     original_mime_type: Optional[str] = None
 
@@ -1683,7 +1819,7 @@ class AssistantImageRawFrame(OutputImageRawFrame):
 class InputDTMFFrame(DTMFFrame, SystemFrame):
     """DTMF keypress input frame from transport."""
 
-    pass
+    type_id = FrameType.DTMF_INPUT
 
 
 @dataclass
@@ -1695,7 +1831,7 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
     field to specify where the DTMF keypress should be sent.
     """
 
-    pass
+    type_id = FrameType.DTMF_OUTPUT_URGENT
 
 
 @dataclass
@@ -1711,6 +1847,8 @@ class SpeechControlParamsFrame(SystemFrame):
         turn_params: Current turn-taking analysis parameters.
     """
 
+    type_id = FrameType.AUDIO_SPEECH_CTRL
+
     vad_params: Optional[VADParams] = None
     turn_params: Optional[BaseTurnParams] = None
 
@@ -1725,6 +1863,8 @@ class ServiceMetadataFrame(SystemFrame):
     Parameters:
         service_name: The name of the service broadcasting this metadata.
     """
+
+    type_id = FrameType.SERVICE_METADATA
 
     service_name: str
 
@@ -1742,6 +1882,8 @@ class STTMetadataFrame(ServiceMetadataFrame):
             final transcript is received, at the 99th percentile.
     """
 
+    type_id = FrameType.STT_METADATA
+
     ttfs_p99_latency: float
 
 
@@ -1757,6 +1899,8 @@ class ServiceSwitcherRequestMetadataFrame(ControlFrame):
     Parameters:
         service: The target service that should re-emit its metadata.
     """
+
+    type_id = FrameType.SERVICE_SWITCHER_META
 
     service: "FrameProcessor"
 
@@ -1777,7 +1921,7 @@ class TaskFrame(SystemFrame):
 
     """
 
-    pass
+    type_id = FrameType.TASK_FRAME
 
 
 @dataclass
@@ -1791,6 +1935,8 @@ class EndTaskFrame(TaskFrame):
     Parameters:
         reason: Optional reason for pushing an end frame.
     """
+
+    type_id = FrameType.CTRL_END_TASK
 
     reason: Optional[Any] = None
 
@@ -1810,6 +1956,8 @@ class CancelTaskFrame(TaskFrame):
         reason: Optional reason for pushing a cancel frame.
     """
 
+    type_id = FrameType.TASK_CANCEL
+
     reason: Optional[Any] = None
 
     def __str__(self):
@@ -1826,7 +1974,7 @@ class StopTaskFrame(TaskFrame):
     upstream.
     """
 
-    pass
+    type_id = FrameType.TASK_STOP
 
 
 @dataclass
@@ -1842,6 +1990,8 @@ class InterruptionTaskFrame(TaskFrame):
         event: Optional event passed to the corresponding `InterruptionFrame`.
 
     """
+
+    type_id = FrameType.TASK_INTERRUPTION
 
     event: Optional[asyncio.Event] = None
 
@@ -1859,6 +2009,8 @@ class BotInterruptionFrame(InterruptionTaskFrame):
     UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
     This frame should be pushed upstream.
     """
+
+    type_id = FrameType.TASK_BOT_INTERRUPT
 
     def __post_init__(self):
         super().__post_init__()
@@ -1897,6 +2049,8 @@ class EndFrame(ControlFrame, UninterruptibleFrame):
         reason: Optional reason for pushing an end frame.
     """
 
+    type_id = FrameType.CTRL_END
+
     reason: Optional[Any] = None
 
     def __str__(self):
@@ -1916,7 +2070,7 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
     to guarantee proper pipeline control.
     """
 
-    pass
+    type_id = FrameType.CTRL_STOP
 
 
 @dataclass
@@ -1926,7 +2080,7 @@ class OutputTransportReadyFrame(ControlFrame):
     Indicates that the output transport is ready and able to receive frames.
     """
 
-    pass
+    type_id = FrameType.CTRL_OUTPUT_READY
 
 
 @dataclass
@@ -1939,6 +2093,8 @@ class HeartbeatFrame(ControlFrame):
     Parameters:
         timestamp: Timestamp when the heartbeat was generated.
     """
+
+    type_id = FrameType.SYS_HEARTBEAT
 
     timestamp: int
 
@@ -1956,6 +2112,8 @@ class FrameProcessorPauseFrame(ControlFrame):
         processor: The frame processor to pause.
     """
 
+    type_id = FrameType.CTRL_PAUSE
+
     processor: "FrameProcessor"
 
 
@@ -1971,6 +2129,8 @@ class FrameProcessorResumeFrame(ControlFrame):
         processor: The frame processor to resume.
     """
 
+    type_id = FrameType.CTRL_RESUME
+
     processor: "FrameProcessor"
 
 
@@ -1982,6 +2142,8 @@ class LLMFullResponseStartFrame(ControlFrame):
     more TextFrames and a final LLMFullResponseEndFrame.
     """
 
+    type_id = FrameType.LLM_RESPONSE_START
+
     skip_tts: Optional[bool] = field(init=False)
 
     def __post_init__(self):
@@ -1992,6 +2154,8 @@ class LLMFullResponseStartFrame(ControlFrame):
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
     """Frame indicating the end of an LLM response."""
+
+    type_id = FrameType.LLM_RESPONSE_END
 
     skip_tts: Optional[bool] = field(init=False)
 
@@ -2021,6 +2185,8 @@ class LLMContextSummaryRequestFrame(ControlFrame):
             the summary.
     """
 
+    type_id = FrameType.LLM_CTX_SUMMARY_REQ
+
     request_id: str
     context: "LLMContext"
     min_messages_to_keep: int
@@ -2044,6 +2210,8 @@ class LLMContextSummaryResultFrame(ControlFrame, UninterruptibleFrame):
         error: Error message if summarization failed, None on success.
     """
 
+    type_id = FrameType.LLM_CTX_SUMMARY_RESULT
+
     request_id: str
     summary: str
     last_summarized_index: int
@@ -2064,6 +2232,8 @@ class FunctionCallInProgressFrame(ControlFrame, UninterruptibleFrame):
         cancel_on_interruption: Whether to cancel this call if interrupted.
     """
 
+    type_id = FrameType.FUNC_CALL_PROGRESS
+
     function_name: str
     tool_call_id: str
     arguments: Any
@@ -2079,14 +2249,14 @@ class VisionFullResponseStartFrame(LLMFullResponseStartFrame):
 
     """
 
-    pass
+    type_id = FrameType.VISION_RESP_START
 
 
 @dataclass
 class VisionFullResponseEndFrame(LLMFullResponseEndFrame):
     """Frame indicating the end of a Vision model response."""
 
-    pass
+    type_id = FrameType.VISION_RESP_END
 
 
 @dataclass
@@ -2103,6 +2273,8 @@ class TTSStartedFrame(ControlFrame):
         context_id: Unique identifier for this TTS context.
     """
 
+    type_id = FrameType.TTS_STARTED
+
     context_id: Optional[str] = None
 
 
@@ -2114,6 +2286,8 @@ class TTSStoppedFrame(ControlFrame):
         context_id: Unique identifier for this TTS context.
     """
 
+    type_id = FrameType.TTS_STOPPED
+
     context_id: Optional[str] = None
 
 
@@ -2123,6 +2297,7 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
 
     Supports both a ``settings`` dict (for backward compatibility) and a
     ``delta`` object.  When both are provided, ``delta`` takes precedence.
+    Inherits UninterruptibleFrame to survive interruption queue purges.
 
     Parameters:
         settings: Dictionary of setting name to value mappings.
@@ -2134,6 +2309,8 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
             object describing the fields to change.
     """
 
+    type_id = FrameType.SERVICE_UPDATE
+
     settings: Mapping[str, Any] = field(default_factory=dict)
     delta: Optional["ServiceSettings"] = None
 
@@ -2142,21 +2319,21 @@ class ServiceUpdateSettingsFrame(ControlFrame, UninterruptibleFrame):
 class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     """Frame for updating LLM service settings."""
 
-    pass
+    type_id = FrameType.LLM_UPDATE_SETTINGS
 
 
 @dataclass
 class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     """Frame for updating TTS service settings."""
 
-    pass
+    type_id = FrameType.TTS_UPDATE_SETTINGS
 
 
 @dataclass
 class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     """Frame for updating STT service settings."""
 
-    pass
+    type_id = FrameType.STT_UPDATE_SETTINGS
 
 
 @dataclass
@@ -2169,6 +2346,8 @@ class UserIdleTimeoutUpdateFrame(SystemFrame):
     Parameters:
         timeout: The new idle timeout in seconds. 0 disables idle detection.
     """
+
+    type_id = FrameType.SYS_USER_IDLE_TIMEOUT_UPDATE
 
     timeout: float
 
@@ -2184,6 +2363,8 @@ class VADParamsUpdateFrame(ControlFrame):
         params: New VAD parameters to apply.
     """
 
+    type_id = FrameType.CTRL_VAD_UPDATE
+
     params: VADParams
 
 
@@ -2191,7 +2372,7 @@ class VADParamsUpdateFrame(ControlFrame):
 class FilterControlFrame(ControlFrame):
     """Base control frame for audio filter operations."""
 
-    pass
+    type_id = FrameType.FILTER_CONTROL
 
 
 @dataclass
@@ -2201,6 +2382,8 @@ class FilterUpdateSettingsFrame(FilterControlFrame):
     Parameters:
         settings: Dictionary of filter setting name to value mappings.
     """
+
+    type_id = FrameType.FILTER_UPDATE
 
     settings: Mapping[str, Any]
 
@@ -2213,6 +2396,8 @@ class FilterEnableFrame(FilterControlFrame):
         enable: Whether to enable (True) or disable (False) the filter.
     """
 
+    type_id = FrameType.FILTER_ENABLE
+
     enable: bool
 
 
@@ -2220,7 +2405,7 @@ class FilterEnableFrame(FilterControlFrame):
 class MixerControlFrame(ControlFrame):
     """Base control frame for audio mixer operations."""
 
-    pass
+    type_id = FrameType.MIXER_CONTROL
 
 
 @dataclass
@@ -2230,6 +2415,8 @@ class MixerUpdateSettingsFrame(MixerControlFrame):
     Parameters:
         settings: Dictionary of mixer setting name to value mappings.
     """
+
+    type_id = FrameType.MIXER_UPDATE
 
     settings: Mapping[str, Any]
 
@@ -2242,6 +2429,8 @@ class MixerEnableFrame(MixerControlFrame):
         enable: Whether to enable (True) or disable (False) the mixer.
     """
 
+    type_id = FrameType.MIXER_ENABLE
+
     enable: bool
 
 
@@ -2249,7 +2438,7 @@ class MixerEnableFrame(MixerControlFrame):
 class ServiceSwitcherFrame(ControlFrame):
     """A base class for frames that affect ServiceSwitcher behavior."""
 
-    pass
+    type_id = FrameType.SERVICE_SWITCHER
 
 
 @dataclass
@@ -2258,5 +2447,7 @@ class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
 
     Handled by ServiceSwitcherStrategyManual to switch the active service.
     """
+
+    type_id = FrameType.SERVICE_SWITCH_MANUAL
 
     service: "FrameProcessor"

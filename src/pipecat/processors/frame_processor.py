@@ -138,6 +138,13 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
 # This prevents hanging if a library swallows asyncio.CancelledError.
 INPUT_TASK_CANCEL_TIMEOUT_SECS = 3
 
+# Timeout in seconds for cancelling the non-system (process) frame task.
+# Without a timeout, __cancel_process_task() can hang indefinitely if a
+# processor's task (e.g. LLM streaming, TTS WebSocket) is slow to cancel,
+# which blocks InterruptionFrame propagation and causes the repeated
+# "InterruptionFrame has not completed" warning loop.
+PROCESS_TASK_CANCEL_TIMEOUT_SECS = 3
+
 
 class FrameProcessor(BaseObject):
     """Base class for all frame processors in the pipeline.
@@ -755,11 +762,13 @@ class FrameProcessor(BaseObject):
         if not self._check_started(frame):
             return
 
-        await self._call_event_handler("on_before_push_frame", frame)
+        if self._has_handlers("on_before_push_frame"):
+            await self._call_event_handler("on_before_push_frame", frame)
 
         await self.__internal_push_frame(frame, direction)
 
-        await self._call_event_handler("on_after_push_frame", frame)
+        if self._has_handlers("on_after_push_frame"):
+            await self._call_event_handler("on_after_push_frame", frame)
 
     async def push_interruption_task_frame_and_wait(self, *, timeout: float = 5.0):
         """Push an interruption task frame upstream and wait for the interruption.
@@ -842,10 +851,15 @@ class FrameProcessor(BaseObject):
         downstream_frame = frame_cls(**init_fields)
         for k, v in extra_fields.items():
             setattr(downstream_frame, k, v)
+        # Preserve metadata if it was set on the original frame (lazy property).
+        if frame._metadata is not None:
+            downstream_frame._metadata = frame._metadata
 
         upstream_frame = frame_cls(**init_fields)
         for k, v in extra_fields.items():
             setattr(upstream_frame, k, v)
+        if frame._metadata is not None:
+            upstream_frame._metadata = frame._metadata
 
         downstream_frame.broadcast_sibling_id = upstream_frame.id
         upstream_frame.broadcast_sibling_id = downstream_frame.id
@@ -1034,14 +1048,15 @@ class FrameProcessor(BaseObject):
     async def __cancel_process_task(self):
         """Cancel the non-system frame processing task."""
         if self.__process_frame_task:
-            await self.cancel_task(self.__process_frame_task)
+            await self.cancel_task(self.__process_frame_task, PROCESS_TASK_CANCEL_TIMEOUT_SECS)
             self.__process_frame_task = None
 
     async def __process_frame(
         self, frame: Frame, direction: FrameDirection, callback: Optional[FrameCallback]
     ):
         try:
-            await self._call_event_handler("on_before_process_frame", frame)
+            if self._has_handlers("on_before_process_frame"):
+                await self._call_event_handler("on_before_process_frame", frame)
 
             # Process the frame.
             await self.process_frame(frame, direction)
@@ -1049,7 +1064,8 @@ class FrameProcessor(BaseObject):
             if callback:
                 await callback(self, frame, direction)
 
-            await self._call_event_handler("on_after_process_frame", frame)
+            if self._has_handlers("on_after_process_frame"):
+                await self._call_event_handler("on_after_process_frame", frame)
         except Exception as e:
             await self.push_error(error_msg=f"Error processing frame: {e}", exception=e)
 

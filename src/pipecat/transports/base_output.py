@@ -551,7 +551,7 @@ class BaseOutputTransport(FrameProcessor):
                 )
                 chunk.transport_destination = self._destination
                 await self._audio_queue.put(chunk)
-                self._audio_buffer = self._audio_buffer[self._audio_chunk_size :]
+                del self._audio_buffer[: self._audio_chunk_size]
 
         async def handle_image_frame(self, frame: OutputImageRawFrame | SpriteFrame):
             """Handle incoming image frames for video output.

@@ -1,0 +1,4 @@
+- Optimized frame dispatch in `LLMUserAggregator` and `LLMAssistantAggregator` with O(1) `type_id` lookup tables replacing sequential `isinstance` chains.
+- Added `FrameType` and `FrameCategory` integer type IDs to `frame_types.py`; each `Frame` subclass carries a `type_id` class variable for zero-cost type identification.
+- Lazy-initialized `Frame.name` and `Frame.metadata` to avoid allocation for frames that never access those fields.
+- Made `UserIdleController` optional in `LLMUserAggregatorParams` (default `None`) with a fast-path frozenset guard to skip idle-controller calls for irrelevant frame types.
