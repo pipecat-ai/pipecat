@@ -58,63 +58,111 @@ class LiveOptions:
     def __init__(
         self,
         *,
-        encoding: Optional[str] = None,
-        language: Optional[str] = None,
-        model: Optional[str] = None,
+        callback: Optional[str] = None,
+        callback_method: Optional[str] = None,
         channels: Optional[int] = None,
-        sample_rate: Optional[int] = None,
+        detect_entities: Optional[bool] = None,
+        diarize: Optional[bool] = None,
+        dictation: Optional[bool] = None,
+        encoding: Optional[str] = None,
+        endpointing: Optional[Any] = None,
+        extra: Optional[Any] = None,
         interim_results: Optional[bool] = None,
-        smart_format: Optional[bool] = None,
-        punctuate: Optional[bool] = None,
+        keyterm: Optional[Any] = None,
+        keywords: Optional[Any] = None,
+        language: Optional[str] = None,
+        mip_opt_out: Optional[bool] = None,
+        model: Optional[str] = None,
+        multichannel: Optional[bool] = None,
+        numerals: Optional[bool] = None,
         profanity_filter: Optional[bool] = None,
+        punctuate: Optional[bool] = None,
+        redact: Optional[Any] = None,
+        replace: Optional[Any] = None,
+        sample_rate: Optional[int] = None,
+        search: Optional[Any] = None,
+        smart_format: Optional[bool] = None,
+        tag: Optional[Any] = None,
+        utterance_end_ms: Optional[int] = None,
         vad_events: Optional[bool] = None,
+        version: Optional[str] = None,
         **kwargs,
     ):
         """Initialize live transcription options.
 
         Args:
-            encoding: Audio encoding (e.g. ``"linear16"``).
-            language: BCP-47 language tag (e.g. ``"en-US"``).
-            model: Deepgram model name (e.g. ``"nova-3-general"``).
+            callback: Callback URL for async transcription delivery.
+            callback_method: HTTP method to use for the callback (``"GET"`` or ``"POST"``).
             channels: Number of audio channels.
-            sample_rate: Audio sample rate in Hz.
+            detect_entities: Enable named entity detection.
+            diarize: Enable speaker diarization.
+            dictation: Enable dictation mode (converts commands to punctuation).
+            encoding: Audio encoding (e.g. ``"linear16"``).
+            endpointing: Endpointing sensitivity in ms, or ``False`` to disable.
+            extra: Additional key-value metadata to attach to the transcription (str or list).
             interim_results: Whether to emit interim transcriptions.
-            smart_format: Apply smart formatting to transcripts.
-            punctuate: Add punctuation to transcripts.
+            keyterm: Keyterms to boost (str or list of str).
+            keywords: Keywords to boost (str or list of str).
+            language: BCP-47 language tag (e.g. ``"en-US"``).
+            mip_opt_out: Opt out of model improvement program.
+            model: Deepgram model name (e.g. ``"nova-3-general"``).
+            multichannel: Enable per-channel transcription for multi-channel audio.
+            numerals: Convert spoken numbers to numerals.
             profanity_filter: Filter profanity from transcripts.
+            punctuate: Add punctuation to transcripts.
+            redact: Redact sensitive information (str or list of redaction types).
+            replace: Word replacement rules (str or list).
+            sample_rate: Audio sample rate in Hz.
+            search: Search terms to highlight (str or list of str).
+            smart_format: Apply smart formatting to transcripts.
+            tag: Custom billing tag (str or list of str).
+            utterance_end_ms: Silence duration in ms before an utterance-end event.
             vad_events: Enable Deepgram VAD speech-started / utterance-end events.
+            version: Model version (e.g. ``"latest"``).
             **kwargs: Any additional Deepgram query parameters.
         """
-        self.encoding = encoding
-        self.language = language
-        self.model = model
+        self.callback = callback
+        self.callback_method = callback_method
         self.channels = channels
-        self.sample_rate = sample_rate
+        self.detect_entities = detect_entities
+        self.diarize = diarize
+        self.dictation = dictation
+        self.encoding = encoding
+        self.endpointing = endpointing
+        self.extra = extra
         self.interim_results = interim_results
-        self.smart_format = smart_format
-        self.punctuate = punctuate
+        self.keyterm = keyterm
+        self.keywords = keywords
+        self.language = language
+        self.mip_opt_out = mip_opt_out
+        self.model = model
+        self.multichannel = multichannel
+        self.numerals = numerals
         self.profanity_filter = profanity_filter
+        self.punctuate = punctuate
+        self.redact = redact
+        self.replace = replace
+        self.sample_rate = sample_rate
+        self.search = search
+        self.smart_format = smart_format
+        self.tag = tag
+        self.utterance_end_ms = utterance_end_ms
         self.vad_events = vad_events
+        self.version = version
         self._extra = kwargs
+
+    def __getattr__(self, name: str):
+        # Fall back to _extra for any params passed as **kwargs.
+        # __getattr__ is only called when normal attribute lookup fails.
+        extra = self.__dict__.get("_extra", {})
+        try:
+            return extra[name]
+        except KeyError:
+            raise AttributeError(f"'LiveOptions' object has no attribute '{name}'")
 
     def to_dict(self) -> dict:
         """Return a dict of all non-None options."""
-        result = {}
-        for key in [
-            "encoding",
-            "language",
-            "model",
-            "channels",
-            "sample_rate",
-            "interim_results",
-            "smart_format",
-            "punctuate",
-            "profanity_filter",
-            "vad_events",
-        ]:
-            value = getattr(self, key)
-            if value is not None:
-                result[key] = value
+        result = {k: v for k, v in vars(self).items() if not k.startswith("_") and v is not None}
         result.update({k: v for k, v in self._extra.items() if v is not None})
         return result
 
