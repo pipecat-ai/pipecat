@@ -52,19 +52,6 @@ class LiveOptions:
     Compatibility wrapper that mirrors the ``LiveOptions`` class removed in
     deepgram-sdk v6. Pass this to :class:`DeepgramSTTService` via the
     ``live_options`` constructor argument.
-
-    Args:
-        encoding: Audio encoding (e.g. ``"linear16"``).
-        language: BCP-47 language tag (e.g. ``"en-US"``).
-        model: Deepgram model name (e.g. ``"nova-3-general"``).
-        channels: Number of audio channels.
-        sample_rate: Audio sample rate in Hz.
-        interim_results: Whether to emit interim transcriptions.
-        smart_format: Apply smart formatting to transcripts.
-        punctuate: Add punctuation to transcripts.
-        profanity_filter: Filter profanity from transcripts.
-        vad_events: Enable Deepgram VAD speech-started / utterance-end events.
-        **kwargs: Any additional Deepgram query parameters.
     """
 
     def __init__(
@@ -82,6 +69,21 @@ class LiveOptions:
         vad_events: Optional[bool] = None,
         **kwargs,
     ):
+        """Initialize live transcription options.
+
+        Args:
+            encoding: Audio encoding (e.g. ``"linear16"``).
+            language: BCP-47 language tag (e.g. ``"en-US"``).
+            model: Deepgram model name (e.g. ``"nova-3-general"``).
+            channels: Number of audio channels.
+            sample_rate: Audio sample rate in Hz.
+            interim_results: Whether to emit interim transcriptions.
+            smart_format: Apply smart formatting to transcripts.
+            punctuate: Add punctuation to transcripts.
+            profanity_filter: Filter profanity from transcripts.
+            vad_events: Enable Deepgram VAD speech-started / utterance-end events.
+            **kwargs: Any additional Deepgram query parameters.
+        """
         self.encoding = encoding
         self.language = language
         self.model = model
@@ -214,7 +216,7 @@ class DeepgramSTTService(STTService):
         if live_options:
             default_model = default_options.model
             merged_options.update(live_options.to_dict())
-            # NOTE(aleix): Fixes a bug in deepgram-sdk where `model` is initialized
+            # NOTE(aleix): Fixes an in deepgram-sdk where `model` is initialized
             # to the string "None" instead of the value `None`.
             if "model" in merged_options and merged_options["model"] == "None":
                 merged_options["model"] = default_model
@@ -255,9 +257,7 @@ class DeepgramSTTService(STTService):
                 from deepgram import DeepgramClientEnvironment
 
                 ws_url = base_url if base_url.startswith("wss://") else f"wss://{base_url}"
-                http_url = (
-                    base_url if base_url.startswith("https://") else f"https://{base_url}"
-                )
+                http_url = base_url if base_url.startswith("https://") else f"https://{base_url}"
                 environment = DeepgramClientEnvironment(
                     base=http_url,
                     production=ws_url,
@@ -399,22 +399,16 @@ class DeepgramSTTService(STTService):
 
     async def _connect(self):
         logger.debug("Connecting to Deepgram")
-        self._connection_task = self.create_task(
-            self._connection_handler(), f"{self}::connection"
-        )
+        self._connection_task = self.create_task(self._connection_handler(), f"{self}::connection")
 
     async def _disconnect(self):
         if not self._connection_task:
             return
 
         logger.debug("Disconnecting from Deepgram")
-
         # Ask Deepgram to close the stream gracefully before cancelling the task.
         if self._connection:
-            try:
-                await self._connection.send_close_stream()
-            except Exception:
-                pass
+            await self._connection.send_close_stream()
 
         await self.cancel_task(self._connection_task)
         self._connection_task = None
@@ -434,17 +428,7 @@ class DeepgramSTTService(STTService):
                     connection.on(EventType.MESSAGE, self._on_message)
                     connection.on(EventType.ERROR, self._on_error)
 
-                    try:
-                        headers = {
-                            k: v
-                            for k, v in connection._websocket.response.headers.items()
-                            if k.startswith("dg-")
-                        }
-                        logger.debug(
-                            f'{self}: Websocket connection initialized: {{"headers": {headers}}}'
-                        )
-                    except Exception:
-                        logger.debug(f"{self}: Websocket connection initialized")
+                    logger.debug(f"{self}: Websocket connection initialized")
 
                     keepalive_task = self.create_task(
                         self._keepalive_handler(), f"{self}::keepalive"
