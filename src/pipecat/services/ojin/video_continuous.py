@@ -178,6 +178,9 @@ class OjinVideoService(FrameProcessor):
 
         # Speaking state tracking
         self._first_tts_received_at: Optional[float] = None
+        self._turn = 0
+        self._last_frame_idx = -1
+        self._new_speech_pending_playback = False
         self._first_speech_frame_received_at: Optional[float] = None
         self._latency_start_ts: Optional[float] = None
         self._latency: Optional[float] = None
@@ -187,6 +190,10 @@ class OjinVideoService(FrameProcessor):
         self._audio_playback_task: Optional[asyncio.Task] = None
         self._interrupting = False
         self._pending_latency_report: Optional[tuple[float, float]] = None
+
+    def can_generate_metrics(self) -> bool:
+        """Enable TTFB metrics reporting via the standard pipecat metrics system."""
+        return True
 
     async def connect_with_retry(self) -> bool:
         """Attempt to connect with configurable retry mechanism."""
@@ -266,7 +273,7 @@ class OjinVideoService(FrameProcessor):
         # Track first TTS audio for started speaking notification
         if self._first_tts_received_at is None:
             self._first_tts_received_at = time.perf_counter()
-            # logger.debug("First TTS audio received, starting speaking timer")
+            await self.start_ttfb_metrics()
 
         # Reset empty timer since we have audio
         self._tts_empty_since = None
@@ -331,6 +338,11 @@ class OjinVideoService(FrameProcessor):
                 is_final=message.is_final_response,
                 volume=volume,
             )
+
+            if frame_idx != self._last_frame_idx:
+                self._turn += 1
+                self._last_frame_idx = frame_idx
+                self._new_speech_pending_playback = not video_frame.is_silence()
 
             if frame_idx >= 1 and self._first_speech_frame_received_at is None:
                 self._first_speech_frame_received_at = time.perf_counter()
@@ -404,29 +416,8 @@ class OjinVideoService(FrameProcessor):
                 is_silence = video_frame.is_silence()
                 self._is_speaking = not is_silence
 
-                if video_frame.volume > 0 and not self._audio_playback_task:
-                    if (
-                        self._latency_start_ts is not None
-                        and self._first_tts_received_at is not None
-                    ):
-                        play_ts = time.perf_counter()
-                        logger.warning(f"Ojin TTFB: {play_ts - self._first_tts_received_at}")
-
-                        # Inference: first TTS audio → first speech frame from server
-                        inference_s = (
-                            (self._first_speech_frame_received_at - self._first_tts_received_at)
-                            if self._first_tts_received_at and self._first_speech_frame_received_at
-                            else 0.0
-                        )
-                        # Buffer: first speech frame received → about to be played
-                        buffer_s = (
-                            (play_ts - self._first_speech_frame_received_at)
-                            if self._first_speech_frame_received_at
-                            else 0.0
-                        )
-                        # Encoding: measured after encode_and_send below
-                        self._pending_latency_report = (inference_s, buffer_s)
-                        self._latency_start_ts = None
+                if self._new_speech_pending_playback and video_frame.volume > 0:
+                    self._new_speech_pending_playback = False
                     await self._start_audio_playback()
 
                 if self._settings.frame_debugging_enabled:
@@ -479,6 +470,8 @@ class OjinVideoService(FrameProcessor):
                         ),
                         direction=FrameDirection.DOWNSTREAM,
                     )
+                    # Report Ojin TTFB via standard pipecat metrics system
+                    await self.stop_ttfb_metrics()
                     self._first_speech_frame_received_at = None
                     self._first_tts_received_at = None
 
@@ -499,6 +492,7 @@ class OjinVideoService(FrameProcessor):
                 continue
 
     async def _start_audio_playback(self):
+        self.stop_ttfb_metrics()
         if self._audio_playback_task is None:
             self._audio_playback_task = asyncio.create_task(self._playback_audio())
 

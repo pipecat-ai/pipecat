@@ -149,7 +149,6 @@ async def main():
     )
 
     # Create image format converter
-    image_converter = ImageFormatConverter()
     tk_update_task = start_tk_updater(tk_root, interval_ms=10)
 
     pipeline = Pipeline(
@@ -158,7 +157,6 @@ async def main():
             context_aggregator.user(),  # User responses
             llm,  # LLM
             persona,
-            image_converter,  # Convert image format from BGR to PPM
             tk_transport.output(),  # Transport video output
             audio_transport.output(),  # Transport audio output
             context_aggregator.assistant(),  # Assistant spoken responses
