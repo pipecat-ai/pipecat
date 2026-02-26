@@ -177,56 +177,27 @@ class DeepgramSTTSettings(STTSettings):
     params.
 
     Parameters:
-        callback: Callback URL for async transcription delivery.
-        callback_method: HTTP method for the callback (``"GET"`` or ``"POST"``).
         channels: Number of audio channels.
-        detect_entities: Enable named entity detection.
         diarize: Enable speaker diarization.
-        dictation: Enable dictation mode.
         encoding: Audio encoding (e.g. ``"linear16"``).
         endpointing: Endpointing sensitivity in ms, or ``False`` to disable.
         interim_results: Whether to emit interim transcriptions.
-        keyterm: Keyterms to boost (str or list of str).
-        keywords: Keywords to boost (str or list of str).
-        mip_opt_out: Opt out of model improvement program.
-        multichannel: Enable per-channel transcription for multi-channel audio.
-        numerals: Convert spoken numbers to numerals.
         profanity_filter: Filter profanity from transcripts.
         punctuate: Add punctuation to transcripts.
-        redact: Redact sensitive information (str or list).
-        replace: Word replacement rules (str or list).
-        search: Search terms to highlight (str or list of str).
         smart_format: Apply smart formatting to transcripts.
-        tag: Custom billing tag (str or list of str).
-        utterance_end_ms: Silence duration in ms before an utterance-end event.
         vad_events: Enable Deepgram VAD speech-started / utterance-end events.
-        version: Model version (e.g. ``"latest"``).
+        extra: Additional Deepgram query parameters not covered by the fields above.
     """
 
-    callback: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    callback_method: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     channels: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    detect_entities: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     diarize: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    dictation: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     encoding: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     endpointing: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     interim_results: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keyterm: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    keywords: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    mip_opt_out: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    multichannel: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    numerals: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     profanity_filter: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     punctuate: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    redact: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    replace: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    search: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     smart_format: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    tag: Any | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    utterance_end_ms: int | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
     vad_events: bool | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
-    version: str | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
 
 
 class DeepgramSTTService(STTService):
