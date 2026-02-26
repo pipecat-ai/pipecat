@@ -496,7 +496,10 @@ class DeepgramSTTService(STTService):
     def _build_connect_kwargs(self) -> dict:
         """Build keyword arguments for ``client.listen.v1.connect()`` from current settings."""
         kwargs = {}
-        for key, value in self._settings.live_options.to_dict().items():
+        live_options = LiveOptions(
+            **{**self._settings.live_options.to_dict(), "sample_rate": self.sample_rate}
+        )
+        for key, value in live_options.to_dict().items():
             if value is None:
                 continue
             if isinstance(value, bool):
