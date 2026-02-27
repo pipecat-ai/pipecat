@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 from pipecat.processors.aggregators.llm_context import NOT_GIVEN, LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.utils.tracing.service_attributes import (
+    _settings_to_dict,
     add_gemini_live_span_attributes,
     add_llm_span_attributes,
     add_openai_realtime_span_attributes,
@@ -510,7 +511,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Get settings from the service
                             params = {}
                             if hasattr(self, "_settings"):
-                                for key, value in self._settings.items():
+                                settings_dict = _settings_to_dict(self._settings)
+                                for key, value in settings_dict.items():
                                     if key == "extra":
                                         continue
                                     # Add value directly if it's a basic type

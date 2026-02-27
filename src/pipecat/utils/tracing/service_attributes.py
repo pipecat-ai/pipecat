@@ -23,6 +23,34 @@ if is_tracing_available():
     from opentelemetry.trace import Span
 
 
+def _settings_to_dict(settings: Any) -> Dict[str, Any]:
+    """Convert a settings object to a dictionary for span attributes.
+
+    Service settings may be a dict or a dataclass (e.g. ``GoogleLLMSettings``,
+    ``InworldTTSSettings``).  Dataclass instances do not have an ``.items()``
+    method, so calling it directly raises ``AttributeError``.
+
+    This helper normalises the input: if the object exposes ``given_fields()``
+    (the ``ServiceSettings`` API) that is used; otherwise ``dataclasses.asdict``
+    is tried; plain dicts are returned as-is.
+
+    Args:
+        settings: A dict or dataclass settings object.
+
+    Returns:
+        A plain dictionary of settings fields.
+    """
+    if isinstance(settings, dict):
+        return settings
+    if hasattr(settings, "given_fields"):
+        return settings.given_fields()
+    import dataclasses
+
+    if dataclasses.is_dataclass(settings):
+        return dataclasses.asdict(settings)
+    return {}
+
+
 def _get_gen_ai_system_from_service_name(service_name: str) -> str:
     """Extract the standardized gen_ai.system value from a service class name.
 
@@ -107,7 +135,7 @@ def add_tts_span_attributes(
 
     # Add settings if provided
     if settings:
-        for key, value in settings.items():
+        for key, value in _settings_to_dict(settings).items():
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"settings.{key}", value)
 
@@ -171,7 +199,7 @@ def add_stt_span_attributes(
 
     # Add settings if provided
     if settings:
-        for key, value in settings.items():
+        for key, value in _settings_to_dict(settings).items():
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"settings.{key}", value)
 
@@ -359,7 +387,7 @@ def add_gemini_live_span_attributes(
 
     # Add settings if provided
     if settings:
-        for key, value in settings.items():
+        for key, value in _settings_to_dict(settings).items():
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"settings.{key}", value)
             elif key == "vad" and value:
