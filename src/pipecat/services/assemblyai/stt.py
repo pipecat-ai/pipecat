@@ -13,7 +13,7 @@ WebSocket API for streaming audio transcription.
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Dict, Mapping, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -210,18 +210,6 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         self._user_speaking = False
         self._vad_speaking = False
-
-        # Log final connection params after any modifications
-        logger.info(f"{self} Final connection params being sent to AssemblyAI:")
-        logger.info(f"  min_end_of_turn_silence_when_confident: {self._settings.connection_params.min_end_of_turn_silence_when_confident}")
-        logger.info(f"  max_turn_silence: {self._settings.connection_params.max_turn_silence}")
-
-        # Warn if min_end_of_turn_silence_when_confident is not 100ms
-        if self._settings.connection_params.min_end_of_turn_silence_when_confident != 100:
-            logger.warning(
-                f"For best latency, set min_end_of_turn_silence_when_confident to 100ms. "
-                f"Current value: {self._settings.connection_params.min_end_of_turn_silence_when_confident}ms"
-            )
 
     def _configure_pipecat_turn_mode(
         self, connection_params: AssemblyAIConnectionParams, is_u3_pro: bool
@@ -461,13 +449,7 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         if params:
             query_string = urlencode(params)
-            full_url = f"{self._api_endpoint_base_url}?{query_string}"
-            logger.info(f"{self} WebSocket URL being sent to AssemblyAI:")
-            logger.info(f"  {full_url}")
-            logger.info(f"  Parsed params:")
-            for k, v in params.items():
-                logger.info(f"    {k}: {v}")
-            return full_url
+            return f"{self._api_endpoint_base_url}?{query_string}"
         return self._api_endpoint_base_url
 
     async def _connect(self):
@@ -672,17 +654,6 @@ class AssemblyAISTTService(WebsocketSTTService):
             - end_of_turn → TranscriptionFrame + UserStoppedSpeakingFrame
             - else → InterimTranscriptionFrame
         """
-        # Log transcript details
-        logger.info(f"{self} ===== TRANSCRIPT RECEIVED =====")
-        logger.info(f"  Text: \"{message.transcript}\"")
-        logger.info(f"  end_of_turn: {message.end_of_turn}")
-        logger.info(f"  turn_is_formatted: {message.turn_is_formatted}")
-        logger.info(f"  turn_order: {message.turn_order}")
-        if message.end_of_turn_confidence is not None:
-            logger.info(f"  end_of_turn_confidence: {message.end_of_turn_confidence}")
-        logger.info(f"  speaker: {message.speaker}")
-        logger.info(f"===============================")
-
         if not message.transcript:
             return
 
@@ -709,11 +680,6 @@ class AssemblyAISTTService(WebsocketSTTService):
                     speaker=message.speaker,
                     text=message.transcript
                 )
-                logger.info(f"{self} 🤖 TEXT SENT TO LLM (with speaker format): \"{transcript_text}\"")
-            else:
-                logger.info(f"{self} 🤖 TEXT SENT TO LLM (speaker {message.speaker}): \"{transcript_text}\"")
-        else:
-            logger.info(f"{self} 🤖 TEXT SENT TO LLM: \"{transcript_text}\"")
 
         # Determine if this is a final turn from AssemblyAI
         is_final_turn = message.end_of_turn and (
