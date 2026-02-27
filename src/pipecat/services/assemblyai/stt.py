@@ -73,7 +73,9 @@ def map_language_from_assemblyai(language_code: str) -> Language:
         # Try to match the language code directly
         return Language(language_code.lower())
     except ValueError:
-        logger.warning(f"Unknown language code from AssemblyAI: {language_code}, defaulting to English")
+        logger.warning(
+            f"Unknown language code from AssemblyAI: {language_code}, defaulting to English"
+        )
         return Language.EN
 
 
@@ -304,7 +306,11 @@ class AssemblyAISTTService(WebsocketSTTService):
             return changed
 
         # If websocket is connected, send UpdateConfiguration for supported params
-        if self._websocket and self._websocket.state is State.OPEN and "connection_params" in changed:
+        if (
+            self._websocket
+            and self._websocket.state is State.OPEN
+            and "connection_params" in changed
+        ):
             # Build UpdateConfiguration message
             update_config = {"type": "UpdateConfiguration"}
             conn_params = self._settings.connection_params
@@ -314,7 +320,10 @@ class AssemblyAISTTService(WebsocketSTTService):
 
             # Check each potentially changed parameter
             if hasattr(conn_params, "keyterms_prompt"):
-                if old_conn_params is None or conn_params.keyterms_prompt != old_conn_params.keyterms_prompt:
+                if (
+                    old_conn_params is None
+                    or conn_params.keyterms_prompt != old_conn_params.keyterms_prompt
+                ):
                     if conn_params.keyterms_prompt is not None:
                         update_config["keyterms_prompt"] = conn_params.keyterms_prompt
                         logger.info(f"Updating keyterms_prompt to: {conn_params.keyterms_prompt}")
@@ -332,16 +341,29 @@ class AssemblyAISTTService(WebsocketSTTService):
                             logger.info(f"Updating prompt")
 
             if hasattr(conn_params, "max_turn_silence"):
-                if old_conn_params is None or conn_params.max_turn_silence != old_conn_params.max_turn_silence:
+                if (
+                    old_conn_params is None
+                    or conn_params.max_turn_silence != old_conn_params.max_turn_silence
+                ):
                     if conn_params.max_turn_silence is not None:
                         update_config["max_turn_silence"] = conn_params.max_turn_silence
-                        logger.info(f"Updating max_turn_silence to: {conn_params.max_turn_silence}ms")
+                        logger.info(
+                            f"Updating max_turn_silence to: {conn_params.max_turn_silence}ms"
+                        )
 
             if hasattr(conn_params, "min_end_of_turn_silence_when_confident"):
-                if old_conn_params is None or conn_params.min_end_of_turn_silence_when_confident != old_conn_params.min_end_of_turn_silence_when_confident:
+                if (
+                    old_conn_params is None
+                    or conn_params.min_end_of_turn_silence_when_confident
+                    != old_conn_params.min_end_of_turn_silence_when_confident
+                ):
                     if conn_params.min_end_of_turn_silence_when_confident is not None:
-                        update_config["min_end_of_turn_silence_when_confident"] = conn_params.min_end_of_turn_silence_when_confident
-                        logger.info(f"Updating min_end_of_turn_silence_when_confident to: {conn_params.min_end_of_turn_silence_when_confident}ms")
+                        update_config["min_end_of_turn_silence_when_confident"] = (
+                            conn_params.min_end_of_turn_silence_when_confident
+                        )
+                        logger.info(
+                            f"Updating min_end_of_turn_silence_when_confident to: {conn_params.min_end_of_turn_silence_when_confident}ms"
+                        )
 
             # Send update if we have parameters to update
             if len(update_config) > 1:  # More than just "type"
@@ -426,7 +448,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 and self._websocket
                 and self._websocket.state is State.OPEN
             ):
-                await self.request_finalize()
+                self.request_finalize()
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
             await self.start_processing_metrics()
 
@@ -616,7 +638,9 @@ class AssemblyAISTTService(WebsocketSTTService):
         Only applies to Mode 2 (STT turn detection). In Mode 1, VAD +
         smart turn analyzer handle interruptions via the aggregator.
         """
-        logger.debug(f"{self} SpeechStarted received (vad_force_turn_endpoint={self._vad_force_turn_endpoint})")
+        logger.debug(
+            f"{self} SpeechStarted received (vad_force_turn_endpoint={self._vad_force_turn_endpoint})"
+        )
         if self._vad_force_turn_endpoint:
             logger.debug(f"{self} SpeechStarted ignored in Pipecat mode")
             return  # Mode 1: handled by aggregator
@@ -677,8 +701,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             # Format transcript with speaker labels if format string provided
             if self._speaker_format:
                 transcript_text = self._speaker_format.format(
-                    speaker=message.speaker,
-                    text=message.transcript
+                    speaker=message.speaker, text=message.transcript
                 )
 
         # Determine if this is a final turn from AssemblyAI
@@ -693,7 +716,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 finalize_confirmed = bool(message.turn_is_formatted)
                 if finalize_confirmed:
                     self.confirm_finalize()
-                logger.debug(f"{self} Final transcript: \"{transcript_text}\"")
+                logger.debug(f'{self} Final transcript: "{transcript_text}"')
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript_text,
@@ -706,7 +729,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 await self._trace_transcription(transcript_text, True, language)
                 await self.stop_processing_metrics()
             else:
-                logger.debug(f"{self} Interim transcript: \"{transcript_text}\"")
+                logger.debug(f'{self} Interim transcript: "{transcript_text}"')
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript_text,
@@ -720,7 +743,9 @@ class AssemblyAISTTService(WebsocketSTTService):
             # --- Mode 2: STT turn detection ---
             # SpeechStarted always arrives before transcripts with u3-rt-pro,
             # so UserStartedSpeakingFrame is guaranteed to be broadcast first.
-            logger.debug(f"{self} Transcript received in STT mode (_user_speaking={self._user_speaking})")
+            logger.debug(
+                f"{self} Transcript received in STT mode (_user_speaking={self._user_speaking})"
+            )
 
             if is_final_turn:
                 # STT mode: AssemblyAI controls finalization, just mark as finalized

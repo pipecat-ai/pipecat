@@ -152,9 +152,9 @@ class AssemblyAIConnectionParams(BaseModel):
     max_turn_silence: Optional[int] = None
     keyterms_prompt: Optional[List[str]] = None
     prompt: Optional[str] = None
-    speech_model: Literal["universal-streaming-english", "universal-streaming-multilingual", "u3-rt-pro"] = (
-        "u3-rt-pro"
-    )
+    speech_model: Literal[
+        "universal-streaming-english", "universal-streaming-multilingual", "u3-rt-pro"
+    ] = "u3-rt-pro"
     language_detection: Optional[bool] = None
     format_turns: bool = True
     speaker_labels: Optional[bool] = None
