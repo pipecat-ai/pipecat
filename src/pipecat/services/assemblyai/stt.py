@@ -438,6 +438,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 and self._websocket
                 and self._websocket.state is State.OPEN
             ):
+                await self.request_finalize()
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
             await self.start_processing_metrics()
 
@@ -761,8 +762,7 @@ class AssemblyAISTTService(WebsocketSTTService):
                 self._user_speaking = True
 
             if is_final_turn:
-                if message.turn_is_formatted:
-                    self.confirm_finalize()
+                # STT mode: AssemblyAI controls finalization, just mark as finalized
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript_text,
