@@ -12,7 +12,7 @@ WebSocket API for streaming audio transcription.
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Mapping, Optional
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -96,6 +96,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         connection_params: AssemblyAIConnectionParams = AssemblyAIConnectionParams(),
         vad_force_turn_endpoint: bool = True,
         should_interrupt: bool = True,
+        speaker_format: Optional[str] = None,
         ttfs_p99_latency: Optional[float] = ASSEMBLYAI_TTFS_P99,
         **kwargs,
     ):
@@ -111,16 +112,24 @@ class AssemblyAISTTService(WebsocketSTTService):
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
             connection_params: Connection configuration parameters. Defaults to AssemblyAIConnectionParams().
             vad_force_turn_endpoint: Controls turn detection mode.
-                When True (Pipecat mode): Forces AssemblyAI to return finals ASAP
-                (confidence=0.0, fast silence params) so Pipecat's smart turn analyzer
-                decides when the user is done. VAD stop sends ForceEndpoint as ceiling.
-                No UserStarted/StoppedSpeakingFrame emitted from STT.
-                When False (STT mode, default): Respects user params for confidence and
-                silence. AssemblyAI's end_of_turn controls turn endings. Emits
-                UserStarted/StoppedSpeakingFrame from STT. No ForceEndpoint on VAD stop.
+                When True (Pipecat mode, default): Forces AssemblyAI to return finals ASAP
+                so Pipecat's turn detection (e.g., Smart Turn) decides when the user is done.
+                - min_end_of_turn_silence_when_confident defaults to 100ms (user can override)
+                - max_turn_silence is ALWAYS set equal to min_end_of_turn_silence_when_confident
+                - VAD stop sends ForceEndpoint as ceiling
+                - No UserStarted/StoppedSpeakingFrame emitted from STT
+                When False (STT mode, u3-rt-pro only): AssemblyAI's model controls turn endings.
+                - Uses AssemblyAI API defaults for all parameters (unless user explicitly sets them)
+                - Respects all user-provided connection_params as-is
+                - Emits UserStarted/StoppedSpeakingFrame from STT
+                - No ForceEndpoint on VAD stop
             should_interrupt: Whether to interrupt the bot when the user starts speaking
                 in STT mode (vad_force_turn_endpoint=False). Only applies to STT mode.
                 Defaults to True.
+            speaker_format: Optional format string for speaker labels when diarization is enabled.
+                Use {speaker} for speaker label and {text} for transcript text.
+                Example: "<{speaker}>{text}</{speaker}>" or "{speaker}: {text}"
+                If None, transcript text is not modified. Defaults to None.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
@@ -135,6 +144,25 @@ class AssemblyAISTTService(WebsocketSTTService):
                 f"u3-rt-pro for SpeechStarted support. Either set "
                 f"vad_force_turn_endpoint=True for {connection_params.speech_model}, "
                 f"or use speech_model='u3-rt-pro'."
+            )
+
+        # Validate that prompt and keyterms_prompt are not both set
+        if connection_params.prompt is not None and connection_params.keyterms_prompt is not None:
+            raise ValueError(
+                "The prompt and keyterms_prompt parameters cannot be used in the same request. "
+                "Please choose either one or the other based on your use case. When you use "
+                "keyterms_prompt, your boosted words are appended to the default prompt automatically. "
+                "Or to boost within prompt: <prompt> + Make sure to boost the words <keyterms> in the audio. "
+                "For more info go to: https://www.assemblyai.com/docs/streaming/universal-3-pro"
+            )
+
+        # Warn if user sets a custom prompt (recommend testing without one first)
+        if connection_params.prompt is not None:
+            logger.warning(
+                "Custom prompt detected. We recommend testing with no prompt first, as this "
+                "will use our optimized default prompt for voice agents. Bad prompts may lead "
+                "to bad results. If you'd like to create your own prompt, check out our "
+                "prompting guide at: https://www.assemblyai.com/docs/streaming/prompting"
             )
 
         # When vad_force_turn_endpoint is enabled, configure connection params
@@ -152,6 +180,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._connection_params = connection_params
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
         self._should_interrupt = should_interrupt
+        self._speaker_format = speaker_format
 
         self._termination_event = asyncio.Event()
         self._received_termination = False
@@ -166,6 +195,18 @@ class AssemblyAISTTService(WebsocketSTTService):
         self._user_speaking = False
         self._vad_speaking = False
 
+        # Log final connection params after any modifications
+        logger.info(f"{self} Final connection params being sent to AssemblyAI:")
+        logger.info(f"  min_end_of_turn_silence_when_confident: {self._connection_params.min_end_of_turn_silence_when_confident}")
+        logger.info(f"  max_turn_silence: {self._connection_params.max_turn_silence}")
+
+        # Warn if min_end_of_turn_silence_when_confident is not 100ms
+        if self._connection_params.min_end_of_turn_silence_when_confident != 100:
+            logger.warning(
+                f"For best latency, set min_end_of_turn_silence_when_confident to 100ms. "
+                f"Current value: {self._connection_params.min_end_of_turn_silence_when_confident}ms"
+            )
+
     def _configure_pipecat_turn_mode(
         self, connection_params: AssemblyAIConnectionParams
     ) -> AssemblyAIConnectionParams:
@@ -176,12 +217,14 @@ class AssemblyAISTTService(WebsocketSTTService):
         when the user is done speaking. VAD stop is the absolute ceiling.
 
         u3-rt-pro:
-        - min_end_of_turn_silence_when_confident=100
-        - max_turn_silence=100
+        - min_end_of_turn_silence_when_confident defaults to 100ms (user can override)
+        - max_turn_silence is ALWAYS set equal to min_end_of_turn_silence_when_confident
+          to avoid double turn detection (AssemblyAI + Pipecat both analyzing)
+        - If user sets max_turn_silence, it's ignored with a warning
         - end_of_turn_confidence_threshold: not set (API default)
 
         universal-streaming-*:
-        - end_of_turn_confidence_threshold=0.0
+        - end_of_turn_confidence_threshold=0.0 (disable semantic turn detection)
         - min_end_of_turn_silence_when_confident=160
         - max_turn_silence: not set (API default)
 
@@ -194,11 +237,27 @@ class AssemblyAISTTService(WebsocketSTTService):
         is_u3_pro = connection_params.speech_model == "u3-rt-pro"
 
         if is_u3_pro:
+            # u3-rt-pro: Synchronize max_turn_silence with min_end_of_turn_silence_when_confident
+            min_silence = connection_params.min_end_of_turn_silence_when_confident
+            if min_silence is None:
+                min_silence = 100
+
+            # Warn if user set max_turn_silence (will be overridden)
+            if connection_params.max_turn_silence is not None:
+                logger.warning(
+                    f"Your max_turn_silence value ({connection_params.max_turn_silence}ms) will be "
+                    f"OVERRIDDEN in Pipecat mode (vad_force_turn_endpoint=True). It will be set to "
+                    f"{min_silence}ms (matching min_end_of_turn_silence_when_confident) and SENT to "
+                    f"AssemblyAI to avoid double turn detection. To use your max_turn_silence as-is, "
+                    f"switch to STT mode (vad_force_turn_endpoint=False)."
+                )
+
             updates = {
-                "min_end_of_turn_silence_when_confident": 100,
-                "max_turn_silence": 100,
+                "min_end_of_turn_silence_when_confident": min_silence,
+                "max_turn_silence": min_silence,
             }
         else:
+            # universal-streaming: Different configuration (works differently)
             updates = {
                 "end_of_turn_confidence_threshold": 0.0,
                 "min_end_of_turn_silence_when_confident": 160,
@@ -293,6 +352,112 @@ class AssemblyAISTTService(WebsocketSTTService):
         """Record transcription event for tracing."""
         pass
 
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Handle dynamic parameter updates via UpdateConfiguration.
+
+        Sends UpdateConfiguration message to AssemblyAI without reconnecting.
+        Supports updating:
+        - keyterms_prompt: List of terms to boost (can be empty array to clear)
+        - prompt: Custom prompt text
+        - max_turn_silence: Maximum silence before forcing turn end
+        - min_end_of_turn_silence_when_confident: Silence before EOT check
+
+        Args:
+            settings: Dictionary of setting name to value mappings.
+        """
+        # Build UpdateConfiguration message
+        update_config = {"type": "UpdateConfiguration"}
+        updated_params = {}
+
+        # Track if both prompt and keyterms_prompt are being set
+        has_prompt = "prompt" in settings and settings["prompt"] is not None
+        has_keyterms = "keyterms_prompt" in settings
+
+        # Validate prompt + keyterms_prompt conflict
+        if has_prompt and has_keyterms:
+            raise ValueError(
+                "The prompt and keyterms_prompt parameters cannot be used in the same update. "
+                "Please choose either one or the other based on your use case."
+            )
+
+        # Process each setting
+        for key, value in settings.items():
+            if key == "keyterms_prompt":
+                # Support empty array to clear keyterms
+                if not isinstance(value, list):
+                    logger.warning(f"keyterms_prompt must be a list, got {type(value)}")
+                    continue
+                update_config["keyterms_prompt"] = value
+                updated_params["keyterms_prompt"] = value
+                logger.info(f"Updating keyterms_prompt to: {value}")
+
+            elif key == "prompt":
+                if not isinstance(value, str):
+                    logger.warning(f"prompt must be a string, got {type(value)}")
+                    continue
+                # Only u3-rt-pro supports prompt
+                if self._connection_params.speech_model != "u3-rt-pro":
+                    logger.warning(
+                        f"prompt parameter is only supported with u3-rt-pro model, "
+                        f"current model is {self._connection_params.speech_model}"
+                    )
+                    continue
+                update_config["prompt"] = value
+                updated_params["prompt"] = value
+                logger.info(f"Updating prompt")
+
+            elif key == "max_turn_silence":
+                if not isinstance(value, int):
+                    logger.warning(f"max_turn_silence must be an integer, got {type(value)}")
+                    continue
+                update_config["max_turn_silence"] = value
+                updated_params["max_turn_silence"] = value
+                logger.info(f"Updating max_turn_silence to: {value}ms")
+
+            elif key == "min_end_of_turn_silence_when_confident":
+                if not isinstance(value, int):
+                    logger.warning(
+                        f"min_end_of_turn_silence_when_confident must be an integer, got {type(value)}"
+                    )
+                    continue
+                update_config["min_end_of_turn_silence_when_confident"] = value
+                updated_params["min_end_of_turn_silence_when_confident"] = value
+                logger.info(f"Updating min_end_of_turn_silence_when_confident to: {value}ms")
+
+            elif key == "language":
+                # Language cannot be changed mid-stream
+                logger.warning(
+                    "Language cannot be changed mid-stream for AssemblyAI. "
+                    "Create a new service instance to change the language."
+                )
+
+            elif key == "model" or key == "speech_model":
+                # Model cannot be changed mid-stream
+                logger.warning(
+                    "Speech model cannot be changed mid-stream for AssemblyAI. "
+                    "Create a new service instance to change the model."
+                )
+
+            else:
+                logger.warning(f"Unknown setting for AssemblyAI STT service: {key}")
+
+        # Send update via WebSocket if we have parameters to update
+        if len(update_config) > 1:  # More than just "type"
+            if self._websocket and self._websocket.state is State.OPEN:
+                await self._websocket.send(json.dumps(update_config))
+                logger.info(f"Sent UpdateConfiguration: {update_config}")
+
+                # Update internal connection params to stay in sync
+                for key, value in updated_params.items():
+                    setattr(self._connection_params, key, value)
+            else:
+                logger.error(
+                    "Cannot update settings - WebSocket not connected. "
+                    "Settings will be applied on next connection."
+                )
+        else:
+            logger.warning("No valid settings to update")
+
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
         params = {}
@@ -313,7 +478,13 @@ class AssemblyAISTTService(WebsocketSTTService):
 
         if params:
             query_string = urlencode(params)
-            return f"{self._api_endpoint_base_url}?{query_string}"
+            full_url = f"{self._api_endpoint_base_url}?{query_string}"
+            logger.info(f"{self} WebSocket URL being sent to AssemblyAI:")
+            logger.info(f"  {full_url}")
+            logger.info(f"  Parsed params:")
+            for k, v in params.items():
+                logger.info(f"    {k}: {v}")
+            return full_url
         return self._api_endpoint_base_url
 
     async def _connect(self):
@@ -429,6 +600,9 @@ class AssemblyAISTTService(WebsocketSTTService):
         async for message in self._get_websocket():
             try:
                 data = json.loads(message)
+                # Log raw JSON for Turn messages to debug speaker_label
+                if data.get("type") == "Turn":
+                    logger.debug(f"{self} RAW JSON from AssemblyAI: {json.dumps(data, indent=2)}")
                 await self._handle_message(data)
             except json.JSONDecodeError:
                 logger.warning(f"Received non-JSON message: {message}")
@@ -477,14 +651,18 @@ class AssemblyAISTTService(WebsocketSTTService):
         Only applies to Mode 2 (STT turn detection). In Mode 1, VAD +
         smart turn analyzer handle interruptions via the aggregator.
         """
+        logger.debug(f"{self} SpeechStarted received (vad_force_turn_endpoint={self._vad_force_turn_endpoint})")
         if self._vad_force_turn_endpoint:
+            logger.debug(f"{self} SpeechStarted ignored in Pipecat mode")
             return  # Mode 1: handled by aggregator
 
+        logger.debug(f"{self} Processing SpeechStarted in STT mode")
         await self.start_processing_metrics()
         await self.broadcast_frame(UserStartedSpeakingFrame)
         if self._should_interrupt:
             await self.push_interruption_task_frame_and_wait()
         self._user_speaking = True
+        logger.debug(f"{self} _user_speaking set to True")
 
     async def _handle_termination(self, message: TerminationMessage):
         """Handle termination message."""
@@ -511,6 +689,17 @@ class AssemblyAISTTService(WebsocketSTTService):
             - end_of_turn → TranscriptionFrame + UserStoppedSpeakingFrame
             - else → InterimTranscriptionFrame
         """
+        # Log transcript details
+        logger.info(f"{self} ===== TRANSCRIPT RECEIVED =====")
+        logger.info(f"  Text: \"{message.transcript}\"")
+        logger.info(f"  end_of_turn: {message.end_of_turn}")
+        logger.info(f"  turn_is_formatted: {message.turn_is_formatted}")
+        logger.info(f"  turn_order: {message.turn_order}")
+        if message.end_of_turn_confidence is not None:
+            logger.info(f"  end_of_turn_confidence: {message.end_of_turn_confidence}")
+        logger.info(f"  speaker: {message.speaker}")
+        logger.info(f"===============================")
+
         if not message.transcript:
             return
 
@@ -525,6 +714,24 @@ class AssemblyAISTTService(WebsocketSTTService):
                     f"for language '{message.language_code}', falling back to English"
                 )
 
+        # Handle speaker diarization
+        speaker_id = self._user_id
+        transcript_text = message.transcript
+
+        if message.speaker:
+            speaker_id = message.speaker
+            # Format transcript with speaker labels if format string provided
+            if self._speaker_format:
+                transcript_text = self._speaker_format.format(
+                    speaker=message.speaker,
+                    text=message.transcript
+                )
+                logger.info(f"{self} 🤖 TEXT SENT TO LLM (with speaker format): \"{transcript_text}\"")
+            else:
+                logger.info(f"{self} 🤖 TEXT SENT TO LLM (speaker {message.speaker}): \"{transcript_text}\"")
+        else:
+            logger.info(f"{self} 🤖 TEXT SENT TO LLM: \"{transcript_text}\"")
+
         # Determine if this is a final turn from AssemblyAI
         is_final_turn = message.end_of_turn and (
             not self._connection_params.format_turns or message.turn_is_formatted
@@ -537,24 +744,24 @@ class AssemblyAISTTService(WebsocketSTTService):
                 finalize_confirmed = bool(message.turn_is_formatted)
                 if finalize_confirmed:
                     self.confirm_finalize()
-                logger.debug(f"{self} Final transcript: \"{message.transcript}\"")
+                logger.debug(f"{self} Final transcript: \"{transcript_text}\"")
                 await self.push_frame(
                     TranscriptionFrame(
-                        message.transcript,
-                        self._user_id,
+                        transcript_text,
+                        speaker_id,
                         time_now_iso8601(),
                         language,
                         message,
                     )
                 )
-                await self._trace_transcription(message.transcript, True, language)
+                await self._trace_transcription(transcript_text, True, language)
                 await self.stop_processing_metrics()
             else:
-                logger.debug(f"{self} Interim transcript: \"{message.transcript}\"")
+                logger.debug(f"{self} Interim transcript: \"{transcript_text}\"")
                 await self.push_frame(
                     InterimTranscriptionFrame(
-                        message.transcript,
-                        self._user_id,
+                        transcript_text,
+                        speaker_id,
                         time_now_iso8601(),
                         language,
                         message,
@@ -565,6 +772,7 @@ class AssemblyAISTTService(WebsocketSTTService):
             # SpeechStarted handles UserStartedSpeakingFrame + interruption.
             # If SpeechStarted hasn't fired yet (shouldn't happen, but guard),
             # broadcast here as fallback.
+            logger.debug(f"{self} Transcript received in STT mode (_user_speaking={self._user_speaking})")
             if not self._user_speaking:
                 logger.warning(f"{self} Transcript arrived before SpeechStarted, broadcasting fallback UserStartedSpeakingFrame")
                 await self.broadcast_frame(UserStartedSpeakingFrame)
@@ -575,15 +783,15 @@ class AssemblyAISTTService(WebsocketSTTService):
                     self.confirm_finalize()
                 await self.push_frame(
                     TranscriptionFrame(
-                        message.transcript,
-                        self._user_id,
+                        transcript_text,
+                        speaker_id,
                         time_now_iso8601(),
                         language,
                         message,
                         finalized=True,
                     )
                 )
-                await self._trace_transcription(message.transcript, True, language)
+                await self._trace_transcription(transcript_text, True, language)
                 await self.stop_processing_metrics()
                 # AAI is authoritative — emit UserStoppedSpeakingFrame immediately.
                 # broadcast_frame pushes downstream (same queue as TranscriptionFrame
@@ -593,8 +801,8 @@ class AssemblyAISTTService(WebsocketSTTService):
             else:
                 await self.push_frame(
                     InterimTranscriptionFrame(
-                        message.transcript,
-                        self._user_id,
+                        transcript_text,
+                        speaker_id,
                         time_now_iso8601(),
                         language,
                         message,

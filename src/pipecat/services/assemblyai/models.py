@@ -12,7 +12,7 @@ transcription WebSocket messages and connection configuration.
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Word(BaseModel):
@@ -72,7 +72,11 @@ class TurnMessage(BaseMessage):
             complete utterances or when end_of_turn is True.
         language_confidence: Confidence score (0-1) for language detection. Only present
             with complete utterances or when end_of_turn is True.
+        speaker: Speaker label (e.g., "A", "B"). Only present when speaker_labels is
+            enabled and end_of_turn is True. Maps to 'speaker_label' in JSON response.
     """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     type: Literal["Turn"] = "Turn"
     turn_order: int
@@ -83,6 +87,7 @@ class TurnMessage(BaseMessage):
     words: List[Word]
     language_code: Optional[str] = None
     language_confidence: Optional[float] = None
+    speaker: Optional[str] = Field(default=None, alias="speaker_label")
 
 
 class SpeechStartedMessage(BaseMessage):
@@ -131,6 +136,9 @@ class AssemblyAIConnectionParams(BaseModel):
             universal-streaming-multilingual. When enabled, Turn messages include
             language_code and language_confidence fields. Defaults to None (not sent).
         format_turns: Whether to format transcript turns. Defaults to True.
+        speaker_labels: Enable speaker diarization. When enabled, final transcripts
+            (end_of_turn=True) include a speaker field identifying the speaker
+            (e.g., "Speaker A", "Speaker B"). Defaults to None (not sent).
     """
 
     sample_rate: int = 16000
@@ -145,3 +153,4 @@ class AssemblyAIConnectionParams(BaseModel):
     )
     language_detection: Optional[bool] = None
     format_turns: bool = True
+    speaker_labels: Optional[bool] = None
