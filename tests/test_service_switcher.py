@@ -11,6 +11,7 @@ import unittest
 from dataclasses import dataclass
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     ManuallySwitchServiceFrame,
     ServiceMetadataFrame,
@@ -20,7 +21,11 @@ from pipecat.frames.frames import (
     TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategyManual
+from pipecat.pipeline.service_switcher import (
+    ServiceSwitcher,
+    ServiceSwitcherStrategyAutomatic,
+    ServiceSwitcherStrategyManual,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
 
@@ -495,6 +500,169 @@ class TestServiceSwitcherMetadata(unittest.IsolatedAsyncioTestCase):
         # service2 pushed metadata on StartFrame, but it should have been blocked
         self.assertGreaterEqual(self.service2.metadata_push_count, 1)
         # Only one MockMetadataFrame should have left (from service1)
+
+
+class TestServiceSwitcherStrategyAutomatic(unittest.IsolatedAsyncioTestCase):
+    """Test cases for ServiceSwitcherStrategyAutomatic."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.service1 = MockFrameProcessor("service1")
+        self.service2 = MockFrameProcessor("service2")
+        self.service3 = MockFrameProcessor("service3")
+        self.services = [self.service1, self.service2, self.service3]
+
+    def test_init_defaults(self):
+        """Test that default values are set correctly."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+
+        self.assertEqual(strategy.active_service, self.service1)
+        self.assertEqual(strategy.recovery_timeout, 30.0)
+        self.assertTrue(strategy.prefer_primary)
+        self.assertEqual(len(strategy.unhealthy_services), 0)
+
+    async def test_error_switches_to_next_healthy_service(self):
+        """Test that an error on the active service switches to the next healthy one."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+
+        error = ErrorFrame(error="connection lost")
+        result = await strategy.handle_error(error)
+
+        self.assertEqual(result, self.service2)
+        self.assertEqual(strategy.active_service, self.service2)
+        self.assertIn(self.service1, strategy.unhealthy_services)
+
+    async def test_consecutive_errors_cascade_through_services(self):
+        """Test that repeated errors cascade through all backup services."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+
+        # First error: service1 -> service2
+        await strategy.handle_error(ErrorFrame(error="error 1"))
+        self.assertEqual(strategy.active_service, self.service2)
+
+        # Second error: service2 -> service3
+        await strategy.handle_error(ErrorFrame(error="error 2"))
+        self.assertEqual(strategy.active_service, self.service3)
+
+        self.assertIn(self.service1, strategy.unhealthy_services)
+        self.assertIn(self.service2, strategy.unhealthy_services)
+
+    async def test_all_services_unhealthy_returns_none(self):
+        """Test that handle_error returns None when all services are unhealthy."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+
+        await strategy.handle_error(ErrorFrame(error="error 1"))
+        await strategy.handle_error(ErrorFrame(error="error 2"))
+        result = await strategy.handle_error(ErrorFrame(error="error 3"))
+
+        self.assertIsNone(result)
+        self.assertEqual(len(strategy.unhealthy_services), 3)
+
+    async def test_recovery_marks_service_healthy(self):
+        """Test that a service is marked healthy after recovery timeout."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy.recovery_timeout = 0.05  # 50ms for fast test
+
+        await strategy.handle_error(ErrorFrame(error="error"))
+        self.assertIn(self.service1, strategy.unhealthy_services)
+
+        # Wait for recovery
+        await asyncio.sleep(0.1)
+
+        self.assertNotIn(self.service1, strategy.unhealthy_services)
+
+    async def test_recovery_switches_back_to_primary(self):
+        """Test that recovery switches back to the primary when prefer_primary is True."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy.recovery_timeout = 0.05
+        strategy.prefer_primary = True
+
+        await strategy.handle_error(ErrorFrame(error="error"))
+        self.assertEqual(strategy.active_service, self.service2)
+
+        # Wait for recovery
+        await asyncio.sleep(0.1)
+
+        self.assertEqual(strategy.active_service, self.service1)
+
+    async def test_recovery_does_not_switch_when_prefer_primary_is_false(self):
+        """Test that recovery does not switch back when prefer_primary is False."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy.recovery_timeout = 0.05
+        strategy.prefer_primary = False
+
+        await strategy.handle_error(ErrorFrame(error="error"))
+        self.assertEqual(strategy.active_service, self.service2)
+
+        # Wait for recovery
+        await asyncio.sleep(0.1)
+
+        # Service1 is healthy again but we stay on service2
+        self.assertNotIn(self.service1, strategy.unhealthy_services)
+        self.assertEqual(strategy.active_service, self.service2)
+
+    async def test_manual_switch_still_works(self):
+        """Test that ManuallySwitchServiceFrame is still handled."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+
+        frame = ManuallySwitchServiceFrame(service=self.service3)
+        result = await strategy.handle_frame(frame, FrameDirection.DOWNSTREAM)
+
+        self.assertEqual(result, self.service3)
+        self.assertEqual(strategy.active_service, self.service3)
+
+    async def test_on_service_switched_event_fires_on_error(self):
+        """Test that on_service_switched event fires when an error triggers a switch."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+
+        switched_events = []
+
+        @strategy.event_handler("on_service_switched")
+        async def on_service_switched(strategy, service):
+            switched_events.append(service)
+
+        await strategy.handle_error(ErrorFrame(error="error"))
+        await asyncio.sleep(0)
+
+        self.assertEqual(len(switched_events), 1)
+        self.assertEqual(switched_events[0], self.service2)
+
+    async def test_repeated_errors_extend_recovery_cooldown(self):
+        """Test that repeated errors on the same service restart the recovery timer."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy.recovery_timeout = 0.1
+
+        # First error on service1
+        await strategy.handle_error(ErrorFrame(error="error 1"))
+        self.assertEqual(strategy.active_service, self.service2)
+
+        # Wait a bit, then trigger another error on service2
+        await asyncio.sleep(0.05)
+
+        # Manually mark service1 healthy and switch back to test re-error
+        strategy._unhealthy_services.discard(self.service1)
+        strategy._active_service = self.service1
+
+        # Error again on service1, should restart recovery timer
+        await strategy.handle_error(ErrorFrame(error="error 2"))
+        self.assertEqual(strategy.active_service, self.service2)
+
+        # After 0.05s, service1 should still be unhealthy (timer restarted)
+        await asyncio.sleep(0.05)
+        self.assertIn(self.service1, strategy.unhealthy_services)
+
+        # After full timeout from second error, should be healthy
+        await asyncio.sleep(0.1)
+        self.assertNotIn(self.service1, strategy.unhealthy_services)
+
+    async def test_healthy_services_preferred_by_priority(self):
+        """Test that higher-priority (earlier in list) healthy services are preferred."""
+        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+
+        # Mark service1 unhealthy
+        await strategy.handle_error(ErrorFrame(error="error"))
+        # Should pick service2 (next in list), not service3
+        self.assertEqual(strategy.active_service, self.service2)
 
 
 if __name__ == "__main__":
