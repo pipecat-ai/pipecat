@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import onnxruntime as ort
+import soxr
 from loguru import logger
 from transformers import WhisperFeatureExtractor
 
@@ -143,12 +144,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
             )
             self._resample_warned = True
 
-        num_output_samples = int(len(audio_array) * _MODEL_SAMPLE_RATE / actual_rate)
-        return np.interp(
-            np.linspace(0, len(audio_array), num_output_samples, endpoint=False),
-            np.arange(len(audio_array)),
-            audio_array,
-        )
+        return soxr.resample(audio_array, actual_rate, _MODEL_SAMPLE_RATE, quality="VHQ")
 
     def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         """Predict end-of-turn using local ONNX model."""
