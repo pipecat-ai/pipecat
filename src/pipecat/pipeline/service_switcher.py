@@ -6,10 +6,14 @@
 
 """Service switcher for switching between different services at runtime, with different switching strategies."""
 
+import asyncio
 from abc import abstractmethod
-from typing import Any, Generic, List, Optional, Type, TypeVar
+from typing import Any, Dict, Generic, List, Optional, Set, Type, TypeVar
+
+from loguru import logger
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     ManuallySwitchServiceFrame,
     ServiceMetadataFrame,
@@ -86,6 +90,21 @@ class ServiceSwitcherStrategy(BaseObject):
         """
         pass
 
+    async def handle_error(self, error: ErrorFrame) -> Optional[FrameProcessor]:
+        """Handle an error from the active service.
+
+        Called by ``ServiceSwitcher`` when a non-fatal ``ErrorFrame`` is pushed
+        upstream by the currently active service. Subclasses can override this
+        to implement automatic failover.
+
+        Args:
+            error: The error frame pushed by the active service.
+
+        Returns:
+            The newly active service if a switch occurred, or None otherwise.
+        """
+        return None
+
 
 class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
     """A strategy for switching between services manually.
@@ -123,6 +142,172 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
 
         If it's not in the list, the request is ignored, as it may have been
         intended for another ServiceSwitcher in the pipeline.
+
+        Args:
+            service: The service to set as active.
+
+        Returns:
+            The newly active service, or None if the service was not found.
+        """
+        if service in self.services:
+            self._active_service = service
+            await self._call_event_handler("on_service_switched", service)
+            return service
+        return None
+
+
+class ServiceSwitcherStrategyAutomatic(ServiceSwitcherStrategy):
+    """A strategy that automatically switches to a backup service on failure.
+
+    When the active service produces a non-fatal error, this strategy marks it
+    as unhealthy and switches to the next healthy service in the list. After a
+    configurable recovery period the unhealthy service is marked healthy again.
+    If ``prefer_primary`` is enabled (the default) and the primary service
+    recovers, the strategy switches back to it automatically.
+
+    Manual switching via ``ManuallySwitchServiceFrame`` is still supported.
+
+    Event handlers available:
+
+    - on_service_switched: Called when the active service changes.
+
+    Example::
+
+        switcher = ServiceSwitcher(
+            services=[primary_stt, backup_stt],
+            strategy_type=ServiceSwitcherStrategyAutomatic,
+        )
+
+        # Optionally customise parameters after construction:
+        switcher.strategy.recovery_timeout = 60.0
+        switcher.strategy.prefer_primary = False
+    """
+
+    def __init__(self, services: List[FrameProcessor]):
+        """Initialize the automatic service switcher strategy.
+
+        Args:
+            services: List of frame processors to switch between.
+                The first service is the primary.
+        """
+        super().__init__(services)
+        self._primary_service: FrameProcessor = services[0]
+        self._unhealthy_services: Set[FrameProcessor] = set()
+        self._recovery_timers: Dict[FrameProcessor, asyncio.TimerHandle] = {}
+
+        self.recovery_timeout: float = 30.0
+        """Seconds before an unhealthy service is marked healthy again."""
+
+        self.prefer_primary: bool = True
+        """When True, automatically switch back to the primary once it recovers."""
+
+    @property
+    def unhealthy_services(self) -> Set[FrameProcessor]:
+        """Return the set of services currently marked as unhealthy."""
+        return set(self._unhealthy_services)
+
+    async def handle_frame(
+        self, frame: ServiceSwitcherFrame, direction: FrameDirection
+    ) -> Optional[FrameProcessor]:
+        """Handle a frame that controls service switching.
+
+        Supports ``ManuallySwitchServiceFrame`` for explicit overrides.
+
+        Args:
+            frame: The frame to handle.
+            direction: The direction of the frame (upstream or downstream).
+
+        Returns:
+            The newly active service if a switch occurred, or None otherwise.
+        """
+        if isinstance(frame, ManuallySwitchServiceFrame):
+            return await self._set_active_if_available(frame.service)
+        return None
+
+    async def handle_error(self, error: ErrorFrame) -> Optional[FrameProcessor]:
+        """Handle an error from the active service by failing over.
+
+        Marks the active service as unhealthy, schedules a recovery timer,
+        and switches to the next healthy service in the list.
+
+        Args:
+            error: The error frame pushed by the active service.
+
+        Returns:
+            The newly active service if a switch occurred, or None if no
+            healthy backup is available.
+        """
+        failed_service = self._active_service
+
+        logger.warning(
+            f"Service {failed_service.name} reported an error, marking unhealthy: {error.error}"
+        )
+
+        self._unhealthy_services.add(failed_service)
+        self._schedule_recovery(failed_service)
+
+        next_service = self._next_healthy_service()
+        if next_service is None:
+            logger.error("All services are unhealthy, no backup available")
+            return None
+
+        return await self._set_active_if_available(next_service)
+
+    def _next_healthy_service(self) -> Optional[FrameProcessor]:
+        """Find the next healthy service in the list.
+
+        Searches from the beginning of the service list so that
+        higher-priority services are preferred.
+
+        Returns:
+            The next healthy service, or None if all are unhealthy.
+        """
+        for service in self._services:
+            if service not in self._unhealthy_services:
+                return service
+        return None
+
+    def _schedule_recovery(self, service: FrameProcessor):
+        """Schedule a recovery timer for an unhealthy service.
+
+        If a timer is already running for this service it is cancelled and
+        restarted so that repeated errors extend the cooldown.
+
+        Args:
+            service: The service to schedule recovery for.
+        """
+        existing = self._recovery_timers.pop(service, None)
+        if existing is not None:
+            existing.cancel()
+
+        loop = asyncio.get_event_loop()
+        handle = loop.call_later(
+            self.recovery_timeout,
+            lambda s=service: asyncio.ensure_future(self._recover_service(s)),
+        )
+        self._recovery_timers[service] = handle
+
+    async def _recover_service(self, service: FrameProcessor):
+        """Mark a service as healthy after its recovery timeout expires.
+
+        If ``prefer_primary`` is enabled and the recovered service is the
+        primary, the strategy switches back to it automatically.
+
+        Args:
+            service: The service that has recovered.
+        """
+        self._unhealthy_services.discard(service)
+        self._recovery_timers.pop(service, None)
+
+        logger.info(f"Service {service.name} marked healthy after recovery timeout")
+
+        if self.prefer_primary and service == self._primary_service:
+            if self._active_service != self._primary_service:
+                logger.info(f"Switching back to primary service {service.name}")
+                await self._set_active_if_available(self._primary_service)
+
+    async def _set_active_if_available(self, service: FrameProcessor) -> Optional[FrameProcessor]:
+        """Set the active service if it is in the service list.
 
         Args:
             service: The service to set as active.
@@ -227,6 +412,10 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         all the filters let it pass, and `StartFrame` causes the service to
         generate `ServiceMetadataFrame`.
 
+        Non-fatal ``ErrorFrame`` instances are forwarded to the strategy via
+        ``handle_error`` so strategies like ``ServiceSwitcherStrategyAutomatic``
+        can perform failover. The error frame is still propagated upstream so
+        that application-level error handlers can observe it.
         """
         # Consume ServiceSwitcherRequestMetadataFrame once the targeted service
         # has handled it (i.e. the active service).
@@ -238,6 +427,12 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         if isinstance(frame, ServiceMetadataFrame):
             if frame.service_name != self.strategy.active_service.name:
                 return
+
+        # Let the strategy react to non-fatal errors from the active service.
+        if isinstance(frame, ErrorFrame) and not frame.fatal:
+            service = await self.strategy.handle_error(frame)
+            if service:
+                await service.queue_frame(ServiceSwitcherRequestMetadataFrame(service=service))
 
         await super().push_frame(frame, direction)
 
