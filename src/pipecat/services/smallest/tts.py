@@ -47,6 +47,7 @@ class SmallestTTSModel(str, Enum):
     """Available Smallest AI TTS models."""
 
     LIGHTNING_V2 = "lightning-v2"
+    LIGHTNING_V3_1 = "lightning-v3.1"
 
 
 def language_to_smallest_tts_language(language: Language) -> Optional[str]:
@@ -129,7 +130,7 @@ class SmallestTTSService(InterruptibleTTSService):
         api_key: str,
         voice_id: str,
         base_url: str = "wss://waves-api.smallest.ai",
-        model: str = SmallestTTSModel.LIGHTNING_V2,
+        model: str = SmallestTTSModel.LIGHTNING_V3_1,
         sample_rate: Optional[int] = 24000,
         params: Optional[InputParams] = None,
         **kwargs,
@@ -140,7 +141,7 @@ class SmallestTTSService(InterruptibleTTSService):
             api_key: Smallest AI API key for authentication.
             voice_id: Voice identifier for synthesis.
             base_url: Base WebSocket URL for the Smallest API.
-            model: TTS model to use. Defaults to "lightning-v2".
+            model: TTS model to use. Defaults to "lightning-v3.1".
             sample_rate: Audio sample rate in Hz. Defaults to 24000.
             params: Configuration parameters for the TTS service.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
@@ -431,7 +432,7 @@ class SmallestHttpTTSService(TTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = SmallestTTSModel.LIGHTNING_V2,
+        model: str = SmallestTTSModel.LIGHTNING_V3_1,
         base_url: str = "https://waves-api.smallest.ai",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -442,7 +443,7 @@ class SmallestHttpTTSService(TTSService):
         Args:
             api_key: Smallest AI API key for authentication.
             voice_id: Voice identifier for synthesis.
-            model: TTS model to use. Defaults to "lightning-v2".
+            model: TTS model to use. Defaults to "lightning-v3.1".
             base_url: Base URL for the Smallest API.
             sample_rate: Audio sample rate in Hz.
             params: Configuration parameters for the TTS service.
