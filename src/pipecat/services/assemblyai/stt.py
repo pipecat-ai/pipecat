@@ -752,14 +752,9 @@ class AssemblyAISTTService(WebsocketSTTService):
                 )
         else:
             # --- Mode 2: STT turn detection ---
-            # SpeechStarted handles UserStartedSpeakingFrame + interruption.
-            # If SpeechStarted hasn't fired yet (shouldn't happen, but guard),
-            # broadcast here as fallback.
+            # SpeechStarted always arrives before transcripts with u3-rt-pro,
+            # so UserStartedSpeakingFrame is guaranteed to be broadcast first.
             logger.debug(f"{self} Transcript received in STT mode (_user_speaking={self._user_speaking})")
-            if not self._user_speaking:
-                logger.warning(f"{self} Transcript arrived before SpeechStarted, broadcasting fallback UserStartedSpeakingFrame")
-                await self.broadcast_frame(UserStartedSpeakingFrame)
-                self._user_speaking = True
 
             if is_final_turn:
                 # STT mode: AssemblyAI controls finalization, just mark as finalized
