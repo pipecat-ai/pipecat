@@ -330,11 +330,7 @@ class SmallestTTSService(InterruptibleTTSService):
 
             if status == "complete":
                 msg_request_id = msg.get("request_id")
-                if (
-                    self._context_id
-                    and msg_request_id
-                    and msg_request_id == self._context_id
-                ):
+                if self._context_id and msg_request_id and msg_request_id == self._context_id:
                     await self.stop_all_metrics()
                     await self.push_frame(TTSStoppedFrame(context_id=self._context_id))
                     self._context_id = None
@@ -496,9 +492,7 @@ class SmallestHttpTTSService(TTSService):
             self._session = aiohttp.ClientSession()
         except ModuleNotFoundError as e:
             logger.error(f"Exception: {e}")
-            logger.error(
-                "In order to use Smallest HTTP TTS, you need to `pip install aiohttp`."
-            )
+            logger.error("In order to use Smallest HTTP TTS, you need to `pip install aiohttp`.")
             raise Exception(f"Missing module: {e}")
 
     async def stop(self, frame: EndFrame):
