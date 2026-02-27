@@ -6,9 +6,8 @@
 
 """Service switcher for switching between different services at runtime, with different switching strategies."""
 
-import asyncio
 from abc import abstractmethod
-from typing import Any, Dict, Generic, List, Optional, Set, Type, TypeVar
+from typing import Any, Generic, List, Optional, Type, TypeVar
 
 from loguru import logger
 
@@ -159,11 +158,9 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
 class ServiceSwitcherStrategyAutomatic(ServiceSwitcherStrategy):
     """A strategy that automatically switches to a backup service on failure.
 
-    When the active service produces a non-fatal error, this strategy marks it
-    as unhealthy and switches to the next healthy service in the list. After a
-    configurable recovery period the unhealthy service is marked healthy again.
-    If ``prefer_primary`` is enabled (the default) and the primary service
-    recovers, the strategy switches back to it automatically.
+    When the active service produces a non-fatal error, this strategy switches
+    to the next available service in the list. Recovery and fallback policies
+    are left to application code via the ``on_service_switched`` event.
 
     Manual switching via ``ManuallySwitchServiceFrame`` is still supported.
 
@@ -178,9 +175,10 @@ class ServiceSwitcherStrategyAutomatic(ServiceSwitcherStrategy):
             strategy_type=ServiceSwitcherStrategyAutomatic,
         )
 
-        # Optionally customise parameters after construction:
-        switcher.strategy.recovery_timeout = 60.0
-        switcher.strategy.prefer_primary = False
+        @switcher.strategy.event_handler("on_service_switched")
+        async def on_switched(strategy, service):
+            # App decides when/how to recover the failed service
+            ...
     """
 
     def __init__(self, services: List[FrameProcessor]):
@@ -188,23 +186,8 @@ class ServiceSwitcherStrategyAutomatic(ServiceSwitcherStrategy):
 
         Args:
             services: List of frame processors to switch between.
-                The first service is the primary.
         """
         super().__init__(services)
-        self._primary_service: FrameProcessor = services[0]
-        self._unhealthy_services: Set[FrameProcessor] = set()
-        self._recovery_timers: Dict[FrameProcessor, asyncio.TimerHandle] = {}
-
-        self.recovery_timeout: float = 30.0
-        """Seconds before an unhealthy service is marked healthy again."""
-
-        self.prefer_primary: bool = True
-        """When True, automatically switch back to the primary once it recovers."""
-
-    @property
-    def unhealthy_services(self) -> Set[FrameProcessor]:
-        """Return the set of services currently marked as unhealthy."""
-        return set(self._unhealthy_services)
 
     async def handle_frame(
         self, frame: ServiceSwitcherFrame, direction: FrameDirection
@@ -227,84 +210,39 @@ class ServiceSwitcherStrategyAutomatic(ServiceSwitcherStrategy):
     async def handle_error(self, error: ErrorFrame) -> Optional[FrameProcessor]:
         """Handle an error from the active service by failing over.
 
-        Marks the active service as unhealthy, schedules a recovery timer,
-        and switches to the next healthy service in the list.
+        Switches to the next service in the list. The failed service remains
+        in the list and can be switched back to manually or via application
+        logic in the ``on_service_switched`` event handler.
 
         Args:
             error: The error frame pushed by the active service.
 
         Returns:
             The newly active service if a switch occurred, or None if no
-            healthy backup is available.
+            other service is available.
         """
         failed_service = self._active_service
 
-        logger.warning(
-            f"Service {failed_service.name} reported an error, marking unhealthy: {error.error}"
-        )
+        logger.warning(f"Service {failed_service.name} reported an error: {error.error}")
 
-        self._unhealthy_services.add(failed_service)
-        self._schedule_recovery(failed_service)
-
-        next_service = self._next_healthy_service()
+        next_service = self._next_service()
         if next_service is None:
-            logger.error("All services are unhealthy, no backup available")
+            logger.error("No other service available to switch to")
             return None
 
         return await self._set_active_if_available(next_service)
 
-    def _next_healthy_service(self) -> Optional[FrameProcessor]:
-        """Find the next healthy service in the list.
-
-        Searches from the beginning of the service list so that
-        higher-priority services are preferred.
+    def _next_service(self) -> Optional[FrameProcessor]:
+        """Find the next service in the list after the active one.
 
         Returns:
-            The next healthy service, or None if all are unhealthy.
+            The next service, or None if there is only one service.
         """
-        for service in self._services:
-            if service not in self._unhealthy_services:
-                return service
-        return None
-
-    def _schedule_recovery(self, service: FrameProcessor):
-        """Schedule a recovery timer for an unhealthy service.
-
-        If a timer is already running for this service it is cancelled and
-        restarted so that repeated errors extend the cooldown.
-
-        Args:
-            service: The service to schedule recovery for.
-        """
-        existing = self._recovery_timers.pop(service, None)
-        if existing is not None:
-            existing.cancel()
-
-        loop = asyncio.get_event_loop()
-        handle = loop.call_later(
-            self.recovery_timeout,
-            lambda s=service: asyncio.ensure_future(self._recover_service(s)),
-        )
-        self._recovery_timers[service] = handle
-
-    async def _recover_service(self, service: FrameProcessor):
-        """Mark a service as healthy after its recovery timeout expires.
-
-        If ``prefer_primary`` is enabled and the recovered service is the
-        primary, the strategy switches back to it automatically.
-
-        Args:
-            service: The service that has recovered.
-        """
-        self._unhealthy_services.discard(service)
-        self._recovery_timers.pop(service, None)
-
-        logger.info(f"Service {service.name} marked healthy after recovery timeout")
-
-        if self.prefer_primary and service == self._primary_service:
-            if self._active_service != self._primary_service:
-                logger.info(f"Switching back to primary service {service.name}")
-                await self._set_active_if_available(self._primary_service)
+        if len(self._services) <= 1:
+            return None
+        current_idx = self._services.index(self._active_service)
+        next_idx = (current_idx + 1) % len(self._services)
+        return self._services[next_idx]
 
     async def _set_active_if_available(self, service: FrameProcessor) -> Optional[FrameProcessor]:
         """Set the active service if it is in the service list.
