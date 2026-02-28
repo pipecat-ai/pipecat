@@ -4691,7 +4691,7 @@ requires-dist = [
     { name = "mlx-whisper", marker = "extra == 'mlx-whisper'", specifier = "~=0.4.2" },
     { name = "nltk", specifier = ">=3.9.3,<4" },
     { name = "noisereduce", marker = "extra == 'noisereduce'", specifier = "~=3.0.3" },
-    { name = "numba", specifier = "==0.61.2" },
+    { name = "numba", specifier = ">=0.61.2" },
     { name = "numpy", specifier = ">=1.26.4,<3" },
     { name = "nvidia-riva-client", marker = "extra == 'nvidia'", specifier = "~=2.21.1" },
     { name = "onnxruntime", specifier = "~=1.23.2" },
