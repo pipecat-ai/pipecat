@@ -157,8 +157,6 @@ class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategy):
     to the next available service in the list. Recovery and fallback policies
     are left to application code via the ``on_service_switched`` event.
 
-    Manual switching via ``ManuallySwitchServiceFrame`` is still supported.
-
     Event handlers available:
 
     - on_service_switched: Called when the active service changes.
@@ -190,28 +188,15 @@ class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategy):
             The newly active service if a switch occurred, or None if no
             other service is available.
         """
-        failed_service = self._active_service
+        logger.warning(f"Service {self._active_service.name} reported an error: {error.error}")
 
-        logger.warning(f"Service {failed_service.name} reported an error: {error.error}")
-
-        next_service = self._next_service()
-        if next_service is None:
+        if len(self._services) <= 1:
             logger.error("No other service available to switch to")
             return None
 
-        return await self._set_active_if_available(next_service)
-
-    def _next_service(self) -> Optional[FrameProcessor]:
-        """Find the next service in the list after the active one.
-
-        Returns:
-            The next service, or None if there is only one service.
-        """
-        if len(self._services) <= 1:
-            return None
         current_idx = self._services.index(self._active_service)
         next_idx = (current_idx + 1) % len(self._services)
-        return self._services[next_idx]
+        return await self._set_active_if_available(self._services[next_idx])
 
 
 StrategyType = TypeVar("StrategyType", bound=ServiceSwitcherStrategy)
