@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -99,7 +100,7 @@ class SmallestTTSService(InterruptibleTTSService):
 
         tts = SmallestTTSService(
             api_key="your-api-key",
-            voice_id="emily",
+            voice_id="sophia",
             params=SmallestTTSService.InputParams(
                 language=Language.EN,
                 speed=1.0,
@@ -128,7 +129,7 @@ class SmallestTTSService(InterruptibleTTSService):
         self,
         *,
         api_key: str,
-        voice_id: str,
+        voice_id: str = "sophia",
         base_url: str = "wss://waves-api.smallest.ai",
         model: str = SmallestTTSModel.LIGHTNING_V3_1,
         sample_rate: Optional[int] = 24000,
@@ -146,27 +147,26 @@ class SmallestTTSService(InterruptibleTTSService):
             params: Configuration parameters for the TTS service.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
+        params = params or SmallestTTSService.InputParams()
+        model_str = model.value if isinstance(model, Enum) else model
+        lang_str = (
+            language_to_smallest_tts_language(params.language) if params.language else "en"
+        )
+
         super().__init__(
             aggregate_sentences=True,
             push_text_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            settings=TTSSettings(model=model_str, voice=voice_id, language=lang_str),
             **kwargs,
         )
 
-        params = params or SmallestTTSService.InputParams()
-
         self._api_key = api_key
-        model_str = model.value if isinstance(model, Enum) else model
         self._websocket_url = f"{base_url}/api/v1/{model_str}/get_speech/stream"
 
-        self.set_model_name(model_str)
-        self.set_voice(voice_id)
-
-        self._settings = {
-            "language": language_to_smallest_tts_language(params.language)
-            if params.language
-            else "en",
+        self._tts_params = {
+            "language": lang_str,
             "speed": params.speed,
             "consistency": params.consistency,
             "similarity": params.similarity,
@@ -206,12 +206,12 @@ class SmallestTTSService(InterruptibleTTSService):
         """
         msg = {
             "text": text,
-            "voice_id": self._voice_id,
-            "language": self._settings["language"],
-            "speed": self._settings["speed"],
-            "consistency": self._settings["consistency"],
-            "similarity": self._settings["similarity"],
-            "enhancement": self._settings["enhancement"],
+            "voice_id": self._settings.voice,
+            "language": self._tts_params["language"],
+            "speed": self._tts_params["speed"],
+            "consistency": self._tts_params["consistency"],
+            "similarity": self._tts_params["similarity"],
+            "enhancement": self._tts_params["enhancement"],
         }
 
         if self._context_id:
@@ -431,7 +431,7 @@ class SmallestHttpTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice_id: str,
+        voice_id: str = "sophia",
         model: str = SmallestTTSModel.LIGHTNING_V3_1,
         base_url: str = "https://waves-api.smallest.ai",
         sample_rate: Optional[int] = None,
@@ -449,20 +449,20 @@ class SmallestHttpTTSService(TTSService):
             params: Configuration parameters for the TTS service.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or SmallestHttpTTSService.InputParams()
+        model_str = model.value if isinstance(model, Enum) else model
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=TTSSettings(model=model_str, voice=voice_id, language=params.language),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
-
-        model_str = model.value if isinstance(model, Enum) else model
-        self.set_model_name(model_str)
-        self.set_voice(voice_id)
-
         self._model_url = f"{self._base_url}/api/v1/{model_str}/get_speech"
 
-        self._settings = {
+        self._tts_params = {
             "language": params.language,
             "speed": params.speed,
             "consistency": params.consistency,
@@ -539,13 +539,12 @@ class SmallestHttpTTSService(TTSService):
             await self.start_ttfb_metrics()
 
             payload = {
-                "voice_id": self._voice_id,
+                "voice_id": self._settings.voice,
                 "text": text,
                 "sample_rate": self.sample_rate,
             }
 
-            # Only include non-None settings
-            for key, value in self._settings.items():
+            for key, value in self._tts_params.items():
                 if value is not None:
                     payload[key] = value
 

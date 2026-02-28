@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_latency import SMALLEST_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -154,20 +155,19 @@ class SmallestSTTService(SegmentedSTTService):
                 Override for your deployment.
             **kwargs: Additional arguments passed to the parent SegmentedSTTService.
         """
+        params = params or SmallestSTTService.InputParams()
+        model_str = model.value if isinstance(model, Enum) else model
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            settings=STTSettings(model=model_str, language=params.language),
             **kwargs,
         )
-
-        params = params or SmallestSTTService.InputParams()
 
         self._api_key = api_key
         self._url = url
         self._language = params.language
-
-        model_str = model.value if isinstance(model, Enum) else model
-        self.set_model_name(model_str)
 
         self._client = httpx.AsyncClient()
         self._headers = {
@@ -340,22 +340,22 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
+        self._rt_params = params or SmallestRealtimeSTTService.InputParams()
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=10,
             keepalive_interval=5,
+            settings=STTSettings(model="pulse", language=self._rt_params.language),
             **kwargs,
         )
 
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
-        self._params = params or SmallestRealtimeSTTService.InputParams()
         self._receive_task = None
         self._connected_event = asyncio.Event()
         self._connected_event.set()
-
-        self.set_model_name("pulse")
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics."""
@@ -442,16 +442,16 @@ class SmallestRealtimeSTTService(WebsocketSTTService):
             logger.debug("Connecting to Smallest Realtime STT")
 
             query_params = {
-                "language": self._params.language,
-                "encoding": self._params.encoding,
+                "language": self._rt_params.language,
+                "encoding": self._rt_params.encoding,
                 "sample_rate": str(self.sample_rate),
-                "word_timestamps": str(self._params.word_timestamps).lower(),
-                "full_transcript": str(self._params.full_transcript).lower(),
-                "sentence_timestamps": str(self._params.sentence_timestamps).lower(),
-                "redact_pii": str(self._params.redact_pii).lower(),
-                "redact_pci": str(self._params.redact_pci).lower(),
-                "numerals": self._params.numerals,
-                "diarize": str(self._params.diarize).lower(),
+                "word_timestamps": str(self._rt_params.word_timestamps).lower(),
+                "full_transcript": str(self._rt_params.full_transcript).lower(),
+                "sentence_timestamps": str(self._rt_params.sentence_timestamps).lower(),
+                "redact_pii": str(self._rt_params.redact_pii).lower(),
+                "redact_pci": str(self._rt_params.redact_pci).lower(),
+                "numerals": self._rt_params.numerals,
+                "diarize": str(self._rt_params.diarize).lower(),
             }
 
             ws_url = f"{self._base_url}/waves/v1/pulse/get_text?{urlencode(query_params)}"
