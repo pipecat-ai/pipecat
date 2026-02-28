@@ -211,6 +211,7 @@ class PiperHttpTTSService(TTSService):
 
         self._base_url = base_url
         self._session = aiohttp_session
+        self._speed = speed
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -241,6 +242,7 @@ class PiperHttpTTSService(TTSService):
             data = {
                 "text": text,
                 "voice": self._settings.voice,
+                "length_scale": self._speed,
             }
 
             async with self._session.post(self._base_url, json=data, headers=headers) as response:
