@@ -333,3 +333,18 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         except Exception as e:
             yield ErrorFrame(error=f"Unknown error occurred: {e}")
+
+    @classmethod
+    def get_voices(cls, api_key: str):
+        return [
+            {"name": "Friendly Person", "voice_id": "54a5170264694bfc8e9ad98df7bd89c3", "description": "A friendly and engaging English speaker", "gender": "male", "language": "en", "sample_url": None, "accent": None},
+            {"name": "Anime Girl", "voice_id": "7f92f8efb8ec43bf8f646fd6d4a6af54", "description": "Anime-style female English voice", "gender": "female", "language": "en", "sample_url": None, "accent": None},
+            {"name": "Nature Documentary", "voice_id": "0eb2bd3576714dbcad7cd4c6b2b6e12f", "description": "Deep, authoritative narrator voice", "gender": "male", "language": "en", "sample_url": None, "accent": None},
+            {"name": "Child", "voice_id": "5c7b3dba4e0a4f03b92a7e0e7b498a6f", "description": "Young child voice for English", "gender": "male", "language": "en", "sample_url": None, "accent": None},
+            {"name": "Cute Girl", "voice_id": "c5e2e78f6b4946a0b28d6f9ee0a6f4ad", "description": "Cute, expressive female English voice", "gender": "female", "language": "en", "sample_url": None, "accent": None},
+            {"name": "Calm Female", "voice_id": "ad3b294dacf14e8e9fd0924fcc7d79c2", "description": "Calm, soothing female English voice", "gender": "female", "language": "en", "sample_url": None, "accent": None},
+            {"name": "News Anchor", "voice_id": "66e038ab7ef84e27a4d96b1b8f49eb4d", "description": "Professional news anchor voice", "gender": "male", "language": "en", "sample_url": None, "accent": None},
+            {"name": "Chinese Female", "voice_id": "a1d6b0d67e2c4f78a9c0b1e3d5f7c812", "description": "Standard Mandarin female voice", "gender": "female", "language": "zh", "sample_url": None, "accent": None},
+            {"name": "Chinese Male", "voice_id": "b3e7c2a14d8f4e92b5c6d7a8f9e0b1c3", "description": "Standard Mandarin male voice", "gender": "male", "language": "zh", "sample_url": None, "accent": None},
+            {"name": "Japanese Female", "voice_id": "d4f8a1c2e3b5f6d7a8c9e0b1d2f3a4c5", "description": "Standard Japanese female voice", "gender": "female", "language": "ja", "sample_url": None, "accent": None},
+        ]

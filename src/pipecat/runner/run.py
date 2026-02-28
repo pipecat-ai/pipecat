@@ -254,16 +254,34 @@ async def _run_telephony_bot(websocket: WebSocket):
                 agent, transport_type, call_data = await BotRunnerService(
                     db
                 ).get_bot_for_incoming_call(websocket)
+            # print("call_data ===========", call_data)    
+            # print("transport_type ===========", transport_type)
+            # print("agent_id ===========", agent.id if agent else None)
+            # print("agent ===========", agent)
+            # print("twilio_credentials ===========", twilio_credentials)
+
+            print("call_data in run.py file ===========", call_data)
+            print("transport_type in run.py file ===========", transport_type)
+            print("agent_id in run.py file ===========", agent.id if agent else None)
+            print("agent in run.py file before return ===========", agent.id)
+
             body = {
                 "call_data": call_data,
                 "transport_type": transport_type,
                 "agent_id": agent.id if agent else None,
                 "agent": agent,
+                # "twilio_credentials": twilio_credentials,
             }
+
+            print("body in run.py file after declaring body ===========", body)
         except Exception as e:
             logger.warning(
                 "Bot runner service failed, calling bot without pre-parsed data: %s", e
             )
+
+    print("======================== in run.py file ========================")
+    print("body ===========", body) 
+    print("websocket ===========", websocket)
 
     runner_args = WebSocketRunnerArguments(websocket=websocket, body=body)
     await bot_module.bot(runner_args)
@@ -875,7 +893,7 @@ def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
   <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{proxy}/ws</Stream>
 </Response>""",
     }
-
+    print("added telephony routes ")
     @app.post("/")
     async def start_call():
         """Handle telephony webhook and return XML response."""
@@ -894,6 +912,7 @@ def _setup_telephony_routes(app: FastAPI, *, transport_type: str, proxy: str):
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
+        print("into websocket_endpoint")
         """Handle WebSocket connections for telephony."""
         await websocket.accept()
         logger.debug("WebSocket connection accepted")

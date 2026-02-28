@@ -133,24 +133,40 @@ class LmntTTSService(InterruptibleTTSService):
             "X-API-Key": api_key,
         }
 
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        items = data if isinstance(data, list) else data.get("voices", data.get("data", [])) or []
-        result = []
-        for v in items:
-            if not isinstance(v, dict):
-                continue
-            result.append({
-                "name": v.get("name"),
-                "voice_id": v.get("id") or v.get("voice_id"),
-                "description": v.get("description"),
-                "gender": v.get("gender"),
-                "language": v.get("language"),
-                "sample_url": v.get("preview_url") or v.get("sample_url"),
-                "accent": v.get("accent"),
-            })
-        return result
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            items = data if isinstance(data, list) else data.get("voices", data.get("data", [])) or []
+            result = []
+            for v in items:
+                if not isinstance(v, dict):
+                    continue
+                result.append({
+                    "name": v.get("name"),
+                    "voice_id": v.get("id") or v.get("voice_id"),
+                    "description": v.get("description"),
+                    "gender": v.get("gender"),
+                    "language": v.get("language"),
+                    "sample_url": v.get("preview_url") or v.get("sample_url"),
+                    "accent": v.get("accent"),
+                })
+            if result:
+                return result
+        except Exception:
+            pass
+
+        # Static fallback voices from LMNT voice library
+        return [
+            {"name": "Ava", "voice_id": "ava", "description": "Warm, friendly American female voice", "gender": "female", "language": "en", "sample_url": None, "accent": "American"},
+            {"name": "Curtis", "voice_id": "curtis", "description": "Confident American male voice", "gender": "male", "language": "en", "sample_url": None, "accent": "American"},
+            {"name": "Lily", "voice_id": "lily", "description": "Soft, clear American female voice", "gender": "female", "language": "en", "sample_url": None, "accent": "American"},
+            {"name": "Daniel", "voice_id": "daniel", "description": "Natural American male voice", "gender": "male", "language": "en", "sample_url": None, "accent": "American"},
+            {"name": "Zoe", "voice_id": "zoe", "description": "Bright, energetic American female voice", "gender": "female", "language": "en", "sample_url": None, "accent": "American"},
+            {"name": "Ethan", "voice_id": "ethan", "description": "Calm, deep American male voice", "gender": "male", "language": "en", "sample_url": None, "accent": "American"},
+            {"name": "Mia", "voice_id": "mia", "description": "Expressive American female voice", "gender": "female", "language": "en", "sample_url": None, "accent": "American"},
+            {"name": "Leo", "voice_id": "leo", "description": "Smooth, professional American male voice", "gender": "male", "language": "en", "sample_url": None, "accent": "American"},
+        ]
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to LMNT service language format.

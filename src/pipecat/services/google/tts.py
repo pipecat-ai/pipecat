@@ -914,6 +914,63 @@ class GoogleBaseTTSService(TTSService):
 
         yield TTSStoppedFrame()
 
+    @classmethod
+    def get_voices(cls, api_key: str):
+        return [
+            {"name": "en-US-Chirp3-HD-Achernar", "voice_id": "en-US-Chirp3-HD-Achernar", "description": "Chirp 3 HD voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Achird", "voice_id": "en-US-Chirp3-HD-Achird", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Algenib", "voice_id": "en-US-Chirp3-HD-Algenib", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Algieba", "voice_id": "en-US-Chirp3-HD-Algieba", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Aoede", "voice_id": "en-US-Chirp3-HD-Aoede", "description": "Chirp 3 HD voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Autonoe", "voice_id": "en-US-Chirp3-HD-Autonoe", "description": "Chirp 3 HD voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Charon", "voice_id": "en-US-Chirp3-HD-Charon", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Enceladus", "voice_id": "en-US-Chirp3-HD-Enceladus", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Fenrir", "voice_id": "en-US-Chirp3-HD-Fenrir", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Kore", "voice_id": "en-US-Chirp3-HD-Kore", "description": "Chirp 3 HD voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Leda", "voice_id": "en-US-Chirp3-HD-Leda", "description": "Chirp 3 HD voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Orus", "voice_id": "en-US-Chirp3-HD-Orus", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Puck", "voice_id": "en-US-Chirp3-HD-Puck", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Chirp3-HD-Zephyr", "voice_id": "en-US-Chirp3-HD-Zephyr", "description": "Chirp 3 HD voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Neural2-A", "voice_id": "en-US-Neural2-A", "description": "Neural2 voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Neural2-C", "voice_id": "en-US-Neural2-C", "description": "Neural2 voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Neural2-D", "voice_id": "en-US-Neural2-D", "description": "Neural2 voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Neural2-E", "voice_id": "en-US-Neural2-E", "description": "Neural2 voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Neural2-F", "voice_id": "en-US-Neural2-F", "description": "Neural2 voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Neural2-G", "voice_id": "en-US-Neural2-G", "description": "Neural2 voice", "gender": "FEMALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Neural2-I", "voice_id": "en-US-Neural2-I", "description": "Neural2 voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-US-Neural2-J", "voice_id": "en-US-Neural2-J", "description": "Neural2 voice", "gender": "MALE", "language": "en-US", "sample_url": None, "accent": None},
+            {"name": "en-GB-Neural2-A", "voice_id": "en-GB-Neural2-A", "description": "Neural2 voice", "gender": "FEMALE", "language": "en-GB", "sample_url": None, "accent": "British"},
+            {"name": "en-GB-Neural2-B", "voice_id": "en-GB-Neural2-B", "description": "Neural2 voice", "gender": "MALE", "language": "en-GB", "sample_url": None, "accent": "British"},
+            {"name": "en-GB-Neural2-C", "voice_id": "en-GB-Neural2-C", "description": "Neural2 voice", "gender": "FEMALE", "language": "en-GB", "sample_url": None, "accent": "British"},
+            {"name": "en-GB-Neural2-D", "voice_id": "en-GB-Neural2-D", "description": "Neural2 voice", "gender": "MALE", "language": "en-GB", "sample_url": None, "accent": "British"},
+            {"name": "en-AU-Neural2-A", "voice_id": "en-AU-Neural2-A", "description": "Neural2 voice", "gender": "FEMALE", "language": "en-AU", "sample_url": None, "accent": "Australian"},
+            {"name": "en-AU-Neural2-B", "voice_id": "en-AU-Neural2-B", "description": "Neural2 voice", "gender": "MALE", "language": "en-AU", "sample_url": None, "accent": "Australian"},
+            {"name": "en-AU-Neural2-C", "voice_id": "en-AU-Neural2-C", "description": "Neural2 voice", "gender": "FEMALE", "language": "en-AU", "sample_url": None, "accent": "Australian"},
+            {"name": "en-AU-Neural2-D", "voice_id": "en-AU-Neural2-D", "description": "Neural2 voice", "gender": "MALE", "language": "en-AU", "sample_url": None, "accent": "Australian"},
+            {"name": "fr-FR-Neural2-F", "voice_id": "fr-FR-Neural2-F", "description": "Neural2 voice", "gender": "FEMALE", "language": "fr-FR", "sample_url": None, "accent": None},
+            {"name": "fr-FR-Neural2-G", "voice_id": "fr-FR-Neural2-G", "description": "Neural2 voice", "gender": "MALE", "language": "fr-FR", "sample_url": None, "accent": None},
+            {"name": "de-DE-Neural2-B", "voice_id": "de-DE-Neural2-B", "description": "Neural2 voice", "gender": "MALE", "language": "de-DE", "sample_url": None, "accent": None},
+            {"name": "de-DE-Neural2-C", "voice_id": "de-DE-Neural2-C", "description": "Neural2 voice", "gender": "FEMALE", "language": "de-DE", "sample_url": None, "accent": None},
+            {"name": "ja-JP-Neural2-B", "voice_id": "ja-JP-Neural2-B", "description": "Neural2 voice", "gender": "FEMALE", "language": "ja-JP", "sample_url": None, "accent": None},
+            {"name": "ja-JP-Neural2-C", "voice_id": "ja-JP-Neural2-C", "description": "Neural2 voice", "gender": "MALE", "language": "ja-JP", "sample_url": None, "accent": None},
+            {"name": "zh-CN-Chirp3-HD-Aoede", "voice_id": "zh-CN-Chirp3-HD-Aoede", "description": "Chirp 3 HD voice", "gender": "FEMALE", "language": "zh-CN", "sample_url": None, "accent": None},
+            {"name": "zh-CN-Chirp3-HD-Charon", "voice_id": "zh-CN-Chirp3-HD-Charon", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "zh-CN", "sample_url": None, "accent": None},
+            {"name": "zh-CN-Chirp3-HD-Puck", "voice_id": "zh-CN-Chirp3-HD-Puck", "description": "Chirp 3 HD voice", "gender": "MALE", "language": "zh-CN", "sample_url": None, "accent": None},
+            {"name": "zh-CN-Chirp3-HD-Zephyr", "voice_id": "zh-CN-Chirp3-HD-Zephyr", "description": "Chirp 3 HD voice", "gender": "FEMALE", "language": "zh-CN", "sample_url": None, "accent": None},
+            {"name": "es-ES-Neural2-A", "voice_id": "es-ES-Neural2-A", "description": "Neural2 voice", "gender": "FEMALE", "language": "es-ES", "sample_url": None, "accent": None},
+            {"name": "es-ES-Neural2-B", "voice_id": "es-ES-Neural2-B", "description": "Neural2 voice", "gender": "MALE", "language": "es-ES", "sample_url": None, "accent": None},
+            {"name": "es-US-Neural2-A", "voice_id": "es-US-Neural2-A", "description": "Neural2 voice", "gender": "FEMALE", "language": "es-US", "sample_url": None, "accent": None},
+            {"name": "es-US-Neural2-B", "voice_id": "es-US-Neural2-B", "description": "Neural2 voice", "gender": "MALE", "language": "es-US", "sample_url": None, "accent": None},
+            {"name": "pt-BR-Neural2-A", "voice_id": "pt-BR-Neural2-A", "description": "Neural2 voice", "gender": "FEMALE", "language": "pt-BR", "sample_url": None, "accent": None},
+            {"name": "pt-BR-Neural2-B", "voice_id": "pt-BR-Neural2-B", "description": "Neural2 voice", "gender": "MALE", "language": "pt-BR", "sample_url": None, "accent": None},
+            {"name": "it-IT-Neural2-A", "voice_id": "it-IT-Neural2-A", "description": "Neural2 voice", "gender": "FEMALE", "language": "it-IT", "sample_url": None, "accent": None},
+            {"name": "it-IT-Neural2-C", "voice_id": "it-IT-Neural2-C", "description": "Neural2 voice", "gender": "MALE", "language": "it-IT", "sample_url": None, "accent": None},
+            {"name": "ko-KR-Neural2-A", "voice_id": "ko-KR-Neural2-A", "description": "Neural2 voice", "gender": "FEMALE", "language": "ko-KR", "sample_url": None, "accent": None},
+            {"name": "ko-KR-Neural2-B", "voice_id": "ko-KR-Neural2-B", "description": "Neural2 voice", "gender": "FEMALE", "language": "ko-KR", "sample_url": None, "accent": None},
+            {"name": "hi-IN-Neural2-A", "voice_id": "hi-IN-Neural2-A", "description": "Neural2 voice", "gender": "FEMALE", "language": "hi-IN", "sample_url": None, "accent": None},
+            {"name": "hi-IN-Neural2-B", "voice_id": "hi-IN-Neural2-B", "description": "Neural2 voice", "gender": "MALE", "language": "hi-IN", "sample_url": None, "accent": None},
+        ]
+
 
 class GoogleTTSService(GoogleBaseTTSService):
     """Google Cloud Text-to-Speech streaming service.
