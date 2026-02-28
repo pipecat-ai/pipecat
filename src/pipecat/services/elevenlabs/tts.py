@@ -47,6 +47,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import (
     AudioContextTTSService,
+    TextAggregationMode,
     TTSService,
 )
 from pipecat.transcriptions.language import Language, resolve_language
@@ -365,7 +366,8 @@ class ElevenLabsTTSService(AudioContextTTSService):
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        aggregate_sentences: Optional[bool] = True,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        aggregate_sentences: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize the ElevenLabs TTS service.
@@ -377,13 +379,20 @@ class ElevenLabsTTSService(AudioContextTTSService):
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
             **kwargs: Additional arguments passed to the parent service.
         """
-        # Aggregating sentences still gives cleaner-sounding results and fewer
-        # artifacts than streaming one word at a time. On average, waiting for a
-        # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
-        # 3 model, and it's worth it for the better audio quality.
+        # By default, we aggregate sentences before sending to TTS. This adds
+        # ~200-300ms of latency per sentence (waiting for the sentence-ending
+        # punctuation token from the LLM). Setting
+        # text_aggregation_mode=TextAggregationMode.TOKEN streams tokens
+        # directly. To use this mode, you must set auto_mode=False. This
+        # eliminates aggregation time, but slows down ElevenLabs.
         #
         # We also don't want to automatically push LLM response text frames,
         # because the context aggregators will add them to the LLM context even
@@ -394,37 +403,37 @@ class ElevenLabsTTSService(AudioContextTTSService):
         # Finally, ElevenLabs doesn't provide information on when the bot stops
         # speaking for a while, so we want the parent class to send TTSStopFrame
         # after a short period not receiving any audio.
+        params = params or ElevenLabsTTSService.InputParams()
+
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
             supports_word_timestamps=True,
             sample_rate=sample_rate,
+            settings=ElevenLabsTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=(
+                    self.language_to_service_language(params.language) if params.language else None
+                ),
+                stability=params.stability,
+                similarity_boost=params.similarity_boost,
+                style=params.style,
+                use_speaker_boost=params.use_speaker_boost,
+                speed=params.speed,
+                auto_mode=str(params.auto_mode).lower(),
+                enable_ssml_parsing=params.enable_ssml_parsing,
+                enable_logging=params.enable_logging,
+                apply_text_normalization=params.apply_text_normalization,
+            ),
             **kwargs,
         )
 
-        params = params or ElevenLabsTTSService.InputParams()
-
         self._api_key = api_key
         self._url = url
-        self._settings = ElevenLabsTTSSettings(
-            model=model,
-            voice=voice_id,
-            language=(
-                self.language_to_service_language(params.language) if params.language else None
-            ),
-            stability=params.stability,
-            similarity_boost=params.similarity_boost,
-            style=params.style,
-            use_speaker_boost=params.use_speaker_boost,
-            speed=params.speed,
-            auto_mode=str(params.auto_mode).lower(),
-            enable_ssml_parsing=params.enable_ssml_parsing,
-            enable_logging=params.enable_logging,
-            apply_text_normalization=params.apply_text_normalization,
-        )
-        self._sync_model_name_to_metrics()
 
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
@@ -894,7 +903,8 @@ class ElevenLabsHttpTTSService(TTSService):
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        aggregate_sentences: Optional[bool] = True,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
+        aggregate_sentences: Optional[bool] = None,
         **kwargs,
     ):
         """Initialize the ElevenLabs HTTP TTS service.
@@ -907,40 +917,44 @@ class ElevenLabsHttpTTSService(TTSService):
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
+            text_aggregation_mode: How to aggregate incoming text before synthesis.
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
             **kwargs: Additional arguments passed to the parent service.
         """
+        params = params or ElevenLabsHttpTTSService.InputParams()
+
         super().__init__(
+            text_aggregation_mode=text_aggregation_mode,
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
             supports_word_timestamps=True,
             sample_rate=sample_rate,
+            settings=ElevenLabsHttpTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else None,
+                optimize_streaming_latency=params.optimize_streaming_latency,
+                stability=params.stability,
+                similarity_boost=params.similarity_boost,
+                style=params.style,
+                use_speaker_boost=params.use_speaker_boost,
+                speed=params.speed,
+                apply_text_normalization=params.apply_text_normalization,
+            ),
             **kwargs,
         )
 
-        params = params or ElevenLabsHttpTTSService.InputParams()
-
         self._api_key = api_key
         self._base_url = base_url
-        self._params = params
         self._session = aiohttp_session
 
-        self._settings = ElevenLabsHttpTTSSettings(
-            model=model,
-            voice=voice_id,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else None,
-            optimize_streaming_latency=params.optimize_streaming_latency,
-            stability=params.stability,
-            similarity_boost=params.similarity_boost,
-            style=params.style,
-            use_speaker_boost=params.use_speaker_boost,
-            speed=params.speed,
-            apply_text_normalization=params.apply_text_normalization,
-        )
-        self._sync_model_name_to_metrics()
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
         self._pronunciation_dictionary_locators = params.pronunciation_dictionary_locators

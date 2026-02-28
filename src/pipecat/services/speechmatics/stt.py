@@ -398,8 +398,6 @@ class SpeechmaticsSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
         # Service parameters
         self._api_key: str = api_key or os.getenv("SPEECHMATICS_API_KEY")
         self._base_url: str = (
@@ -428,8 +426,8 @@ class SpeechmaticsSTTService(STTService):
         speaker_passive_format = params.speaker_passive_format or speaker_active_format
 
         # Settings — seeded from InputParams
-        self._settings = SpeechmaticsSTTSettings(
-            model=None,
+        settings = SpeechmaticsSTTSettings(
+            model=None,  # Will be resolved from operating_point after config is built
             language=params.language,
             domain=params.domain,
             turn_detection_mode=params.turn_detection_mode,
@@ -455,9 +453,17 @@ class SpeechmaticsSTTService(STTService):
             extra_params=params.extra_params,
         )
 
-        # Build SDK config from settings
+        # Build SDK config from settings, then resolve model from operating_point
         self._client: VoiceAgentClient | None = None
-        self._config: VoiceAgentConfig = self._build_config()
+        self._config: VoiceAgentConfig = self._build_config(settings)
+        settings.model = self._config.operating_point.value
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=settings,
+            **kwargs,
+        )
 
         # Outbound frame queue
         self._outbound_frames: asyncio.Queue[Frame] = asyncio.Queue()
@@ -467,10 +473,6 @@ class SpeechmaticsSTTService(STTService):
             EndOfUtteranceMode.FIXED,
             EndOfUtteranceMode.EXTERNAL,
         ]
-
-        # Model + metrics (operating_point comes from the SDK config/preset)
-        self._settings.model = self._config.operating_point.value
-        self._sync_model_name_to_metrics()
 
         # Message queue
         self._stt_msg_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -524,7 +526,7 @@ class SpeechmaticsSTTService(STTService):
             logger.debug(f"{self} settings update requires reconnect: {changed.keys()}")
             # Connection-level fields changed — rebuild the SDK config
             # from the now-updated self._settings, then reconnect.
-            self._config = self._build_config()
+            self._config = self._build_config(self._settings)
             await self._disconnect()
             await self._connect()
         elif changed.keys() & SpeechmaticsSTTSettings.HOT_FIELDS:
@@ -661,13 +663,17 @@ class SpeechmaticsSTTService(STTService):
     # CONFIGURATION
     # ============================================================================
 
-    def _build_config(self) -> VoiceAgentConfig:
-        """Build a ``VoiceAgentConfig`` from the current ``self._settings``.
+    def _build_config(self, settings: SpeechmaticsSTTSettings) -> VoiceAgentConfig:
+        """Build a ``VoiceAgentConfig`` from the given settings.
 
-        Used both at init time and before reconnecting so the connection
-        always reflects the latest settings.
+        Used both at init time (with explicit settings, before
+        ``super().__init__`` has run) and before reconnecting so the
+        connection always reflects the latest settings.
+
+        Args:
+            settings: Settings to build from.
         """
-        s = self._settings
+        s = settings
 
         # Preset from turn detection mode
         config = VoiceAgentConfigPreset.load(s.turn_detection_mode.value)

@@ -41,6 +41,10 @@ class TTFBMetricsData(MetricsData):
 class ProcessingMetricsData(MetricsData):
     """General processing time metrics data.
 
+    .. deprecated:: 0.0.104
+        Processing metrics are deprecated and will be removed in a future version.
+        Use TTFB metrics instead.
+
     Parameters:
         value: Processing time measurement in seconds.
     """
@@ -85,6 +89,19 @@ class TTSUsageMetricsData(MetricsData):
     """
 
     value: int
+
+
+class TextAggregationMetricsData(MetricsData):
+    """Text aggregation time metrics data.
+
+    Measures the time from the first LLM token to the first complete sentence,
+    representing the latency cost of sentence aggregation in the TTS pipeline.
+
+    Parameters:
+        value: Aggregation time in seconds.
+    """
+
+    value: float
 
 
 class TurnMetricsData(MetricsData):

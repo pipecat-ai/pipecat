@@ -121,11 +121,21 @@ class HumeTTSService(TTSService):
                 f"Hume TTS streams at {HUME_SAMPLE_RATE} Hz; configured sample_rate={sample_rate}"
             )
 
+        params = params or HumeTTSService.InputParams()
+
         super().__init__(
             sample_rate=sample_rate,
             push_text_frames=False,
             push_stop_frames=True,
             supports_word_timestamps=True,
+            settings=HumeTTSSettings(
+                model=None,
+                voice=voice_id,
+                language=None,  # Not applicable here
+                description=params.description,
+                speed=params.speed,
+                trailing_silence=params.trailing_silence,
+            ),
             **kwargs,
         )
 
@@ -134,15 +144,6 @@ class HumeTTSService(TTSService):
         self._http_client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
 
         self._client = AsyncHumeClient(api_key=api_key, httpx_client=self._http_client)
-
-        params = params or HumeTTSService.InputParams()
-        self._settings = HumeTTSSettings(
-            model=None,
-            voice=voice_id,
-            description=params.description,
-            speed=params.speed,
-            trailing_silence=params.trailing_silence,
-        )
 
         self._audio_bytes = b""
 

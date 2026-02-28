@@ -602,25 +602,28 @@ class GoogleHttpTTSService(TTSService):
             params: Voice customization parameters including pitch, rate, volume, etc.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or GoogleHttpTTSService.InputParams()
 
-        self._location = location
-        self._settings = GoogleHttpTTSSettings(
-            model=None,
-            pitch=params.pitch,
-            rate=params.rate,
-            speaking_rate=params.speaking_rate,
-            volume=params.volume,
-            emphasis=params.emphasis,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            gender=params.gender,
-            google_style=params.google_style,
-            voice=voice_id,
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=GoogleHttpTTSSettings(
+                model=None,
+                pitch=params.pitch,
+                rate=params.rate,
+                speaking_rate=params.speaking_rate,
+                volume=params.volume,
+                emphasis=params.emphasis,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                gender=params.gender,
+                google_style=params.google_style,
+                voice=voice_id,
+            ),
+            **kwargs,
         )
+
+        self._location = location
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
         )
@@ -1016,19 +1019,22 @@ class GoogleTTSService(GoogleBaseTTSService):
             params: Language configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or GoogleTTSService.InputParams()
 
-        self._location = location
-        self._settings = GoogleStreamTTSSettings(
-            model=None,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            speaking_rate=params.speaking_rate,
-            voice=voice_id,
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=GoogleStreamTTSSettings(
+                model=None,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                speaking_rate=params.speaking_rate,
+                voice=voice_id,
+            ),
+            **kwargs,
         )
+
+        self._location = location
         self._voice_cloning_key = voice_cloning_key
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
@@ -1222,26 +1228,27 @@ class GeminiTTSService(GoogleBaseTTSService):
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
         params = params or GeminiTTSService.InputParams()
 
         if voice_id not in self.AVAILABLE_VOICES:
             logger.warning(f"Voice '{voice_id}' not in known voices list. Using anyway.")
 
-        self._location = location
-        self._model = model
-        self._settings = GeminiTTSSettings(
-            model=None,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            prompt=params.prompt,
-            multi_speaker=params.multi_speaker,
-            speaker_configs=params.speaker_configs,
-            voice=voice_id,
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=GeminiTTSSettings(
+                model=model,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                prompt=params.prompt,
+                multi_speaker=params.multi_speaker,
+                speaker_configs=params.speaker_configs,
+                voice=voice_id,
+            ),
+            **kwargs,
         )
 
+        self._location = location
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
         )
@@ -1319,7 +1326,7 @@ class GeminiTTSService(GoogleBaseTTSService):
 
                 voice = texttospeech_v1.VoiceSelectionParams(
                     language_code=self._settings.language,
-                    model_name=self._model,
+                    model_name=self._settings.model,
                     multi_speaker_voice_config=multi_speaker_voice_config,
                 )
             else:
@@ -1327,7 +1334,7 @@ class GeminiTTSService(GoogleBaseTTSService):
                 voice = texttospeech_v1.VoiceSelectionParams(
                     language_code=self._settings.language,
                     name=self._settings.voice,
-                    model_name=self._model,
+                    model_name=self._settings.model,
                 )
 
             # Create streaming config

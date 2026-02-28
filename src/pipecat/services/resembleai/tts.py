@@ -92,19 +92,19 @@ class ResembleAITTSService(AudioContextTTSService):
             sample_rate=sample_rate,
             reuse_context_id_within_turn=False,
             supports_word_timestamps=True,
+            settings=ResembleAITTSSettings(
+                model=None,
+                voice=voice_id,
+                language=None,
+                precision=precision,
+                output_format=output_format,
+                resemble_sample_rate=sample_rate,
+            ),
             **kwargs,
         )
 
         self._api_key = api_key
         self._url = url
-        self._settings = ResembleAITTSSettings(
-            model=None,
-            voice=voice_id,
-            language=None,
-            precision=precision,
-            output_format=output_format,
-            resemble_sample_rate=sample_rate,
-        )
 
         self._websocket = None
         self._request_id_counter = 0

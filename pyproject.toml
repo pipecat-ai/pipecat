@@ -36,7 +36,7 @@ dependencies = [
     "soxr~=0.5.0",
     "openai>=1.74.0,<3",
     # Pinning numba to resolve package dependencies
-    "numba==0.61.2",
+    "numba>=0.61.2",
     "wait_for2>=0.4.1; python_version<'3.12'",
     # Required by LocalSmartTurnAnalyzerV3
     # Inlined here instead of using a self-referential extra for Poetry compatibility.
@@ -105,7 +105,7 @@ remote-smart-turn = []
 resembleai = [ "pipecat-ai[websockets-base]" ]
 rime = [ "pipecat-ai[websockets-base]" ]
 riva = [ "pipecat-ai[nvidia]" ]
-runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.2.0"]
+runner = [ "python-dotenv>=1.0.0,<2.0.0", "uvicorn>=0.32.0,<1.0.0", "fastapi>=0.115.6,<0.128.0", "pipecat-ai-small-webrtc-prebuilt>=2.3.0"]
 sagemaker = ["aws_sdk_sagemaker_runtime_http2; python_version>='3.12'"]
 sambanova = []
 sarvam = [ "sarvamai==0.1.26a2", "pipecat-ai[websockets-base]" ]

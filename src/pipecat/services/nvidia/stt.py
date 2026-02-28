@@ -164,9 +164,17 @@ class NvidiaSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
         params = params or NvidiaSTTService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=NvidiaSTTSettings(
+                model=model_function_map.get("model_name"),
+                language=params.language,
+            ),
+            **kwargs,
+        )
 
         self._server = server
         self._api_key = api_key
@@ -179,12 +187,6 @@ class NvidiaSTTService(STTService):
         self._stop_threshold_eou = -1.0
         self._custom_configuration = ""
         self._function_id = model_function_map.get("function_id")
-
-        self._settings = NvidiaSTTSettings(
-            model=model_function_map.get("model_name"),
-            language=params.language,
-        )
-        self._sync_model_name_to_metrics()
 
         self._asr_service = None
         self._queue = None
@@ -463,9 +465,23 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
         params = params or NvidiaSegmentedSTTService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=NvidiaSegmentedSTTSettings(
+                model=model_function_map.get("model_name"),
+                language=self.language_to_service_language(params.language or Language.EN_US)
+                or "en-US",
+                profanity_filter=params.profanity_filter,
+                automatic_punctuation=params.automatic_punctuation,
+                verbatim_transcripts=params.verbatim_transcripts,
+                boosted_lm_words=params.boosted_lm_words,
+                boosted_lm_score=params.boosted_lm_score,
+            ),
+            **kwargs,
+        )
 
         # Initialize NVIDIA Riva settings
         self._api_key = api_key
@@ -484,17 +500,6 @@ class NvidiaSegmentedSTTService(SegmentedSTTService):
 
         self._config = None
         self._asr_service = None
-        self._settings = NvidiaSegmentedSTTSettings(
-            model=model_function_map.get("model_name"),
-            language=self.language_to_service_language(params.language or Language.EN_US)
-            or "en-US",
-            profanity_filter=params.profanity_filter,
-            automatic_punctuation=params.automatic_punctuation,
-            verbatim_transcripts=params.verbatim_transcripts,
-            boosted_lm_words=params.boosted_lm_words,
-            boosted_lm_score=params.boosted_lm_score,
-        )
-        self._sync_model_name_to_metrics()
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language enum to NVIDIA Riva's language code.

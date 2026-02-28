@@ -213,11 +213,6 @@ class CambTTSService(TTSService):
             params: Additional voice parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
-
-        self._api_key = api_key
-        self._timeout = timeout
-
         params = params or CambTTSService.InputParams()
 
         # Warn if sample rate doesn't match model's supported rate
@@ -227,16 +222,23 @@ class CambTTSService(TTSService):
                 f"sample rate. Current rate of {sample_rate}Hz may cause issues."
             )
 
-        # Build settings
-        self._settings = CambTTSSettings(
-            model=model,
-            voice=voice_id,
-            language=(
-                self.language_to_service_language(params.language) if params.language else "en-us"
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=CambTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=(
+                    self.language_to_service_language(params.language)
+                    if params.language
+                    else "en-us"
+                ),
+                user_instructions=params.user_instructions,
             ),
-            user_instructions=params.user_instructions,
+            **kwargs,
         )
-        self._sync_model_name_to_metrics()
+
+        self._api_key = api_key
+        self._timeout = timeout
 
         self._client = None
 

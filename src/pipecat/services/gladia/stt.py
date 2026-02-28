@@ -278,14 +278,6 @@ class GladiaSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService parent class.
         """
-        super().__init__(
-            sample_rate=sample_rate,
-            ttfs_p99_latency=ttfs_p99_latency,
-            keepalive_timeout=20,
-            keepalive_interval=5,
-            **kwargs,
-        )
-
         params = params or GladiaInputParams()
 
         if params.language is not None:
@@ -308,11 +300,6 @@ class GladiaSTTService(WebsocketSTTService):
                     stacklevel=2,
                 )
 
-        self._api_key = api_key
-        self._region = region
-        self._url = url
-        self._receive_task = None
-
         # Resolve deprecated language → language_config at init time
         language_config = params.language_config
         if not language_config and params.language:
@@ -320,22 +307,33 @@ class GladiaSTTService(WebsocketSTTService):
             if language_code:
                 language_config = LanguageConfig(languages=[language_code], code_switching=False)
 
-        self._settings = GladiaSTTSettings(
-            model=model,
-            language=None,
-            encoding=params.encoding,
-            bit_depth=params.bit_depth,
-            channels=params.channels,
-            custom_metadata=params.custom_metadata,
-            endpointing=params.endpointing,
-            maximum_duration_without_endpointing=params.maximum_duration_without_endpointing,
-            language_config=language_config,
-            pre_processing=params.pre_processing,
-            realtime_processing=params.realtime_processing,
-            messages_config=params.messages_config,
-            enable_vad=params.enable_vad,
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            keepalive_timeout=20,
+            keepalive_interval=5,
+            settings=GladiaSTTSettings(
+                model=model,
+                language=None,
+                encoding=params.encoding,
+                bit_depth=params.bit_depth,
+                channels=params.channels,
+                custom_metadata=params.custom_metadata,
+                endpointing=params.endpointing,
+                maximum_duration_without_endpointing=params.maximum_duration_without_endpointing,
+                language_config=language_config,
+                pre_processing=params.pre_processing,
+                realtime_processing=params.realtime_processing,
+                messages_config=params.messages_config,
+                enable_vad=params.enable_vad,
+            ),
+            **kwargs,
         )
-        self._sync_model_name_to_metrics()
+
+        self._api_key = api_key
+        self._region = region
+        self._url = url
+        self._receive_task = None
 
         # Session management
         self._session_url = None

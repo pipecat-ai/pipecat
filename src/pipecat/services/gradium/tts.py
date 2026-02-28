@@ -85,27 +85,27 @@ class GradiumTTSService(AudioContextTTSService):
             params: Additional configuration parameters.
             **kwargs: Additional arguments passed to parent class.
         """
+        params = params or GradiumTTSService.InputParams()
+
         super().__init__(
             push_stop_frames=True,
             push_text_frames=False,
             pause_frame_processing=True,
             supports_word_timestamps=True,
             sample_rate=SAMPLE_RATE,
+            settings=GradiumTTSSettings(
+                model=model,
+                voice=voice_id,
+                language=None,
+                output_format="pcm",
+            ),
             **kwargs,
         )
-
-        params = params or GradiumTTSService.InputParams()
 
         # Store service configuration
         self._api_key = api_key
         self._url = url
         self._json_config = json_config
-        self._settings = GradiumTTSSettings(
-            model=model,
-            voice=voice_id,
-            language=None,
-            output_format="pcm",
-        )
 
         # State tracking
         self._receive_task = None

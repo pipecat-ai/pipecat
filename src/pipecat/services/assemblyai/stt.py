@@ -111,15 +111,17 @@ class AssemblyAISTTService(WebsocketSTTService):
             connection_params = self._configure_manual_turn_mode(connection_params)
 
         super().__init__(
-            sample_rate=connection_params.sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs
+            sample_rate=connection_params.sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=AssemblyAISTTSettings(
+                model=None,
+                language=language,
+                connection_params=connection_params,
+            ),
+            **kwargs,
         )
 
         self._api_key = api_key
-        self._settings = AssemblyAISTTSettings(
-            model=None,
-            language=language,
-            connection_params=connection_params,
-        )
         self._api_endpoint_base_url = api_endpoint_base_url
         self._vad_force_turn_endpoint = vad_force_turn_endpoint
 

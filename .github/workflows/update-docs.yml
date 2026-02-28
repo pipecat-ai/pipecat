@@ -1,0 +1,146 @@
+name: Update Documentation on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+    paths:
+      - "src/pipecat/services/**"
+      - "src/pipecat/transports/**"
+      - "src/pipecat/serializers/**"
+      - "src/pipecat/processors/**"
+      - "src/pipecat/audio/**"
+      - "src/pipecat/turns/**"
+      - "src/pipecat/observers/**"
+      - "src/pipecat/pipeline/**"
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to generate docs for"
+        required: true
+        type: string
+
+jobs:
+  update-docs:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+    steps:
+      - name: Checkout pipecat
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout docs
+        uses: actions/checkout@v4
+        with:
+          repository: pipecat-ai/docs
+          token: ${{ secrets.DOCS_SYNC_TOKEN }}
+          path: _docs
+
+      - name: Resolve PR number
+        id: pr
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "number=${{ inputs.pr_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update documentation
+        uses: anthropics/claude-code-action@v1
+        env:
+          DOCS_SYNC_TOKEN: ${{ secrets.DOCS_SYNC_TOKEN }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are updating documentation for the pipecat-ai/docs repository based on
+            changes merged in PR #${{ steps.pr.outputs.number }} of pipecat-ai/pipecat.
+
+            ## Setup
+
+            1. Read the skill instructions at `.claude/skills/update-docs/SKILL.md`
+            2. Read the source-to-doc mapping at `.claude/skills/update-docs/SOURCE_DOC_MAPPING.md`
+            3. The docs repository is checked out at `./_docs/`
+
+            ## Get the diff
+
+            Run `gh pr diff ${{ steps.pr.outputs.number }}` to see what changed in the PR.
+            Also run `gh pr diff ${{ steps.pr.outputs.number }} --name-only` to get the list of changed files.
+            Filter to source files matching the directories listed in SKILL.md Step 3.
+
+            If no relevant source files were changed, exit with "No documentation changes needed."
+
+            ## Follow the skill instructions
+
+            Apply the SKILL.md workflow (Steps 3-9) with these adaptations for automation:
+
+            ### Docs path
+            Use `./_docs/` — it's already checked out. Do not ask for a path.
+
+            ### Branch management
+            - Branch name: `docs/pr-${{ steps.pr.outputs.number }}`
+            - Work inside `./_docs/` for all doc edits and git operations
+            - Check if the branch already exists on the remote:
+              ```bash
+              cd _docs && git fetch origin docs/pr-${{ steps.pr.outputs.number }} 2>/dev/null
+              ```
+              - If it exists: check it out (supports workflow re-runs)
+              - If not: create it from main
+
+            ### Git config
+            Before committing in `_docs`, set:
+            ```bash
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            ```
+
+            ### No interactive questions
+            Do not ask questions. If you encounter gaps (unmapped files, missing sections,
+            ambiguous changes), note them in the PR body under "## Gaps identified".
+
+            ### Creating the docs PR
+            After committing all changes in `_docs`, push and create a PR:
+            ```bash
+            cd _docs
+            git push -u origin docs/pr-${{ steps.pr.outputs.number }}
+            GH_TOKEN=$DOCS_SYNC_TOKEN gh pr create \
+              --repo pipecat-ai/docs \
+              --label auto-docs \
+              --title "docs: update for pipecat PR #${{ steps.pr.outputs.number }}" \
+              --body "$(cat <<'BODY'
+            Automated documentation update for [pipecat PR #${{ steps.pr.outputs.number }}](https://github.com/pipecat-ai/pipecat/pull/${{ steps.pr.outputs.number }}).
+
+            ## Changes
+            <summarize each doc page updated and what changed>
+
+            ## Gaps identified
+            <any unmapped files, missing doc pages, or missing sections — or "None">
+            BODY
+            )"
+            ```
+
+            ### Re-run handling
+            If `gh pr create` fails because a PR from that branch already exists,
+            push the updated commits and use `gh pr edit` to update the body instead.
+
+            ### No-op
+            If after analyzing the diff you determine no documentation changes are needed
+            (e.g., only skip-listed files changed, or changes don't affect public API docs),
+            exit cleanly without creating a branch or PR. Output "No documentation changes needed."
+
+            ## Important rules
+            - Only modify files inside `./_docs/` — never modify pipecat source code
+            - Follow the conservative editing rules from SKILL.md Step 6
+            - Read each doc page fully before editing (SKILL.md Guidelines)
+            - Use `GH_TOKEN=$DOCS_SYNC_TOKEN` for all `gh` commands targeting pipecat-ai/docs
+          claude_args: |
+            --model claude-sonnet-4-5-20250929
+            --max-turns 30
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash"

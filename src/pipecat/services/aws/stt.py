@@ -99,15 +99,17 @@ class AWSTranscribeSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
-        self._settings = AWSTranscribeSTTSettings(
-            language=self.language_to_service_language(language) or "en-US",
-            sample_rate=sample_rate,
-            media_encoding="linear16",
-            number_of_channels=1,
-            show_speaker_label=False,
-            enable_channel_identification=False,
+        super().__init__(
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=AWSTranscribeSTTSettings(
+                language=self.language_to_service_language(language) or "en-US",
+                sample_rate=sample_rate,
+                media_encoding="linear16",
+                number_of_channels=1,
+                show_speaker_label=False,
+                enable_channel_identification=False,
+            ),
+            **kwargs,
         )
 
         # Validate sample rate - AWS Transcribe only supports 8000 Hz or 16000 Hz

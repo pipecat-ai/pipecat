@@ -499,9 +499,28 @@ class GoogleSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
         params = params or GoogleSTTService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=GoogleSTTSettings(
+                language=None,
+                languages=list(params.language_list),
+                language_codes=None,
+                model=params.model,
+                use_separate_recognition_per_channel=params.use_separate_recognition_per_channel,
+                enable_automatic_punctuation=params.enable_automatic_punctuation,
+                enable_spoken_punctuation=params.enable_spoken_punctuation,
+                enable_spoken_emojis=params.enable_spoken_emojis,
+                profanity_filter=params.profanity_filter,
+                enable_word_time_offsets=params.enable_word_time_offsets,
+                enable_word_confidence=params.enable_word_confidence,
+                enable_interim_results=params.enable_interim_results,
+                enable_voice_activity_events=params.enable_voice_activity_events,
+            ),
+            **kwargs,
+        )
 
         self._location = location
         self._stream = None
@@ -552,22 +571,6 @@ class GoogleSTTService(STTService):
             raise ValueError("Project ID not found in credentials")
 
         self._client = speech_v2.SpeechAsyncClient(credentials=creds, client_options=client_options)
-
-        self._settings = GoogleSTTSettings(
-            language=None,
-            languages=list(params.language_list),
-            language_codes=None,
-            model=params.model,
-            use_separate_recognition_per_channel=params.use_separate_recognition_per_channel,
-            enable_automatic_punctuation=params.enable_automatic_punctuation,
-            enable_spoken_punctuation=params.enable_spoken_punctuation,
-            enable_spoken_emojis=params.enable_spoken_emojis,
-            profanity_filter=params.profanity_filter,
-            enable_word_time_offsets=params.enable_word_time_offsets,
-            enable_word_confidence=params.enable_word_confidence,
-            enable_interim_results=params.enable_interim_results,
-            enable_voice_activity_events=params.enable_voice_activity_events,
-        )
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.

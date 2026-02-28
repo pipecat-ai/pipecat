@@ -695,9 +695,37 @@ class GeminiLiveLLMService(LLMService):
                     stacklevel=2,
                 )
 
-        super().__init__(base_url=base_url, **kwargs)
-
         params = params or InputParams()
+
+        super().__init__(
+            base_url=base_url,
+            settings=GeminiLiveLLMSettings(
+                model=model,
+                frequency_penalty=params.frequency_penalty,
+                max_tokens=params.max_tokens,
+                presence_penalty=params.presence_penalty,
+                temperature=params.temperature,
+                top_k=params.top_k,
+                top_p=params.top_p,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                modalities=params.modalities,
+                language=language_to_gemini_language(params.language)
+                if params.language
+                else "en-US",
+                media_resolution=params.media_resolution,
+                vad=params.vad,
+                context_window_compression=params.context_window_compression.model_dump()
+                if params.context_window_compression
+                else {},
+                thinking=params.thinking or {},
+                enable_affective_dialog=params.enable_affective_dialog or False,
+                proactivity=params.proactivity or {},
+                extra=params.extra if isinstance(params.extra, dict) else {},
+            ),
+            **kwargs,
+        )
 
         self._last_sent_time = 0
         self._base_url = base_url
@@ -741,31 +769,6 @@ class GeminiLiveLLMService(LLMService):
         # Reconnection tracking
         self._consecutive_failures = 0
         self._connection_start_time = None
-
-        self._settings = GeminiLiveLLMSettings(
-            model=model,
-            frequency_penalty=params.frequency_penalty,
-            max_tokens=params.max_tokens,
-            presence_penalty=params.presence_penalty,
-            temperature=params.temperature,
-            top_k=params.top_k,
-            top_p=params.top_p,
-            seed=None,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            modalities=params.modalities,
-            language=self._language_code,
-            media_resolution=params.media_resolution,
-            vad=params.vad,
-            context_window_compression=params.context_window_compression.model_dump()
-            if params.context_window_compression
-            else {},
-            thinking=params.thinking or {},
-            enable_affective_dialog=params.enable_affective_dialog or False,
-            proactivity=params.proactivity or {},
-            extra=params.extra if isinstance(params.extra, dict) else {},
-        )
-        self._sync_model_name_to_metrics()
 
         self._file_api_base_url = file_api_base_url
         self._file_api: Optional[GeminiFileAPI] = None

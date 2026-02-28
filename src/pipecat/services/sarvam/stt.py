@@ -240,11 +240,22 @@ class SarvamSTTService(STTService):
                 f"Model '{model}' does not support language parameter (auto-detects language)."
             )
 
+        # Resolve mode default from model config
+        mode = params.mode if params.mode is not None else self._config.default_mode
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=keepalive_timeout,
             keepalive_interval=keepalive_interval,
+            settings=SarvamSTTSettings(
+                model=model,
+                language=params.language,
+                prompt=params.prompt,
+                mode=mode,
+                vad_signals=params.vad_signals,
+                high_vad_sensitivity=params.high_vad_sensitivity,
+            ),
             **kwargs,
         )
 
@@ -267,19 +278,6 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
-
-        # Resolve mode default from model config
-        mode = params.mode if params.mode is not None else self._config.default_mode
-
-        self._settings = SarvamSTTSettings(
-            model=model,
-            language=params.language,
-            prompt=params.prompt,
-            mode=mode,
-            vad_signals=params.vad_signals,
-            high_vad_sensitivity=params.high_vad_sensitivity,
-        )
-        self._sync_model_name_to_metrics()
 
         if params.vad_signals:
             self._register_event_handler("on_speech_started")

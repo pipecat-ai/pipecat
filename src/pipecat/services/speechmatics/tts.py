@@ -95,7 +95,18 @@ class SpeechmaticsTTSService(TTSService):
                 f"Speechmatics TTS only supports {self.SPEECHMATICS_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        params = params or SpeechmaticsTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=SpeechmaticsTTSSettings(
+                model=None,
+                voice=voice_id,
+                language=None,
+                max_retries=params.max_retries,
+            ),
+            **kwargs,
+        )
 
         # Service parameters
         self._api_key: str = api_key
@@ -105,14 +116,6 @@ class SpeechmaticsTTSService(TTSService):
         # Check we have required attributes
         if not self._api_key:
             raise ValueError("Missing Speechmatics API key")
-
-        params = params or SpeechmaticsTTSService.InputParams()
-        self._settings = SpeechmaticsTTSSettings(
-            model=None,
-            voice=voice_id,
-            language=None,
-            max_retries=params.max_retries,
-        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

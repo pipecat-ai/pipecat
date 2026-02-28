@@ -17,6 +17,7 @@ from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
     MetricsData,
     ProcessingMetricsData,
+    TextAggregationMetricsData,
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
@@ -43,6 +44,7 @@ class FrameProcessorMetrics(BaseObject):
         self._task_manager = None
         self._start_ttfb_time = 0
         self._start_processing_time = 0
+        self._start_text_aggregation_time = 0
         self._last_ttfb_time = 0
         self._should_report_ttfb = True
 
@@ -148,6 +150,10 @@ class FrameProcessorMetrics(BaseObject):
     async def start_processing_metrics(self, *, start_time: Optional[float] = None):
         """Start measuring processing time.
 
+        .. deprecated:: 0.0.104
+            Processing metrics are deprecated and will be removed in a future version.
+            Use TTFB metrics instead.
+
         Args:
             start_time: Optional timestamp to use as the start time. If None,
                 uses the current time.
@@ -156,6 +162,10 @@ class FrameProcessorMetrics(BaseObject):
 
     async def stop_processing_metrics(self, *, end_time: Optional[float] = None):
         """Stop processing time measurement and generate metrics frame.
+
+        .. deprecated:: 0.0.104
+            Processing metrics are deprecated and will be removed in a future version.
+            Use TTFB metrics instead.
 
         Args:
             end_time: Optional timestamp to use as the end time. If None, uses
@@ -211,3 +221,24 @@ class FrameProcessorMetrics(BaseObject):
         )
         logger.debug(f"{self._processor_name()} usage characters: {characters.value}")
         return MetricsFrame(data=[characters])
+
+    async def start_text_aggregation_metrics(self):
+        """Start measuring text aggregation time (first token to first sentence)."""
+        self._start_text_aggregation_time = time.time()
+
+    async def stop_text_aggregation_metrics(self):
+        """Stop text aggregation measurement and generate metrics frame.
+
+        Returns:
+            MetricsFrame containing text aggregation time, or None if not measuring.
+        """
+        if self._start_text_aggregation_time == 0:
+            return None
+
+        value = time.time() - self._start_text_aggregation_time
+        logger.debug(f"{self._processor_name()} text aggregation time: {value}")
+        aggregation = TextAggregationMetricsData(
+            processor=self._processor_name(), value=value, model=self._model_name()
+        )
+        self._start_text_aggregation_time = 0
+        return MetricsFrame(data=[aggregation])

@@ -96,7 +96,17 @@ class AzureSTTService(STTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
-        super().__init__(sample_rate=sample_rate, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=AzureSTTSettings(
+                model=None,
+                region=region,
+                language=language_to_azure_language(language),
+                sample_rate=sample_rate,
+            ),
+            **kwargs,
+        )
 
         self._speech_config = SpeechConfig(
             subscription=api_key,
@@ -109,12 +119,6 @@ class AzureSTTService(STTService):
 
         self._audio_stream = None
         self._speech_recognizer = None
-        self._settings = AzureSTTSettings(
-            model=None,
-            region=region,
-            language=language_to_azure_language(language),
-            sample_rate=sample_rate,
-        )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate performance metrics.

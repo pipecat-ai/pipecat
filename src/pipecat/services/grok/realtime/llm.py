@@ -145,24 +145,26 @@ class GrokRealtimeLLMService(LLMService):
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(base_url=base_url, **kwargs)
+        super().__init__(
+            base_url=base_url,
+            settings=GrokRealtimeLLMSettings(
+                model=None,
+                temperature=None,
+                max_tokens=None,
+                top_p=None,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+                session_properties=session_properties or events.SessionProperties(),
+            ),
+            **kwargs,
+        )
 
         self.api_key = api_key
         self.base_url = base_url
-
-        self._settings = GrokRealtimeLLMSettings(
-            model=None,
-            temperature=None,
-            max_tokens=None,
-            top_p=None,
-            top_k=None,
-            frequency_penalty=None,
-            presence_penalty=None,
-            seed=None,
-            filter_incomplete_user_turns=False,
-            user_turn_completion_config=None,
-            session_properties=session_properties or events.SessionProperties(),
-        )
 
         self._audio_input_paused = start_audio_paused
         self._websocket = None

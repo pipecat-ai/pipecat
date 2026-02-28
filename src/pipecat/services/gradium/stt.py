@@ -129,8 +129,6 @@ class GradiumSTTService(WebsocketSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
-        super().__init__(sample_rate=SAMPLE_RATE, ttfs_p99_latency=ttfs_p99_latency, **kwargs)
-
         if json_config is not None:
             import warnings
 
@@ -140,18 +138,23 @@ class GradiumSTTService(WebsocketSTTService):
                 stacklevel=2,
             )
 
+        params = params or GradiumSTTService.InputParams()
+
+        super().__init__(
+            sample_rate=SAMPLE_RATE,
+            ttfs_p99_latency=ttfs_p99_latency,
+            settings=GradiumSTTSettings(
+                model=None,
+                language=params.language,
+                delay_in_frames=params.delay_in_frames or None,
+            ),
+            **kwargs,
+        )
+
         self._api_key = api_key
         self._api_endpoint_base_url = api_endpoint_base_url
         self._websocket = None
         self._json_config = json_config
-
-        params = params or GradiumSTTService.InputParams()
-
-        self._settings = GradiumSTTSettings(
-            model=None,
-            language=params.language,
-            delay_in_frames=params.delay_in_frames or None,
-        )
 
         self._receive_task = None
 

@@ -207,26 +207,24 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         # was never destroyed.
         # So we can keep it here as false, because inside the method send_with_retry, it will
         # already try to reconnect if needed.
+        params = params or DeepgramFluxSTTService.InputParams()
         super().__init__(
             sample_rate=sample_rate,
             reconnect_on_error=False,
+            settings=DeepgramFluxSTTSettings(
+                model=model,
+                language=Language.EN,
+                encoding=flux_encoding,
+                eager_eot_threshold=params.eager_eot_threshold,
+                eot_threshold=params.eot_threshold,
+                eot_timeout_ms=params.eot_timeout_ms,
+                keyterm=params.keyterm or [],
+                mip_opt_out=params.mip_opt_out,
+                tag=params.tag or [],
+                min_confidence=params.min_confidence,
+            ),
             **kwargs,
         )
-
-        params = params or DeepgramFluxSTTService.InputParams()
-        self._settings = DeepgramFluxSTTSettings(
-            model=model,
-            language=Language.EN,
-            encoding=flux_encoding,
-            eager_eot_threshold=params.eager_eot_threshold,
-            eot_threshold=params.eot_threshold,
-            eot_timeout_ms=params.eot_timeout_ms,
-            keyterm=params.keyterm or [],
-            mip_opt_out=params.mip_opt_out,
-            tag=params.tag or [],
-            min_confidence=params.min_confidence,
-        )
-        self._sync_model_name_to_metrics()
         self._api_key = api_key
         self._url = url
         self._should_interrupt = should_interrupt

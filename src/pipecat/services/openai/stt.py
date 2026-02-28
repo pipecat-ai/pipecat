@@ -221,6 +221,11 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
 
         super().__init__(
             ttfs_p99_latency=ttfs_p99_latency,
+            settings=OpenAIRealtimeSTTSettings(
+                model=model,
+                language=language,
+                prompt=prompt,
+            ),
             **kwargs,
         )
 
@@ -231,13 +236,6 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         self._turn_detection = turn_detection
         self._noise_reduction = noise_reduction
         self._should_interrupt = should_interrupt
-
-        self._settings = OpenAIRealtimeSTTSettings(
-            model=model,
-            language=language,
-            prompt=prompt,
-        )
-        self._sync_model_name_to_metrics()
 
         self._receive_task = None
         self._session_ready = False

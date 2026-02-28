@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
-from pipecat.services.tts_service import TTSService
+from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -141,7 +141,6 @@ class AzureBaseTTSService:
         api_key: str,
         region: str,
         voice: str = "en-US-SaraNeural",
-        params: Optional[InputParams] = None,
     ):
         """Initialize Azure-specific configuration.
 
@@ -151,25 +150,7 @@ class AzureBaseTTSService:
             api_key: Azure Cognitive Services subscription key.
             region: Azure region identifier (e.g., "eastus", "westus2").
             voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
-            params: Voice and synthesis parameters configuration.
         """
-        params = params or AzureBaseTTSService.InputParams()
-
-        self._settings = AzureTTSSettings(
-            model=None,
-            emphasis=params.emphasis,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
-            pitch=params.pitch,
-            rate=params.rate,
-            role=params.role,
-            style=params.style,
-            style_degree=params.style_degree,
-            voice=voice,
-            volume=params.volume,
-        )
-
         self._api_key = api_key
         self._region = region
         self._speech_synthesizer = None
@@ -275,7 +256,8 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         voice: str = "en-US-SaraNeural",
         sample_rate: Optional[int] = None,
         params: Optional[AzureBaseTTSService.InputParams] = None,
-        aggregate_sentences: bool = True,
+        aggregate_sentences: Optional[bool] = None,
+        text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
     ):
         """Initialize the Azure streaming TTS service.
@@ -286,21 +268,43 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
-            aggregate_sentences: Whether to aggregate sentences before synthesis.
-            **kwargs: Additional arguments passed to the parent TTSService.
+            aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
+
+                .. deprecated:: 0.0.104
+                    Use ``text_aggregation_mode`` instead.
+
+            text_aggregation_mode: How to aggregate text before synthesis.
+            **kwargs: Additional arguments passed to parent WordTTSService.
         """
+        params = params or AzureBaseTTSService.InputParams()
+
         super().__init__(
             aggregate_sentences=aggregate_sentences,
+            text_aggregation_mode=text_aggregation_mode,
             push_text_frames=False,  # We'll push text frames based on word timestamps
             push_stop_frames=True,
             pause_frame_processing=True,
             supports_word_timestamps=True,
             sample_rate=sample_rate,
+            settings=AzureTTSSettings(
+                model=None,
+                emphasis=params.emphasis,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                pitch=params.pitch,
+                rate=params.rate,
+                role=params.role,
+                style=params.style,
+                style_degree=params.style_degree,
+                voice=voice,
+                volume=params.volume,
+            ),
             **kwargs,
         )
 
         # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, voice=voice, params=params)
+        self._init_azure_base(api_key=api_key, region=region, voice=voice)
 
         self._speech_config = None
         self._speech_synthesizer = None
@@ -734,10 +738,29 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
             params: Voice and synthesis parameters configuration.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        params = params or AzureBaseTTSService.InputParams()
+
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=AzureTTSSettings(
+                model=None,
+                emphasis=params.emphasis,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en-US",
+                pitch=params.pitch,
+                rate=params.rate,
+                role=params.role,
+                style=params.style,
+                style_degree=params.style_degree,
+                voice=voice,
+                volume=params.volume,
+            ),
+            **kwargs,
+        )
 
         # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, voice=voice, params=params)
+        self._init_azure_base(api_key=api_key, region=region, voice=voice)
 
         self._speech_config = None
         self._speech_synthesizer = None

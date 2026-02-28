@@ -207,13 +207,22 @@ class FalSTTService(SegmentedSTTService):
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
+        params = params or FalSTTService.InputParams()
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
+            settings=FalSTTSettings(
+                model=None,
+                language=self.language_to_service_language(params.language)
+                if params.language
+                else "en",
+                task=params.task,
+                chunk_level=params.chunk_level,
+                version=params.version,
+            ),
             **kwargs,
         )
-
-        params = params or FalSTTService.InputParams()
 
         if api_key:
             os.environ["FAL_KEY"] = api_key
@@ -223,15 +232,6 @@ class FalSTTService(SegmentedSTTService):
             )
 
         self._fal_client = fal_client.AsyncClient(key=api_key or os.getenv("FAL_KEY"))
-        self._settings = FalSTTSettings(
-            model=None,
-            language=self.language_to_service_language(params.language)
-            if params.language
-            else "en",
-            task=params.task,
-            chunk_level=params.chunk_level,
-            version=params.version,
-        )
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate processing metrics.
