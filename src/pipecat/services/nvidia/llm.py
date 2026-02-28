@@ -10,10 +10,14 @@ This module provides a service for interacting with NVIDIA's NIM (NVIDIA Inferen
 Microservice) API while maintaining compatibility with the OpenAI-style interface.
 """
 
+from typing import Optional
+
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 
 class NvidiaLLMService(OpenAILLMService):
@@ -29,7 +33,8 @@ class NvidiaLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://integrate.api.nvidia.com/v1",
-        model: str = "nvidia/llama-3.1-nemotron-70b-instruct",
+        model: Optional[str] = None,
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the NvidiaLLMService.
@@ -37,10 +42,26 @@ class NvidiaLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing NVIDIA's NIM API.
             base_url: The base URL for NIM API. Defaults to "https://integrate.api.nvidia.com/v1".
-            model: The model identifier to use. Defaults to "nvidia/llama-3.1-nemotron-70b-instruct".
+            model: The model identifier to use. Defaults to
+                "nvidia/llama-3.1-nemotron-70b-instruct".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(
+            model=model or "nvidia/llama-3.1-nemotron-70b-instruct"
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
         # Counters for accumulating token usage metrics
         self._prompt_tokens = 0
         self._completion_tokens = 0

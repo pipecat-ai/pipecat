@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import GOOGLE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -425,6 +425,9 @@ class GoogleSTTService(STTService):
     class InputParams(BaseModel):
         """Configuration parameters for Google Speech-to-Text.
 
+        .. deprecated:: 1.0
+            Use ``settings=GoogleSTTSettings(...)`` instead.
+
         Parameters:
             languages: Single language or list of recognition languages. First language is primary.
             model: Speech recognition model to use.
@@ -484,6 +487,7 @@ class GoogleSTTService(STTService):
         location: str = "global",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GoogleSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = GOOGLE_TTFS_P99,
         **kwargs,
     ):
@@ -495,30 +499,43 @@ class GoogleSTTService(STTService):
             location: Google Cloud location (e.g., "global", "us-central1").
             sample_rate: Audio sample rate in Hertz.
             params: Configuration parameters for the service.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GoogleSTTSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                ``params``, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
         """
-        params = params or GoogleSTTService.InputParams()
+        if params is not None:
+            _warn_deprecated_param("params", "GoogleSTTSettings")
+
+        _params = params or GoogleSTTService.InputParams()
+
+        default_settings = GoogleSTTSettings(
+            language=None,
+            languages=list(_params.language_list),
+            language_codes=None,
+            model=_params.model,
+            use_separate_recognition_per_channel=_params.use_separate_recognition_per_channel,
+            enable_automatic_punctuation=_params.enable_automatic_punctuation,
+            enable_spoken_punctuation=_params.enable_spoken_punctuation,
+            enable_spoken_emojis=_params.enable_spoken_emojis,
+            profanity_filter=_params.profanity_filter,
+            enable_word_time_offsets=_params.enable_word_time_offsets,
+            enable_word_confidence=_params.enable_word_confidence,
+            enable_interim_results=_params.enable_interim_results,
+            enable_voice_activity_events=_params.enable_voice_activity_events,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=GoogleSTTSettings(
-                language=None,
-                languages=list(params.language_list),
-                language_codes=None,
-                model=params.model,
-                use_separate_recognition_per_channel=params.use_separate_recognition_per_channel,
-                enable_automatic_punctuation=params.enable_automatic_punctuation,
-                enable_spoken_punctuation=params.enable_spoken_punctuation,
-                enable_spoken_emojis=params.enable_spoken_emojis,
-                profanity_filter=params.profanity_filter,
-                enable_word_time_offsets=params.enable_word_time_offsets,
-                enable_word_confidence=params.enable_word_confidence,
-                enable_interim_results=params.enable_interim_results,
-                enable_voice_activity_events=params.enable_voice_activity_events,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

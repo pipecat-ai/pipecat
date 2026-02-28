@@ -41,7 +41,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
-    from pipecat.services.deepgram.stt import LiveOptions
+    from deepgram import LiveOptions
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -51,10 +51,10 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
-class DeepgramSageMakerSTTSettings(DeepgramSTTSettings):
+class DeepgramSageMakerSTTSettings(_DeepgramSTTSettingsBase):
     """Settings for the Deepgram SageMaker STT service.
 
-    See ``DeepgramSTTSettings`` for full documentation.
+    See ``_DeepgramSTTSettingsBase`` for full documentation.
     """
 
     pass
@@ -97,6 +97,7 @@ class DeepgramSageMakerSTTService(STTService):
         region: str,
         sample_rate: Optional[int] = None,
         live_options: Optional[LiveOptions] = None,
+        settings: Optional[DeepgramSageMakerSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = DEEPGRAM_SAGEMAKER_TTFS_P99,
         **kwargs,
     ):
@@ -111,37 +112,38 @@ class DeepgramSageMakerSTTService(STTService):
             live_options: Deepgram LiveOptions configuration. Treated as a
                 delta from a set of sensible defaults — only the fields you
                 set are overridden; all others keep their default values.
+            settings: Runtime-updatable settings. When provided alongside
+                ``live_options``, ``settings`` values take precedence (applied
+                after the ``live_options`` merge).
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
         """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
 
-        settings = DeepgramSageMakerSTTSettings(
-            model="nova-3",
-            language=Language.EN,
+        default_options = LiveOptions(
             encoding="linear16",
+            language=Language.EN,
+            model="nova-3",
             channels=1,
             interim_results=True,
-            smart_format=False,
             punctuate=True,
-            profanity_filter=True,
-            vad_events=False,
-            diarize=False,
-            endpointing=None,
         )
 
+        default_settings = DeepgramSageMakerSTTSettings(
+            model=default_options.model,
+            language=default_options.language,
+            live_options=default_options,
+        )
         if live_options:
-            lo_dict = live_options.to_dict()
-            delta = DeepgramSageMakerSTTSettings.from_mapping(
-                {k: v for k, v in lo_dict.items() if k != "sample_rate"}
-            )
-            settings.apply_update(delta)
+            default_settings._merge_live_options_delta(live_options)
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=settings,
+            settings=default_settings,
             **kwargs,
         )
 
@@ -228,8 +230,9 @@ class DeepgramSageMakerSTTService(STTService):
         """
         logger.debug("Connecting to Deepgram on SageMaker...")
 
-        # Reconstruct a LiveOptions from the flat settings to build the query string.
-        live_options = LiveOptions(**self._settings.given_fields())
+        live_options = LiveOptions(
+            **{**self._settings.live_options.to_dict(), "sample_rate": self.sample_rate}
+        )
 
         # Build query string from live_options, converting booleans to strings
         query_params = {}
@@ -240,7 +243,6 @@ class DeepgramSageMakerSTTService(STTService):
                     query_params[key] = str(value).lower()
                 else:
                     query_params[key] = str(value)
-        query_params["sample_rate"] = str(self.sample_rate)
 
         query_string = "&".join(f"{k}={v}" for k, v in query_params.items())
 

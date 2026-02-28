@@ -75,6 +75,10 @@ class BaseOpenAILLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for OpenAI model configuration.
 
+        .. deprecated:: 1.0
+            Use ``settings=OpenAILLMSettings(...)`` instead of
+            ``params=InputParams(...)``.
+
         Parameters:
             frequency_penalty: Penalty for frequent tokens (-2.0 to 2.0).
             presence_penalty: Penalty for new tokens (-2.0 to 2.0).
@@ -108,13 +112,14 @@ class BaseOpenAILLMService(LLMService):
     def __init__(
         self,
         *,
-        model: str,
+        model: Optional[str] = None,
         api_key=None,
         base_url=None,
         organization=None,
         project=None,
         default_headers: Optional[Mapping[str, str]] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[OpenAILLMSettings] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
         system_instruction: Optional[str] = None,
@@ -124,35 +129,50 @@ class BaseOpenAILLMService(LLMService):
 
         Args:
             model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             api_key: OpenAI API key. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
             organization: OpenAI organization ID.
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             params: Input parameters for model configuration and behavior.
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to retry the request once if it times out.
             system_instruction: Optional system instruction to prepend to messages.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
-        params = params or BaseOpenAILLMService.InputParams()
+        _params = params or BaseOpenAILLMService.InputParams()
+
+        default_settings = OpenAILLMSettings(
+            model=model or "gpt-4o",
+            frequency_penalty=_params.frequency_penalty,
+            presence_penalty=_params.presence_penalty,
+            seed=_params.seed,
+            temperature=_params.temperature,
+            top_p=_params.top_p,
+            top_k=None,
+            max_tokens=_params.max_tokens,
+            max_completion_tokens=_params.max_completion_tokens,
+            service_tier=_params.service_tier,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            extra=_params.extra if isinstance(_params.extra, dict) else {},
+        )
+
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
-            settings=OpenAILLMSettings(
-                model=model,
-                frequency_penalty=params.frequency_penalty,
-                presence_penalty=params.presence_penalty,
-                seed=params.seed,
-                temperature=params.temperature,
-                top_p=params.top_p,
-                top_k=None,
-                max_tokens=params.max_tokens,
-                max_completion_tokens=params.max_completion_tokens,
-                service_tier=params.service_tier,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                extra=params.extra if isinstance(params.extra, dict) else {},
-            ),
+            settings=default_settings,
             **kwargs,
         )
         self._retry_timeout_secs = retry_timeout_secs

@@ -11,11 +11,15 @@ an OpenAI-compatible interface. It handles Perplexity's unique token usage
 reporting patterns while maintaining compatibility with the Pipecat framework.
 """
 
+from typing import Optional
+
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 
 class PerplexityLLMService(OpenAILLMService):
@@ -31,7 +35,8 @@ class PerplexityLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.perplexity.ai",
-        model: str = "sonar",
+        model: Optional[str] = None,
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Perplexity LLM service.
@@ -40,9 +45,22 @@ class PerplexityLLMService(OpenAILLMService):
             api_key: The API key for accessing Perplexity's API.
             base_url: The base URL for Perplexity's API. Defaults to "https://api.perplexity.ai".
             model: The model identifier to use. Defaults to "sonar".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(model=model or "sonar")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
         # Counters for accumulating token usage metrics
         self._prompt_tokens = 0
         self._completion_tokens = 0

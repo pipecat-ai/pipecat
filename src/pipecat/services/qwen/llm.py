@@ -6,9 +6,13 @@
 
 """Qwen LLM service implementation using OpenAI-compatible interface."""
 
+from typing import Optional
+
 from loguru import logger
 
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 
 class QwenLLMService(OpenAILLMService):
@@ -23,7 +27,8 @@ class QwenLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        model: str = "qwen-plus",
+        model: Optional[str] = None,
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Qwen LLM service.
@@ -32,10 +37,23 @@ class QwenLLMService(OpenAILLMService):
             api_key: The API key for accessing Qwen's API (DashScope API key).
             base_url: Base URL for Qwen API. Defaults to "https://dashscope-intl.aliyuncs.com/compatible-mode/v1".
             model: The model identifier to use. Defaults to "qwen-plus".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
-        logger.info(f"Initialized Qwen LLM service with model: {model}")
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(model=model or "qwen-plus")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
+        logger.info(f"Initialized Qwen LLM service with model: {self._settings.model}")
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Qwen API endpoint.

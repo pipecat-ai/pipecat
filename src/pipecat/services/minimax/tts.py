@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -166,6 +166,9 @@ class MiniMaxHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Configuration parameters for MiniMax TTS.
 
+        .. deprecated:: 1.0
+            Use ``MiniMaxTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             language: Language for TTS generation. Supports 40 languages.
                 Note: Filipino, Tamil, and Persian require speech-2.6-* models.
@@ -201,11 +204,12 @@ class MiniMaxHttpTTSService(TTSService):
         api_key: str,
         base_url: str = "https://api.minimax.io/v1/t2a_v2",
         group_id: str,
-        model: str = "speech-02-turbo",
-        voice_id: str = "Calm_Woman",
+        model: Optional[str] = None,
+        voice_id: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[MiniMaxTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the MiniMax TTS service.
@@ -221,50 +225,45 @@ class MiniMaxHttpTTSService(TTSService):
                 "speech-2.6-hd", "speech-2.6-turbo" (latest, supports Filipino/Tamil/Persian),
                 "speech-02-hd", "speech-02-turbo",
                 "speech-01-hd", "speech-01-turbo".
+
+                .. deprecated:: 1.0
+                    Use ``settings=MiniMaxTTSSettings(model=...)`` instead.
+
             voice_id: Voice identifier. Defaults to "Calm_Woman".
+
+                .. deprecated:: 1.0
+                    Use ``settings=MiniMaxTTSSettings(voice=...)`` instead.
+
             aiohttp_session: aiohttp.ClientSession for API communication.
             sample_rate: Output audio sample rate in Hz. If None, uses pipeline default.
             params: Additional configuration parameters.
+
+                .. deprecated:: 1.0
+                    Use ``settings=MiniMaxTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        params = params or MiniMaxHttpTTSService.InputParams()
+        if model is not None:
+            _warn_deprecated_param("model", "MiniMaxTTSSettings", "model")
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "MiniMaxTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "MiniMaxTTSSettings")
 
-        super().__init__(
-            sample_rate=sample_rate,
-            settings=MiniMaxTTSSettings(
-                model=model,
-                voice=voice_id,
-                language=None,
-                stream=True,
-                speed=params.speed,
-                volume=params.volume,
-                pitch=params.pitch,
-                language_boost=None,
-                emotion=None,
-                text_normalization=None,
-                latex_read=None,
-                audio_bitrate=128000,
-                audio_format="pcm",
-                audio_channel=1,
-                audio_sample_rate=0,
-            ),
-            **kwargs,
-        )
+        _params = params or MiniMaxHttpTTSService.InputParams()
 
-        self._api_key = api_key
-        self._group_id = group_id
-        self._base_url = f"{base_url}?GroupId={group_id}"
-        self._session = aiohttp_session
-
-        # Add language boost if provided
-        if params.language:
-            service_lang = self.language_to_service_language(params.language)
+        # Resolve language boost
+        language_boost = None
+        if _params.language:
+            service_lang = self.language_to_service_language(_params.language)
             if service_lang:
-                self._settings.language_boost = service_lang
+                language_boost = service_lang
 
-        # Add optional emotion if provided
-        if params.emotion:
-            # Validate emotion is in the supported list
+        # Resolve emotion
+        emotion = None
+        if _params.emotion:
             supported_emotions = [
                 "happy",
                 "sad",
@@ -275,15 +274,16 @@ class MiniMaxHttpTTSService(TTSService):
                 "neutral",
                 "fluent",
             ]
-            if params.emotion in supported_emotions:
-                self._settings.emotion = params.emotion
+            if _params.emotion in supported_emotions:
+                emotion = _params.emotion
             else:
                 logger.warning(
-                    f"Unsupported emotion: {params.emotion}. Supported emotions: {supported_emotions}"
+                    f"Unsupported emotion: {_params.emotion}. Supported emotions: {supported_emotions}"
                 )
 
-        # If `english_normalization`, add `text_normalization` and print warning
-        if params.english_normalization is not None:
+        # Resolve text_normalization
+        text_normalization = None
+        if _params.english_normalization is not None:
             import warnings
 
             with warnings.catch_warnings():
@@ -292,15 +292,40 @@ class MiniMaxHttpTTSService(TTSService):
                     "Parameter `english_normalization` is deprecated and will be removed in a future version. Use `text_normalization` instead.",
                     DeprecationWarning,
                 )
-            self._settings.text_normalization = params.english_normalization
+            text_normalization = _params.english_normalization
+        if _params.text_normalization is not None:
+            text_normalization = _params.text_normalization
 
-        # Add text_normalization if provided (corrected parameter name)
-        if params.text_normalization is not None:
-            self._settings.text_normalization = params.text_normalization
+        default_settings = MiniMaxTTSSettings(
+            model=model or "speech-02-turbo",
+            voice=voice_id or "Calm_Woman",
+            language=None,
+            stream=True,
+            speed=_params.speed,
+            volume=_params.volume,
+            pitch=_params.pitch,
+            language_boost=language_boost,
+            emotion=emotion,
+            text_normalization=text_normalization,
+            latex_read=_params.latex_read,
+            audio_bitrate=128000,
+            audio_format="pcm",
+            audio_channel=1,
+            audio_sample_rate=0,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
-        # Add latex_read if provided
-        if params.latex_read is not None:
-            self._settings.latex_read = params.latex_read
+        super().__init__(
+            sample_rate=sample_rate,
+            settings=default_settings,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._group_id = group_id
+        self._base_url = f"{base_url}?GroupId={group_id}"
+        self._session = aiohttp_session
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

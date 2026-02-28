@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import InterruptibleTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -102,6 +102,9 @@ class NeuphonicTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         """Input parameters for Neuphonic TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``settings=NeuphonicTTSSettings(...)`` instead.
+
         Parameters:
             language: Language for synthesis. Defaults to English.
             speed: Speech speed multiplier. Defaults to 1.0.
@@ -119,6 +122,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
         params: Optional[InputParams] = None,
+        settings: Optional[NeuphonicTTSSettings] = None,
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
@@ -128,10 +132,20 @@ class NeuphonicTTSService(InterruptibleTTSService):
         Args:
             api_key: Neuphonic API key for authentication.
             voice_id: ID of the voice to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=NeuphonicTTSSettings(voice=...)`` instead.
+
             url: WebSocket URL for the Neuphonic API.
             sample_rate: Audio sample rate in Hz. Defaults to 22050.
             encoding: Audio encoding format. Defaults to "pcm_linear".
             params: Additional input parameters for TTS configuration.
+
+                .. deprecated:: 1.0
+                    Use ``settings=NeuphonicTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
                 .. deprecated:: 0.0.104
@@ -140,7 +154,23 @@ class NeuphonicTTSService(InterruptibleTTSService):
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
-        params = params or NeuphonicTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "NeuphonicTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "NeuphonicTTSSettings")
+
+        _params = params or NeuphonicTTSService.InputParams()
+
+        default_settings = NeuphonicTTSSettings(
+            model=None,
+            language=self.language_to_service_language(_params.language),
+            speed=_params.speed,
+            encoding=encoding,
+            sampling_rate=sample_rate,
+            voice=voice_id,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             aggregate_sentences=aggregate_sentences,
@@ -148,14 +178,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
             sample_rate=sample_rate,
-            settings=NeuphonicTTSSettings(
-                model=None,
-                language=self.language_to_service_language(params.language),
-                speed=params.speed,
-                encoding=encoding,
-                sampling_rate=sample_rate,
-                voice=voice_id,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -418,6 +441,9 @@ class NeuphonicHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Neuphonic HTTP TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``settings=NeuphonicTTSSettings(...)`` instead.
+
         Parameters:
             language: Language for synthesis. Defaults to English.
             speed: Speech speed multiplier. Defaults to 1.0.
@@ -436,6 +462,7 @@ class NeuphonicHttpTTSService(TTSService):
         sample_rate: Optional[int] = 22050,
         encoding: Optional[str] = "pcm_linear",
         params: Optional[InputParams] = None,
+        settings: Optional[NeuphonicTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Neuphonic HTTP TTS service.
@@ -443,25 +470,44 @@ class NeuphonicHttpTTSService(TTSService):
         Args:
             api_key: Neuphonic API key for authentication.
             voice_id: ID of the voice to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=NeuphonicTTSSettings(voice=...)`` instead.
+
             aiohttp_session: Shared aiohttp session for HTTP requests.
             url: Base URL for the Neuphonic HTTP API.
             sample_rate: Audio sample rate in Hz. Defaults to 22050.
             encoding: Audio encoding format. Defaults to "pcm_linear".
             params: Additional input parameters for TTS configuration.
+
+                .. deprecated:: 1.0
+                    Use ``settings=NeuphonicTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        params = params or NeuphonicHttpTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "NeuphonicTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "NeuphonicTTSSettings")
+
+        _params = params or NeuphonicHttpTTSService.InputParams()
+
+        default_settings = NeuphonicTTSSettings(
+            model=None,
+            voice=voice_id,
+            language=self.language_to_service_language(_params.language) or "en",
+            speed=_params.speed,
+            encoding=encoding,
+            sampling_rate=sample_rate,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=NeuphonicTTSSettings(
-                model=None,
-                voice=voice_id,
-                language=self.language_to_service_language(params.language) or "en",
-                speed=params.speed,
-                encoding=encoding,
-                sampling_rate=sample_rate,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

@@ -6,10 +6,14 @@
 
 """Cerebras LLM service implementation using OpenAI-compatible interface."""
 
+from typing import Optional
+
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 
 class CerebrasLLMService(OpenAILLMService):
@@ -24,7 +28,8 @@ class CerebrasLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.cerebras.ai/v1",
-        model: str = "gpt-oss-120b",
+        model: Optional[str] = None,
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Cerebras LLM service.
@@ -33,9 +38,22 @@ class CerebrasLLMService(OpenAILLMService):
             api_key: The API key for accessing Cerebras's API.
             base_url: The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1".
             model: The model identifier to use. Defaults to "gpt-oss-120b".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(model=model or "gpt-oss-120b")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Cerebras API endpoint.

@@ -76,7 +76,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
@@ -552,6 +552,9 @@ class ContextWindowCompressionParams(BaseModel):
 class InputParams(BaseModel):
     """Input parameters for Gemini Live generation.
 
+    .. deprecated::
+        Use ``GeminiLiveLLMSettings`` instead.
+
     Parameters:
         frequency_penalty: Frequency penalty for generation (0.0-2.0). Defaults to None.
         max_tokens: Maximum tokens to generate. Must be >= 1. Defaults to 4096.
@@ -647,13 +650,14 @@ class GeminiLiveLLMService(LLMService):
         *,
         api_key: str,
         base_url: Optional[str] = None,
-        model="models/gemini-2.5-flash-native-audio-preview-12-2025",
+        model: Optional[str] = None,
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         system_instruction: Optional[str] = None,
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GeminiLiveLLMSettings] = None,
         inference_on_context_initialization: bool = True,
         file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
         http_options: Optional[HttpOptions] = None,
@@ -670,13 +674,23 @@ class GeminiLiveLLMService(LLMService):
                     Please use `http_options` to customize requests made by the
                     API client.
 
-            model: Model identifier to use. Defaults to "models/gemini-2.5-flash-native-audio-preview-12-2025".
+            model: Model identifier to use.
+
+                .. deprecated::
+                    Use ``settings=GeminiLiveLLMSettings(model=...)`` instead.
+
             voice_id: TTS voice identifier. Defaults to "Charon".
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             system_instruction: System prompt for the model. Defaults to None.
             tools: Tools/functions available to the model. Defaults to None.
-            params: Configuration parameters for the model. Defaults to InputParams().
+            params: Configuration parameters for the model.
+
+                .. deprecated::
+                    Use ``settings=GeminiLiveLLMSettings(...)`` instead.
+
+            settings: Gemini Live LLM settings. If provided together with deprecated
+                top-level parameters, the ``settings`` values take precedence.
             inference_on_context_initialization: Whether to generate a response when context
                 is first set. Defaults to True.
             file_api_base_url: Base URL for the Gemini File API. Defaults to the official endpoint.
@@ -694,43 +708,49 @@ class GeminiLiveLLMService(LLMService):
                     DeprecationWarning,
                     stacklevel=2,
                 )
+        if model is not None:
+            _warn_deprecated_param("model", "GeminiLiveLLMSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "GeminiLiveLLMSettings")
 
-        params = params or InputParams()
+        _params = params or InputParams()
+
+        default_settings = GeminiLiveLLMSettings(
+            model=model or "models/gemini-2.5-flash-native-audio-preview-12-2025",
+            frequency_penalty=_params.frequency_penalty,
+            max_tokens=_params.max_tokens,
+            presence_penalty=_params.presence_penalty,
+            temperature=_params.temperature,
+            top_k=_params.top_k,
+            top_p=_params.top_p,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            modalities=_params.modalities,
+            language=language_to_gemini_language(_params.language) if _params.language else "en-US",
+            media_resolution=_params.media_resolution,
+            vad=_params.vad,
+            context_window_compression=_params.context_window_compression.model_dump()
+            if _params.context_window_compression
+            else {},
+            thinking=_params.thinking or {},
+            enable_affective_dialog=_params.enable_affective_dialog or False,
+            proactivity=_params.proactivity or {},
+            extra=_params.extra if isinstance(_params.extra, dict) else {},
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             base_url=base_url,
-            settings=GeminiLiveLLMSettings(
-                model=model,
-                frequency_penalty=params.frequency_penalty,
-                max_tokens=params.max_tokens,
-                presence_penalty=params.presence_penalty,
-                temperature=params.temperature,
-                top_k=params.top_k,
-                top_p=params.top_p,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                modalities=params.modalities,
-                language=language_to_gemini_language(params.language)
-                if params.language
-                else "en-US",
-                media_resolution=params.media_resolution,
-                vad=params.vad,
-                context_window_compression=params.context_window_compression.model_dump()
-                if params.context_window_compression
-                else {},
-                thinking=params.thinking or {},
-                enable_affective_dialog=params.enable_affective_dialog or False,
-                proactivity=params.proactivity or {},
-                extra=params.extra if isinstance(params.extra, dict) else {},
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         self._last_sent_time = 0
         self._base_url = base_url
         self._voice_id = voice_id
-        self._language_code = params.language
+        self._language_code = _params.language
 
         self._system_instruction_from_init = system_instruction
         self._tools_from_init = tools
@@ -760,11 +780,11 @@ class GeminiLiveLLMService(LLMService):
 
         self._sample_rate = 24000
 
-        self._language = params.language
+        self._language = _params.language
         self._language_code = (
-            language_to_gemini_language(params.language) if params.language else "en-US"
+            language_to_gemini_language(_params.language) if _params.language else "en-US"
         )
-        self._vad_params = params.vad
+        self._vad_params = _params.vad
 
         # Reconnection tracking
         self._consecutive_failures = 0

@@ -23,7 +23,8 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.base_llm import BaseOpenAILLMService
+from pipecat.services.openai.base_llm import BaseOpenAILLMService, OpenAILLMSettings
+from pipecat.services.settings import _warn_deprecated_param
 
 
 @dataclass
@@ -72,18 +73,53 @@ class OpenAILLMService(BaseOpenAILLMService):
     def __init__(
         self,
         *,
-        model: str = "gpt-4.1",
+        model: Optional[str] = None,
         params: Optional[BaseOpenAILLMService.InputParams] = None,
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize OpenAI LLM service.
 
         Args:
             model: The OpenAI model name to use. Defaults to "gpt-4.1".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             params: Input parameters for model configuration.
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent BaseOpenAILLMService.
         """
-        super().__init__(model=model, params=params, **kwargs)
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "OpenAILLMSettings")
+
+        _params = params or BaseOpenAILLMService.InputParams()
+        default_settings = OpenAILLMSettings(
+            model=model or "gpt-4.1",
+            frequency_penalty=_params.frequency_penalty,
+            presence_penalty=_params.presence_penalty,
+            seed=_params.seed,
+            temperature=_params.temperature,
+            top_p=_params.top_p,
+            top_k=None,
+            max_tokens=_params.max_tokens,
+            max_completion_tokens=_params.max_completion_tokens,
+            service_tier=_params.service_tier,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            extra=_params.extra if isinstance(_params.extra, dict) else {},
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
 
     def create_context_aggregator(
         self,

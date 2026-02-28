@@ -20,7 +20,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import FAL_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -169,6 +169,9 @@ class FalSTTService(SegmentedSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for Fal's Wizper API.
 
+        .. deprecated:: 1.0
+            Use ``settings=FalSTTSettings(...)`` instead.
+
         Parameters:
             language: Language of the audio input. Defaults to English.
             task: Task to perform ('transcribe' or 'translate'). Defaults to 'transcribe'.
@@ -188,6 +191,7 @@ class FalSTTService(SegmentedSTTService):
         aiohttp_session: Optional[aiohttp.ClientSession] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[FalSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = FAL_TTFS_P99,
         **kwargs,
     ):
@@ -199,24 +203,37 @@ class FalSTTService(SegmentedSTTService):
                 If not provided, a session will be created and managed internally.
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the Wizper API.
+
+                .. deprecated:: 1.0
+                    Use ``settings=FalSTTSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        params = params or FalSTTService.InputParams()
+        if params is not None:
+            _warn_deprecated_param("params", "FalSTTSettings")
+
+        _params = params or FalSTTService.InputParams()
+
+        default_settings = FalSTTSettings(
+            model=None,
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else "en",
+            task=_params.task,
+            chunk_level=_params.chunk_level,
+            version=_params.version,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=FalSTTSettings(
-                model=None,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "en",
-                task=params.task,
-                chunk_level=params.chunk_level,
-                version=params.version,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

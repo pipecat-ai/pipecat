@@ -172,32 +172,38 @@ class UltravoxRealtimeLLMService(LLMService):
         self,
         *,
         params: Union[AgentInputParams, OneShotInputParams, JoinUrlInputParams],
+        settings: Optional[UltravoxRealtimeLLMSettings] = None,
         one_shot_selected_tools: Optional[ToolsSchema] = None,
         **kwargs,
     ):
         """Initialize the Ultravox Realtime LLM service.
 
         Args:
-            api_key: Ultravox API key for authentication.
             params: Configuration parameters for the model.
+            settings: Ultravox Realtime LLM settings. If provided, the ``settings``
+                values take precedence over default values.
             one_shot_selected_tools: ToolsSchema for tools to use with this call.
                 May only be set with OneShotInputParams.
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        default_settings = UltravoxRealtimeLLMSettings(
+            model=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            output_medium=None,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
-            settings=UltravoxRealtimeLLMSettings(
-                model=None,
-                temperature=None,
-                max_tokens=None,
-                top_p=None,
-                top_k=None,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                output_medium=None,
-            ),
+            settings=default_settings,
             **kwargs,
         )
         self._params = params

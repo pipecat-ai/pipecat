@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -124,8 +124,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for Deepgram Flux API.
 
-        This class defines all available connection parameters for the Deepgram Flux API
-        based on the official documentation.
+        .. deprecated:: 1.0
+            Use ``settings=DeepgramFluxSTTSettings(...)`` instead.
 
         Parameters:
             eager_eot_threshold: Optional. EagerEndOfTurn/TurnResumed are off by default.
@@ -158,10 +158,11 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         api_key: str,
         url: str = "wss://api.deepgram.com/v2/listen",
         sample_rate: Optional[int] = None,
-        model: str = "flux-general-en",
+        model: Optional[str] = None,
         flux_encoding: str = "linear16",
         params: Optional[InputParams] = None,
         should_interrupt: bool = True,
+        settings: Optional[DeepgramFluxSTTSettings] = None,
         **kwargs,
     ):
         """Initialize the Deepgram Flux STT service.
@@ -170,12 +171,21 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             api_key: Deepgram API key for authentication. Required for API access.
             url: WebSocket URL for the Deepgram Flux API. Defaults to the preview endpoint.
             sample_rate: Audio sample rate in Hz. If None, uses the rate from params or 16000.
-            model: Deepgram Flux model to use for transcription. Currently only supports "flux-general-en".
+            model: Deepgram Flux model to use for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=DeepgramFluxSTTSettings(model=...)`` instead.
+
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
             params: InputParams instance containing detailed API configuration options.
-                If None, default parameters will be used.
+
+                .. deprecated:: 1.0
+                    Use ``settings=DeepgramFluxSTTSettings(...)`` instead.
+
             should_interrupt: Determine whether the bot should be interrupted when Flux detects that the user is speaking.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent WebsocketSTTService class.
 
         Examples:
@@ -185,18 +195,21 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
             Advanced usage with custom parameters::
 
-                params = DeepgramFluxSTTService.InputParams(
-                    eager_eot_threshold=0.5,
-                    eot_threshold=0.8,
-                    keyterm=["AI", "machine learning", "neural network"],
-                    tag=["production", "voice-agent"]
-                )
                 stt = DeepgramFluxSTTService(
                     api_key="your-api-key",
-                    model="flux-general-en",
-                    params=params
+                    settings=DeepgramFluxSTTSettings(
+                        model="flux-general-en",
+                        eager_eot_threshold=0.5,
+                        eot_threshold=0.8,
+                        keyterm=["AI", "machine learning", "neural network"],
+                        tag=["production", "voice-agent"],
+                    ),
                 )
         """
+        if model is not None:
+            _warn_deprecated_param("model", "DeepgramFluxSTTSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "DeepgramFluxSTTSettings")
         # Note: For DeepgramFluxSTTService, differently from other processes, we need to create
         # the _receive_task inside _connect_websocket, because the websocket should only be
         # considered connected and ready to send audio once we receive from Flux the message
@@ -207,22 +220,27 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         # was never destroyed.
         # So we can keep it here as false, because inside the method send_with_retry, it will
         # already try to reconnect if needed.
-        params = params or DeepgramFluxSTTService.InputParams()
+        _params = params or DeepgramFluxSTTService.InputParams()
+
+        default_settings = DeepgramFluxSTTSettings(
+            model=model or "flux-general-en",
+            language=Language.EN,
+            encoding=flux_encoding,
+            eager_eot_threshold=_params.eager_eot_threshold,
+            eot_threshold=_params.eot_threshold,
+            eot_timeout_ms=_params.eot_timeout_ms,
+            keyterm=_params.keyterm or [],
+            mip_opt_out=_params.mip_opt_out,
+            tag=_params.tag or [],
+            min_confidence=_params.min_confidence,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             reconnect_on_error=False,
-            settings=DeepgramFluxSTTSettings(
-                model=model,
-                language=Language.EN,
-                encoding=flux_encoding,
-                eager_eot_threshold=params.eager_eot_threshold,
-                eot_threshold=params.eot_threshold,
-                eot_timeout_ms=params.eot_timeout_ms,
-                keyterm=params.keyterm or [],
-                mip_opt_out=params.mip_opt_out,
-                tag=params.tag or [],
-                min_confidence=params.min_confidence,
-            ),
+            settings=default_settings,
             **kwargs,
         )
         self._api_key = api_key

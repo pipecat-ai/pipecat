@@ -56,7 +56,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
@@ -126,6 +126,7 @@ class GrokRealtimeLLMService(LLMService):
         api_key: str,
         base_url: str = "wss://api.x.ai/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
+        settings: Optional[GrokRealtimeLLMSettings] = None,
         start_audio_paused: bool = False,
         **kwargs,
     ):
@@ -136,30 +137,46 @@ class GrokRealtimeLLMService(LLMService):
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.x.ai/v1/realtime".
             session_properties: Configuration properties for the realtime session.
+
+                .. deprecated::
+                    Use ``settings=GrokRealtimeLLMSettings(session_properties=...)``
+                    instead.
+
                 If None, uses default SessionProperties with voice "Ara".
                 To set a different voice, configure it in session_properties:
 
                     session_properties = events.SessionProperties(voice="Rex")
 
                 Available voices: Ara, Rex, Sal, Eve, Leo.
+            settings: Grok Realtime LLM settings. If provided together with deprecated
+                top-level parameters, the ``settings`` values take precedence.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        if session_properties is not None:
+            _warn_deprecated_param(
+                "session_properties", "GrokRealtimeLLMSettings", "session_properties"
+            )
+
+        default_settings = GrokRealtimeLLMSettings(
+            model=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=session_properties or events.SessionProperties(),
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             base_url=base_url,
-            settings=GrokRealtimeLLMSettings(
-                model=None,
-                temperature=None,
-                max_tokens=None,
-                top_p=None,
-                top_k=None,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                session_properties=session_properties or events.SessionProperties(),
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

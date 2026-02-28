@@ -54,7 +54,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -126,9 +126,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-4o-realtime-preview-2025-06-03",
+        model: Optional[str] = None,
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
+        settings: Optional[OpenAIRealtimeBetaLLMSettings] = None,
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
@@ -137,11 +138,22 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         Args:
             api_key: OpenAI API key for authentication.
-            model: OpenAI model name. Defaults to "gpt-4o-realtime-preview-2025-06-03".
+            model: OpenAI model name.
+
+                .. deprecated::
+                    Use ``settings=OpenAIRealtimeBetaLLMSettings(model=...)`` instead.
+
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.openai.com/v1/realtime".
             session_properties: Configuration properties for the realtime session.
+
+                .. deprecated::
+                    Use ``settings=OpenAIRealtimeBetaLLMSettings(session_properties=...)``
+                    instead.
+
                 If None, uses default SessionProperties.
+            settings: Realtime Beta LLM settings. If provided together with deprecated
+                top-level parameters, the ``settings`` values take precedence.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             send_transcription_frames: Whether to emit transcription frames. Defaults to True.
             **kwargs: Additional arguments passed to parent LLMService.
@@ -155,22 +167,33 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 stacklevel=2,
             )
 
-        full_url = f"{base_url}?model={model}"
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAIRealtimeBetaLLMSettings", "model")
+        if session_properties is not None:
+            _warn_deprecated_param(
+                "session_properties", "OpenAIRealtimeBetaLLMSettings", "session_properties"
+            )
+
+        default_settings = OpenAIRealtimeBetaLLMSettings(
+            model=model or "gpt-4o-realtime-preview-2025-06-03",
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=session_properties or events.SessionProperties(),
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        full_url = f"{base_url}?model={default_settings.model}"
         super().__init__(
             base_url=full_url,
-            settings=OpenAIRealtimeBetaLLMSettings(
-                model=model,
-                temperature=None,
-                max_tokens=None,
-                top_p=None,
-                top_k=None,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                session_properties=session_properties or events.SessionProperties(),
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

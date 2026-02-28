@@ -6,10 +6,14 @@
 
 """Azure OpenAI service implementation for the Pipecat AI framework."""
 
+from typing import Optional
+
 from loguru import logger
 from openai import AsyncAzureOpenAI
 
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 
 class AzureLLMService(OpenAILLMService):
@@ -24,8 +28,9 @@ class AzureLLMService(OpenAILLMService):
         *,
         api_key: str,
         endpoint: str,
-        model: str,
+        model: Optional[str] = None,
         api_version: str = "2024-09-01-preview",
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Azure LLM service.
@@ -33,15 +38,28 @@ class AzureLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Azure OpenAI.
             endpoint: The Azure endpoint URL.
-            model: The model identifier to use.
+            model: The model identifier to use. Defaults to "gpt-4o".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             api_version: Azure API version. Defaults to "2024-09-01-preview".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(model=model or "gpt-4o")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint
         self._api_version = api_version
-        super().__init__(api_key=api_key, model=model, **kwargs)
+        super().__init__(api_key=api_key, settings=default_settings, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Azure OpenAI endpoint.

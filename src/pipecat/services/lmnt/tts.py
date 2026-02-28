@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -98,10 +98,11 @@ class LmntTTSService(InterruptibleTTSService):
         self,
         *,
         api_key: str,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         language: Language = Language.EN,
-        model: str = "blizzard",
+        model: Optional[str] = None,
+        settings: Optional[LmntTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the LMNT TTS service.
@@ -109,21 +110,40 @@ class LmntTTSService(InterruptibleTTSService):
         Args:
             api_key: LMNT API key for authentication.
             voice_id: ID of the voice to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=LmntTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate. If None, uses default.
             language: Language for synthesis. Defaults to English.
-            model: TTS model to use. Defaults to "blizzard".
+            model: TTS model to use.
+
+                .. deprecated:: 1.0
+                    Use ``settings=LmntTTSSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "LmntTTSSettings", "voice")
+        if model is not None:
+            _warn_deprecated_param("model", "LmntTTSSettings", "model")
+
+        default_settings = LmntTTSSettings(
+            model=model or "blizzard",
+            voice=voice_id,
+            language=self.language_to_service_language(language),
+            format="raw",
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            settings=LmntTTSSettings(
-                model=model,
-                voice=voice_id,
-                language=self.language_to_service_language(language),
-                format="raw",
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

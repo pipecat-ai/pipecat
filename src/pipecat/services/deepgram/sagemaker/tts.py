@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws.sagemaker.bidi_client import SageMakerBidiClient
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -78,9 +78,10 @@ class DeepgramSageMakerTTSService(TTSService):
         *,
         endpoint_name: str,
         region: str,
-        voice: str = "aura-2-helena-en",
+        voice: Optional[str] = None,
         sample_rate: Optional[int] = None,
         encoding: str = "linear16",
+        settings: Optional[DeepgramSageMakerTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Deepgram SageMaker TTS service.
@@ -90,21 +91,36 @@ class DeepgramSageMakerTTSService(TTSService):
                 deployed (e.g., "my-deepgram-tts-endpoint").
             region: AWS region where the endpoint is deployed (e.g., "us-east-2").
             voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
+
+                .. deprecated:: 1.0
+                    Use ``settings=DeepgramSageMakerTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses the value from StartFrame.
             encoding: Audio encoding format. Defaults to "linear16".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
+        if voice is not None:
+            _warn_deprecated_param("voice", "DeepgramSageMakerTTSSettings", "voice")
+
+        voice = voice or "aura-2-helena-en"
+
+        default_settings = DeepgramSageMakerTTSSettings(
+            model=voice,
+            voice=voice,
+            language=None,
+            encoding=encoding,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             push_stop_frames=True,
             pause_frame_processing=True,
             append_trailing_space=True,
-            settings=DeepgramSageMakerTTSSettings(
-                model=voice,
-                voice=voice,
-                language=None,
-                encoding=encoding,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

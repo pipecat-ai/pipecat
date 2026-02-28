@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import AudioContextTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -70,11 +70,12 @@ class ResembleAITTSService(AudioContextTTSService):
         self,
         *,
         api_key: str,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         url: str = "wss://websocket.cluster.resemble.ai/stream",
         precision: Optional[str] = "PCM_16",
         output_format: Optional[str] = "wav",
         sample_rate: Optional[int] = 22050,
+        settings: Optional[ResembleAITTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Resemble AI TTS service.
@@ -82,24 +83,37 @@ class ResembleAITTSService(AudioContextTTSService):
         Args:
             api_key: Resemble AI API key for authentication.
             voice_id: Voice UUID to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=ResembleAITTSSettings(voice=...)`` instead.
+
             url: WebSocket URL for Resemble AI TTS API.
             precision: PCM bit depth (PCM_32, PCM_24, PCM_16, or MULAW).
             output_format: Audio format (wav or mp3).
             sample_rate: Audio sample rate (8000, 16000, 22050, 32000, or 44100). Defaults to 22050.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent service.
         """
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "ResembleAITTSSettings", "voice")
+
+        default_settings = ResembleAITTSSettings(
+            model=None,
+            voice=voice_id,
+            language=None,
+            precision=precision,
+            output_format=output_format,
+            resemble_sample_rate=sample_rate,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             reuse_context_id_within_turn=False,
             supports_word_timestamps=True,
-            settings=ResembleAITTSSettings(
-                model=None,
-                voice=voice_id,
-                language=None,
-                precision=precision,
-                output_format=output_format,
-                resemble_sample_rate=sample_rate,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

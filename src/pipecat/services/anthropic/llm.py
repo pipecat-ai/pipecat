@@ -58,7 +58,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.settings import NOT_GIVEN as _NOT_GIVEN
-from pipecat.services.settings import LLMSettings, _NotGiven, is_given
+from pipecat.services.settings import LLMSettings, _NotGiven, _warn_deprecated_param, is_given
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -170,6 +170,10 @@ class AnthropicLLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for Anthropic model inference.
 
+        .. deprecated::
+            Use ``AnthropicLLMSettings`` instead. Pass settings directly via the
+            ``settings`` parameter of :class:`AnthropicLLMService`.
+
         Parameters:
             enable_prompt_caching: Whether to enable the prompt caching feature.
             enable_prompt_caching_beta (deprecated): Whether to enable the beta prompt caching feature.
@@ -213,8 +217,9 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-sonnet-4-6",
+        model: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[AnthropicLLMSettings] = None,
         client=None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
@@ -225,42 +230,66 @@ class AnthropicLLMService(LLMService):
 
         Args:
             api_key: Anthropic API key for authentication.
-            model: Model name to use. Defaults to "claude-sonnet-4-6".
+            model: Model name to use.
+
+                .. deprecated::
+                    Use ``settings=AnthropicLLMSettings(model=...)`` instead.
+
             params: Optional model parameters for inference.
+
+                .. deprecated::
+                    Use ``settings=AnthropicLLMSettings(...)`` instead.
+
+            settings: Runtime-updatable settings for this service.  When both
+                deprecated parameters and *settings* are provided, *settings*
+                values take precedence.
             client: Optional custom Anthropic client instance.
             retry_timeout_secs: Request timeout in seconds for retry logic.
             retry_on_timeout: Whether to retry the request once if it times out.
             system_instruction: Optional system instruction to use as the system prompt.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        params = params or AnthropicLLMService.InputParams()
+        if model is not None:
+            _warn_deprecated_param("model", "AnthropicLLMSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "AnthropicLLMSettings")
 
-        super().__init__(
-            settings=AnthropicLLMSettings(
-                model=model,
-                max_tokens=params.max_tokens,
-                enable_prompt_caching=(
-                    params.enable_prompt_caching
-                    if params.enable_prompt_caching is not None
-                    else (
-                        params.enable_prompt_caching_beta
-                        if params.enable_prompt_caching_beta is not None
-                        else False
-                    )
-                ),
-                temperature=params.temperature,
-                top_k=params.top_k,
-                top_p=params.top_p,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                thinking=params.thinking,
-                extra=params.extra if isinstance(params.extra, dict) else {},
-            ),
-            **kwargs,
+        _params = params or AnthropicLLMService.InputParams()
+
+        # Handle existing enable_prompt_caching_beta deprecation
+        enable_prompt_caching = _params.enable_prompt_caching
+        if _params.enable_prompt_caching_beta is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "enable_prompt_caching_beta is deprecated. Use enable_prompt_caching instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            if enable_prompt_caching is None:
+                enable_prompt_caching = _params.enable_prompt_caching_beta
+
+        default_settings = AnthropicLLMSettings(
+            model=model or "claude-sonnet-4-6",
+            max_tokens=_params.max_tokens,
+            enable_prompt_caching=enable_prompt_caching or False,
+            temperature=_params.temperature,
+            top_k=_params.top_k,
+            top_p=_params.top_p,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            thinking=_params.thinking,
+            extra=_params.extra if isinstance(_params.extra, dict) else {},
         )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
         self._client = client or AsyncAnthropic(
             api_key=api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one

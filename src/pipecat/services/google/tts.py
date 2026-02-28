@@ -37,7 +37,13 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, is_given
+from pipecat.services.settings import (
+    NOT_GIVEN,
+    TTSSettings,
+    _NotGiven,
+    _warn_deprecated_param,
+    is_given,
+)
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 
@@ -560,6 +566,9 @@ class GoogleHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Google HTTP TTS voice customization.
 
+        .. deprecated:: 1.0
+            Use ``GoogleHttpTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             pitch: Voice pitch adjustment (e.g., "+2st", "-50%").
             rate: Speaking rate adjustment (e.g., "slow", "fast", "125%"). Used for SSML prosody tags (non-Chirp voices).
@@ -586,9 +595,10 @@ class GoogleHttpTTSService(TTSService):
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
         location: Optional[str] = None,
-        voice_id: str = "en-US-Chirp3-HD-Charon",
+        voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GoogleHttpTTSSettings] = None,
         **kwargs,
     ):
         """Initializes the Google HTTP TTS service.
@@ -598,28 +608,47 @@ class GoogleHttpTTSService(TTSService):
             credentials_path: Path to Google Cloud service account JSON file.
             location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Google TTS voice identifier (e.g., "en-US-Standard-A").
+
+                .. deprecated:: 1.0
+                    Use ``settings=GoogleHttpTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Voice customization parameters including pitch, rate, volume, etc.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GoogleHttpTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        params = params or GoogleHttpTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "GoogleHttpTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "GoogleHttpTTSSettings")
+
+        _params = params or GoogleHttpTTSService.InputParams()
+
+        default_settings = GoogleHttpTTSSettings(
+            model=None,
+            pitch=_params.pitch,
+            rate=_params.rate,
+            speaking_rate=_params.speaking_rate,
+            volume=_params.volume,
+            emphasis=_params.emphasis,
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else "en-US",
+            gender=_params.gender,
+            google_style=_params.google_style,
+            voice=voice_id or "en-US-Chirp3-HD-Charon",
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=GoogleHttpTTSSettings(
-                model=None,
-                pitch=params.pitch,
-                rate=params.rate,
-                speaking_rate=params.speaking_rate,
-                volume=params.volume,
-                emphasis=params.emphasis,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "en-US",
-                gender=params.gender,
-                google_style=params.google_style,
-                voice=voice_id,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -987,6 +1016,9 @@ class GoogleTTSService(GoogleBaseTTSService):
     class InputParams(BaseModel):
         """Input parameters for Google streaming TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``GoogleStreamTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             language: Language for synthesis. Defaults to English.
             speaking_rate: The speaking rate, in the range [0.25, 2.0].
@@ -1001,10 +1033,11 @@ class GoogleTTSService(GoogleBaseTTSService):
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
         location: Optional[str] = None,
-        voice_id: str = "en-US-Chirp3-HD-Charon",
+        voice_id: Optional[str] = None,
         voice_cloning_key: Optional[str] = None,
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
+        settings: Optional[GoogleStreamTTSSettings] = None,
         **kwargs,
     ):
         """Initializes the Google streaming TTS service.
@@ -1014,23 +1047,42 @@ class GoogleTTSService(GoogleBaseTTSService):
             credentials_path: Path to Google Cloud service account JSON file.
             location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
+
+                .. deprecated:: 1.0
+                    Use ``settings=GoogleStreamTTSSettings(voice=...)`` instead.
+
             voice_cloning_key: The voice cloning key for Chirp 3 custom voices.
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Language configuration parameters.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GoogleStreamTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        params = params or GoogleTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "GoogleStreamTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "GoogleStreamTTSSettings")
+
+        _params = params or GoogleTTSService.InputParams()
+
+        default_settings = GoogleStreamTTSSettings(
+            model=None,
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else "en-US",
+            speaking_rate=_params.speaking_rate,
+            voice=voice_id or "en-US-Chirp3-HD-Charon",
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=GoogleStreamTTSSettings(
-                model=None,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "en-US",
-                speaking_rate=params.speaking_rate,
-                voice=voice_id,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -1170,6 +1222,9 @@ class GeminiTTSService(GoogleBaseTTSService):
     class InputParams(BaseModel):
         """Input parameters for Gemini TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``GeminiTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             language: Language for synthesis. Defaults to English.
             prompt: Optional style instructions for how to synthesize the content.
@@ -1186,13 +1241,14 @@ class GeminiTTSService(GoogleBaseTTSService):
         self,
         *,
         api_key: Optional[str] = None,
-        model: str = "gemini-2.5-flash-tts",
+        model: Optional[str] = None,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
         location: Optional[str] = None,
-        voice_id: str = "Kore",
+        voice_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GeminiTTSSettings] = None,
         **kwargs,
     ):
         """Initializes the Gemini TTS service.
@@ -1206,12 +1262,26 @@ class GeminiTTSService(GoogleBaseTTSService):
 
             model: Gemini TTS model to use. Must be a TTS model like
                    "gemini-2.5-flash-tts" or "gemini-2.5-pro-tts".
+
+                .. deprecated:: 1.0
+                    Use ``settings=GeminiTTSSettings(model=...)`` instead.
+
             credentials: JSON string containing Google Cloud service account credentials.
             credentials_path: Path to Google Cloud service account JSON file.
             location: Google Cloud location for regional endpoint (e.g., "us-central1").
             voice_id: Voice name from the available Gemini voices.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GeminiTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses Google's default 24kHz.
             params: TTS configuration parameters.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GeminiTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
         # Handle deprecated api_key parameter
@@ -1222,29 +1292,40 @@ class GeminiTTSService(GoogleBaseTTSService):
                 DeprecationWarning,
                 stacklevel=2,
             )
+        if model is not None:
+            _warn_deprecated_param("model", "GeminiTTSSettings", "model")
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "GeminiTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "GeminiTTSSettings")
 
         if sample_rate and sample_rate != self.GOOGLE_SAMPLE_RATE:
             logger.warning(
                 f"Google TTS only supports {self.GOOGLE_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        params = params or GeminiTTSService.InputParams()
+        _params = params or GeminiTTSService.InputParams()
 
+        voice_id = voice_id or "Kore"
         if voice_id not in self.AVAILABLE_VOICES:
             logger.warning(f"Voice '{voice_id}' not in known voices list. Using anyway.")
 
+        default_settings = GeminiTTSSettings(
+            model=model or "gemini-2.5-flash-tts",
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else "en-US",
+            prompt=_params.prompt,
+            multi_speaker=_params.multi_speaker,
+            speaker_configs=_params.speaker_configs,
+            voice=voice_id,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
-            settings=GeminiTTSSettings(
-                model=model,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "en-US",
-                prompt=params.prompt,
-                multi_speaker=params.multi_speaker,
-                speaker_configs=params.speaker_configs,
-                voice=voice_id,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

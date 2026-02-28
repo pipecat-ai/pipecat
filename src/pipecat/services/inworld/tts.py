@@ -29,7 +29,7 @@ from pipecat import version as pipecat_version
 USER_AGENT = f"pipecat/{pipecat_version()}"
 from pydantic import BaseModel
 
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -114,6 +114,9 @@ class InworldHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Inworld TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``InworldTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             temperature: Temperature for speech synthesis.
             speaking_rate: Speaking rate for speech synthesis.
@@ -129,12 +132,13 @@ class InworldHttpTTSService(TTSService):
         *,
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
-        voice_id: str = "Ashley",
-        model: str = "inworld-tts-1.5-max",
+        voice_id: Optional[str] = None,
+        model: Optional[str] = None,
         streaming: bool = True,
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
-        params: InputParams = None,
+        params: Optional[InputParams] = None,
+        settings: Optional[InworldTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Inworld TTS service.
@@ -143,32 +147,57 @@ class InworldHttpTTSService(TTSService):
             api_key: Inworld API key.
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             voice_id: ID of the voice to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=InworldTTSSettings(voice=...)`` instead.
+
             model: ID of the model to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=InworldTTSSettings(model=...)`` instead.
+
             streaming: Whether to use streaming mode.
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
             params: Input parameters for Inworld TTS configuration.
+
+                .. deprecated:: 1.0
+                    Use ``settings=InworldTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent class.
         """
-        params = params or InworldHttpTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "InworldTTSSettings", "voice")
+        if model is not None:
+            _warn_deprecated_param("model", "InworldTTSSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "InworldTTSSettings")
+
+        _params = params or InworldHttpTTSService.InputParams()
+
+        default_settings = InworldTTSSettings(
+            model=model or "inworld-tts-1.5-max",
+            voice=voice_id or "Ashley",
+            language=None,
+            audio_encoding=encoding,
+            audio_sample_rate=0,
+            speaking_rate=_params.speaking_rate,
+            temperature=_params.temperature,
+            timestamp_transport_strategy=_params.timestamp_transport_strategy,
+            auto_mode=None,  # Not applicable for HTTP TTS
+            apply_text_normalization=None,  # Not applicable for HTTP TTS
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             push_text_frames=False,
             push_stop_frames=True,
             supports_word_timestamps=True,
             sample_rate=sample_rate,
-            settings=InworldTTSSettings(
-                model=model,
-                voice=voice_id,
-                language=None,
-                audio_encoding=encoding,
-                audio_sample_rate=0,
-                speaking_rate=params.speaking_rate,
-                temperature=params.temperature,
-                timestamp_transport_strategy=params.timestamp_transport_strategy,
-                auto_mode=None,  # Not applicable for HTTP TTS
-                apply_text_normalization=None,  # Not applicable for HTTP TTS
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -477,6 +506,9 @@ class InworldTTSService(AudioContextTTSService):
     class InputParams(BaseModel):
         """Input parameters for Inworld WebSocket TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``InworldTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             temperature: Temperature for speech synthesis.
             speaking_rate: Speaking rate for speech synthesis.
@@ -503,12 +535,13 @@ class InworldTTSService(AudioContextTTSService):
         self,
         *,
         api_key: str,
-        voice_id: str = "Ashley",
-        model: str = "inworld-tts-1.5-max",
+        voice_id: Optional[str] = None,
+        model: Optional[str] = None,
         url: str = "wss://api.inworld.ai/tts/v1/voice:streamBidirectional",
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
-        params: InputParams = None,
+        params: Optional[InputParams] = None,
+        settings: Optional[InworldTTSSettings] = None,
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         append_trailing_space: bool = True,
@@ -519,11 +552,25 @@ class InworldTTSService(AudioContextTTSService):
         Args:
             api_key: Inworld API key.
             voice_id: ID of the voice to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=InworldTTSSettings(voice=...)`` instead.
+
             model: ID of the model to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=InworldTTSSettings(model=...)`` instead.
+
             url: URL of the Inworld WebSocket API.
             sample_rate: Audio sample rate in Hz.
             encoding: Audio encoding format.
             params: Input parameters for Inworld WebSocket TTS configuration.
+
+                .. deprecated:: 1.0
+                    Use ``settings=InworldTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
                 .. deprecated:: 0.0.104
@@ -533,7 +580,29 @@ class InworldTTSService(AudioContextTTSService):
             append_trailing_space: Whether to append a trailing space to text before sending to TTS.
             **kwargs: Additional arguments passed to the parent class.
         """
-        params = params or InworldTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "InworldTTSSettings", "voice")
+        if model is not None:
+            _warn_deprecated_param("model", "InworldTTSSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "InworldTTSSettings")
+
+        _params = params or InworldTTSService.InputParams()
+
+        default_settings = InworldTTSSettings(
+            model=model or "inworld-tts-1.5-max",
+            voice=voice_id or "Ashley",
+            language=None,
+            audio_encoding=encoding,
+            audio_sample_rate=0,
+            speaking_rate=_params.speaking_rate,
+            temperature=_params.temperature,
+            apply_text_normalization=_params.apply_text_normalization,
+            timestamp_transport_strategy=_params.timestamp_transport_strategy,
+            auto_mode=_params.auto_mode if _params.auto_mode is not None else aggregate_sentences,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             push_text_frames=False,
@@ -544,18 +613,7 @@ class InworldTTSService(AudioContextTTSService):
             aggregate_sentences=aggregate_sentences,
             text_aggregation_mode=text_aggregation_mode,
             append_trailing_space=append_trailing_space,
-            settings=InworldTTSSettings(
-                model=model,
-                voice=voice_id,
-                language=None,
-                audio_encoding=encoding,
-                audio_sample_rate=0,
-                speaking_rate=params.speaking_rate,
-                temperature=params.temperature,
-                apply_text_normalization=params.apply_text_normalization,
-                timestamp_transport_strategy=params.timestamp_transport_strategy,
-                auto_mode=params.auto_mode if params.auto_mode is not None else aggregate_sentences,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -564,8 +622,8 @@ class InworldTTSService(AudioContextTTSService):
         self._timestamp_type = "WORD"
 
         self._buffer_settings = {
-            "maxBufferDelayMs": params.max_buffer_delay_ms,
-            "bufferCharThreshold": params.buffer_char_threshold,
+            "maxBufferDelayMs": _params.max_buffer_delay_ms,
+            "bufferCharThreshold": _params.buffer_char_threshold,
         }
 
         self._receive_task = None

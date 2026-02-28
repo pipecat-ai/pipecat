@@ -6,10 +6,14 @@
 
 """Fireworks AI service implementation using OpenAI-compatible interface."""
 
+from typing import Optional
+
 from loguru import logger
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 
 class FireworksLLMService(OpenAILLMService):
@@ -23,8 +27,9 @@ class FireworksLLMService(OpenAILLMService):
         self,
         *,
         api_key: str,
-        model: str = "accounts/fireworks/models/firefunction-v2",
+        model: Optional[str] = None,
         base_url: str = "https://api.fireworks.ai/inference/v1",
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the Fireworks LLM service.
@@ -32,10 +37,25 @@ class FireworksLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Fireworks AI.
             model: The model identifier to use. Defaults to "accounts/fireworks/models/firefunction-v2".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             base_url: The base URL for Fireworks API. Defaults to "https://api.fireworks.ai/inference/v1".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(
+            model=model or "accounts/fireworks/models/firefunction-v2"
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Fireworks API endpoint.

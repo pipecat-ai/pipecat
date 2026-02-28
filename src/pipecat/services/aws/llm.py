@@ -55,7 +55,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -752,6 +752,10 @@ class AWSBedrockLLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for AWS Bedrock LLM service.
 
+        .. deprecated::
+            Use ``AWSBedrockLLMSettings`` instead. Pass settings directly via the
+            ``settings`` parameter of :class:`AWSBedrockLLMService`.
+
         Parameters:
             max_tokens: Maximum number of tokens to generate.
             temperature: Sampling temperature between 0.0 and 1.0.
@@ -771,12 +775,14 @@ class AWSBedrockLLMService(LLMService):
     def __init__(
         self,
         *,
-        model: str,
+        model: Optional[str] = None,
         aws_access_key: Optional[str] = None,
         aws_secret_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
         aws_region: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[AWSBedrockLLMSettings] = None,
+        stop_sequences: Optional[List[str]] = None,
         client_config: Optional[Config] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
@@ -787,37 +793,59 @@ class AWSBedrockLLMService(LLMService):
 
         Args:
             model: The AWS Bedrock model identifier to use.
+
+                .. deprecated::
+                    Use ``settings=AWSBedrockLLMSettings(model=...)`` instead.
+
             aws_access_key: AWS access key ID. If None, uses default credentials.
             aws_secret_key: AWS secret access key. If None, uses default credentials.
             aws_session_token: AWS session token for temporary credentials.
             aws_region: AWS region for the Bedrock service.
             params: Model parameters and configuration.
+
+                .. deprecated::
+                    Use ``settings=AWSBedrockLLMSettings(...)`` instead.
+
+            settings: Runtime-updatable settings for this service.  When both
+                deprecated parameters and *settings* are provided, *settings*
+                values take precedence.
+            stop_sequences: List of strings that stop generation.
             client_config: Custom boto3 client configuration.
             retry_timeout_secs: Request timeout in seconds for retry logic.
             retry_on_timeout: Whether to retry the request once if it times out.
             system_instruction: Optional system instruction to use as the system prompt.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        params = params or AWSBedrockLLMService.InputParams()
+        if model is not None:
+            _warn_deprecated_param("model", "AWSBedrockLLMSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "AWSBedrockLLMSettings")
 
-        super().__init__(
-            settings=AWSBedrockLLMSettings(
-                model=model,
-                max_tokens=params.max_tokens,
-                temperature=params.temperature,
-                top_p=params.top_p,
-                top_k=None,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                latency=params.latency,
-                additional_model_request_fields=params.additional_model_request_fields
-                if isinstance(params.additional_model_request_fields, dict)
-                else {},
-            ),
-            **kwargs,
+        _params = params or AWSBedrockLLMService.InputParams()
+
+        default_settings = AWSBedrockLLMSettings(
+            model=model or "us.amazon.nova-lite-v1:0",
+            max_tokens=_params.max_tokens,
+            temperature=_params.temperature,
+            top_p=_params.top_p,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            latency=_params.latency,
+            additional_model_request_fields=_params.additional_model_request_fields
+            if isinstance(_params.additional_model_request_fields, dict)
+            else {},
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
+
+        self._stop_sequences = (
+            stop_sequences if stop_sequences is not None else (_params.stop_sequences or [])
         )
 
         # Initialize the AWS Bedrock client
@@ -843,7 +871,7 @@ class AWSBedrockLLMService(LLMService):
         self._retry_on_timeout = retry_on_timeout
         self._system_instruction = system_instruction
 
-        logger.info(f"Using AWS Bedrock model: {model}")
+        logger.info(f"Using AWS Bedrock model: {self._settings.model}")
         if self._system_instruction:
             logger.debug(f"{self}: Using system instruction: {self._system_instruction}")
 

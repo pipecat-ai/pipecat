@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import ELEVENLABS_REALTIME_TTFS_P99, ELEVENLABS_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService, WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -228,6 +228,9 @@ class ElevenLabsSTTService(SegmentedSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs STT API.
 
+        .. deprecated:: 1.0
+            Use ``settings=ElevenLabsSTTSettings(...)`` instead.
+
         Parameters:
             language: Target language for transcription.
             tag_audio_events: Whether to include audio events like (laughter), (coughing), in the transcription.
@@ -242,9 +245,10 @@ class ElevenLabsSTTService(SegmentedSTTService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         base_url: str = "https://api.elevenlabs.io",
-        model: str = "scribe_v2",
+        model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[ElevenLabsSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = ELEVENLABS_TTFS_P99,
         **kwargs,
     ):
@@ -254,25 +258,44 @@ class ElevenLabsSTTService(SegmentedSTTService):
             api_key: ElevenLabs API key for authentication.
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             base_url: Base URL for ElevenLabs API.
-            model: Model ID for transcription. Defaults to "scribe_v2".
+            model: Model ID for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=ElevenLabsSTTSettings(model=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
+
+                .. deprecated:: 1.0
+                    Use ``settings=ElevenLabsSTTSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
-        params = params or ElevenLabsSTTService.InputParams()
+        if model is not None:
+            _warn_deprecated_param("model", "ElevenLabsSTTSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "ElevenLabsSTTSettings")
+
+        _params = params or ElevenLabsSTTService.InputParams()
+
+        default_settings = ElevenLabsSTTSettings(
+            model=model or "scribe_v2",
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else "eng",
+            tag_audio_events=_params.tag_audio_events,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=ElevenLabsSTTSettings(
-                model=model,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "eng",
-                tag_audio_events=params.tag_audio_events,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -429,6 +452,9 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for ElevenLabs Realtime STT API.
 
+        .. deprecated:: 1.0
+            Use ``settings=ElevenLabsRealtimeSTTSettings(...)`` instead.
+
         Parameters:
             language_code: ISO-639-1 or ISO-639-3 language code. Leave None for auto-detection.
             commit_strategy: How to segment speech - manual (Pipecat VAD) or vad (ElevenLabs VAD).
@@ -460,9 +486,10 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         *,
         api_key: str,
         base_url: str = "api.elevenlabs.io",
-        model: str = "scribe_v2_realtime",
+        model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[ElevenLabsRealtimeSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = ELEVENLABS_REALTIME_TTFS_P99,
         **kwargs,
     ):
@@ -471,32 +498,51 @@ class ElevenLabsRealtimeSTTService(WebsocketSTTService):
         Args:
             api_key: ElevenLabs API key for authentication.
             base_url: Base URL for ElevenLabs WebSocket API.
-            model: Model ID for transcription. Defaults to "scribe_v2_realtime".
+            model: Model ID for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=ElevenLabsRealtimeSTTSettings(model=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
             params: Configuration parameters for the STT service.
+
+                .. deprecated:: 1.0
+                    Use ``settings=ElevenLabsRealtimeSTTSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to WebsocketSTTService.
         """
-        params = params or ElevenLabsRealtimeSTTService.InputParams()
+        if model is not None:
+            _warn_deprecated_param("model", "ElevenLabsRealtimeSTTSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "ElevenLabsRealtimeSTTSettings")
+
+        _params = params or ElevenLabsRealtimeSTTService.InputParams()
+
+        default_settings = ElevenLabsRealtimeSTTSettings(
+            model=model or "scribe_v2_realtime",
+            language=_params.language_code,
+            commit_strategy=_params.commit_strategy,
+            vad_silence_threshold_secs=_params.vad_silence_threshold_secs,
+            vad_threshold=_params.vad_threshold,
+            min_speech_duration_ms=_params.min_speech_duration_ms,
+            min_silence_duration_ms=_params.min_silence_duration_ms,
+            include_timestamps=_params.include_timestamps,
+            enable_logging=_params.enable_logging,
+            include_language_detection=_params.include_language_detection,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=10,
             keepalive_interval=5,
-            settings=ElevenLabsRealtimeSTTSettings(
-                model=model,
-                language=params.language_code,
-                commit_strategy=params.commit_strategy,
-                vad_silence_threshold_secs=params.vad_silence_threshold_secs,
-                vad_threshold=params.vad_threshold,
-                min_speech_duration_ms=params.min_speech_duration_ms,
-                min_silence_duration_ms=params.min_silence_duration_ms,
-                include_timestamps=params.include_timestamps,
-                enable_logging=params.enable_logging,
-                include_language_detection=params.include_language_detection,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

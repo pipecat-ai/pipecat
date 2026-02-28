@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -94,31 +94,45 @@ class XTTSService(TTSService):
     def __init__(
         self,
         *,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
         language: Language = Language.EN,
         sample_rate: Optional[int] = None,
+        settings: Optional[XTTSTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the XTTS service.
 
         Args:
             voice_id: ID of the voice/speaker to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=XTTSTTSSettings(voice=...)`` instead.
+
             base_url: Base URL of the XTTS streaming server.
             aiohttp_session: HTTP session for making requests to the server.
             language: Language for synthesis. Defaults to English.
             sample_rate: Audio sample rate. If None, uses default.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "XTTSTTSSettings", "voice")
+
+        default_settings = XTTSTTSSettings(
+            model=None,
+            voice=voice_id,
+            language=self.language_to_service_language(language),
+            base_url=base_url,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
-            settings=XTTSTTSSettings(
-                model=None,
-                voice=voice_id,
-                language=self.language_to_service_language(language),
-                base_url=base_url,
-            ),
+            settings=default_settings,
             **kwargs,
         )
         self._studio_speakers: Optional[Dict[str, Any]] = None

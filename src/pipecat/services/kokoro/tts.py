@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -112,6 +112,9 @@ class KokoroTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Kokoro TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``KokoroTTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             language: Language to use for synthesis.
         """
@@ -121,35 +124,55 @@ class KokoroTTSService(TTSService):
     def __init__(
         self,
         *,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         model_path: Optional[str] = None,
         voices_path: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[KokoroTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Kokoro TTS service.
 
         Args:
             voice_id: Voice identifier to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=KokoroTTSSettings(voice=...)`` instead.
+
             model_path: Path to the kokoro ONNX model file. Defaults to auto-downloaded file.
             voices_path: Path to the voices binary file. Defaults to auto-downloaded file.
             params: Configuration parameters for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=KokoroTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent `TTSService`.
 
         """
-        params = params or KokoroTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "KokoroTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "KokoroTTSSettings")
+
+        _params = params or KokoroTTSService.InputParams()
+
+        default_settings = KokoroTTSSettings(
+            model=None,
+            voice=voice_id,
+            language=language_to_kokoro_language(_params.language),
+            lang_code=language_to_kokoro_language(_params.language),
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
-            settings=KokoroTTSSettings(
-                model=None,
-                voice=voice_id,
-                language=language_to_kokoro_language(params.language),
-                lang_code=language_to_kokoro_language(params.language),
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
-        self._lang_code = language_to_kokoro_language(params.language)
+        self._lang_code = language_to_kokoro_language(_params.language)
 
         model = Path(model_path) if model_path else KOKORO_CACHE_DIR / "kokoro-v1.0.onnx"
         voices = Path(voices_path) if voices_path else KOKORO_CACHE_DIR / "voices-v1.0.bin"

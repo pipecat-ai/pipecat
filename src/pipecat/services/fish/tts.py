@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -95,6 +95,9 @@ class FishAudioTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         """Input parameters for Fish Audio TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``settings=FishAudioTTSSettings(...)`` instead.
+
         Parameters:
             language: Language for synthesis. Defaults to English.
             latency: Latency mode ("normal" or "balanced"). Defaults to "normal".
@@ -115,10 +118,11 @@ class FishAudioTTSService(InterruptibleTTSService):
         api_key: str,
         reference_id: Optional[str] = None,  # This is the voice ID
         model: Optional[str] = None,  # Deprecated
-        model_id: str = "s1",
+        model_id: Optional[str] = None,
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[FishAudioTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Fish Audio TTS service.
@@ -126,28 +130,46 @@ class FishAudioTTSService(InterruptibleTTSService):
         Args:
             api_key: Fish Audio API key for authentication.
             reference_id: Reference ID of the voice model to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=FishAudioTTSSettings(voice=...)`` instead.
+
             model: Deprecated. Reference ID of the voice model to use for synthesis.
 
-              .. deprecated:: 0.0.74
-                The `model` parameter is deprecated and will be removed in version 0.1.0.
-                Use `reference_id` instead to specify the voice model.
+                .. deprecated:: 0.0.74
+                    The ``model`` parameter is deprecated and will be removed in version 0.1.0.
+                    Use ``reference_id`` instead to specify the voice model.
 
-            model_id: Specify which Fish Audio TTS model to use (e.g. "s1")
+            model_id: Specify which Fish Audio TTS model to use (e.g. "s1").
+
+                .. deprecated:: 1.0
+                    Use ``settings=FishAudioTTSSettings(model=...)`` instead.
+
             output_format: Audio output format. Defaults to "pcm".
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
+
+                .. deprecated:: 1.0
+                    Use ``settings=FishAudioTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent service.
         """
-        params = params or FishAudioTTSService.InputParams()
+        if reference_id is not None:
+            _warn_deprecated_param("reference_id", "FishAudioTTSSettings", "voice")
+        if model_id is not None:
+            _warn_deprecated_param("model_id", "FishAudioTTSSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "FishAudioTTSSettings")
+
+        _params = params or FishAudioTTSService.InputParams()
 
         # Validation for model and reference_id parameters
         if model and reference_id:
             raise ValueError(
                 "Cannot specify both 'model' and 'reference_id'. Use 'reference_id' only."
             )
-
-        if model is None and reference_id is None:
-            raise ValueError("Must specify 'reference_id' (or deprecated 'model') parameter.")
 
         if model:
             import warnings
@@ -162,21 +184,25 @@ class FishAudioTTSService(InterruptibleTTSService):
                 )
             reference_id = model
 
+        default_settings = FishAudioTTSSettings(
+            model=model_id or "s1",
+            voice=reference_id,
+            fish_sample_rate=0,
+            latency=_params.latency,
+            format=output_format,
+            normalize=_params.normalize,
+            prosody_speed=_params.prosody_speed,
+            prosody_volume=_params.prosody_volume,
+            reference_id=reference_id,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            settings=FishAudioTTSSettings(
-                model=model_id,
-                voice=reference_id,
-                fish_sample_rate=0,
-                latency=params.latency,
-                format=output_format,
-                normalize=params.normalize,
-                prosody_speed=params.prosody_speed,
-                prosody_volume=params.prosody_volume,
-                reference_id=reference_id,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

@@ -158,6 +158,7 @@ class CartesiaSTTService(WebsocketSTTService):
         base_url: str = "",
         sample_rate: int = 16000,
         live_options: Optional[CartesiaLiveOptions] = None,
+        settings: Optional[CartesiaSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = CARTESIA_TTFS_P99,
         **kwargs,
     ):
@@ -168,6 +169,8 @@ class CartesiaSTTService(WebsocketSTTService):
             base_url: Custom API endpoint URL. If empty, uses default.
             sample_rate: Audio sample rate in Hz. Defaults to 16000.
             live_options: Configuration options for transcription service.
+            settings: Runtime-updatable settings. When provided alongside
+                ``live_options``, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
@@ -189,16 +192,20 @@ class CartesiaSTTService(WebsocketSTTService):
                 k: v for k, v in merged_options.items() if not isinstance(v, str) or v != "None"
             }
 
+        default_settings = CartesiaSTTSettings(
+            model=merged_options["model"],
+            language=merged_options.get("language"),
+            encoding=merged_options.get("encoding", "pcm_s16le"),
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=120,
             keepalive_interval=30,
-            settings=CartesiaSTTSettings(
-                model=merged_options["model"],
-                language=merged_options.get("language"),
-                encoding=merged_options.get("encoding", "pcm_s16le"),
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

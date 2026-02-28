@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -90,6 +90,9 @@ class OpenAITTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for OpenAI TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``settings=OpenAITTSSettings(...)`` instead.
+
         Parameters:
             instructions: Instructions to guide voice synthesis behavior.
             speed: Voice speed control (0.25 to 4.0, default 1.0).
@@ -103,12 +106,13 @@ class OpenAITTSService(TTSService):
         *,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        voice: str = "alloy",
-        model: str = "gpt-4o-mini-tts",
+        voice: Optional[str] = None,
+        model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         instructions: Optional[str] = None,
         speed: Optional[float] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[OpenAITTSSettings] = None,
         **kwargs,
     ):
         """Initialize OpenAI TTS service.
@@ -117,40 +121,69 @@ class OpenAITTSService(TTSService):
             api_key: OpenAI API key for authentication. If None, uses environment variable.
             base_url: Custom base URL for OpenAI API. If None, uses default.
             voice: Voice ID to use for synthesis. Defaults to "alloy".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAITTSSettings(voice=...)`` instead.
+
             model: TTS model to use. Defaults to "gpt-4o-mini-tts".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAITTSSettings(model=...)`` instead.
+
             sample_rate: Output audio sample rate in Hz. If None, uses OpenAI's default 24kHz.
             instructions: Optional instructions to guide voice synthesis behavior.
-            speed: Voice speed control (0.25 to 4.0, default 1.0).
-            params: Optional synthesis controls (acting instructions, speed, ...).
-            **kwargs: Additional keyword arguments passed to TTSService.
 
-                .. deprecated:: 0.0.91
-                        The `instructions` and `speed` parameters are deprecated, use `InputParams` instead.
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAITTSSettings(instructions=...)`` instead.
+
+            speed: Voice speed control (0.25 to 4.0, default 1.0).
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAITTSSettings(speed=...)`` instead.
+
+            params: Optional synthesis controls (acting instructions, speed, ...).
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAITTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
+            **kwargs: Additional keyword arguments passed to TTSService.
         """
+        if voice is not None:
+            _warn_deprecated_param("voice", "OpenAITTSSettings", "voice")
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAITTSSettings", "model")
+        if instructions is not None:
+            _warn_deprecated_param("instructions", "OpenAITTSSettings", "instructions")
+        if speed is not None:
+            _warn_deprecated_param("speed", "OpenAITTSSettings", "speed")
+        if params is not None:
+            _warn_deprecated_param("params", "OpenAITTSSettings")
+
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
             logger.warning(
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
                 f"Current rate of {sample_rate}Hz may cause issues."
             )
-        if instructions or speed:
-            import warnings
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "The `instructions` and `speed` parameters are deprecated, use `InputParams` instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+        _params = params or OpenAITTSService.InputParams()
+        _instructions = instructions if instructions is not None else _params.instructions
+        _speed = speed if speed is not None else _params.speed
+
+        default_settings = OpenAITTSSettings(
+            model=model or "gpt-4o-mini-tts",
+            voice=voice or "alloy",
+            language=None,
+            instructions=_instructions,
+            speed=_speed,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=OpenAITTSSettings(
-                model=model,
-                voice=voice,
-                instructions=params.instructions if params else instructions,
-                speed=params.speed if params else speed,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

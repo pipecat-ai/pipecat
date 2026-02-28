@@ -35,10 +35,14 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import OPENAI_REALTIME_TTFS_P99, OPENAI_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
-from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
+from pipecat.services.whisper.base_stt import (
+    BaseWhisperSTTService,
+    BaseWhisperSTTSettings,
+    Transcription,
+)
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
@@ -61,30 +65,40 @@ class OpenAISTTService(BaseWhisperSTTService):
     def __init__(
         self,
         *,
-        model: str = "gpt-4o-transcribe",
+        model: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         language: Optional[Language] = Language.EN,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
+        settings: Optional[BaseWhisperSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = OPENAI_TTFS_P99,
         **kwargs,
     ):
         """Initialize OpenAI STT service.
 
         Args:
-            model: Model to use — either gpt-4o or Whisper. Defaults to "gpt-4o-transcribe".
+            model: Model to use — either gpt-4o or Whisper.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(model=...)`` instead.
+
             api_key: OpenAI API key. Defaults to None.
             base_url: API base URL. Defaults to None.
             language: Language of the audio input. Defaults to English.
             prompt: Optional text to guide the model's style or continue a previous segment.
             temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to BaseWhisperSTTService.
         """
+        if model is not None:
+            _warn_deprecated_param("model", "BaseWhisperSTTSettings", "model")
+
         super().__init__(
-            model=model,
+            model=model or "gpt-4o-transcribe",
             api_key=api_key,
             base_url=base_url,
             language=language,
@@ -93,6 +107,9 @@ class OpenAISTTService(BaseWhisperSTTService):
             ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )
+
+        if settings is not None:
+            self._settings.apply_update(settings)
 
     async def _transcribe(self, audio: bytes) -> Transcription:
         assert self._language is not None  # Assigned in the BaseWhisperSTTService class
@@ -175,13 +192,14 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-4o-transcribe",
+        model: Optional[str] = None,
         base_url: str = "wss://api.openai.com/v1/realtime",
         language: Optional[Language] = Language.EN,
         prompt: Optional[str] = None,
         turn_detection: Optional[Union[dict, Literal[False]]] = False,
         noise_reduction: Optional[Literal["near_field", "far_field"]] = None,
         should_interrupt: bool = True,
+        settings: Optional[OpenAIRealtimeSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = OPENAI_REALTIME_TTFS_P99,
         **kwargs,
     ):
@@ -191,7 +209,10 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             api_key: OpenAI API key for authentication.
             model: Transcription model. Supported values are
                 ``"gpt-4o-transcribe"`` and ``"gpt-4o-mini-transcribe"``.
-                Defaults to ``"gpt-4o-transcribe"``.
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAIRealtimeSTTSettings(model=...)`` instead.
+
             base_url: WebSocket base URL for the Realtime API.
                 Defaults to ``"wss://api.openai.com/v1/realtime"``.
             language: Language of the audio input. Defaults to English.
@@ -208,6 +229,8 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
             should_interrupt: Whether to interrupt bot output when
                 speech is detected by server-side VAD. Only applies when
                 turn detection is enabled. Defaults to True.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent
@@ -219,13 +242,20 @@ class OpenAIRealtimeSTTService(WebsocketSTTService):
                 "Install it with: pip install pipecat-ai[openai]"
             )
 
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAIRealtimeSTTSettings", "model")
+
+        default_settings = OpenAIRealtimeSTTSettings(
+            model=model or "gpt-4o-transcribe",
+            language=language,
+            prompt=prompt,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=OpenAIRealtimeSTTSettings(
-                model=model,
-                language=language,
-                prompt=prompt,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

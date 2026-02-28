@@ -21,7 +21,9 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -36,8 +38,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         self,
         *,
         api_key: str,
-        model: str = "Llama-4-Maverick-17B-128E-Instruct",
+        model: Optional[str] = None,
         base_url: str = "https://api.sambanova.ai/v1",
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs: Dict[Any, Any],
     ) -> None:
         """Initialize SambaNova LLM service.
@@ -45,10 +48,23 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         Args:
             api_key: The API key for accessing SambaNova API.
             model: The model identifier to use. Defaults to "Llama-4-Maverick-17B-128E-Instruct".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             base_url: The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(model=model or "Llama-4-Maverick-17B-128E-Instruct")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(api_key=api_key, base_url=base_url, settings=default_settings, **kwargs)
 
     def create_client(
         self,

@@ -19,9 +19,12 @@ from loguru import logger
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.google.gemini_live.llm import (
     GeminiLiveLLMService,
+    GeminiLiveLLMSettings,
     HttpOptions,
     InputParams,
+    language_to_gemini_language,
 )
+from pipecat.services.settings import _warn_deprecated_param
 
 try:
     from google.auth import default
@@ -51,13 +54,14 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         credentials_path: Optional[str] = None,
         location: str,
         project_id: str,
-        model="google/gemini-live-2.5-flash-native-audio",
+        model: Optional[str] = None,
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         system_instruction: Optional[str] = None,
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GeminiLiveLLMSettings] = None,
         inference_on_context_initialization: bool = True,
         file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
         http_options: Optional[HttpOptions] = None,
@@ -70,7 +74,11 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             credentials_path: Path to the service account JSON file.
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
-            model: Model identifier to use. Defaults to "models/gemini-live-2.5-flash-native-audio".
+            model: Model identifier to use.
+
+                .. deprecated::
+                    Use ``settings=GeminiLiveLLMSettings(model=...)`` instead.
+
             voice_id: TTS voice identifier. Defaults to "Charon".
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
@@ -78,6 +86,12 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
             tools: Tools/functions available to the model. Defaults to None.
             params: Configuration parameters for the model along with Vertex AI
                 location and project ID.
+
+                .. deprecated::
+                    Use ``settings=GeminiLiveLLMSettings(...)`` instead.
+
+            settings: Gemini Live LLM settings. If provided together with deprecated
+                top-level parameters, the ``settings`` values take precedence.
             inference_on_context_initialization: Whether to generate a response when context
                 is first set. Defaults to True.
             file_api_base_url: Base URL for the Gemini File API. Defaults to the official endpoint.
@@ -95,24 +109,59 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
                 "Invalid parameter 'api_key'. Use 'credentials' or 'credentials_path' for Vertex AI authentication."
             )
 
+        if model is not None:
+            _warn_deprecated_param("model", "GeminiLiveLLMSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "GeminiLiveLLMSettings")
+
         # These need to be set before calling super().__init__() because
         # super().__init__() invokes create_client(), which needs these.
         self._credentials = self._get_credentials(credentials, credentials_path)
         self._project_id = project_id
         self._location = location
 
-        # Call parent constructor with the obtained API key
+        # Build default_settings from deprecated args, then apply settings delta.
+        # We pass settings= to super() instead of model=/params= to avoid
+        # double deprecation warnings from the parent.
+        _params = params or InputParams()
+
+        default_settings = GeminiLiveLLMSettings(
+            model=model or "google/gemini-live-2.5-flash-native-audio",
+            frequency_penalty=_params.frequency_penalty,
+            max_tokens=_params.max_tokens,
+            presence_penalty=_params.presence_penalty,
+            temperature=_params.temperature,
+            top_k=_params.top_k,
+            top_p=_params.top_p,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            modalities=_params.modalities,
+            language=language_to_gemini_language(_params.language) if _params.language else "en-US",
+            media_resolution=_params.media_resolution,
+            vad=_params.vad,
+            context_window_compression=_params.context_window_compression.model_dump()
+            if _params.context_window_compression
+            else {},
+            thinking=_params.thinking or {},
+            enable_affective_dialog=_params.enable_affective_dialog or False,
+            proactivity=_params.proactivity or {},
+            extra=_params.extra if isinstance(_params.extra, dict) else {},
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        # Call parent constructor with the obtained settings
         super().__init__(
             # api_key is required by parent class, but actually not used with
             # Vertex
             api_key="dummy",
-            model=model,
             voice_id=voice_id,
             start_audio_paused=start_audio_paused,
             start_video_paused=start_video_paused,
             system_instruction=system_instruction,
             tools=tools,
-            params=params,
+            settings=default_settings,
             inference_on_context_initialization=inference_on_context_initialization,
             file_api_base_url=file_api_base_url,
             http_options=http_options,

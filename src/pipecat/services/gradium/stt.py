@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import GRADIUM_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -91,6 +91,9 @@ class GradiumSTTService(WebsocketSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for Gradium STT API.
 
+        .. deprecated:: 1.0
+            Use ``settings=GradiumSTTSettings(...)`` instead.
+
         Parameters:
             language: Expected language of the audio (e.g., "en", "es", "fr").
                 This helps ground the model to a specific language and improve
@@ -111,6 +114,7 @@ class GradiumSTTService(WebsocketSTTService):
         api_endpoint_base_url: str = "wss://eu.api.gradium.ai/api/speech/asr",
         params: Optional[InputParams] = None,
         json_config: Optional[str] = None,
+        settings: Optional[GradiumSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = GRADIUM_TTFS_P99,
         **kwargs,
     ):
@@ -120,11 +124,17 @@ class GradiumSTTService(WebsocketSTTService):
             api_key: Gradium API key for authentication.
             api_endpoint_base_url: WebSocket endpoint URL. Defaults to Gradium's streaming endpoint.
             params: Configuration parameters for language and delay settings.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GradiumSTTSettings(...)`` instead.
+
             json_config: Optional JSON configuration string for additional model settings.
 
                 .. deprecated:: 0.0.101
                     Use `params` instead for type-safe configuration.
 
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
@@ -138,16 +148,23 @@ class GradiumSTTService(WebsocketSTTService):
                 stacklevel=2,
             )
 
-        params = params or GradiumSTTService.InputParams()
+        if params is not None:
+            _warn_deprecated_param("params", "GradiumSTTSettings")
+
+        _params = params or GradiumSTTService.InputParams()
+
+        default_settings = GradiumSTTSettings(
+            model=None,
+            language=_params.language,
+            delay_in_frames=_params.delay_in_frames or None,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=SAMPLE_RATE,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=GradiumSTTSettings(
-                model=None,
-                language=params.language,
-                delay_in_frames=params.delay_in_frames or None,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
