@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.google.utils import update_google_client_http_options
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import ImageGenSettings
+from pipecat.services.settings import ImageGenSettings, _warn_deprecated_param
 
 try:
     from google import genai
@@ -73,18 +73,33 @@ class GoogleImageGenService(ImageGenService):
         api_key: str,
         params: Optional[InputParams] = None,
         http_options: Optional[Any] = None,
+        settings: Optional[GoogleImageGenSettings] = None,
         **kwargs,
     ):
         """Initialize the GoogleImageGenService with API key and parameters.
 
         Args:
             api_key: Google AI API key for authentication.
-            params: Configuration parameters for image generation. Defaults to InputParams().
+            params: Configuration parameters for image generation.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GoogleImageGenSettings(model=...)`` instead.
+
             http_options: HTTP options for the client.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent ImageGenService.
         """
+        if params is not None:
+            _warn_deprecated_param("params", "GoogleImageGenSettings")
+
         params = params or GoogleImageGenService.InputParams()
-        super().__init__(settings=GoogleImageGenSettings(model=params.model), **kwargs)
+
+        default_settings = GoogleImageGenSettings(model=params.model)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
         self._params = params
 
         # Add client header

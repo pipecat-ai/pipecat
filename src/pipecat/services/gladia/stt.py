@@ -39,7 +39,7 @@ from pipecat.services.gladia.config import (
     PreProcessingConfig,
     RealtimeProcessingConfig,
 )
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import GLADIA_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -249,10 +249,11 @@ class GladiaSTTService(WebsocketSTTService):
         url: str = "https://api.gladia.io/v2/live",
         confidence: Optional[float] = None,
         sample_rate: Optional[int] = None,
-        model: str = "solaria-1",
+        model: Optional[str] = None,
         params: Optional[GladiaInputParams] = None,
         max_buffer_size: int = 1024 * 1024 * 20,  # 20MB default buffer
         should_interrupt: bool = True,
+        settings: Optional[GladiaSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = GLADIA_TTFS_P99,
         **kwargs,
     ):
@@ -269,15 +270,30 @@ class GladiaSTTService(WebsocketSTTService):
                     No confidence threshold is applied.
 
             sample_rate: Audio sample rate in Hz. If None, uses service default.
-            model: Model to use for transcription. Defaults to "solaria-1".
+            model: Model to use for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GladiaSTTSettings(model=...)`` instead.
+
             params: Additional configuration parameters for Gladia service.
+
+                .. deprecated:: 1.0
+                    Use ``settings=GladiaSTTSettings(...)`` instead.
+
             max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
             should_interrupt: Determine whether the bot should be interrupted when
                 Gladia VAD detects user speech. Defaults to True.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService parent class.
         """
+        if model is not None:
+            _warn_deprecated_param("model", "GladiaSTTSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "GladiaSTTSettings")
+
         params = params or GladiaInputParams()
 
         if params.language is not None:
@@ -307,26 +323,30 @@ class GladiaSTTService(WebsocketSTTService):
             if language_code:
                 language_config = LanguageConfig(languages=[language_code], code_switching=False)
 
+        default_settings = GladiaSTTSettings(
+            model=model or "solaria-1",
+            language=None,
+            encoding=params.encoding,
+            bit_depth=params.bit_depth,
+            channels=params.channels,
+            custom_metadata=params.custom_metadata,
+            endpointing=params.endpointing,
+            maximum_duration_without_endpointing=params.maximum_duration_without_endpointing,
+            language_config=language_config,
+            pre_processing=params.pre_processing,
+            realtime_processing=params.realtime_processing,
+            messages_config=params.messages_config,
+            enable_vad=params.enable_vad,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=20,
             keepalive_interval=5,
-            settings=GladiaSTTSettings(
-                model=model,
-                language=None,
-                encoding=params.encoding,
-                bit_depth=params.bit_depth,
-                channels=params.channels,
-                custom_metadata=params.custom_metadata,
-                endpointing=params.endpointing,
-                maximum_duration_without_endpointing=params.maximum_duration_without_endpointing,
-                language_config=language_config,
-                pre_processing=params.pre_processing,
-                realtime_processing=params.realtime_processing,
-                messages_config=params.messages_config,
-                enable_vad=params.enable_vad,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

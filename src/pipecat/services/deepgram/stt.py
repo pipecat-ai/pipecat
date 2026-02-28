@@ -256,6 +256,7 @@ class DeepgramSTTService(STTService):
         live_options: Optional[LiveOptions] = None,
         addons: Optional[Dict] = None,
         should_interrupt: bool = True,
+        settings: Optional[DeepgramSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = DEEPGRAM_TTFS_P99,
         **kwargs,
     ):
@@ -279,6 +280,9 @@ class DeepgramSTTService(STTService):
                 .. deprecated:: 0.0.99
                     This parameter will be removed along with `vad_events` support.
 
+            settings: Runtime-updatable settings. When provided alongside
+                ``live_options``, ``settings`` values take precedence (applied
+                after the ``live_options`` merge).
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the parent STTService.
@@ -299,7 +303,7 @@ class DeepgramSTTService(STTService):
                 )
             base_url = url
 
-        settings = DeepgramSTTSettings(
+        default_settings = DeepgramSTTSettings(
             model="nova-3-general",
             language=Language.EN,
             encoding="linear16",
@@ -318,15 +322,18 @@ class DeepgramSTTService(STTService):
             delta = DeepgramSTTSettings.from_mapping(
                 {k: v for k, v in lo_dict.items() if k != "sample_rate"}
             )
-            settings.apply_update(delta)
+            default_settings.apply_update(delta)
+
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         # Sync extra to top-level fields so self._settings is unambiguous
-        settings._sync_extra_to_fields()
+        default_settings._sync_extra_to_fields()
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=settings,
+            settings=default_settings,
             **kwargs,
         )
 

@@ -14,7 +14,9 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 
 class OpenRouterLLMService(OpenAILLMService):
@@ -28,8 +30,9 @@ class OpenRouterLLMService(OpenAILLMService):
         self,
         *,
         api_key: Optional[str] = None,
-        model: str = "openai/gpt-4o-2024-11-20",
+        model: Optional[str] = None,
         base_url: str = "https://openrouter.ai/api/v1",
+        settings: Optional[OpenAILLMSettings] = None,
         **kwargs,
     ):
         """Initialize the OpenRouter LLM service.
@@ -38,13 +41,26 @@ class OpenRouterLLMService(OpenAILLMService):
             api_key: The API key for accessing OpenRouter's API. If None, will attempt
                 to read from environment variables.
             model: The model identifier to use. Defaults to "openai/gpt-4o-2024-11-20".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             base_url: The base URL for OpenRouter API. Defaults to "https://openrouter.ai/api/v1".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(model=model or "openai/gpt-4o-2024-11-20")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             api_key=api_key,
             base_url=base_url,
-            model=model,
+            settings=default_settings,
             **kwargs,
         )
 

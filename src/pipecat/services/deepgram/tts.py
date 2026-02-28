@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService, WebsocketTTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -72,41 +72,55 @@ class DeepgramTTSService(WebsocketTTSService):
         self,
         *,
         api_key: str,
-        voice: str = "aura-2-helena-en",
+        voice: Optional[str] = None,
         base_url: str = "wss://api.deepgram.com",
         sample_rate: Optional[int] = None,
         encoding: str = "linear16",
+        settings: Optional[DeepgramTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Deepgram WebSocket TTS service.
 
         Args:
             api_key: Deepgram API key for authentication.
-            voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
+            voice: Voice model to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=DeepgramTTSSettings(voice=...)`` instead.
+
             base_url: WebSocket base URL for Deepgram API. Defaults to "wss://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             encoding: Audio encoding format. Defaults to "linear16". Must be one of SUPPORTED_ENCODINGS.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService class.
 
         Raises:
             ValueError: If encoding is not in SUPPORTED_ENCODINGS.
         """
+        if voice is not None:
+            _warn_deprecated_param("voice", "DeepgramTTSSettings", "voice")
+
         if encoding.lower() not in self.SUPPORTED_ENCODINGS:
             raise ValueError(
                 f"Unsupported encoding '{encoding}'. Must be one of {', '.join(self.SUPPORTED_ENCODINGS)} for WebSocket TTS."
             )
+
+        default_settings = DeepgramTTSSettings(
+            model=voice or "aura-2-helena-en",
+            voice=voice or "aura-2-helena-en",
+            language=None,
+            encoding=encoding,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             pause_frame_processing=True,
             push_stop_frames=True,
             append_trailing_space=True,
-            settings=DeepgramTTSSettings(
-                model=voice,
-                voice=voice,
-                language=None,
-                encoding=encoding,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -375,32 +389,46 @@ class DeepgramHttpTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice: str = "aura-2-helena-en",
+        voice: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         base_url: str = "https://api.deepgram.com",
         sample_rate: Optional[int] = None,
         encoding: str = "linear16",
+        settings: Optional[DeepgramTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Deepgram TTS service.
 
         Args:
             api_key: Deepgram API key for authentication.
-            voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
+            voice: Voice model to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=DeepgramTTSSettings(voice=...)`` instead.
+
             aiohttp_session: Shared aiohttp session for HTTP requests with connection pooling.
             base_url: Custom base URL for Deepgram API. Defaults to "https://api.deepgram.com".
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             encoding: Audio encoding format. Defaults to "linear16".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService class.
         """
+        if voice is not None:
+            _warn_deprecated_param("voice", "DeepgramTTSSettings", "voice")
+
+        default_settings = DeepgramTTSSettings(
+            model=voice or "aura-2-helena-en",
+            voice=voice or "aura-2-helena-en",
+            language=None,
+            encoding=encoding,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
-            settings=DeepgramTTSSettings(
-                model=voice,
-                voice=voice,
-                language=None,
-                encoding=encoding,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

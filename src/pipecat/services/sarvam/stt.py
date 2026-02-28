@@ -32,7 +32,13 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.sarvam._sdk import sdk_headers
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, is_given
+from pipecat.services.settings import (
+    NOT_GIVEN,
+    STTSettings,
+    _NotGiven,
+    _warn_deprecated_param,
+    is_given,
+)
 from pipecat.services.stt_latency import SARVAM_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -171,6 +177,9 @@ class SarvamSTTService(STTService):
     class InputParams(BaseModel):
         """Configuration parameters for Sarvam STT service.
 
+        .. deprecated:: 1.0
+            Use ``settings=SarvamSTTSettings(...)`` instead.
+
         Parameters:
             language: Target language for transcription.
                 - saarika:v2.5: Defaults to "unknown" (auto-detect supported)
@@ -194,10 +203,11 @@ class SarvamSTTService(STTService):
         self,
         *,
         api_key: str,
-        model: str = "saarika:v2.5",
+        model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         input_audio_codec: str = "wav",
         params: Optional[InputParams] = None,
+        settings: Optional[SarvamSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = SARVAM_TTFS_P99,
         keepalive_timeout: Optional[float] = None,
         keepalive_interval: float = 5.0,
@@ -207,13 +217,20 @@ class SarvamSTTService(STTService):
 
         Args:
             api_key: Sarvam API key for authentication.
-            model: Sarvam model to use for transcription. Allowed values:
-                - "saarika:v2.5": Standard STT model
-                - "saaras:v2.5": STT-Translate model (auto-detects language, supports prompts)
-                - "saaras:v3": Advanced STT model (supports mode)
+            model: Sarvam model to use for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=SarvamSTTSettings(model=...)`` instead.
+
             sample_rate: Audio sample rate. Defaults to 16000 if not specified.
             input_audio_codec: Audio codec/format of the input file. Defaults to "wav".
             params: Configuration parameters for Sarvam STT service.
+
+                .. deprecated:: 1.0
+                    Use ``settings=SarvamSTTSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             keepalive_timeout: Seconds of no audio before sending silence to keep the
@@ -221,7 +238,13 @@ class SarvamSTTService(STTService):
             keepalive_interval: Seconds between idle checks when keepalive is enabled.
             **kwargs: Additional arguments passed to the parent STTService.
         """
-        params = params or SarvamSTTService.InputParams()
+        if model is not None:
+            _warn_deprecated_param("model", "SarvamSTTSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "SarvamSTTSettings")
+
+        model = model or "saarika:v2.5"
+        _params = params or SarvamSTTService.InputParams()
 
         # Get model configuration (validates model exists)
         if model not in MODEL_CONFIGS:
@@ -231,31 +254,35 @@ class SarvamSTTService(STTService):
         self._config = MODEL_CONFIGS[model]
 
         # Validate parameters against model capabilities
-        if params.prompt is not None and not self._config.supports_prompt:
+        if _params.prompt is not None and not self._config.supports_prompt:
             raise ValueError(f"Model '{model}' does not support prompt parameter.")
-        if params.mode is not None and not self._config.supports_mode:
+        if _params.mode is not None and not self._config.supports_mode:
             raise ValueError(f"Model '{model}' does not support mode parameter.")
-        if params.language is not None and not self._config.supports_language:
+        if _params.language is not None and not self._config.supports_language:
             raise ValueError(
                 f"Model '{model}' does not support language parameter (auto-detects language)."
             )
 
         # Resolve mode default from model config
-        mode = params.mode if params.mode is not None else self._config.default_mode
+        mode = _params.mode if _params.mode is not None else self._config.default_mode
+
+        default_settings = SarvamSTTSettings(
+            model=model,
+            language=_params.language,
+            prompt=_params.prompt,
+            mode=mode,
+            vad_signals=_params.vad_signals,
+            high_vad_sensitivity=_params.high_vad_sensitivity,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=keepalive_timeout,
             keepalive_interval=keepalive_interval,
-            settings=SarvamSTTSettings(
-                model=model,
-                language=params.language,
-                prompt=params.prompt,
-                mode=mode,
-                vad_signals=params.vad_signals,
-                high_vad_sensitivity=params.high_vad_sensitivity,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -274,7 +301,7 @@ class SarvamSTTService(STTService):
         self._socket_client = None
         self._receive_task = None
 
-        if params.vad_signals:
+        if _params.vad_signals:
             self._register_event_handler("on_speech_started")
             self._register_event_handler("on_speech_stopped")
             self._register_event_handler("on_utterance_end")

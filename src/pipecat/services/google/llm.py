@@ -58,7 +58,13 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, is_given
+from pipecat.services.settings import (
+    NOT_GIVEN,
+    LLMSettings,
+    _NotGiven,
+    _warn_deprecated_param,
+    is_given,
+)
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -748,6 +754,9 @@ class GoogleLLMService(LLMService):
     class InputParams(BaseModel):
         """Input parameters for Google AI models.
 
+        .. deprecated::
+            Use ``settings=GoogleLLMSettings(...)`` instead.
+
         Parameters:
             max_tokens: Maximum number of tokens to generate.
             temperature: Sampling temperature between 0.0 and 2.0.
@@ -773,8 +782,9 @@ class GoogleLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gemini-2.5-flash",
+        model: Optional[str] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[GoogleLLMSettings] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_config: Optional[Dict[str, Any]] = None,
@@ -785,33 +795,50 @@ class GoogleLLMService(LLMService):
 
         Args:
             api_key: Google AI API key for authentication.
-            model: Model name to use. Defaults to "gemini-2.0-flash".
-            params: Input parameters for the model.
+            model: Model name to use.
+
+                .. deprecated::
+                    Use ``settings=GoogleLLMSettings(model=...)`` instead.
+
+            params: Optional model parameters for inference.
+
+                .. deprecated::
+                    Use ``settings=GoogleLLMSettings(...)`` instead.
+
+            settings: Runtime-updatable settings for this service.  When both
+                deprecated parameters and *settings* are provided, *settings*
+                values take precedence.
             system_instruction: System instruction/prompt for the model.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent class.
         """
-        params = params or GoogleLLMService.InputParams()
+        if model is not None:
+            _warn_deprecated_param("model", "GoogleLLMSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "GoogleLLMSettings")
 
-        super().__init__(
-            settings=GoogleLLMSettings(
-                model=model,
-                max_tokens=params.max_tokens,
-                temperature=params.temperature,
-                top_k=params.top_k,
-                top_p=params.top_p,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                thinking=params.thinking,
-                extra=params.extra if isinstance(params.extra, dict) else {},
-            ),
-            **kwargs,
+        _params = params or GoogleLLMService.InputParams()
+
+        default_settings = GoogleLLMSettings(
+            model=model or "gemini-2.5-flash",
+            max_tokens=_params.max_tokens,
+            temperature=_params.temperature,
+            top_k=_params.top_k,
+            top_p=_params.top_p,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            thinking=_params.thinking,
+            extra=_params.extra if isinstance(_params.extra, dict) else {},
         )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
 
         self._api_key = api_key
         self._system_instruction = system_instruction

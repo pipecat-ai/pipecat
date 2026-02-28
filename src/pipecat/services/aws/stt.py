@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import AWS_TRANSCRIBE_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -81,8 +81,9 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         aws_access_key_id: Optional[str] = None,
         aws_session_token: Optional[str] = None,
         region: Optional[str] = None,
-        sample_rate: int = 16000,
-        language: Language = Language.EN,
+        sample_rate: Optional[int] = None,
+        language: Optional[Language] = None,
+        settings: Optional[AWSTranscribeSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = AWS_TRANSCRIBE_TTFS_P99,
         **kwargs,
     ):
@@ -93,29 +94,51 @@ class AWSTranscribeSTTService(WebsocketSTTService):
             aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
             aws_session_token: AWS session token for temporary credentials. If None, uses AWS_SESSION_TOKEN environment variable.
             region: AWS region for the service.
-            sample_rate: Audio sample rate in Hz. Must be 8000 or 16000. Defaults to 16000.
-            language: Language for transcription. Defaults to English.
+            sample_rate: Audio sample rate in Hz. Must be 8000 or 16000.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AWSTranscribeSTTSettings(sample_rate=...)`` instead.
+
+            language: Language for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AWSTranscribeSTTSettings(language=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
         """
+        if sample_rate is not None:
+            _warn_deprecated_param("sample_rate", "AWSTranscribeSTTSettings", "sample_rate")
+        if language is not None:
+            _warn_deprecated_param("language", "AWSTranscribeSTTSettings", "language")
+
+        _sample_rate = sample_rate or 16000
+        _language = language or Language.EN
+
+        default_settings = AWSTranscribeSTTSettings(
+            language=self.language_to_service_language(_language) or "en-US",
+            sample_rate=_sample_rate,
+            media_encoding="linear16",
+            number_of_channels=1,
+            show_speaker_label=False,
+            enable_channel_identification=False,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=AWSTranscribeSTTSettings(
-                language=self.language_to_service_language(language) or "en-US",
-                sample_rate=sample_rate,
-                media_encoding="linear16",
-                number_of_channels=1,
-                show_speaker_label=False,
-                enable_channel_identification=False,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         # Validate sample rate - AWS Transcribe only supports 8000 Hz or 16000 Hz
-        if sample_rate not in [8000, 16000]:
+        if _sample_rate not in [8000, 16000]:
             logger.warning(
-                f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. Converting from {sample_rate} Hz to 16000 Hz."
+                f"AWS Transcribe only supports 8000 Hz or 16000 Hz sample rates. Converting from {_sample_rate} Hz to 16000 Hz."
             )
             self._settings.sample_rate = 16000
 

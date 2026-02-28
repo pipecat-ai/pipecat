@@ -6,9 +6,13 @@
 
 """OLLama LLM service implementation for Pipecat AI framework."""
 
+from typing import Optional
+
 from loguru import logger
 
+from pipecat.services.openai.base_llm import OpenAILLMSettings
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.settings import _warn_deprecated_param
 
 
 class OLLamaLLMService(OpenAILLMService):
@@ -19,17 +23,35 @@ class OLLamaLLMService(OpenAILLMService):
     """
 
     def __init__(
-        self, *, model: str = "llama2", base_url: str = "http://localhost:11434/v1", **kwargs
+        self,
+        *,
+        model: Optional[str] = None,
+        base_url: str = "http://localhost:11434/v1",
+        settings: Optional[OpenAILLMSettings] = None,
+        **kwargs,
     ):
         """Initialize OLLama LLM service.
 
         Args:
             model: The OLLama model to use. Defaults to "llama2".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAILLMSettings(model=...)`` instead.
+
             base_url: The base URL for the OLLama API endpoint.
                     Defaults to "http://localhost:11434/v1".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
-        super().__init__(model=model, base_url=base_url, api_key="ollama", **kwargs)
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAILLMSettings", "model")
+
+        default_settings = OpenAILLMSettings(model=model or "llama2")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(base_url=base_url, api_key="ollama", settings=default_settings, **kwargs)
 
     def create_client(self, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Ollama.

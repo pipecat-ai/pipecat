@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import WHISPER_TTFS_P99
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -129,13 +129,14 @@ class BaseWhisperSTTService(SegmentedSTTService):
     def __init__(
         self,
         *,
-        model: str,
+        model: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        language: Optional[Language] = Language.EN,
+        language: Optional[Language] = None,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         include_prob_metrics: bool = False,
+        settings: Optional[BaseWhisperSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = WHISPER_TTFS_P99,
         **kwargs,
     ):
@@ -143,33 +144,68 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
         Args:
             model: Name of the Whisper model to use.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(model=...)`` instead.
+
             api_key: Service API key. Defaults to None.
             base_url: Service API base URL. Defaults to None.
-            language: Language of the audio input. Defaults to English.
+            language: Language of the audio input.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(language=...)`` instead.
+
             prompt: Optional text to guide the model's style or continue a previous segment.
-            temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(prompt=...)`` instead.
+
+            temperature: Sampling temperature between 0 and 1.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(temperature=...)`` instead.
+
             include_prob_metrics: If True, enables probability metrics in API response.
                 Each service implements this differently (see child classes).
                 Defaults to False.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
+        if model is not None:
+            _warn_deprecated_param("model", "BaseWhisperSTTSettings", "model")
+        if language is not None:
+            _warn_deprecated_param("language", "BaseWhisperSTTSettings", "language")
+        if prompt is not None:
+            _warn_deprecated_param("prompt", "BaseWhisperSTTSettings", "prompt")
+        if temperature is not None:
+            _warn_deprecated_param("temperature", "BaseWhisperSTTSettings", "temperature")
+
+        _language = language or Language.EN
+
+        default_settings = BaseWhisperSTTSettings(
+            model=model,
+            language=self.language_to_service_language(_language),
+            base_url=base_url,
+            prompt=prompt,
+            temperature=temperature,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=BaseWhisperSTTSettings(
-                model=model,
-                language=self.language_to_service_language(language or Language.EN),
-                base_url=base_url,
-                prompt=prompt,
-                temperature=temperature,
-            ),
+            settings=default_settings,
             **kwargs,
         )
         self._client = self._create_client(api_key, base_url)
         self._language = self._settings.language
-        self._prompt = prompt
-        self._temperature = temperature
+        self._prompt = self._settings.prompt if self._settings.prompt else prompt
+        self._temperature = (
+            self._settings.temperature if self._settings.temperature else temperature
+        )
         self._include_prob_metrics = include_prob_metrics
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):

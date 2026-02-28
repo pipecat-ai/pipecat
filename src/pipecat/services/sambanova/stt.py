@@ -10,8 +10,13 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from pipecat.services.settings import _warn_deprecated_param
 from pipecat.services.stt_latency import SAMBANOVA_TTFS_P99
-from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
+from pipecat.services.whisper.base_stt import (
+    BaseWhisperSTTService,
+    BaseWhisperSTTSettings,
+    Transcription,
+)
 from pipecat.transcriptions.language import Language
 
 
@@ -25,35 +30,75 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
     def __init__(
         self,
         *,
-        model: str = "Whisper-Large-v3",
+        model: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: str = "https://api.sambanova.ai/v1",
-        language: Optional[Language] = Language.EN,
+        language: Optional[Language] = None,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
+        settings: Optional[BaseWhisperSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = SAMBANOVA_TTFS_P99,
         **kwargs: Any,
     ) -> None:
         """Initialize SambaNova STT service.
 
         Args:
-            model: Whisper model to use. Defaults to "Whisper-Large-v3".
+            model: Whisper model to use.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(model=...)`` instead.
+
             api_key: SambaNova API key. Defaults to None.
             base_url: API base URL. Defaults to "https://api.sambanova.ai/v1".
-            language: Language of the audio input. Defaults to English.
+            language: Language of the audio input.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(language=...)`` instead.
+
             prompt: Optional text to guide the model's style or continue a previous segment.
-            temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(prompt=...)`` instead.
+
+            temperature: Optional sampling temperature between 0 and 1.
+
+                .. deprecated:: 1.0
+                    Use ``settings=BaseWhisperSTTSettings(temperature=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to `pipecat.services.whisper.base_stt.BaseWhisperSTTService`.
         """
-        super().__init__(
+        if model is not None:
+            _warn_deprecated_param("model", "BaseWhisperSTTSettings", "model")
+        if language is not None:
+            _warn_deprecated_param("language", "BaseWhisperSTTSettings", "language")
+        if prompt is not None:
+            _warn_deprecated_param("prompt", "BaseWhisperSTTSettings", "prompt")
+        if temperature is not None:
+            _warn_deprecated_param("temperature", "BaseWhisperSTTSettings", "temperature")
+
+        model = model or "Whisper-Large-v3"
+        language = language or Language.EN
+
+        # Build settings from deprecated params and pass via settings=
+        # to avoid double deprecation warnings in BaseWhisperSTTService.
+        default_settings = BaseWhisperSTTSettings(
             model=model,
-            api_key=api_key,
+            language=self.language_to_service_language(language),
             base_url=base_url,
-            language=language,
             prompt=prompt,
             temperature=temperature,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            settings=default_settings,
             ttfs_p99_latency=ttfs_p99_latency,
             **kwargs,
         )

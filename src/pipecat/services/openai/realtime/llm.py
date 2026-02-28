@@ -59,7 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, LLMSettings, _NotGiven, _warn_deprecated_param
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
@@ -121,9 +121,10 @@ class OpenAIRealtimeLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-realtime-1.5",
+        model: Optional[str] = None,
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
+        settings: Optional[OpenAIRealtimeLLMSettings] = None,
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         video_frame_detail: str = "auto",
@@ -134,14 +135,25 @@ class OpenAIRealtimeLLMService(LLMService):
 
         Args:
             api_key: OpenAI API key for authentication.
-            model: OpenAI model name. Defaults to "gpt-realtime".
+            model: OpenAI model name.
+
+                .. deprecated::
+                    Use ``settings=OpenAIRealtimeLLMSettings(model=...)`` instead.
+
                 This is a connection-level parameter set via the WebSocket URL query
                 parameter and cannot be changed during the session.
             base_url: WebSocket base URL for the realtime API.
                 Defaults to "wss://api.openai.com/v1/realtime".
             session_properties: Configuration properties for the realtime session.
+
+                .. deprecated::
+                    Use ``settings=OpenAIRealtimeLLMSettings(session_properties=...)``
+                    instead.
+
                 These are session-level settings that can be updated during the session
                 (except for voice and model). If None, uses default SessionProperties.
+            settings: Realtime LLM settings. If provided together with deprecated
+                top-level parameters, the ``settings`` values take precedence.
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
             start_video_paused: Whether to start with video input paused. Defaults to False.
             video_frame_detail: Detail level for video processing. Can be "auto", "low", or "high".
@@ -156,6 +168,12 @@ class OpenAIRealtimeLLMService(LLMService):
 
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAIRealtimeLLMSettings", "model")
+        if session_properties is not None:
+            _warn_deprecated_param(
+                "session_properties", "OpenAIRealtimeLLMSettings", "session_properties"
+            )
         if send_transcription_frames is not None:
             import warnings
 
@@ -168,24 +186,28 @@ class OpenAIRealtimeLLMService(LLMService):
                     stacklevel=2,
                 )
 
+        default_settings = OpenAIRealtimeLLMSettings(
+            model=model or "gpt-realtime-1.5",
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            top_k=None,
+            frequency_penalty=None,
+            presence_penalty=None,
+            seed=None,
+            filter_incomplete_user_turns=False,
+            user_turn_completion_config=None,
+            session_properties=session_properties or events.SessionProperties(),
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         # Build WebSocket URL with model query parameter
         # Source: https://platform.openai.com/docs/guides/realtime-websocket
-        full_url = f"{base_url}?model={model}"
+        full_url = f"{base_url}?model={default_settings.model}"
         super().__init__(
             base_url=full_url,
-            settings=OpenAIRealtimeLLMSettings(
-                model=model,
-                temperature=None,
-                max_tokens=None,
-                top_p=None,
-                top_k=None,
-                frequency_penalty=None,
-                presence_penalty=None,
-                seed=None,
-                filter_incomplete_user_turns=False,
-                user_turn_completion_config=None,
-                session_properties=session_properties or events.SessionProperties(),
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

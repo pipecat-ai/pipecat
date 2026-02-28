@@ -32,7 +32,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -175,6 +175,9 @@ class CambTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Camb.ai TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``settings=CambTTSSettings(...)`` instead.
+
         Parameters:
             language: Language for synthesis (BCP-47 format). Defaults to English.
             user_instructions: Custom instructions for mars-instruct model only.
@@ -193,47 +196,71 @@ class CambTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice_id: int = 147320,
-        model: str = "mars-flash",
+        voice_id: Optional[int] = None,
+        model: Optional[str] = None,
         timeout: float = 60.0,
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        settings: Optional[CambTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Camb.ai TTS service.
 
         Args:
             api_key: Camb.ai API key for authentication.
-            voice_id: Voice ID to use. Defaults to 147320.
+            voice_id: Voice ID to use.
+
+                .. deprecated:: 1.0
+                    Use ``settings=CambTTSSettings(voice=...)`` instead.
+
             model: TTS model to use. Options: "mars-flash" (fast), "mars-pro" (high quality).
-                Defaults to "mars-flash".
+
+                .. deprecated:: 1.0
+                    Use ``settings=CambTTSSettings(model=...)`` instead.
+
             timeout: Request timeout in seconds. Defaults to 60.0 (minimum recommended
                 by Camb.ai).
             sample_rate: Audio sample rate in Hz. If None, uses model-specific default.
             params: Additional voice parameters. If None, uses defaults.
+
+                .. deprecated:: 1.0
+                    Use ``settings=CambTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        params = params or CambTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "CambTTSSettings", "voice")
+        if model is not None:
+            _warn_deprecated_param("model", "CambTTSSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "CambTTSSettings")
+
+        _params = params or CambTTSService.InputParams()
+        _model = model or "mars-flash"
 
         # Warn if sample rate doesn't match model's supported rate
-        if sample_rate and sample_rate != MODEL_SAMPLE_RATES.get(model):
+        if sample_rate and sample_rate != MODEL_SAMPLE_RATES.get(_model):
             logger.warning(
-                f"Camb.ai's {model} model only supports {MODEL_SAMPLE_RATES.get(model)}Hz "
+                f"Camb.ai's {_model} model only supports {MODEL_SAMPLE_RATES.get(_model)}Hz "
                 f"sample rate. Current rate of {sample_rate}Hz may cause issues."
             )
 
+        default_settings = CambTTSSettings(
+            model=_model,
+            voice=voice_id or 147320,
+            language=(
+                self.language_to_service_language(_params.language) if _params.language else "en-us"
+            ),
+            user_instructions=_params.user_instructions,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
-            settings=CambTTSSettings(
-                model=model,
-                voice=voice_id,
-                language=(
-                    self.language_to_service_language(params.language)
-                    if params.language
-                    else "en-us"
-                ),
-                user_instructions=params.user_instructions,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

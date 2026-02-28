@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     URLImageRawFrame,
 )
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import ImageGenSettings
+from pipecat.services.settings import ImageGenSettings, _warn_deprecated_param
 
 
 @dataclass
@@ -52,7 +52,8 @@ class OpenAIImageGenService(ImageGenService):
         base_url: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"],
-        model: str = "dall-e-3",
+        model: Optional[str] = None,
+        settings: Optional[OpenAIImageGenSettings] = None,
     ):
         """Initialize the OpenAI image generation service.
 
@@ -62,8 +63,21 @@ class OpenAIImageGenService(ImageGenService):
             aiohttp_session: HTTP session for downloading generated images.
             image_size: Target size for generated images.
             model: DALL-E model to use for generation. Defaults to "dall-e-3".
+
+                .. deprecated:: 1.0
+                    Use ``settings=OpenAIImageGenSettings(model=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
         """
-        super().__init__(settings=OpenAIImageGenSettings(model=model))
+        if model is not None:
+            _warn_deprecated_param("model", "OpenAIImageGenSettings", "model")
+
+        default_settings = OpenAIImageGenSettings(model=model or "dall-e-3")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings)
         self._image_size = image_size
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._aiohttp_session = aiohttp_session

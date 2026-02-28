@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -114,6 +114,9 @@ class AzureBaseTTSService:
 
     class InputParams(BaseModel):
         """Input parameters for Azure TTS voice configuration.
+
+        .. deprecated:: 1.0
+            Use ``settings=AzureTTSSettings(...)`` instead.
 
         Parameters:
             emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
@@ -253,9 +256,10 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         *,
         api_key: str,
         region: str,
-        voice: str = "en-US-SaraNeural",
+        voice: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[AzureBaseTTSService.InputParams] = None,
+        settings: Optional[AzureTTSSettings] = None,
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
@@ -265,9 +269,19 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
         Args:
             api_key: Azure Cognitive Services subscription key.
             region: Azure region identifier (e.g., "eastus", "westus2").
-            voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
+            voice: Voice name to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AzureTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AzureTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
                 .. deprecated:: 0.0.104
@@ -276,7 +290,29 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to parent WordTTSService.
         """
-        params = params or AzureBaseTTSService.InputParams()
+        if voice is not None:
+            _warn_deprecated_param("voice", "AzureTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "AzureTTSSettings")
+
+        _params = params or AzureBaseTTSService.InputParams()
+
+        default_settings = AzureTTSSettings(
+            model=None,
+            emphasis=_params.emphasis,
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else "en-US",
+            pitch=_params.pitch,
+            rate=_params.rate,
+            role=_params.role,
+            style=_params.style,
+            style_degree=_params.style_degree,
+            voice=voice or "en-US-SaraNeural",
+            volume=_params.volume,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             aggregate_sentences=aggregate_sentences,
@@ -286,25 +322,12 @@ class AzureTTSService(TTSService, AzureBaseTTSService):
             pause_frame_processing=True,
             supports_word_timestamps=True,
             sample_rate=sample_rate,
-            settings=AzureTTSSettings(
-                model=None,
-                emphasis=params.emphasis,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "en-US",
-                pitch=params.pitch,
-                rate=params.rate,
-                role=params.role,
-                style=params.style,
-                style_degree=params.style_degree,
-                voice=voice,
-                volume=params.volume,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, voice=voice)
+        self._init_azure_base(api_key=api_key, region=region, voice=default_settings.voice)
 
         self._speech_config = None
         self._speech_synthesizer = None
@@ -730,9 +753,10 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         *,
         api_key: str,
         region: str,
-        voice: str = "en-US-SaraNeural",
+        voice: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: Optional[AzureBaseTTSService.InputParams] = None,
+        settings: Optional[AzureTTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Azure HTTP TTS service.
@@ -740,34 +764,53 @@ class AzureHttpTTSService(TTSService, AzureBaseTTSService):
         Args:
             api_key: Azure Cognitive Services subscription key.
             region: Azure region identifier (e.g., "eastus", "westus2").
-            voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
+            voice: Voice name to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AzureTTSSettings(voice=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             params: Voice and synthesis parameters configuration.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AzureTTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent TTSService.
         """
-        params = params or AzureBaseTTSService.InputParams()
+        if voice is not None:
+            _warn_deprecated_param("voice", "AzureTTSSettings", "voice")
+        if params is not None:
+            _warn_deprecated_param("params", "AzureTTSSettings")
+
+        _params = params or AzureBaseTTSService.InputParams()
+
+        default_settings = AzureTTSSettings(
+            model=None,
+            emphasis=_params.emphasis,
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else "en-US",
+            pitch=_params.pitch,
+            rate=_params.rate,
+            role=_params.role,
+            style=_params.style,
+            style_degree=_params.style_degree,
+            voice=voice or "en-US-SaraNeural",
+            volume=_params.volume,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=AzureTTSSettings(
-                model=None,
-                emphasis=params.emphasis,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else "en-US",
-                pitch=params.pitch,
-                rate=params.rate,
-                role=params.role,
-                style=params.style,
-                style_degree=params.style_degree,
-                voice=voice,
-                volume=params.volume,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         # Initialize Azure-specific functionality from mixin
-        self._init_azure_base(api_key=api_key, region=region, voice=voice)
+        self._init_azure_base(api_key=api_key, region=region, voice=default_settings.voice)
 
         self._speech_config = None
         self._speech_synthesizer = None

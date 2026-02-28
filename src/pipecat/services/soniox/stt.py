@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import SONIOX_TTFS_P99
 from pipecat.services.stt_service import WebsocketSTTService
 from pipecat.transcriptions.language import Language
@@ -78,6 +78,9 @@ class SonioxContextObject(BaseModel):
 
 class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
+
+    .. deprecated:: 1.0
+        Use ``settings=SonioxSTTSettings(...)`` instead.
 
     See Soniox WebSocket API documentation for more details:
     https://soniox.com/docs/speech-to-text/api-reference/websocket-api#configuration-parameters
@@ -183,8 +186,10 @@ class SonioxSTTService(WebsocketSTTService):
         api_key: str,
         url: str = "wss://stt-rt.soniox.com/transcribe-websocket",
         sample_rate: Optional[int] = None,
+        model: Optional[str] = None,
         params: Optional[SonioxInputParams] = None,
         vad_force_turn_endpoint: bool = True,
+        settings: Optional[SonioxSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = SONIOX_TTFS_P99,
         **kwargs,
     ):
@@ -194,33 +199,53 @@ class SonioxSTTService(WebsocketSTTService):
             api_key: Soniox API key.
             url: Soniox WebSocket API URL.
             sample_rate: Audio sample rate.
+            model: Soniox model to use for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=SonioxSTTSettings(model=...)`` instead.
+
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
+
+                .. deprecated:: 1.0
+                    Use ``settings=SonioxSTTSettings(...)`` instead.
+
             vad_force_turn_endpoint: Listen to `VADUserStoppedSpeakingFrame` to send finalize message to Soniox.
                 If disabled, Soniox will detect the end of the speech. Defaults to True.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to the STTService.
         """
-        params = params or SonioxInputParams()
+        if model is not None:
+            _warn_deprecated_param("model", "SonioxSTTSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "SonioxSTTSettings")
+
+        _params = params or SonioxInputParams()
+
+        default_settings = SonioxSTTSettings(
+            model=model or _params.model,
+            language=None,
+            audio_format=_params.audio_format,
+            num_channels=_params.num_channels,
+            language_hints=_params.language_hints,
+            language_hints_strict=_params.language_hints_strict,
+            context=_params.context,
+            enable_speaker_diarization=_params.enable_speaker_diarization,
+            enable_language_identification=_params.enable_language_identification,
+            client_reference_id=_params.client_reference_id,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
             keepalive_timeout=1,
             keepalive_interval=5,
-            settings=SonioxSTTSettings(
-                model=params.model,
-                language=None,
-                audio_format=params.audio_format,
-                num_channels=params.num_channels,
-                language_hints=params.language_hints,
-                language_hints_strict=params.language_hints_strict,
-                context=params.context,
-                enable_speaker_diarization=params.enable_speaker_diarization,
-                enable_language_identification=params.enable_language_identification,
-                client_reference_id=params.client_reference_id,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

@@ -13,14 +13,14 @@ using REST endpoints for creating images from text prompts.
 import asyncio
 import io
 from dataclasses import dataclass
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 import aiohttp
 from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import ImageGenSettings
+from pipecat.services.settings import ImageGenSettings, _warn_deprecated_param
 
 
 @dataclass
@@ -46,9 +46,10 @@ class AzureImageGenServiceREST(ImageGenService):
         image_size: str,
         api_key: str,
         endpoint: str,
-        model: str,
+        model: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         api_version="2023-06-01-preview",
+        settings: Optional[AzureImageGenSettings] = None,
     ):
         """Initialize the AzureImageGenServiceREST.
 
@@ -57,10 +58,23 @@ class AzureImageGenServiceREST(ImageGenService):
             api_key: Azure OpenAI API key for authentication.
             endpoint: Azure OpenAI endpoint URL.
             model: The image generation model to use.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AzureImageGenSettings(model=...)`` instead.
+
             aiohttp_session: Shared aiohttp session for HTTP requests.
             api_version: Azure API version string. Defaults to "2023-06-01-preview".
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
         """
-        super().__init__(settings=AzureImageGenSettings(model=model))
+        if model is not None:
+            _warn_deprecated_param("model", "AzureImageGenSettings", "model")
+
+        default_settings = AzureImageGenSettings(model=model)
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings)
 
         self._api_key = api_key
         self._azure_endpoint = endpoint

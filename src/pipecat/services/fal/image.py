@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.image_service import ImageGenService
-from pipecat.services.settings import ImageGenSettings
+from pipecat.services.settings import ImageGenSettings, _warn_deprecated_param
 
 try:
     import fal_client
@@ -75,8 +75,9 @@ class FalImageGenService(ImageGenService):
         *,
         params: InputParams,
         aiohttp_session: aiohttp.ClientSession,
-        model: str = "fal-ai/fast-sdxl",
+        model: Optional[str] = None,
         key: Optional[str] = None,
+        settings: Optional[FalImageGenSettings] = None,
         **kwargs,
     ):
         """Initialize the FalImageGenService.
@@ -85,10 +86,23 @@ class FalImageGenService(ImageGenService):
             params: Input parameters for image generation configuration.
             aiohttp_session: HTTP client session for downloading generated images.
             model: The Fal.ai model to use for generation. Defaults to "fal-ai/fast-sdxl".
+
+                .. deprecated:: 1.0
+                    Use ``settings=FalImageGenSettings(model=...)`` instead.
+
             key: Optional API key for Fal.ai. If provided, sets FAL_KEY environment variable.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to parent ImageGenService.
         """
-        super().__init__(settings=FalImageGenSettings(model=model), **kwargs)
+        if model is not None:
+            _warn_deprecated_param("model", "FalImageGenSettings", "model")
+
+        default_settings = FalImageGenSettings(model=model or "fal-ai/fast-sdxl")
+        if settings is not None:
+            default_settings.apply_update(settings)
+
+        super().__init__(settings=default_settings, **kwargs)
         self._params = params
         self._aiohttp_session = aiohttp_session
         if key:

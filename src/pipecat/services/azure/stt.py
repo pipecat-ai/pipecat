@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import AZURE_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -79,10 +79,11 @@ class AzureSTTService(STTService):
         *,
         api_key: str,
         region: str,
-        language: Language = Language.EN_US,
+        language: Optional[Language] = Language.EN_US,
         sample_rate: Optional[int] = None,
         private_endpoint: Optional[str] = None,
         endpoint_id: Optional[str] = None,
+        settings: Optional[AzureSTTSettings] = None,
         ttfs_p99_latency: Optional[float] = AZURE_TTFS_P99,
         **kwargs,
     ):
@@ -92,30 +93,44 @@ class AzureSTTService(STTService):
             api_key: Azure Cognitive Services subscription key.
             region: Azure region for the Speech service (e.g., 'eastus').
             language: Language for speech recognition. Defaults to English (US).
+
+                .. deprecated:: 1.0
+                    Use ``settings=AzureSTTSettings(language=...)`` instead.
+
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             private_endpoint: Private endpoint for STT behind firewall.
                 See https://docs.azure.cn/en-us/ai-services/speech-service/speech-services-private-link?tabs=portal
             endpoint_id: Custom model endpoint id.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService.
         """
+        if language != Language.EN_US:
+            _warn_deprecated_param("language", "AzureSTTSettings", "language")
+
+        default_settings = AzureSTTSettings(
+            model=None,
+            region=region,
+            language=language_to_azure_language(language) if language else None,
+            sample_rate=sample_rate,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=AzureSTTSettings(
-                model=None,
-                region=region,
-                language=language_to_azure_language(language),
-                sample_rate=sample_rate,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
         self._speech_config = SpeechConfig(
             subscription=api_key,
             region=region,
-            speech_recognition_language=language_to_azure_language(language),
+            speech_recognition_language=default_settings.language
+            or language_to_azure_language(Language.EN_US),
             endpoint=private_endpoint,
         )
 

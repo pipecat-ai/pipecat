@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.tts_service import AudioContextTTSService, TextAggregationMode, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -110,6 +110,9 @@ class AsyncAITTSService(AudioContextTTSService):
     class InputParams(BaseModel):
         """Input parameters for Async TTS configuration.
 
+        .. deprecated:: 1.0
+            Use ``AsyncAITTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             language: Language to use for synthesis.
         """
@@ -120,14 +123,15 @@ class AsyncAITTSService(AudioContextTTSService):
         self,
         *,
         api_key: str,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         version: str = "v1",
         url: str = "wss://api.async.com/text_to_speech/websocket/ws",
-        model: str = "async_flash_v1.0",
+        model: Optional[str] = None,
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
+        settings: Optional[AsyncAITTSSettings] = None,
         aggregate_sentences: Optional[bool] = None,
         text_aggregation_mode: Optional[TextAggregationMode] = None,
         **kwargs,
@@ -138,13 +142,27 @@ class AsyncAITTSService(AudioContextTTSService):
             api_key: Async API key.
             voice_id: UUID of the voice to use for synthesis. See docs for a full list:
                 https://docs.async.com/list-voices-16699698e0
+
+                .. deprecated:: 1.0
+                    Use ``settings=AsyncAITTSSettings(voice=...)`` instead.
+
             version: Async API version.
             url: WebSocket URL for Async TTS API.
             model: TTS model to use (e.g., "async_flash_v1.0").
+
+                .. deprecated:: 1.0
+                    Use ``settings=AsyncAITTSSettings(model=...)`` instead.
+
             sample_rate: Audio sample rate.
             encoding: Audio encoding format.
             container: Audio container format.
             params: Additional input parameters for voice customization.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AsyncAITTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             aggregate_sentences: Deprecated. Use text_aggregation_mode instead.
 
                 .. deprecated:: 0.0.104
@@ -153,7 +171,27 @@ class AsyncAITTSService(AudioContextTTSService):
             text_aggregation_mode: How to aggregate text before synthesis.
             **kwargs: Additional arguments passed to the parent service.
         """
-        params = params or AsyncAITTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "AsyncAITTSSettings", "voice")
+        if model is not None:
+            _warn_deprecated_param("model", "AsyncAITTSSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "AsyncAITTSSettings")
+
+        _params = params or AsyncAITTSService.InputParams()
+
+        default_settings = AsyncAITTSSettings(
+            model=model or "async_flash_v1.0",
+            voice=voice_id,
+            output_container=container,
+            output_encoding=encoding,
+            output_sample_rate=0,
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else None,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             aggregate_sentences=aggregate_sentences,
@@ -161,16 +199,7 @@ class AsyncAITTSService(AudioContextTTSService):
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,
-            settings=AsyncAITTSSettings(
-                model=model,
-                voice=voice_id,
-                output_container=container,
-                output_encoding=encoding,
-                output_sample_rate=0,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else None,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
@@ -471,6 +500,9 @@ class AsyncAIHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Async API.
 
+        .. deprecated:: 1.0
+            Use ``AsyncAITTSSettings`` directly via the ``settings`` parameter instead.
+
         Parameters:
             language: Language to use for synthesis.
         """
@@ -481,15 +513,16 @@ class AsyncAIHttpTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice_id: str,
+        voice_id: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
-        model: str = "async_flash_v1.0",
+        model: Optional[str] = None,
         url: str = "https://api.async.com",
         version: str = "v1",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
+        settings: Optional[AsyncAITTSSettings] = None,
         **kwargs,
     ):
         """Initialize the Async TTS service.
@@ -497,30 +530,55 @@ class AsyncAIHttpTTSService(TTSService):
         Args:
             api_key: Async API key.
             voice_id: ID of the voice to use for synthesis.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AsyncAITTSSettings(voice=...)`` instead.
+
             aiohttp_session: An aiohttp session for making HTTP requests.
             model: TTS model to use (e.g., "async_flash_v1.0").
+
+                .. deprecated:: 1.0
+                    Use ``settings=AsyncAITTSSettings(model=...)`` instead.
+
             url: Base URL for Async API.
             version: API version string for Async API.
             sample_rate: Audio sample rate.
             encoding: Audio encoding format.
             container: Audio container format.
             params: Additional input parameters for voice customization.
+
+                .. deprecated:: 1.0
+                    Use ``settings=AsyncAITTSSettings(...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to the parent TTSService.
         """
-        params = params or AsyncAIHttpTTSService.InputParams()
+        if voice_id is not None:
+            _warn_deprecated_param("voice_id", "AsyncAITTSSettings", "voice")
+        if model is not None:
+            _warn_deprecated_param("model", "AsyncAITTSSettings", "model")
+        if params is not None:
+            _warn_deprecated_param("params", "AsyncAITTSSettings")
+
+        _params = params or AsyncAIHttpTTSService.InputParams()
+
+        default_settings = AsyncAITTSSettings(
+            model=model or "async_flash_v1.0",
+            voice=voice_id,
+            output_container=container,
+            output_encoding=encoding,
+            output_sample_rate=0,
+            language=self.language_to_service_language(_params.language)
+            if _params.language
+            else None,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
-            settings=AsyncAITTSSettings(
-                model=model,
-                voice=voice_id,
-                output_container=container,
-                output_encoding=encoding,
-                output_sample_rate=0,
-                language=self.language_to_service_language(params.language)
-                if params.language
-                else None,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

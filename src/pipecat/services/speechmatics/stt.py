@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_latency import SPEECHMATICS_TTFS_P99
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language, resolve_language
@@ -381,6 +381,7 @@ class SpeechmaticsSTTService(STTService):
         sample_rate: int | None = None,
         params: InputParams | None = None,
         should_interrupt: bool = True,
+        settings: SpeechmaticsSTTSettings | None = None,
         ttfs_p99_latency: float | None = SPEECHMATICS_TTFS_P99,
         **kwargs,
     ):
@@ -392,8 +393,14 @@ class SpeechmaticsSTTService(STTService):
             base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
                 or defaults to `wss://eu2.rt.speechmatics.com/v2`.
             sample_rate: Optional audio sample rate in Hz.
-            params: Optional[InputParams]: Input parameters for the service.
+            params: Input parameters for the service.
+
+                .. deprecated:: 1.0
+                    Use ``settings=SpeechmaticsSTTSettings(...)`` instead.
+
             should_interrupt: Determine whether the bot should be interrupted when Speechmatics turn_detection_mode is configured to detect user speech.
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                ``params``, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to STTService.
@@ -409,6 +416,9 @@ class SpeechmaticsSTTService(STTService):
             raise ValueError("Missing Speechmatics API key")
         if not self._base_url:
             raise ValueError("Missing Speechmatics base URL")
+
+        if params is not None:
+            _warn_deprecated_param("params", "SpeechmaticsSTTSettings")
 
         # Default params
         params = params or SpeechmaticsSTTService.InputParams()
@@ -426,7 +436,7 @@ class SpeechmaticsSTTService(STTService):
         speaker_passive_format = params.speaker_passive_format or speaker_active_format
 
         # Settings — seeded from InputParams
-        settings = SpeechmaticsSTTSettings(
+        default_settings = SpeechmaticsSTTSettings(
             model=None,  # Will be resolved from operating_point after config is built
             language=params.language,
             domain=params.domain,
@@ -455,13 +465,16 @@ class SpeechmaticsSTTService(STTService):
 
         # Build SDK config from settings, then resolve model from operating_point
         self._client: VoiceAgentClient | None = None
-        self._config: VoiceAgentConfig = self._build_config(settings)
-        settings.model = self._config.operating_point.value
+        self._config: VoiceAgentConfig = self._build_config(default_settings)
+        default_settings.model = self._config.operating_point.value
+
+        if settings is not None:
+            default_settings.apply_update(settings)
 
         super().__init__(
             sample_rate=sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=settings,
+            settings=default_settings,
             **kwargs,
         )
 

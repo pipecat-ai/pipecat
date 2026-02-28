@@ -114,6 +114,7 @@ class AssemblyAISTTService(WebsocketSTTService):
         vad_force_turn_endpoint: bool = True,
         should_interrupt: bool = True,
         speaker_format: Optional[str] = None,
+        settings: Optional[AssemblyAISTTSettings] = None,
         ttfs_p99_latency: Optional[float] = ASSEMBLYAI_TTFS_P99,
         **kwargs,
     ):
@@ -144,6 +145,8 @@ class AssemblyAISTTService(WebsocketSTTService):
                 Use {speaker} for speaker label and {text} for transcript text.
                 Example: "<{speaker}>{text}</{speaker}>" or "{speaker}: {text}"
                 If None, transcript text is not modified. Defaults to None.
+            settings: Runtime-updatable settings. When provided alongside other
+                parameters, ``settings`` values take precedence.
             ttfs_p99_latency: P99 latency from speech end to final transcript in seconds.
                 Override for your deployment. See https://github.com/pipecat-ai/stt-benchmark
             **kwargs: Additional arguments passed to parent STTService class.
@@ -185,14 +188,18 @@ class AssemblyAISTTService(WebsocketSTTService):
         if vad_force_turn_endpoint:
             connection_params = self._configure_pipecat_turn_mode(connection_params, is_u3_pro)
 
+        default_settings = AssemblyAISTTSettings(
+            model=None,
+            language=language,
+            connection_params=connection_params,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
             sample_rate=connection_params.sample_rate,
             ttfs_p99_latency=ttfs_p99_latency,
-            settings=AssemblyAISTTSettings(
-                model=None,
-                language=language,
-                connection_params=connection_params,
-            ),
+            settings=default_settings,
             **kwargs,
         )
 

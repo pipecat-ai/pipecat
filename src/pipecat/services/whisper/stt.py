@@ -20,7 +20,7 @@ from loguru import logger
 from typing_extensions import TYPE_CHECKING, override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven
+from pipecat.services.settings import NOT_GIVEN, STTSettings, _NotGiven, _warn_deprecated_param
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.time import time_now_iso8601
@@ -216,36 +216,80 @@ class WhisperSTTService(SegmentedSTTService):
     def __init__(
         self,
         *,
-        model: str | Model = Model.DISTIL_MEDIUM_EN,
-        device: str = "auto",
-        compute_type: str = "default",
-        no_speech_prob: float = 0.4,
-        language: Language = Language.EN,
+        model: Optional[str | Model] = None,
+        device: Optional[str] = None,
+        compute_type: Optional[str] = None,
+        no_speech_prob: Optional[float] = None,
+        language: Optional[Language] = None,
+        settings: Optional[WhisperSTTSettings] = None,
         **kwargs,
     ):
         """Initialize the Whisper STT service.
 
         Args:
             model: The Whisper model to use for transcription. Can be a Model enum or string.
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperSTTSettings(model=...)`` instead.
+
             device: The device to run inference on ('cpu', 'cuda', or 'auto').
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperSTTSettings(device=...)`` instead.
+
             compute_type: The compute type for inference ('default', 'int8', 'int8_float16', etc.).
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperSTTSettings(compute_type=...)`` instead.
+
             no_speech_prob: Probability threshold for filtering out non-speech segments.
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperSTTSettings(no_speech_prob=...)`` instead.
+
             language: The default language for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperSTTSettings(language=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
+        if model is not None:
+            _warn_deprecated_param("model", "WhisperSTTSettings", "model")
+        if device is not None:
+            _warn_deprecated_param("device", "WhisperSTTSettings", "device")
+        if compute_type is not None:
+            _warn_deprecated_param("compute_type", "WhisperSTTSettings", "compute_type")
+        if no_speech_prob is not None:
+            _warn_deprecated_param("no_speech_prob", "WhisperSTTSettings", "no_speech_prob")
+        if language is not None:
+            _warn_deprecated_param("language", "WhisperSTTSettings", "language")
+
+        _model = model if model is not None else Model.DISTIL_MEDIUM_EN
+        _device = device or "auto"
+        _compute_type = compute_type or "default"
+        _no_speech_prob = no_speech_prob if no_speech_prob is not None else 0.4
+        _language = language or Language.EN
+
+        default_settings = WhisperSTTSettings(
+            model=_model if isinstance(_model, str) else _model.value,
+            language=_language,
+            device=_device,
+            compute_type=_compute_type,
+            no_speech_prob=_no_speech_prob,
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         super().__init__(
-            settings=WhisperSTTSettings(
-                model=model if isinstance(model, str) else model.value,
-                language=language,
-                device=device,
-                compute_type=compute_type,
-                no_speech_prob=no_speech_prob,
-            ),
+            settings=default_settings,
             **kwargs,
         )
-        self._device: str = device
-        self._compute_type = compute_type
-        self._no_speech_prob = no_speech_prob
+        self._device: str = self._settings.device
+        self._compute_type = self._settings.compute_type
+        self._no_speech_prob = self._settings.no_speech_prob
         self._model: Optional[WhisperModel] = None
 
         self._load()
@@ -352,36 +396,73 @@ class WhisperSTTServiceMLX(WhisperSTTService):
     def __init__(
         self,
         *,
-        model: str | MLXModel = MLXModel.TINY,
-        no_speech_prob: float = 0.6,
-        language: Language = Language.EN,
-        temperature: float = 0.0,
+        model: Optional[str | MLXModel] = None,
+        no_speech_prob: Optional[float] = None,
+        language: Optional[Language] = None,
+        temperature: Optional[float] = None,
+        settings: Optional[WhisperMLXSTTSettings] = None,
         **kwargs,
     ):
         """Initialize the MLX Whisper STT service.
 
         Args:
             model: The MLX Whisper model to use for transcription. Can be an MLXModel enum or string.
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperMLXSTTSettings(model=...)`` instead.
+
             no_speech_prob: Probability threshold for filtering out non-speech segments.
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperMLXSTTSettings(no_speech_prob=...)`` instead.
+
             language: The default language for transcription.
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperMLXSTTSettings(language=...)`` instead.
+
             temperature: Temperature for sampling. Can be a float or tuple of floats.
+
+                .. deprecated:: 1.0
+                    Use ``settings=WhisperMLXSTTSettings(temperature=...)`` instead.
+
+            settings: Runtime-updatable settings. When provided alongside deprecated
+                parameters, ``settings`` values take precedence.
             **kwargs: Additional arguments passed to SegmentedSTTService.
         """
+        if model is not None:
+            _warn_deprecated_param("model", "WhisperMLXSTTSettings", "model")
+        if no_speech_prob is not None:
+            _warn_deprecated_param("no_speech_prob", "WhisperMLXSTTSettings", "no_speech_prob")
+        if language is not None:
+            _warn_deprecated_param("language", "WhisperMLXSTTSettings", "language")
+        if temperature is not None:
+            _warn_deprecated_param("temperature", "WhisperMLXSTTSettings", "temperature")
+
+        _model = model if model is not None else MLXModel.TINY
+        _no_speech_prob = no_speech_prob if no_speech_prob is not None else 0.6
+        _language = language or Language.EN
+        _temperature = temperature if temperature is not None else 0.0
+
+        default_settings = WhisperMLXSTTSettings(
+            model=_model if isinstance(_model, str) else _model.value,
+            language=_language,
+            no_speech_prob=_no_speech_prob,
+            temperature=_temperature,
+            engine="mlx",
+        )
+        if settings is not None:
+            default_settings.apply_update(settings)
+
         # Skip WhisperSTTService.__init__ and call its parent directly
         SegmentedSTTService.__init__(
             self,
-            settings=WhisperMLXSTTSettings(
-                model=model if isinstance(model, str) else model.value,
-                language=language,
-                no_speech_prob=no_speech_prob,
-                temperature=temperature,
-                engine="mlx",
-            ),
+            settings=default_settings,
             **kwargs,
         )
 
-        self._no_speech_prob = no_speech_prob
-        self._temperature = temperature
+        self._no_speech_prob = self._settings.no_speech_prob
+        self._temperature = self._settings.temperature
 
         # No need to call _load() as MLX Whisper loads models on demand
 
