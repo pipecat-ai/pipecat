@@ -155,7 +155,7 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
         return None
 
 
-class ServiceSwitcherStrategyAutomatic(ServiceSwitcherStrategy):
+class ServiceSwitcherStrategyFailover(ServiceSwitcherStrategy):
     """A strategy that automatically switches to a backup service on failure.
 
     When the active service produces a non-fatal error, this strategy switches
@@ -172,7 +172,7 @@ class ServiceSwitcherStrategyAutomatic(ServiceSwitcherStrategy):
 
         switcher = ServiceSwitcher(
             services=[primary_stt, backup_stt],
-            strategy_type=ServiceSwitcherStrategyAutomatic,
+            strategy_type=ServiceSwitcherStrategyFailover,
         )
 
         @switcher.strategy.event_handler("on_service_switched")
@@ -351,7 +351,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         generate `ServiceMetadataFrame`.
 
         Non-fatal ``ErrorFrame`` instances are forwarded to the strategy via
-        ``handle_error`` so strategies like ``ServiceSwitcherStrategyAutomatic``
+        ``handle_error`` so strategies like ``ServiceSwitcherStrategyFailover``
         can perform failover. The error frame is still propagated upstream so
         that application-level error handlers can observe it.
         """

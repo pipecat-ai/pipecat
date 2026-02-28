@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.service_switcher import (
     ServiceSwitcher,
-    ServiceSwitcherStrategyAutomatic,
+    ServiceSwitcherStrategyFailover,
     ServiceSwitcherStrategyManual,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -502,8 +502,8 @@ class TestServiceSwitcherMetadata(unittest.IsolatedAsyncioTestCase):
         # Only one MockMetadataFrame should have left (from service1)
 
 
-class TestServiceSwitcherStrategyAutomatic(unittest.IsolatedAsyncioTestCase):
-    """Test cases for ServiceSwitcherStrategyAutomatic."""
+class TestServiceSwitcherStrategyFailover(unittest.IsolatedAsyncioTestCase):
+    """Test cases for ServiceSwitcherStrategyFailover."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -514,12 +514,12 @@ class TestServiceSwitcherStrategyAutomatic(unittest.IsolatedAsyncioTestCase):
 
     def test_init_defaults(self):
         """Test that default values are set correctly."""
-        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy = ServiceSwitcherStrategyFailover(self.services)
         self.assertEqual(strategy.active_service, self.service1)
 
     async def test_error_switches_to_next_service(self):
         """Test that an error on the active service switches to the next one."""
-        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy = ServiceSwitcherStrategyFailover(self.services)
 
         error = ErrorFrame(error="connection lost")
         result = await strategy.handle_error(error)
@@ -529,7 +529,7 @@ class TestServiceSwitcherStrategyAutomatic(unittest.IsolatedAsyncioTestCase):
 
     async def test_consecutive_errors_cycle_through_services(self):
         """Test that repeated errors cycle through all services."""
-        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy = ServiceSwitcherStrategyFailover(self.services)
 
         # First error: service1 -> service2
         await strategy.handle_error(ErrorFrame(error="error 1"))
@@ -545,14 +545,14 @@ class TestServiceSwitcherStrategyAutomatic(unittest.IsolatedAsyncioTestCase):
 
     async def test_single_service_returns_none(self):
         """Test that handle_error returns None with only one service."""
-        strategy = ServiceSwitcherStrategyAutomatic([self.service1])
+        strategy = ServiceSwitcherStrategyFailover([self.service1])
 
         result = await strategy.handle_error(ErrorFrame(error="error"))
         self.assertIsNone(result)
 
     async def test_manual_switch_still_works(self):
         """Test that ManuallySwitchServiceFrame is still handled."""
-        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy = ServiceSwitcherStrategyFailover(self.services)
 
         frame = ManuallySwitchServiceFrame(service=self.service3)
         result = await strategy.handle_frame(frame, FrameDirection.DOWNSTREAM)
@@ -562,7 +562,7 @@ class TestServiceSwitcherStrategyAutomatic(unittest.IsolatedAsyncioTestCase):
 
     async def test_on_service_switched_event_fires_on_error(self):
         """Test that on_service_switched event fires when an error triggers a switch."""
-        strategy = ServiceSwitcherStrategyAutomatic(self.services)
+        strategy = ServiceSwitcherStrategyFailover(self.services)
 
         switched_events = []
 
