@@ -66,8 +66,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
        - More natural turn detection based on speech patterns and pauses
 
     2. Advanced Turn Detection Tuning (STT Mode)
-       - `min_turn_silence`: Minimum silence (ms) when confident
-         about end-of-turn. Lower values = faster responses. Default: 200ms
+       - `min_turn_silence`: Minimum silence (ms) when confident about end-of-turn.
+         Lower values = faster responses. Default: 100ms
        - `max_turn_silence`: Maximum silence (ms) before forcing end-of-turn.
          Prevents long pauses. Default: 1000ms
 
