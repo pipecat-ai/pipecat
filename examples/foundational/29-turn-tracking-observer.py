@@ -101,6 +101,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         observers=[latency_observer, startup_observer],
     )
 
+    @latency_observer.event_handler("on_first_bot_speech_latency")
+    async def on_first_bot_speech_latency(observer, latency_seconds):
+        logger.info(f"First bot speech: {latency_seconds:.3f}s after client connected")
+
     @latency_observer.event_handler("on_latency_measured")
     async def on_latency_measured(observer, latency_seconds):
         logger.info(f"⏱️ User-to-bot latency: {latency_seconds:.3f}s")

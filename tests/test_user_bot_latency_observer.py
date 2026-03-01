@@ -2,6 +2,7 @@ import unittest
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    ClientConnectedFrame,
     InterruptionFrame,
     MetricsFrame,
     UserStoppedSpeakingFrame,
@@ -341,6 +342,126 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(latencies), 0)
         self.assertEqual(len(breakdowns), 0)
+
+    async def test_first_bot_speech_latency(self):
+        """Test first bot speech latency and breakdown from ClientConnected to BotStartedSpeaking."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        first_speech_latencies = []
+        breakdowns = []
+
+        @observer.event_handler("on_first_bot_speech_latency")
+        async def on_first_bot_speech(obs, latency_seconds):
+            first_speech_latencies.append(latency_seconds)
+
+        @observer.event_handler("on_latency_breakdown")
+        async def on_breakdown(obs, breakdown):
+            breakdowns.append(breakdown)
+
+        llm_ttfb = TTFBMetricsData(processor="OpenAILLMService#0", value=0.250)
+        tts_ttfb = TTFBMetricsData(processor="CartesiaTTSService#0", value=0.070)
+
+        frames_to_send = [
+            ClientConnectedFrame(),
+            MetricsFrame(data=[llm_ttfb]),
+            MetricsFrame(data=[tts_ttfb]),
+            BotStartedSpeakingFrame(),
+        ]
+
+        expected_down_frames = [
+            ClientConnectedFrame,
+            MetricsFrame,
+            MetricsFrame,
+            BotStartedSpeakingFrame,
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(first_speech_latencies), 1)
+        self.assertGreater(first_speech_latencies[0], 0)
+        self.assertLess(first_speech_latencies[0], 1.0)
+
+        # Breakdown should also be emitted with the accumulated metrics
+        self.assertEqual(len(breakdowns), 1)
+        self.assertEqual(len(breakdowns[0].ttfb), 2)
+        self.assertEqual(breakdowns[0].ttfb[0].processor, "OpenAILLMService#0")
+        self.assertEqual(breakdowns[0].ttfb[1].processor, "CartesiaTTSService#0")
+
+    async def test_first_bot_speech_only_once(self):
+        """Test that first bot speech latency is only emitted once."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        first_speech_latencies = []
+
+        @observer.event_handler("on_first_bot_speech_latency")
+        async def on_first_bot_speech(obs, latency_seconds):
+            first_speech_latencies.append(latency_seconds)
+
+        frames_to_send = [
+            ClientConnectedFrame(),
+            BotStartedSpeakingFrame(),
+            # Second bot speech should not trigger the event again
+            VADUserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+        ]
+
+        expected_down_frames = [
+            ClientConnectedFrame,
+            BotStartedSpeakingFrame,
+            VADUserStoppedSpeakingFrame,
+            BotStartedSpeakingFrame,
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(first_speech_latencies), 1)
+
+    async def test_first_bot_speech_skipped_when_user_speaks_first(self):
+        """Test that first bot speech event is not emitted when user speaks before the bot."""
+        observer = UserBotLatencyObserver()
+        processor = IdentityFilter()
+
+        first_speech_latencies = []
+
+        @observer.event_handler("on_first_bot_speech_latency")
+        async def on_first_bot_speech(obs, latency_seconds):
+            first_speech_latencies.append(latency_seconds)
+
+        frames_to_send = [
+            ClientConnectedFrame(),
+            # User speaks before bot has a chance to greet
+            VADUserStartedSpeakingFrame(),
+            VADUserStoppedSpeakingFrame(),
+            BotStartedSpeakingFrame(),
+        ]
+
+        expected_down_frames = [
+            ClientConnectedFrame,
+            VADUserStartedSpeakingFrame,
+            VADUserStoppedSpeakingFrame,
+            BotStartedSpeakingFrame,
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            observers=[observer],
+        )
+
+        self.assertEqual(len(first_speech_latencies), 0)
 
 
 if __name__ == "__main__":

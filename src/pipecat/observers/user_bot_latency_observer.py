@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
+    ClientConnectedFrame,
     InterruptionFrame,
     MetricsFrame,
     UserStoppedSpeakingFrame,
@@ -80,6 +81,10 @@ class UserBotLatencyObserver(BaseObserver):
         on_latency_breakdown(observer, breakdown): Emitted at each
             ``BotStartedSpeakingFrame`` with a :class:`LatencyBreakdown`
             containing per-service metrics collected during the user→bot cycle.
+        on_first_bot_speech_latency(observer, latency_seconds): Emitted once,
+            the first time ``BotStartedSpeakingFrame`` arrives after
+            ``ClientConnectedFrame``. Measures the time from client connection
+            to the first bot speech.
     """
 
     def __init__(self, *, max_frames=100, **kwargs):
@@ -97,6 +102,10 @@ class UserBotLatencyObserver(BaseObserver):
         self._user_stopped_time: Optional[float] = None
         self._user_turn: Optional[float] = None
 
+        # First bot speech tracking
+        self._client_connected_time: Optional[float] = None
+        self._first_bot_speech_measured: bool = False
+
         # Frame deduplication (bounded deque + set pattern)
         self._processed_frames: set = set()
         self._frame_history: deque = deque(maxlen=max_frames)
@@ -107,6 +116,7 @@ class UserBotLatencyObserver(BaseObserver):
 
         self._register_event_handler("on_latency_measured")
         self._register_event_handler("on_latency_breakdown")
+        self._register_event_handler("on_first_bot_speech_latency")
 
     async def on_push_frame(self, data: FramePushed):
         """Process frames to track speech timing and calculate latency.
@@ -132,12 +142,21 @@ class UserBotLatencyObserver(BaseObserver):
         if len(self._processed_frames) > len(self._frame_history):
             self._processed_frames = set(self._frame_history)
 
+        # Track client connection (first occurrence only)
+        if isinstance(data.frame, ClientConnectedFrame):
+            if self._client_connected_time is None:
+                self._client_connected_time = time.time()
+            return
+
         # Track speech and pipeline events for latency
         if isinstance(data.frame, VADUserStartedSpeakingFrame):
             # Reset when user starts speaking
             self._user_stopped_time = None
             self._user_turn = None
             self._reset_accumulators()
+            # If user speaks before the bot's first speech, abandon the
+            # first-bot-speech measurement — it's only meaningful for greetings.
+            self._first_bot_speech_measured = True
         elif isinstance(data.frame, VADUserStoppedSpeakingFrame):
             # Record the actual time the user stopped speaking, which is
             # the VAD determination time minus the stop_secs silence duration
@@ -159,28 +178,41 @@ class UserBotLatencyObserver(BaseObserver):
 
     async def _handle_bot_started_speaking(self):
         """Handle BotStartedSpeakingFrame to emit latency and breakdown."""
-        if self._user_stopped_time is None:
-            return
+        emit_breakdown = False
 
-        latency = time.time() - self._user_stopped_time
-        self._user_stopped_time = None
-        await self._call_event_handler("on_latency_measured", latency)
+        # One-time first bot speech measurement (client connect → first speech)
+        if self._client_connected_time is not None and not self._first_bot_speech_measured:
+            self._first_bot_speech_measured = True
+            latency = time.time() - self._client_connected_time
+            await self._call_event_handler("on_first_bot_speech_latency", latency)
+            emit_breakdown = True
 
-        breakdown = LatencyBreakdown(
-            ttfb=list(self._ttfb),
-            text_aggregation=self._text_aggregation,
-            user_turn_secs=self._user_turn,
-        )
-        await self._call_event_handler("on_latency_breakdown", breakdown)
-        self._reset_accumulators()
+        if self._user_stopped_time is not None:
+            latency = time.time() - self._user_stopped_time
+            self._user_stopped_time = None
+            await self._call_event_handler("on_latency_measured", latency)
+            emit_breakdown = True
+
+        if emit_breakdown:
+            breakdown = LatencyBreakdown(
+                ttfb=list(self._ttfb),
+                text_aggregation=self._text_aggregation,
+                user_turn_secs=self._user_turn,
+            )
+            await self._call_event_handler("on_latency_breakdown", breakdown)
+            self._reset_accumulators()
 
     def _handle_metrics_frame(self, frame: MetricsFrame):
         """Extract latency metrics from a MetricsFrame.
 
-        Only accumulates metrics when a user→bot measurement is in progress
-        (after ``VADUserStoppedSpeakingFrame``).
+        Accumulates metrics when a measurement is in progress: either a
+        user→bot cycle (after ``VADUserStoppedSpeakingFrame``) or the
+        first-bot-speech window (after ``ClientConnectedFrame``).
         """
-        if self._user_stopped_time is None:
+        waiting_for_first_speech = (
+            self._client_connected_time is not None and not self._first_bot_speech_measured
+        )
+        if self._user_stopped_time is None and not waiting_for_first_speech:
             return
 
         for metrics_data in frame.data:
