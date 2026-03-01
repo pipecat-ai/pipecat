@@ -1,0 +1,1 @@
+- Added Onairos personalization integration with `OnairosPersonaInjector`, `OnairosMemoryService`, and `OnairosContextAggregator` services. These services augment LLM prompts with user personality traits, memories, and MBTI compatibility scores from the Onairos platform for deeply personalized voice agents.
