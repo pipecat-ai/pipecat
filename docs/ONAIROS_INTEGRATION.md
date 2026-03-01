@@ -18,9 +18,9 @@ Complete guide to integrating Onairos personalization with Pipecat voice agents.
 
 Onairos is a privacy-first personalization platform that enables your voice agents to:
 
-- **Remember users** across sessions with persistent persona data
-- **Personalize responses** based on communication style, interests, and preferences
-- **Seamless onboarding** with user-controlled data sharing
+- **Personalize responses** based on personality traits, archetype, and MBTI alignment
+- **Understand users deeply** with multi-paragraph user summaries generated from their data
+- **Seamless onboarding** with user-controlled data sharing via frontend SDK
 - **Respect privacy** with user-owned data architecture
 
 ### Architecture
@@ -32,10 +32,11 @@ Onairos is a privacy-first personalization platform that enables your voice agen
 │                                                                     │
 │  ┌─────────────┐     ┌─────────────────┐     ┌──────────────────┐  │
 │  │   Frontend  │     │    Pipecat      │     │    Onairos API   │  │
-│  │  (React/RN) │────▶│  Voice Agent    │────▶│ api.onairos.uk   │  │
+│  │  (React/RN) │────▶│  Voice Agent    │────▶│ api2.onairos.uk  │  │
 │  │             │     │                 │     │                  │  │
-│  │ @onairos/sdk│     │ OnairosMemory   │     │ GET /personas    │  │
-│  │             │     │ OnairosPersona  │     │ POST /connections│  │
+│  │ @onairos/sdk│     │ OnairosPersona  │     │ /inferenceNoProof│  │
+│  │             │     │   Injector      │     │ /traits-only     │  │
+│  │             │     │                 │     │ /combined-infer. │  │
 │  └─────────────┘     └─────────────────┘     └──────────────────┘  │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
@@ -50,17 +51,13 @@ Onairos is a privacy-first personalization platform that enables your voice agen
 1. Go to [https://dashboard.onairos.uk/](https://dashboard.onairos.uk/)
 2. Create a developer account
 3. Create a new application
-4. Get your API credentials:
-   - **Secret Key** (`sk_live_*` or `sk_test_*`) - for server-side
-   - **Publishable Key** (`pk_*`) - for client-side
-   - **App ID** - your application identifier
+4. Get your credentials:
+   - **Publishable Key** (`pk_*`) - for client-side SDK
 
 ### 2. Environment Variables
 
 ```bash
-# Add to your .env file
-ONAIROS_API_KEY=sk_live_your_secret_key
-ONAIROS_APP_ID=app_your_app_id
+# For frontend SDK
 ONAIROS_PUBLISHABLE_KEY=pk_your_publishable_key
 ```
 
@@ -79,45 +76,42 @@ pip install "pipecat-ai[onairos]"
 # Or with uv
 uv add "pipecat-ai[onairos]"
 
-# This installs aiohttp for REST API calls to api.onairos.uk
+# This installs aiohttp for REST API calls to api2.onairos.uk
 ```
 
 ### Basic Integration
 
 ```python
-import os
-from pipecat.services.onairos import (
-    OnairosMemoryService,
-    OnairosPersonaInjector,
-    OnairosContextAggregator,
-)
+from pipecat.services.onairos import OnairosPersonaInjector
 
-# Initialize services
-memory = OnairosMemoryService(
-    api_key=os.getenv("ONAIROS_API_KEY"),
-    app_id=os.getenv("ONAIROS_APP_ID"),
-    user_id="user_123"
-)
-
+# Initialize without credentials - they arrive from frontend onComplete
 persona = OnairosPersonaInjector(
-    api_key=os.getenv("ONAIROS_API_KEY"),
-    app_id=os.getenv("ONAIROS_APP_ID"),
-    user_id="user_123"
+    user_id="user_123",
+    params=OnairosPersonaInjector.InputParams(
+        include_personality_traits=True,
+        include_traits_to_improve=True,
+        include_user_summary=True,
+        include_archetype=True,
+        include_mbti=True,
+        top_mbti_count=5,
+    ),
 )
+
+# When frontend sends onComplete data:
+persona.set_api_credentials(api_url=api_url, access_token=access_token)
 ```
 
 ### Pipeline Integration
 
 ```python
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.services.onairos import OnairosMemoryService, OnairosPersonaInjector
+from pipecat.services.onairos import OnairosPersonaInjector
 
 pipeline = Pipeline([
     transport.input(),           # Audio/video input
     stt,                         # Speech-to-text
-    persona,                     # ← Inject user persona early
     user_aggregator,
-    memory,                      # ← Enhance with persona data
+    persona,                     # ← Inject user persona
     llm,                         # Your LLM (OpenAI, Anthropic, etc.)
     tts,                         # Text-to-speech
     transport.output(),
@@ -154,7 +148,7 @@ function VoiceAgent({ websocket }) {
   return (
     <div>
       <h2>Connect for Personalized Experience</h2>
-      
+
       {/* Onairos renders a connect button */}
       <Onairos
         requestData={{
@@ -169,7 +163,7 @@ function VoiceAgent({ websocket }) {
           }));
         }}
       />
-      
+
       {/* Your Pipecat voice UI here */}
     </div>
   );
@@ -212,14 +206,11 @@ npm install onairos
 ```javascript
 import Onairos from 'onairos';
 
-// The Onairos component handles rendering and auth
-// In vanilla JS, you'd typically render to a container:
 const onairosButton = new Onairos({
   requestData: {
     Traits: { type: "Personality", size: "Large" }
   },
   onComplete: (apiUrl, accessToken) => {
-    // Send to your Pipecat backend via WebSocket
     websocket.send(JSON.stringify({
       type: "onairos_credentials",
       apiUrl: apiUrl,
@@ -235,49 +226,116 @@ const onairosButton = new Onairos({
 
 ### Onairos REST API
 
-**Base URL:** `https://api.onairos.uk/v1`
+**Base URL:** `https://api2.onairos.uk`
 
-#### Get Persona
-
-```
-GET /personas/:userId
-Authorization: Bearer sk_live_your_key
-
-Response:
-{
-  "id": "persona_abc123",
-  "userId": "user_123",
-  "preferences": {
-    "contentTopics": ["technology", "music"],
-    "communicationStyle": "casual",
-    "timezone": "America/New_York"
-  },
-  "traits": {
-    "openness": 0.8,
-    "interests": ["AI", "privacy", "music"]
-  },
-  "connectedAt": "2025-01-10T12:00:00Z"
-}
-```
-
-#### Create Connection
+#### Get Personality Traits Only
 
 ```
-POST /connections
-Authorization: Bearer sk_live_your_key
+POST /traits-only
+Authorization: Bearer {accessToken}
 Content-Type: application/json
 
 {
-  "userId": "user_123",
-  "redirectUrl": "https://yourapp.com/callback",
-  "permissions": ["preferences", "interests", "traits"]
+  "accessToken": "{accessToken}",
+  "inputData": []
 }
 
 Response:
 {
-  "connectionId": "conn_xyz789",
-  "connectionUrl": "https://connect.onairos.uk/c/conn_xyz789",
-  "expiresAt": "2025-01-15T12:00:00Z"
+  "success": true,
+  "traits": {
+    "positive_traits": {
+      "Stoic Wisdom Interest": 80,
+      "AI Enthusiasm": 75
+    },
+    "traits_to_improve": {
+      "Social Media Engagement": 35
+    }
+  }
+}
+```
+
+#### Get MBTI Inference
+
+MBTI scores come from running the user's trained FinalMLP model on 16 MBTI type descriptions. The output is preference scores (0-1) per type, indicating how much the user aligns with each personality type.
+
+```
+POST /inferenceNoProof
+Authorization: Bearer {accessToken}
+Content-Type: application/json
+
+{
+  "accessToken": "{accessToken}",
+  "inputData": []
+}
+
+Response:
+{
+  "InferenceResult": {
+    "output": [0.584, 0.500, 0.550, 0.520, 0.627, 0.511, 0.580, 0.490,
+               0.460, 0.580, 0.470, 0.450, 0.430, 0.410, 0.400, 0.390]
+  }
+}
+```
+
+The output array maps to MBTI types in order:
+`INTJ, INTP, ENTJ, ENTP, INFJ, INFP, ENFJ, ENFP, ISTJ, ISFJ, ESTJ, ESFJ, ISTP, ISFP, ESTP, ESFP`
+
+#### Get Combined Inference (Traits + MBTI)
+
+```
+POST /combined-inference
+Authorization: Bearer {accessToken}
+Content-Type: application/json
+
+{
+  "accessToken": "{accessToken}",
+  "inputData": []
+}
+
+Response:
+{
+  "InferenceResult": {
+    "output": [0.584, 0.500, ...]
+  },
+  "traits": {
+    "positive_traits": {"Stoic Wisdom Interest": 80, ...},
+    "traits_to_improve": {"Social Media Engagement": 35, ...}
+  },
+  "connectedPlatforms": {
+    "platforms": ["youtube", "reddit"]
+  }
+}
+```
+
+#### Full Personality Traits Structure
+
+When available from the GenerateTraitsIterativeEnhanced pipeline, traits include richer detail:
+
+```json
+{
+  "personality_traits": {
+    "positive_traits": {
+      "Stoic Wisdom Interest": {
+        "score": 80,
+        "emoji": "🏛️",
+        "evidence": "You frequently engage with philosophy content"
+      }
+    },
+    "traits_to_improve": {
+      "Social Media Engagement": {
+        "score": 35,
+        "emoji": "📱",
+        "evidence": "You show limited interest in social platforms"
+      }
+    },
+    "user_summary": "2-3 paragraphs about the user in 2nd person",
+    "top_traits_explanation": "1-2 paragraphs explaining reasoning",
+    "archetype": "Strategic Explorer",
+    "nudges": [
+      {"text": "You're highly analytical — try journaling a decision you're mulling over"}
+    ]
+  }
 }
 ```
 
@@ -307,17 +365,22 @@ to understand them. Ask whatever feels relevant based on what they share.
 Trust your judgment on what matters.
 Once you genuinely feel you know enough to match them well, wrap up.
 
-Personality Traits of User:
-{"Stoic Wisdom Interest": 80, "Daily Stoic Engagement": 90,
- "Philosophical Discussions": 85, "AI and ML Enthusiasm": 40,
- "Coffee Lover": 95, "Morning Person": 70}
+Positive Traits of User:
+Stoic Wisdom Interest: 80, Daily Stoic Engagement: 90,
+Coffee Lover: 95, Morning Person: 70
 
-Memory of User:
-Reads Daily Stoic every morning. Prefers small coffee shop meetups.
-Works in tech, interested in philosophy and AI ethics. Has a golden retriever.
+Areas to Improve:
+Social Media Engagement: 35, Public Speaking Confidence: 40
 
-MBTI (Personalities User Likes):
-INFJ: 0.627, INTJ: 0.585, ENFJ: 0.580, INFP: 0.550, ENTP: 0.520
+User Summary:
+You are drawn to deep philosophical thinking and have a strong interest
+in Stoic philosophy. You enjoy morning routines and are a dedicated
+coffee enthusiast.
+
+Archetype: The Strategic Explorer
+
+MBTI Alignment (Personalities User Likes):
+INFJ: 0.627, INTJ: 0.585, ENFJ: 0.580, ISFJ: 0.580, INFP: 0.511
 
 Critical Instruction:
 Always check context before asking. Complete onboarding ASAP.
@@ -349,7 +412,7 @@ Always check context before asking. Complete onboarding ASAP.
 │                                                │                         │
 │                                                ▼                         │
 │                                          6. Onairos returns:             │
-│                                             { traits, memory, mbti }     │
+│                                             { traits, MBTI scores }      │
 │                                                │                         │
 │                                                ▼                         │
 │                                          7. Augment LLM prompt           │
@@ -357,18 +420,17 @@ Always check context before asking. Complete onboarding ASAP.
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Insight:** The frontend only receives `apiUrl` and `accessToken`. The actual user data (traits, memory, MBTI) stays secure on the backend.
+**Key Insight:** The frontend only receives `apiUrl` and `accessToken`. The actual user data (traits, MBTI) stays secure on the backend.
 
 ### The onComplete Callback
 
 When `onComplete` fires in the frontend, it receives two parameters:
 
 ```javascript
-// onComplete callback signature:
 onComplete: (apiUrl, accessToken) => {
-  // apiUrl: "https://api2.onairos.uk/inferenceNoProof"
+  // apiUrl: "https://api2.onairos.uk/combined-inference"
   // accessToken: "eyJhbGciOiJIUzI1NiIs..."  (JWT token)
-  
+
   // Send these to your Pipecat backend
   websocket.send(JSON.stringify({
     type: "onairos_credentials",
@@ -383,7 +445,7 @@ onComplete: (apiUrl, accessToken) => {
 The backend uses these credentials to fetch the actual data:
 
 ```
-POST https://api2.onairos.uk/inferenceNoProof
+POST https://api2.onairos.uk/combined-inference
 Authorization: Bearer {accessToken}
 Content-Type: application/json
 
@@ -395,16 +457,15 @@ Content-Type: application/json
 Response:
 {
   "InferenceResult": {
-    "output": {
-      "personality_traits": {
-        "Stoic Wisdom Interest": 80,
-        "AI Enthusiasm": 40
-      },
-      "memory": "Reads Daily Stoic every morning...",
-      "mbti": {
-        "INFJ": 0.627,
-        "INTJ": 0.585
-      }
+    "output": [0.584, 0.500, 0.550, 0.520, 0.627, ...]
+  },
+  "traits": {
+    "positive_traits": {
+      "Stoic Wisdom Interest": 80,
+      "AI Enthusiasm": 40
+    },
+    "traits_to_improve": {
+      "Social Media Engagement": 35
     }
   }
 }
@@ -420,7 +481,9 @@ persona = OnairosPersonaInjector(
     user_id="user_123",
     params=OnairosPersonaInjector.InputParams(
         include_personality_traits=True,
-        include_memory=True,
+        include_traits_to_improve=True,
+        include_user_summary=True,
+        include_archetype=True,
         include_mbti=True,
         top_mbti_count=5,
         critical_instruction="Always check context before asking.",
@@ -448,8 +511,10 @@ If you already have the data (e.g., from a webhook):
 persona = OnairosPersonaInjector(
     user_id="user_123",
     user_data=OnairosUserData(
-        personality_traits={"Stoic Wisdom Interest": 80, "AI Enthusiasm": 40},
-        memory="Reads Daily Stoic every morning. Prefers coffee shop meetups.",
+        positive_traits={"Stoic Wisdom Interest": 80, "AI Enthusiasm": 40},
+        traits_to_improve={"Social Media Engagement": 35},
+        user_summary="You are drawn to deep philosophical thinking...",
+        archetype="Strategic Explorer",
         mbti={"INFJ": 0.627, "INTJ": 0.585, "ENFJ": 0.580},
     ),
 )
@@ -460,10 +525,10 @@ persona = OnairosPersonaInjector(
 **Without Onairos (generic onboarding):**
 > "Hi! Tell me about yourself. What are your hobbies?"
 
-**With Onairos (knows user loves Stoic philosophy + coffee):**
-> "Hey! I see you're really into Stoic philosophy - that's fascinating. 
-> Do you have a favorite Stoic author, or is it more the daily practice that resonates with you?
-> Also, I noticed you're a coffee person - me too! Any favorite spots?"
+**With Onairos (knows user is a Strategic Explorer who loves Stoic philosophy):**
+> "Hey! I see you're a Strategic Explorer with a real passion for Stoic philosophy.
+> Do you have a favorite Stoic author, or is it more the daily practice that resonates?
+> Also, I noticed you're a coffee person - any favorite spots?"
 
 The agent **already knows** key information, so it can:
 - Skip basic questions (saves time)
@@ -479,32 +544,25 @@ The agent **already knows** key information, so it can:
 See `examples/foundational/38-onairos.py` for a complete working example.
 
 ```python
-from pipecat.services.onairos import OnairosMemoryService, OnairosPersonaInjector
-
-# Services
-memory = OnairosMemoryService(
-    api_key=os.getenv("ONAIROS_API_KEY"),
-    user_id=USER_ID,
-    params=OnairosMemoryService.InputParams(
-        system_prompt="User Profile:\n",
-        include_preferences=True,
-        include_traits=True,
-    )
-)
+from pipecat.services.onairos import OnairosPersonaInjector, OnairosUserData
 
 persona = OnairosPersonaInjector(
-    api_key=os.getenv("ONAIROS_API_KEY"),
     user_id=USER_ID,
+    params=OnairosPersonaInjector.InputParams(
+        include_personality_traits=True,
+        include_traits_to_improve=True,
+        include_user_summary=True,
+        include_archetype=True,
+        include_mbti=True,
+        top_mbti_count=5,
+    ),
 )
 
 # Event handlers
-@persona.event_handler("on_persona_loaded")
-async def on_persona_loaded(persona_data):
-    logger.info(f"Loaded persona with interests: {persona_data.get('traits', {}).get('interests')}")
-
-@persona.event_handler("on_connection_required")
-async def on_connection_required(user_id):
-    logger.info(f"User {user_id} needs to connect Onairos")
+@persona.event_handler("on_user_data_loaded")
+async def on_user_data_loaded(user_data):
+    logger.info(f"Loaded persona with archetype: {user_data.archetype}")
+    logger.info(f"Positive traits: {list(user_data.positive_traits.keys())}")
 ```
 
 ### With Voice UI Kit + RTVI
@@ -520,7 +578,7 @@ import { useState, useRef } from 'react';
 function VoiceAgent() {
   const [isConnected, setIsConnected] = useState(false);
   const clientRef = useRef(null);
-  
+
   const startSession = async () => {
     const client = new RTVIClient({
       transport: new DailyTransport(),
@@ -528,7 +586,7 @@ function VoiceAgent() {
         baseUrl: 'https://your-server.com',
       }
     });
-    
+
     clientRef.current = client;
     await client.connect();
   };
@@ -542,7 +600,6 @@ function VoiceAgent() {
         }}
         onComplete={(apiUrl, accessToken) => {
           setIsConnected(true);
-          // Send credentials to backend via RTVI client
           if (clientRef.current) {
             clientRef.current.sendMessage({
               type: "onairos_credentials",
@@ -552,7 +609,7 @@ function VoiceAgent() {
           }
         }}
       />
-      
+
       <button onClick={startSession} disabled={!isConnected}>
         {isConnected ? 'Start Personalized Call' : 'Connect Onairos First'}
       </button>
@@ -563,72 +620,29 @@ function VoiceAgent() {
 
 **Backend (Python) - Receiving Onairos Data:**
 ```python
-from pipecat.services.onairos import OnairosPersonaInjector, OnairosUserData
+from pipecat.services.onairos import OnairosPersonaInjector
 
 async def run_bot(transport, runner_args):
-    # Get Onairos data from RTVI config (passed by frontend)
-    onairos_config = runner_args.config.get('onairos', {})
-    
-    user_id = onairos_config.get('user_id', 'anonymous')
-    
-    # Create persona injector with frontend data
-    persona = OnairosPersonaInjector(
-        user_id=user_id,
-        user_data=OnairosUserData(
-            personality_traits=onairos_config.get('personality_traits', {}),
-            memory=onairos_config.get('memory', ''),
-            mbti=onairos_config.get('mbti', {}),
-        ) if onairos_config.get('personality_traits') else None,
-        # Fallback to API if no frontend data
-        api_key=os.getenv("ONAIROS_API_KEY"),
-    )
-    
-    # ... rest of pipeline
-```
+    persona = OnairosPersonaInjector(user_id="user_123")
 
-### Alternative: Onairos onComplete Webhook
+    @transport.event_handler("on_message")
+    async def on_message(transport, message):
+        if isinstance(message, dict) and message.get("type") == "onairos_credentials":
+            persona.set_api_credentials(
+                api_url=message["apiUrl"],
+                access_token=message["accessToken"]
+            )
 
-For server-to-server flow, Onairos can send data via webhook when a user connects:
-
-```python
-from fastapi import FastAPI, Request
-from pipecat.services.onairos import OnairosUserData
-
-app = FastAPI()
-
-# Store user data (use Redis/DB in production)
-user_data_cache = {}
-
-@app.post("/onairos/webhook")
-async def onairos_webhook(request: Request):
-    """Receive Onairos onComplete data via webhook."""
-    data = await request.json()
-    
-    user_id = data.get('user_id')
-    user_data_cache[user_id] = OnairosUserData(
-        personality_traits=data.get('personality_traits', {}),
-        memory=data.get('memory', ''),
-        mbti=data.get('mbti', {}),
-        raw_data=data,
-    )
-    
-    return {"status": "ok"}
+    pipeline = Pipeline([...stt, user_aggregator, persona, llm, tts...])
 ```
 
 ---
 
 ## Troubleshooting
 
-### "ONAIROS_API_KEY not set"
+### No persona data in augmentation
 
-Set your API key in environment variables:
-```bash
-export ONAIROS_API_KEY=sk_live_your_key
-```
-
-### "No persona found for user"
-
-The user hasn't connected their Onairos account yet. Use `OnairosContextAggregator` to prompt them to connect.
+Ensure the frontend `onComplete` callback is sending credentials to the backend, and that `set_api_credentials()` is being called before the first LLM frame is processed.
 
 ### Rate Limiting
 
@@ -644,5 +658,4 @@ The user hasn't connected their Onairos account yet. Use `OnairosContextAggregat
 
 - **Onairos Docs:** https://onairos.uk/docs
 - **Onairos Dashboard:** https://dashboard.onairos.uk
-- **API Reference:** https://onairos.uk/docs/api-endpoints/
 - **JavaScript SDK:** https://onairos.uk/docs/javascript-sdk/

@@ -4,7 +4,7 @@
 
 ### Step 1: Get Onairos Credentials
 1. Go to https://dashboard.onairos.uk
-2. Create account → Create app → Copy credentials
+2. Create account → Create app → Copy your publishable key
 
 ### Step 2: Frontend
 
@@ -60,7 +60,31 @@ pipeline = Pipeline([...stt, persona, llm, tts...])
 ```
 
 ### That's It!
-Your LLM now receives augmented prompts with user personality traits, memories, and MBTI preferences.
+Your LLM now receives augmented prompts with user personality traits, archetype, user summary, and MBTI alignment scores.
+
+### What the LLM Sees
+
+Once Onairos data is loaded, the LLM receives an additional system message:
+
+```
+Positive Traits of User:
+Stoic Wisdom Interest: 80, AI Enthusiasm: 75, Coffee Lover: 95
+
+Areas to Improve:
+Social Media Engagement: 35, Public Speaking Confidence: 40
+
+User Summary:
+You are drawn to deep philosophical thinking and have a strong interest
+in Stoic philosophy...
+
+Archetype: The Strategic Explorer
+
+MBTI Alignment (Personalities User Likes):
+INFJ: 0.627, INTJ: 0.585, ENFJ: 0.580, ISFJ: 0.580, INFP: 0.511
+
+Critical Instruction:
+Always check context before asking. Use this information to personalize.
+```
 
 ---
 

@@ -4,44 +4,44 @@
 # SPDX-License-Identifier: BSD-2-Clause
 #
 
-"""Onairos personalization and memory services for Pipecat.
+"""Onairos personalization services for Pipecat.
 
 This module provides deep personalization capabilities for voice and multimodal
 conversational AI agents. Onairos augments your base prompts with rich user context:
 
-- Personality Traits: Numerical scores for user interests and characteristics
-- Memory: Textual memories about the user from past interactions
-- MBTI Compatibility: Personality type preference scores
+- Personality Traits: Positive traits and areas to improve with scores
+- User Summary: Multi-paragraph description of the user
+- Archetype: Short personality archetype label
+- MBTI Alignment: Personality type preference scores from inference
 
 Example augmented prompt:
     [Your Base Prompt]
 
-    Personality Traits of User:
-    {"Stoic Wisdom Interest": 80, "AI Enthusiasm": 40}
+    Positive Traits of User:
+    Stoic Wisdom Interest: 80, AI Enthusiasm: 40
 
-    Memory of User:
-    Reads Daily Stoic every morning. Prefers coffee shop meetups.
+    Areas to Improve:
+    Social Media Engagement: 35
 
-    MBTI (Personalities User Likes):
+    User Summary:
+    You are drawn to deep philosophical thinking...
+
+    Archetype: The Strategic Explorer
+
+    MBTI Alignment (Personalities User Likes):
     INFJ: 0.627, INTJ: 0.585, ENFJ: 0.580
 
     Critical Instruction:
     Always check context before asking.
 
 Services:
-    OnairosPersonaInjector: Augments prompts with personality traits, memory, MBTI
-    OnairosMemoryService: Additional context enhancement
-    OnairosContextAggregator: Connection state and onboarding management
+    OnairosPersonaInjector: Augments prompts with personality traits, archetype, MBTI
     OnairosUserData: Data model for Onairos user context
 """
 
-from pipecat.services.onairos.context import OnairosContextAggregator
-from pipecat.services.onairos.memory import OnairosMemoryService
 from pipecat.services.onairos.persona import OnairosPersonaInjector, OnairosUserData
 
 __all__ = [
-    "OnairosMemoryService",
     "OnairosPersonaInjector",
-    "OnairosContextAggregator",
     "OnairosUserData",
 ]

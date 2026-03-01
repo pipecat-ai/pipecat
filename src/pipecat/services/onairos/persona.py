@@ -7,31 +7,37 @@
 """Onairos persona injection service for Pipecat.
 
 This module provides persona injection capabilities that augment LLM prompts
-with rich user context from Onairos, including personality traits, memories,
-and MBTI compatibility scores.
+with rich user context from Onairos, including personality traits, archetype,
+user summary, and MBTI compatibility scores.
 
 Flow:
     1. Frontend: User connects via Onairos SDK
     2. Frontend onComplete: Returns { apiUrl, accessToken }
     3. Backend: Uses apiUrl + accessToken to call Onairos inference API
-    4. Backend: Receives personality traits, memory, MBTI
+    4. Backend: Receives personality traits, MBTI scores
     5. Backend: Augments LLM prompt with this data
 
 Onairos API Base: https://api2.onairos.uk
 Endpoints:
-    - POST /inferenceNoProof - Get preferences/insights and memories
-    - POST /traits - Get personality traits only
+    - POST /inferenceNoProof - Get MBTI inference scores
+    - POST /traits-only - Get personality traits only
+    - POST /combined-inference - Get both inference and traits
 
 Example augmented prompt:
     [Base Prompt]
 
-    Personality Traits of User:
-    {"Stoic Wisdom Interest": 80, "AI Enthusiasm": 40}
+    Positive Traits of User:
+    Stoic Wisdom Interest: 80, AI Enthusiasm: 40
 
-    Memory of User:
-    Reads Daily Stoic every morning. Prefers coffee shop meetups.
+    Areas to Improve:
+    Social Media Engagement: 35, Public Speaking Confidence: 40
 
-    MBTI (Personalities User Likes):
+    User Summary:
+    You are drawn to deep philosophical thinking...
+
+    Archetype: The Strategic Explorer
+
+    MBTI Alignment (Personalities User Likes):
     INFJ: 0.627, INTJ: 0.585, ENFJ: 0.580
 
     Critical Instruction:
@@ -54,21 +60,58 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+# Standard MBTI type labels used when mapping inference output array to types
+MBTI_TYPES = [
+    "INTJ", "INTP", "ENTJ", "ENTP",
+    "INFJ", "INFP", "ENFJ", "ENFP",
+    "ISTJ", "ISFJ", "ESTJ", "ESFJ",
+    "ISTP", "ISFP", "ESTP", "ESFP",
+]
+
 
 class OnairosUserData(BaseModel):
-    """Structured Onairos user data from inference API.
+    """Structured Onairos user data from inference and traits APIs.
 
     Parameters:
-        personality_traits: Dict of trait names to scores (0-100).
-        memory: Textual memories about the user.
-        mbti: Dict of MBTI types to compatibility scores (0-1).
+        positive_traits: Dict of positive trait names to scores or detail objects.
+            Values can be plain numbers (0-100) or dicts with score, emoji, evidence.
+        traits_to_improve: Dict of improvement area names to scores or detail objects.
+        user_summary: Multi-paragraph description of the user in 2nd person.
+        top_traits_explanation: Explanation of reasoning behind top traits.
+        archetype: Short archetype label (e.g. "Strategic Explorer").
+        nudges: List of suggestion dicts, each with a "text" key.
+        mbti: Dict of MBTI type codes to preference scores (0-1).
         raw_data: Full raw response from Onairos API.
     """
 
-    personality_traits: Dict[str, float] = Field(default_factory=dict)
-    memory: str = Field(default="")
+    positive_traits: Dict[str, Any] = Field(default_factory=dict)
+    traits_to_improve: Dict[str, Any] = Field(default_factory=dict)
+    user_summary: str = Field(default="")
+    top_traits_explanation: str = Field(default="")
+    archetype: str = Field(default="")
+    nudges: List[Dict[str, str]] = Field(default_factory=list)
     mbti: Dict[str, float] = Field(default_factory=dict)
     raw_data: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _extract_score(value: Any) -> Optional[float]:
+    """Extract a numeric score from a trait value.
+
+    Trait values may be plain numbers or dicts like {score, emoji, evidence}.
+
+    Args:
+        value: The trait value to extract a score from.
+
+    Returns:
+        The numeric score, or None if extraction fails.
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, dict):
+        score = value.get("score")
+        if score is not None:
+            return float(score)
+    return None
 
 
 class OnairosPersonaInjector(FrameProcessor):
@@ -79,12 +122,12 @@ class OnairosPersonaInjector(FrameProcessor):
     injects it into the conversation context.
 
     Flow:
-        Frontend onComplete → { apiUrl, accessToken }
-                                    ↓
+        Frontend onComplete -> { apiUrl, accessToken }
+                                    |
         Backend OnairosPersonaInjector.set_api_credentials(apiUrl, token)
-                                    ↓
-        Backend calls Onairos API → Gets traits, memory, MBTI
-                                    ↓
+                                    |
+        Backend calls Onairos API -> Gets traits, MBTI scores
+                                    |
         Augments LLM prompt with user context
 
     Event handlers available:
@@ -108,8 +151,11 @@ class OnairosPersonaInjector(FrameProcessor):
         """Configuration parameters for Onairos persona injector.
 
         Parameters:
-            include_personality_traits: Include personality trait scores.
-            include_memory: Include user memories.
+            include_personality_traits: Include positive personality trait scores.
+            include_traits_to_improve: Include areas for improvement.
+            include_user_summary: Include the multi-paragraph user summary.
+            include_archetype: Include the user archetype label.
+            include_nudges: Include actionable nudge suggestions.
             include_mbti: Include MBTI compatibility scores.
             critical_instruction: Instruction appended after context.
             top_mbti_count: Number of top MBTI types to include.
@@ -117,7 +163,10 @@ class OnairosPersonaInjector(FrameProcessor):
         """
 
         include_personality_traits: bool = Field(default=True)
-        include_memory: bool = Field(default=True)
+        include_traits_to_improve: bool = Field(default=True)
+        include_user_summary: bool = Field(default=True)
+        include_archetype: bool = Field(default=True)
+        include_nudges: bool = Field(default=False)
         include_mbti: bool = Field(default=True)
         critical_instruction: str = Field(
             default="Always check context before asking. Use this information to personalize."
@@ -216,13 +265,37 @@ class OnairosPersonaInjector(FrameProcessor):
     def set_user_data_from_dict(self, data: Dict[str, Any]):
         """Set user data from a raw dictionary.
 
+        Handles multiple response formats from the Onairos backend:
+        - /traits-only: {traits: {positive_traits, traits_to_improve}}
+        - /combined-inference: {InferenceResult, traits, ...}
+        - Full personality_traits structure with user_summary, archetype, etc.
+
         Args:
-            data: Raw Onairos API response or onComplete data.
+            data: Raw Onairos API response or pre-parsed data.
         """
+        traits = data.get("traits", data.get("personality_traits", {}))
+        positive_traits = {}
+        traits_to_improve = {}
+
+        if isinstance(traits, dict):
+            positive_traits = traits.get("positive_traits", {})
+            traits_to_improve = traits.get("traits_to_improve", {})
+
+        mbti = data.get("mbti", {})
+        if not mbti:
+            inference = data.get("InferenceResult", {})
+            output = inference.get("output", [])
+            if isinstance(output, list) and len(output) == len(MBTI_TYPES):
+                mbti = dict(zip(MBTI_TYPES, [float(v) for v in output]))
+
         self._user_data = OnairosUserData(
-            personality_traits=data.get("personality_traits", data.get("traits", {})),
-            memory=data.get("memory", data.get("memories", "")),
-            mbti=data.get("mbti", data.get("mbti_compatibility", {})),
+            positive_traits=positive_traits,
+            traits_to_improve=traits_to_improve,
+            user_summary=data.get("user_summary", ""),
+            top_traits_explanation=data.get("top_traits_explanation", ""),
+            archetype=data.get("archetype", ""),
+            nudges=data.get("nudges", []),
+            mbti=mbti,
             raw_data=data,
         )
         self._context_injected = False
@@ -237,9 +310,16 @@ class OnairosPersonaInjector(FrameProcessor):
     async def fetch_user_data(self) -> Optional[OnairosUserData]:
         """Fetch user data from Onairos API using the credentials from onComplete.
 
-        The API endpoint is typically:
-            POST https://api2.onairos.uk/inferenceNoProof
-            or the apiUrl returned by onComplete
+        Handles the following real backend response formats:
+
+        /combined-inference:
+            {InferenceResult: {output: [...]}, traits: {positive_traits, traits_to_improve}}
+
+        /inferenceNoProof:
+            {InferenceResult: {output: [0.584, 0.500, ...]}}
+
+        /traits-only:
+            {success: true, traits: {positive_traits: {...}, traits_to_improve: {...}}}
 
         Returns:
             OnairosUserData if successful, None otherwise.
@@ -257,10 +337,9 @@ class OnairosPersonaInjector(FrameProcessor):
         try:
             session = await self._get_http_session()
 
-            # The Onairos API expects this format
             payload = {
                 "accessToken": self._access_token,
-                "inputData": []  # Empty for fetching existing user data
+                "inputData": []
             }
 
             headers = {
@@ -272,17 +351,51 @@ class OnairosPersonaInjector(FrameProcessor):
                 if response.status == 200:
                     raw = await response.json()
 
-                    # Parse the inference result
-                    inference_result = raw.get("InferenceResult", raw)
-                    output = inference_result.get("output", inference_result)
+                    # Parse traits from /traits-only or /combined-inference format
+                    traits_data = raw.get("traits", {})
+                    positive_traits = {}
+                    traits_to_improve = {}
+                    if isinstance(traits_data, dict):
+                        positive_traits = traits_data.get("positive_traits", {})
+                        traits_to_improve = traits_data.get("traits_to_improve", {})
+
+                    # Parse MBTI from InferenceResult.output array
+                    mbti = {}
+                    inference_result = raw.get("InferenceResult", {})
+                    if isinstance(inference_result, dict):
+                        output = inference_result.get("output", [])
+                        if isinstance(output, list) and len(output) == len(MBTI_TYPES):
+                            mbti = dict(
+                                zip(MBTI_TYPES, [float(v) for v in output])
+                            )
+
+                    # Parse full personality_traits structure if present
+                    personality = raw.get("personality_traits", {})
+                    user_summary = ""
+                    top_traits_explanation = ""
+                    archetype = ""
+                    nudges = []
+
+                    if isinstance(personality, dict):
+                        if not positive_traits:
+                            positive_traits = personality.get("positive_traits", {})
+                        if not traits_to_improve:
+                            traits_to_improve = personality.get("traits_to_improve", {})
+                        user_summary = personality.get("user_summary", "")
+                        top_traits_explanation = personality.get(
+                            "top_traits_explanation", ""
+                        )
+                        archetype = personality.get("archetype", "")
+                        nudges = personality.get("nudges", [])
 
                     self._user_data = OnairosUserData(
-                        personality_traits=output.get(
-                            "personality_traits",
-                            output.get("traits", {})
-                        ),
-                        memory=output.get("memory", output.get("memories", "")),
-                        mbti=output.get("mbti", output.get("mbti_compatibility", {})),
+                        positive_traits=positive_traits,
+                        traits_to_improve=traits_to_improve,
+                        user_summary=user_summary,
+                        top_traits_explanation=top_traits_explanation,
+                        archetype=archetype,
+                        nudges=nudges,
+                        mbti=mbti,
                         raw_data=raw,
                     )
 
@@ -313,17 +426,50 @@ class OnairosPersonaInjector(FrameProcessor):
 
         sections = []
 
-        # Personality Traits
-        if self._params.include_personality_traits and self._user_data.personality_traits:
-            traits = self._user_data.personality_traits
-            if self._params.top_traits_count > 0:
-                sorted_traits = sorted(traits.items(), key=lambda x: x[1], reverse=True)
-                traits = dict(sorted_traits[: self._params.top_traits_count])
-            sections.append(f"Personality Traits of User:\n{json.dumps(traits, indent=2)}")
+        # Positive Traits
+        if self._params.include_personality_traits and self._user_data.positive_traits:
+            traits = self._user_data.positive_traits
+            scores = {}
+            for name, value in traits.items():
+                score = _extract_score(value)
+                if score is not None:
+                    scores[name] = score
 
-        # Memory
-        if self._params.include_memory and self._user_data.memory:
-            sections.append(f"Memory of User:\n{self._user_data.memory}")
+            if self._params.top_traits_count > 0:
+                sorted_traits = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+                scores = dict(sorted_traits[: self._params.top_traits_count])
+
+            if scores:
+                traits_str = ", ".join([f"{k}: {int(v)}" for k, v in scores.items()])
+                sections.append(f"Positive Traits of User:\n{traits_str}")
+
+        # Areas to Improve
+        if self._params.include_traits_to_improve and self._user_data.traits_to_improve:
+            traits = self._user_data.traits_to_improve
+            scores = {}
+            for name, value in traits.items():
+                score = _extract_score(value)
+                if score is not None:
+                    scores[name] = score
+
+            if scores:
+                traits_str = ", ".join([f"{k}: {int(v)}" for k, v in scores.items()])
+                sections.append(f"Areas to Improve:\n{traits_str}")
+
+        # User Summary
+        if self._params.include_user_summary and self._user_data.user_summary:
+            sections.append(f"User Summary:\n{self._user_data.user_summary}")
+
+        # Archetype
+        if self._params.include_archetype and self._user_data.archetype:
+            sections.append(f"Archetype: {self._user_data.archetype}")
+
+        # Nudges
+        if self._params.include_nudges and self._user_data.nudges:
+            nudge_texts = [n.get("text", "") for n in self._user_data.nudges if n.get("text")]
+            if nudge_texts:
+                nudges_str = "\n".join([f"- {t}" for t in nudge_texts])
+                sections.append(f"Nudges:\n{nudges_str}")
 
         # MBTI
         if self._params.include_mbti and self._user_data.mbti:
@@ -331,7 +477,7 @@ class OnairosPersonaInjector(FrameProcessor):
             sorted_mbti = sorted(mbti.items(), key=lambda x: x[1], reverse=True)
             top_mbti = sorted_mbti[: self._params.top_mbti_count]
             mbti_str = ", ".join([f"{k}: {v:.3f}" for k, v in top_mbti])
-            sections.append(f"MBTI (Personalities User Likes):\n{mbti_str}")
+            sections.append(f"MBTI Alignment (Personalities User Likes):\n{mbti_str}")
 
         # Critical Instruction
         if self._params.critical_instruction:

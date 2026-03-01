@@ -12,19 +12,24 @@ This example demonstrates the complete Onairos integration flow:
 2. Frontend onComplete: Returns { apiUrl, accessToken }
 3. Frontend: Sends apiUrl + accessToken to backend via WebSocket/RTVI
 4. Backend: Calls Onairos API to fetch actual user data
-5. Backend: Augments LLM prompt with personality traits, memory, MBTI
+5. Backend: Augments LLM prompt with personality traits, archetype, MBTI
 
 The resulting augmented prompt looks like:
 
     [Your Base Prompt]
 
-    Personality Traits of User:
-    {"Stoic Wisdom Interest": 80, "AI Enthusiasm": 40, "Coffee Lover": 95}
+    Positive Traits of User:
+    Stoic Wisdom Interest: 80, AI Enthusiasm: 40, Coffee Lover: 95
 
-    Memory of User:
-    Reads Daily Stoic every morning. Prefers small coffee shop meetups.
+    Areas to Improve:
+    Social Media Engagement: 35, Public Speaking Confidence: 40
 
-    MBTI (Personalities User Likes):
+    User Summary:
+    You are drawn to deep philosophical thinking...
+
+    Archetype: The Strategic Explorer
+
+    MBTI Alignment (Personalities User Likes):
     INFJ: 0.627, INTJ: 0.585, ENFJ: 0.580
 
     Critical Instruction:
@@ -92,7 +97,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         1. Initialize persona injector (waiting for credentials)
         2. Frontend sends onComplete credentials via message
         3. Backend calls Onairos API to fetch user data
-        4. LLM prompt is augmented with personality traits, memory, MBTI
+        4. LLM prompt is augmented with personality traits, archetype, MBTI
     """
     USER_ID = "onairos-demo-user"
 
@@ -111,12 +116,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # ==========================================================================
     # Onairos Persona Injector
     # ==========================================================================
-    # Initialize WITHOUT credentials - they'll come from frontend onComplete
     persona = OnairosPersonaInjector(
         user_id=USER_ID,
         params=OnairosPersonaInjector.InputParams(
             include_personality_traits=True,
-            include_memory=True,
+            include_traits_to_improve=True,
+            include_user_summary=True,
+            include_archetype=True,
             include_mbti=True,
             top_mbti_count=5,
             critical_instruction=(
@@ -133,17 +139,22 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @persona.event_handler("on_user_data_loaded")
     async def on_user_data_loaded(user_data: OnairosUserData):
         """Called when Onairos API returns user data."""
-        traits_count = len(user_data.personality_traits)
+        pos_count = len(user_data.positive_traits)
+        imp_count = len(user_data.traits_to_improve)
         mbti_count = len(user_data.mbti)
-        has_memory = bool(user_data.memory)
         logger.info(
-            f"Loaded Onairos data: {traits_count} traits, "
-            f"{mbti_count} MBTI types, memory: {has_memory}"
+            f"Loaded Onairos data: {pos_count} positive traits, "
+            f"{imp_count} areas to improve, {mbti_count} MBTI types, "
+            f"archetype: {user_data.archetype or 'none'}"
         )
-        # Log a sample trait
-        if user_data.personality_traits:
-            top_trait = max(user_data.personality_traits.items(), key=lambda x: x[1])
-            logger.info(f"Top trait: {top_trait[0]} = {top_trait[1]}")
+        if user_data.positive_traits:
+            from pipecat.services.onairos.persona import _extract_score
+
+            top_name = max(
+                user_data.positive_traits.items(),
+                key=lambda x: _extract_score(x[1]) or 0,
+            )
+            logger.info(f"Top trait: {top_name[0]}")
 
     @persona.event_handler("on_api_error")
     async def on_api_error(error_info):
@@ -165,7 +176,7 @@ Adapt your communication style based on their preferences.
 
 If Onairos context is available below, use it to personalize your responses.
 If someone has high interest scores in certain topics, engage with those.
-Reference their memories when relevant to build rapport."""
+Reference their archetype and summary when relevant to build rapport."""
 
     messages = [{"role": "system", "content": BASE_PROMPT}]
 
@@ -183,7 +194,7 @@ Reference their memories when relevant to build rapport."""
             transport.input(),
             stt,
             user_aggregator,
-            persona,  # ← Augments prompt with Onairos data
+            persona,  # Augments prompt with Onairos data
             llm,
             tts,
             transport.output(),
@@ -203,12 +214,10 @@ Reference their memories when relevant to build rapport."""
     # ==========================================================================
     # Handle Onairos Credentials from Frontend
     # ==========================================================================
-    # The frontend sends onComplete data via RTVI message or WebSocket
 
     @task.rtvi.event_handler("on_config")
     async def on_config(rtvi, config):
         """Handle RTVI config which may contain Onairos credentials."""
-        # Check if Onairos credentials are in the config
         for service_config in config:
             if service_config.get("service") == "onairos":
                 options = {opt["name"]: opt["value"] for opt in service_config.get("options", [])}
@@ -219,7 +228,6 @@ Reference their memories when relevant to build rapport."""
                     )
                     logger.info("Received Onairos credentials from frontend")
 
-    # Alternative: Handle via custom message
     @transport.event_handler("on_message")
     async def on_message(transport, message):
         """Handle custom messages from frontend."""
@@ -239,8 +247,18 @@ Reference their memories when relevant to build rapport."""
         """Start the conversation."""
         if persona.has_data and persona.user_data:
             data = persona.user_data
-            if data.personality_traits:
-                top_trait = max(data.personality_traits.items(), key=lambda x: x[1])
+            if data.archetype:
+                greeting = (
+                    f"Hey! I can see you're a {data.archetype} type. "
+                    "I'd love to chat about what's on your mind."
+                )
+            elif data.positive_traits:
+                from pipecat.services.onairos.persona import _extract_score
+
+                top_trait = max(
+                    data.positive_traits.items(),
+                    key=lambda x: _extract_score(x[1]) or 0,
+                )
                 greeting = (
                     f"Hey! I see you're really into {top_trait[0].lower()}. "
                     "I'd love to chat about that or anything else on your mind."
