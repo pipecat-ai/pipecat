@@ -1,0 +1,1 @@
+- Added `LLMMessagesAppendFrame` support for `OpenAIRealtimeLLMService` and `OpenAIRealtimeBetaLLMService`, enabling programmatic message injection and bot response triggering.
