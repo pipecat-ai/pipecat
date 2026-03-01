@@ -129,47 +129,47 @@ pipeline = Pipeline([
 
 ## Frontend Setup (npm) - Optional
 
-> **Note:** This section is for your **separate frontend application** (React, React Native, etc.), not this Pipecat repo. The frontend handles user authentication with Onairos and passes the data to your Pipecat backend.
+> **Note:** This section is for your **separate frontend application** (React, React Native, etc.), not this Pipecat repo. The frontend handles user authentication with Onairos and passes credentials to your Pipecat backend.
 
 For web and mobile applications, use the Onairos SDK to enable user connections.
+
+**Platform SDKs:**
+| Platform | Package |
+|----------|---------|
+| Web (React, Vue, JS) | `npm install onairos` |
+| React Native | `npm install @onairos/react-native` |
+| Swift (iOS) | See docs.onairos.uk |
+| Flutter | See docs.onairos.uk |
 
 ### Web (React)
 
 ```bash
-npm install @onairos/sdk @onairos/react
+npm install onairos
 ```
 
 ```jsx
-import { OnairosProvider, useOnairos, usePersona } from '@onairos/react';
+import Onairos from 'onairos';
 
-function App() {
-  return (
-    <OnairosProvider 
-      apiKey={process.env.ONAIROS_PUBLISHABLE_KEY}
-      appId={process.env.ONAIROS_APP_ID}
-    >
-      <VoiceAgent />
-    </OnairosProvider>
-  );
-}
-
-function VoiceAgent() {
-  const { connect, isConnected } = useOnairos();
-  const { persona, isLoading } = usePersona();
-
-  if (!isConnected) {
-    return (
-      <button onClick={() => connect({ 
-        permissions: ['preferences', 'interests'] 
-      })}>
-        Connect Onairos for Personalization
-      </button>
-    );
-  }
-
+function VoiceAgent({ websocket }) {
   return (
     <div>
-      <p>Welcome! Your interests: {persona?.traits.interests.join(', ')}</p>
+      <h2>Connect for Personalized Experience</h2>
+      
+      {/* Onairos renders a connect button */}
+      <Onairos
+        requestData={{
+          Traits: { type: "Personality", size: "Large" }
+        }}
+        onComplete={(apiUrl, accessToken) => {
+          // Send credentials to your Pipecat backend
+          websocket.send(JSON.stringify({
+            type: "onairos_credentials",
+            apiUrl: apiUrl,
+            accessToken: accessToken
+          }));
+        }}
+      />
+      
       {/* Your Pipecat voice UI here */}
     </div>
   );
@@ -183,13 +183,22 @@ npm install @onairos/react-native
 ```
 
 ```jsx
-import { OnairosProvider, useOnairos } from '@onairos/react-native';
+import Onairos from '@onairos/react-native';
 
-function App() {
+function VoiceAgent({ websocket }) {
   return (
-    <OnairosProvider apiKey={ONAIROS_PUBLISHABLE_KEY}>
-      <VoiceAgent />
-    </OnairosProvider>
+    <Onairos
+      requestData={{
+        Traits: { type: "Personality", size: "Large" }
+      }}
+      onComplete={(apiUrl, accessToken) => {
+        websocket.send(JSON.stringify({
+          type: "onairos_credentials",
+          apiUrl,
+          accessToken
+        }));
+      }}
+    />
   );
 }
 ```
@@ -197,28 +206,27 @@ function App() {
 ### Vanilla JavaScript
 
 ```bash
-npm install @onairos/sdk
+npm install onairos
 ```
 
 ```javascript
-import { OnairosClient } from '@onairos/sdk';
+import Onairos from 'onairos';
 
-const onairos = new OnairosClient({
-  apiKey: process.env.ONAIROS_API_KEY,
-  appId: process.env.ONAIROS_APP_ID,
-  environment: 'production'
+// The Onairos component handles rendering and auth
+// In vanilla JS, you'd typically render to a container:
+const onairosButton = new Onairos({
+  requestData: {
+    Traits: { type: "Personality", size: "Large" }
+  },
+  onComplete: (apiUrl, accessToken) => {
+    // Send to your Pipecat backend via WebSocket
+    websocket.send(JSON.stringify({
+      type: "onairos_credentials",
+      apiUrl: apiUrl,
+      accessToken: accessToken
+    }));
+  }
 });
-
-// Create connection URL for user to connect
-const connectionUrl = await onairos.connections.create({
-  userId: 'user_123',
-  redirectUrl: 'https://yourapp.com/callback',
-  permissions: ['preferences', 'interests', 'traits']
-});
-
-// After connection, fetch persona
-const persona = await onairos.personas.get('user_123');
-console.log(persona.preferences.communicationStyle);
 ```
 
 ---
@@ -351,15 +359,22 @@ Always check context before asking. Complete onboarding ASAP.
 
 **Key Insight:** The frontend only receives `apiUrl` and `accessToken`. The actual user data (traits, memory, MBTI) stays secure on the backend.
 
-### The onComplete Response
+### The onComplete Callback
 
-When `onComplete` fires in the frontend:
+When `onComplete` fires in the frontend, it receives two parameters:
 
 ```javascript
-// Frontend receives this (NOT the actual data):
-{
-  "apiUrl": "https://api2.onairos.uk/inferenceNoProof",
-  "accessToken": "eyJhbGciOiJIUzI1NiIs..."  // JWT token
+// onComplete callback signature:
+onComplete: (apiUrl, accessToken) => {
+  // apiUrl: "https://api2.onairos.uk/inferenceNoProof"
+  // accessToken: "eyJhbGciOiJIUzI1NiIs..."  (JWT token)
+  
+  // Send these to your Pipecat backend
+  websocket.send(JSON.stringify({
+    type: "onairos_credentials",
+    apiUrl,
+    accessToken
+  }));
 }
 ```
 
@@ -494,43 +509,54 @@ async def on_connection_required(user_id):
 
 ### With Voice UI Kit + RTVI
 
-The recommended pattern is to pass Onairos data from frontend to backend via RTVI config:
+The recommended pattern is to pass Onairos credentials from frontend to backend via WebSocket message:
 
 **Frontend (React):**
 ```jsx
 import { RTVIClient } from '@pipecat-ai/client-js';
-import { useOnairos } from '@onairos/react';
+import Onairos from 'onairos';
+import { useState, useRef } from 'react';
 
 function VoiceAgent() {
-  const { persona, isConnected } = useOnairos();
+  const [isConnected, setIsConnected] = useState(false);
+  const clientRef = useRef(null);
   
   const startSession = async () => {
     const client = new RTVIClient({
       transport: new DailyTransport(),
       params: {
         baseUrl: 'https://your-server.com',
-        // Pass Onairos data in config
-        config: [
-          {
-            service: 'onairos',
-            options: [
-              { name: 'user_id', value: 'user_123' },
-              { name: 'personality_traits', value: persona?.personality_traits || {} },
-              { name: 'memory', value: persona?.memory || '' },
-              { name: 'mbti', value: persona?.mbti || {} },
-            ]
-          }
-        ]
       }
     });
     
+    clientRef.current = client;
     await client.connect();
   };
 
   return (
-    <button onClick={startSession}>
-      {isConnected ? 'Start Personalized Call' : 'Connect Onairos First'}
-    </button>
+    <div>
+      {/* Onairos button - sends credentials when user connects */}
+      <Onairos
+        requestData={{
+          Traits: { type: "Personality", size: "Large" }
+        }}
+        onComplete={(apiUrl, accessToken) => {
+          setIsConnected(true);
+          // Send credentials to backend via RTVI client
+          if (clientRef.current) {
+            clientRef.current.sendMessage({
+              type: "onairos_credentials",
+              apiUrl,
+              accessToken
+            });
+          }
+        }}
+      />
+      
+      <button onClick={startSession} disabled={!isConnected}>
+        {isConnected ? 'Start Personalized Call' : 'Connect Onairos First'}
+      </button>
+    </div>
   );
 }
 ```

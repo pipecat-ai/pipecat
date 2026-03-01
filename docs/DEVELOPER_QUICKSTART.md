@@ -6,32 +6,38 @@
 1. Go to https://dashboard.onairos.uk
 2. Create account → Create app → Copy credentials
 
-### Step 2: Frontend (React)
+### Step 2: Frontend
+
+**Install the SDK for your platform:**
 ```bash
-npm install @onairos/sdk
+# Web (React, Vue, vanilla JS)
+npm install onairos
+
+# React Native
+npm install @onairos/react-native
+
+# Swift and Flutter SDKs also available - see docs.onairos.uk
 ```
 
 ```jsx
 import Onairos from 'onairos';
 
-function ConnectButton({ onCredentials }) {
-  const handleConnect = () => {
-    const onairos = new Onairos({
-      requestData: {
+function ConnectButton({ websocket }) {
+  return (
+    <Onairos
+      requestData={{
         Traits: { type: "Personality", size: "Large" }
-      },
-      onComplete: (data) => {
-        // Send to your Pipecat backend
+      }}
+      onComplete={(apiUrl, accessToken) => {
+        // Send credentials to your Pipecat backend
         websocket.send(JSON.stringify({
           type: "onairos_credentials",
-          apiUrl: data.apiUrl,
-          accessToken: data.accessToken
+          apiUrl: apiUrl,
+          accessToken: accessToken
         }));
-      }
-    });
-  };
-
-  return <button onClick={handleConnect}>Connect Onairos</button>;
+      }}
+    />
+  );
 }
 ```
 

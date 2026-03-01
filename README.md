@@ -135,29 +135,41 @@ pipeline = Pipeline([
 
 > **Note:** The npm packages are for your **separate frontend application**, not this Python repo.
 
-In your React/React Native frontend project:
+Install the SDK for your platform:
 
 ```bash
-# Web
-npm install @onairos/sdk @onairos/react
+# Web (React, Vue, vanilla JS)
+npm install onairos
 
 # React Native
 npm install @onairos/react-native
+
+# Swift and Flutter SDKs also available - see docs.onairos.uk
 ```
 
 ```jsx
-import { OnairosProvider, usePersona } from '@onairos/react';
+import Onairos from 'onairos';
 
-function App() {
+function VoiceAgent({ websocket }) {
   return (
-    <OnairosProvider apiKey={process.env.ONAIROS_PUBLISHABLE_KEY}>
-      <VoiceAgent />
-    </OnairosProvider>
+    <Onairos
+      requestData={{
+        Traits: { type: "Personality", size: "Large" }
+      }}
+      onComplete={(apiUrl, accessToken) => {
+        // Send credentials to your Pipecat backend
+        websocket.send(JSON.stringify({
+          type: "onairos_credentials",
+          apiUrl,
+          accessToken
+        }));
+      }}
+    />
   );
 }
 ```
 
-The frontend collects user data via `onComplete` and passes it to your Pipecat backend via RTVI config or WebSocket metadata.
+The `onComplete` callback provides `apiUrl` and `accessToken` which you send to your Pipecat backend. The backend then calls the Onairos API to fetch the actual user data.
 
 📚 **Full integration guide:** [docs/ONAIROS_INTEGRATION.md](docs/ONAIROS_INTEGRATION.md)
 
