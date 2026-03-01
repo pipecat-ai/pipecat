@@ -11,8 +11,8 @@ transcription WebSocket messages and connection configuration.
 """
 
 from typing import List, Literal, Optional
-import warnings
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -166,11 +166,9 @@ class AssemblyAIConnectionParams(BaseModel):
     def handle_deprecated_param(self):
         """Handle deprecated min_end_of_turn_silence_when_confident parameter."""
         if self.min_end_of_turn_silence_when_confident is not None:
-            warnings.warn(
+            logger.warning(
                 "The 'min_end_of_turn_silence_when_confident' parameter is deprecated and will be "
-                "removed in a future version. Please use 'min_turn_silence' instead.",
-                DeprecationWarning,
-                stacklevel=2,
+                "removed in a future version. Please use 'min_turn_silence' instead."
             )
             # If min_turn_silence is not set, use the deprecated value
             if self.min_turn_silence is None:
