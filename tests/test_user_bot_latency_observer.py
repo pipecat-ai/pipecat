@@ -153,7 +153,7 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bd.ttfb[1].processor, "OpenAILLMService#0")
         self.assertEqual(bd.ttfb[2].processor, "CartesiaTTSService#0")
         self.assertIsNotNone(bd.text_aggregation)
-        self.assertEqual(bd.text_aggregation.value, 0.030)
+        self.assertEqual(bd.text_aggregation.duration_secs, 0.030)
 
     async def test_interruption_resets_accumulators(self):
         """Test that InterruptionFrame clears stale metrics from earlier cycles."""
@@ -202,9 +202,9 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
         # Only the post-interruption metrics should be present
         self.assertEqual(len(bd.ttfb), 2)
         self.assertEqual(bd.ttfb[0].processor, "OpenAILLMService#0")
-        self.assertEqual(bd.ttfb[0].value, 0.224)
+        self.assertEqual(bd.ttfb[0].duration_secs, 0.224)
         self.assertEqual(bd.ttfb[1].processor, "CartesiaTTSService#0")
-        self.assertEqual(bd.ttfb[1].value, 0.142)
+        self.assertEqual(bd.ttfb[1].duration_secs, 0.142)
 
     async def test_only_first_text_aggregation_kept(self):
         """Test that only the first text aggregation metric is kept per cycle."""
@@ -243,7 +243,7 @@ class TestUserBotLatencyObserver(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(breakdowns), 1)
         self.assertIsNotNone(breakdowns[0].text_aggregation)
-        self.assertEqual(breakdowns[0].text_aggregation.value, 0.030)
+        self.assertEqual(breakdowns[0].text_aggregation.duration_secs, 0.030)
 
     async def test_user_turn_measured(self):
         """Test that pre-LLM wait from user silence to UserStopped is captured."""

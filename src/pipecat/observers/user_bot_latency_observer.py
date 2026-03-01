@@ -14,8 +14,9 @@ is measured. Optionally collects per-service latency breakdown metrics
 
 import time
 from collections import deque
-from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -36,21 +37,51 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
 
 
-@dataclass
-class FunctionCallMetrics:
+class TTFBBreakdownMetrics(BaseModel):
+    """TTFB measurement with timestamp for timeline placement.
+
+    Parameters:
+        processor: Name of the processor that reported the TTFB.
+        model: Optional model name associated with the metric.
+        start_time: Unix timestamp when the TTFB measurement started.
+        duration_secs: TTFB duration in seconds.
+    """
+
+    processor: str
+    model: Optional[str] = None
+    start_time: float
+    duration_secs: float
+
+
+class TextAggregationBreakdownMetrics(BaseModel):
+    """Text aggregation measurement with timestamp for timeline placement.
+
+    Parameters:
+        processor: Name of the processor that reported the metric.
+        start_time: Unix timestamp when text aggregation started.
+        duration_secs: Aggregation duration in seconds.
+    """
+
+    processor: str
+    start_time: float
+    duration_secs: float
+
+
+class FunctionCallMetrics(BaseModel):
     """Latency for a single function call execution.
 
     Parameters:
         function_name: Name of the function that was called.
+        start_time: Unix timestamp when execution started.
         duration_secs: Time in seconds from execution start to result.
     """
 
     function_name: str
+    start_time: float
     duration_secs: float
 
 
-@dataclass
-class LatencyBreakdown:
+class LatencyBreakdown(BaseModel):
     """Per-service latency breakdown for a single user-to-bot cycle.
 
     Collected between ``VADUserStoppedSpeakingFrame`` and
@@ -61,6 +92,9 @@ class LatencyBreakdown:
         ttfb: Time-to-first-byte metrics from each service in the pipeline.
         text_aggregation: First text aggregation measurement, representing
             the latency cost of sentence aggregation in the TTS pipeline.
+        user_turn_start_time: Unix timestamp when the user turn started
+            (actual user silence, adjusted for VAD stop_secs). ``None`` if
+            no ``VADUserStoppedSpeakingFrame`` was observed.
         user_turn_secs: Duration in seconds of the user's turn, measured
             from when the user actually stopped speaking to when the turn
             was released (``UserStoppedSpeakingFrame``). This includes
@@ -71,10 +105,11 @@ class LatencyBreakdown:
             this cycle. Empty if no function calls occurred.
     """
 
-    ttfb: List[TTFBMetricsData] = field(default_factory=list)
-    text_aggregation: Optional[TextAggregationMetricsData] = None
+    ttfb: List[TTFBBreakdownMetrics] = Field(default_factory=list)
+    text_aggregation: Optional[TextAggregationBreakdownMetrics] = None
+    user_turn_start_time: Optional[float] = None
     user_turn_secs: Optional[float] = None
-    function_calls: List[FunctionCallMetrics] = field(default_factory=list)
+    function_calls: List[FunctionCallMetrics] = Field(default_factory=list)
 
 
 class UserBotLatencyObserver(BaseObserver):
@@ -118,6 +153,7 @@ class UserBotLatencyObserver(BaseObserver):
         """
         super().__init__(**kwargs)
         self._user_stopped_time: Optional[float] = None
+        self._user_turn_start_time: Optional[float] = None
         self._user_turn: Optional[float] = None
 
         # First bot speech tracking
@@ -129,8 +165,8 @@ class UserBotLatencyObserver(BaseObserver):
         self._frame_history: deque = deque(maxlen=max_frames)
 
         # Per-cycle metric accumulators
-        self._ttfb: List[TTFBMetricsData] = []
-        self._text_aggregation: Optional[TextAggregationMetricsData] = None
+        self._ttfb: List[TTFBBreakdownMetrics] = []
+        self._text_aggregation: Optional[TextAggregationBreakdownMetrics] = None
         self._function_call_starts: Dict[str, tuple[str, float]] = {}
         self._function_call_metrics: List[FunctionCallMetrics] = []
 
@@ -172,6 +208,7 @@ class UserBotLatencyObserver(BaseObserver):
         if isinstance(data.frame, VADUserStartedSpeakingFrame):
             # Reset when user starts speaking
             self._user_stopped_time = None
+            self._user_turn_start_time = None
             self._user_turn = None
             self._reset_accumulators()
             # If user speaks before the bot's first speech, abandon the
@@ -182,6 +219,7 @@ class UserBotLatencyObserver(BaseObserver):
             # the VAD determination time minus the stop_secs silence duration
             # that had to elapse before the VAD confirmed speech ended.
             self._user_stopped_time = data.frame.timestamp - data.frame.stop_secs
+            self._user_turn_start_time = self._user_stopped_time
         elif isinstance(data.frame, UserStoppedSpeakingFrame):
             # Measure the user turn duration: from actual user silence to
             # turn release. Includes VAD silence detection, STT finalization,
@@ -203,6 +241,7 @@ class UserBotLatencyObserver(BaseObserver):
                 self._function_call_metrics.append(
                     FunctionCallMetrics(
                         function_name=function_name,
+                        start_time=start_time,
                         duration_secs=time.time() - start_time,
                     )
                 )
@@ -232,6 +271,7 @@ class UserBotLatencyObserver(BaseObserver):
             breakdown = LatencyBreakdown(
                 ttfb=list(self._ttfb),
                 text_aggregation=self._text_aggregation,
+                user_turn_start_time=self._user_turn_start_time,
                 user_turn_secs=self._user_turn,
                 function_calls=list(self._function_call_metrics),
             )
@@ -251,19 +291,32 @@ class UserBotLatencyObserver(BaseObserver):
         if self._user_stopped_time is None and not waiting_for_first_speech:
             return
 
+        now = time.time()
         for metrics_data in frame.data:
             if isinstance(metrics_data, TTFBMetricsData) and metrics_data.value > 0:
-                self._ttfb.append(metrics_data)
+                self._ttfb.append(
+                    TTFBBreakdownMetrics(
+                        processor=metrics_data.processor,
+                        model=metrics_data.model,
+                        start_time=now - metrics_data.value,
+                        duration_secs=metrics_data.value,
+                    )
+                )
             elif isinstance(metrics_data, TextAggregationMetricsData):
                 # Only keep the first measurement — it's the one that
                 # impacts the initial speaking latency.
                 if self._text_aggregation is None:
-                    self._text_aggregation = metrics_data
+                    self._text_aggregation = TextAggregationBreakdownMetrics(
+                        processor=metrics_data.processor,
+                        start_time=now - metrics_data.value,
+                        duration_secs=metrics_data.value,
+                    )
 
     def _reset_accumulators(self):
         """Clear per-cycle metric accumulators."""
         self._ttfb = []
         self._text_aggregation = None
+        self._user_turn_start_time = None
         self._user_turn = None
         self._function_call_starts = {}
         self._function_call_metrics = []

@@ -191,7 +191,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # turn analyzer delay).
         stt_ttfb = next((t for t in breakdown.ttfb if "STT" in t.processor), None)
         if breakdown.user_turn_secs is not None:
-            stt_note = f" (STT: {stt_ttfb.value:.3f}s)" if stt_ttfb else ""
+            stt_note = f" (STT: {stt_ttfb.duration_secs:.3f}s)" if stt_ttfb else ""
             logger.info(f"  User turn: {breakdown.user_turn_secs:.3f}s{stt_note}")
 
         # Show non-STT TTFBs, inserting function calls after the first
@@ -199,7 +199,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         non_stt = [t for t in breakdown.ttfb if t is not stt_ttfb]
         fc_shown = False
         for ttfb in non_stt:
-            logger.info(f"  {ttfb.processor}: TTFB {ttfb.value:.3f}s")
+            logger.info(f"  {ttfb.processor}: TTFB {ttfb.duration_secs:.3f}s")
             if not fc_shown and breakdown.function_calls:
                 for fc in breakdown.function_calls:
                     logger.info(f"  {fc.function_name}: {fc.duration_secs:.3f}s")
@@ -207,7 +207,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         if breakdown.text_aggregation:
             ta = breakdown.text_aggregation
-            logger.info(f"  {ta.processor}: text aggregation {ta.value:.3f}s")
+            logger.info(f"  {ta.processor}: text aggregation {ta.duration_secs:.3f}s")
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
