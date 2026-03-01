@@ -46,7 +46,6 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         super().__init__(**kwargs)
 
         self._log_data = env_truthy("PIPECAT_SMART_TURN_LOG_DATA", default=False)
-        self._resample_warned = False
 
         if not smart_turn_model_path:
             # Load bundled model
@@ -136,13 +135,6 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         actual_rate = self._sample_rate or _MODEL_SAMPLE_RATE
         if actual_rate == _MODEL_SAMPLE_RATE:
             return audio_array
-
-        if not self._resample_warned:
-            logger.warning(
-                f"Smart Turn v3 model expects {_MODEL_SAMPLE_RATE}Hz audio but received "
-                f"{actual_rate}Hz. Audio will be resampled automatically."
-            )
-            self._resample_warned = True
 
         return soxr.resample(audio_array, actual_rate, _MODEL_SAMPLE_RATE, quality="VHQ")
 
