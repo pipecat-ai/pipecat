@@ -975,7 +975,6 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         logger.debug(
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
-
         # Flush any pending text aggregation before adding the tool call to
         # context. This prevents duplication when interleaved tool calling
         # produces text → tool_call → text in a single response.
