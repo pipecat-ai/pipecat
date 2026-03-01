@@ -462,6 +462,9 @@ class AssemblyAISTTService(WebsocketSTTService):
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
         params = {}
         for k, v in self._settings.connection_params.model_dump().items():
+            # Skip deprecated parameter - it's been migrated to min_turn_silence
+            if k == "min_end_of_turn_silence_when_confident":
+                continue
             if v is not None:
                 if k == "keyterms_prompt":
                     params[k] = json.dumps(v)

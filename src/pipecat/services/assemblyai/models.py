@@ -11,8 +11,9 @@ transcription WebSocket messages and connection configuration.
 """
 
 from typing import List, Literal, Optional
+import warnings
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Word(BaseModel):
@@ -130,6 +131,7 @@ class AssemblyAIConnectionParams(BaseModel):
         word_finalization_max_wait_time: Maximum time to wait for word finalization in milliseconds.
         end_of_turn_confidence_threshold: Confidence threshold for end-of-turn detection.
         min_turn_silence: Minimum silence duration when confident about end-of-turn.
+        min_end_of_turn_silence_when_confident: DEPRECATED. Use min_turn_silence instead.
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
         keyterms_prompt: List of key terms to guide transcription. Will be JSON serialized before sending.
         prompt: Optional text prompt to guide the transcription. Only used when speech_model is "u3-rt-pro".
@@ -149,6 +151,7 @@ class AssemblyAIConnectionParams(BaseModel):
     word_finalization_max_wait_time: Optional[int] = None
     end_of_turn_confidence_threshold: Optional[float] = None
     min_turn_silence: Optional[int] = None
+    min_end_of_turn_silence_when_confident: Optional[int] = None  # Deprecated
     max_turn_silence: Optional[int] = None
     keyterms_prompt: Optional[List[str]] = None
     prompt: Optional[str] = None
@@ -158,3 +161,18 @@ class AssemblyAIConnectionParams(BaseModel):
     language_detection: Optional[bool] = None
     format_turns: bool = True
     speaker_labels: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def handle_deprecated_param(self):
+        """Handle deprecated min_end_of_turn_silence_when_confident parameter."""
+        if self.min_end_of_turn_silence_when_confident is not None:
+            warnings.warn(
+                "The 'min_end_of_turn_silence_when_confident' parameter is deprecated and will be "
+                "removed in a future version. Please use 'min_turn_silence' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # If min_turn_silence is not set, use the deprecated value
+            if self.min_turn_silence is None:
+                self.min_turn_silence = self.min_end_of_turn_silence_when_confident
+        return self
